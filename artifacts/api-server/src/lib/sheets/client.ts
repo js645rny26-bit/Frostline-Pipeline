@@ -109,6 +109,17 @@ export async function appendRange(
   return { updatedRows: result.updates?.updatedRows ?? values.length };
 }
 
+// ─── Sheet management ────────────────────────────────────────────────────────
+
+export async function addSheet(workbookId: string, title: string): Promise<void> {
+  await sheetsRequest(`/v4/spreadsheets/${workbookId}:batchUpdate`, {
+    method: "POST",
+    body: {
+      requests: [{ addSheet: { properties: { title } } }],
+    },
+  });
+}
+
 // ─── Drive helpers ───────────────────────────────────────────────────────────
 
 export interface DriveFile {

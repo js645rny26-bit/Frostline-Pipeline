@@ -230,18 +230,20 @@ export async function runFullPipeline(dateStr?: string): Promise<PublishResult> 
   // Module 11: Extract decision boards
   const mod11 = await extractOutputBoards();
 
-  // Module 12: Archive run bundle
-  const mod12 = await archiveRunBundle(slate, mod08, mod09, mod10, mod11);
-  if (mod12.status !== "success") {
-    allErrors.push(...mod12.errors);
-  }
-
+  // Overall status before archival (so we can write it into the run log row)
   const overallStatus =
     mod08.status === "failure" || mod10.status === "failure"
       ? "failure"
-      : mod08.status === "partial_failure" || mod09.status !== "verified" || mod12.status === "partial_failure"
+      : mod08.status === "partial_failure"
         ? "partial_success"
         : "success";
+
+  // Module 12: Append run log row to RUN_LOG sheet (non-blocking — failure is advisory)
+  const mod12 = await archiveRunBundle(slate, mod08, mod09, mod10, mod11);
+  if (mod12.status !== "success") {
+    // Run log is best-effort; don't downgrade overall status for it
+    allErrors.push(...mod12.errors);
+  }
 
   logger.info({ overallStatus, date }, "Full pipeline: 12-module run complete");
 

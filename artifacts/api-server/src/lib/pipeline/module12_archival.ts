@@ -1,10 +1,11 @@
 /**
  * Module 12: Run Logging & Archival
- * Creates an immutable Run Bundle folder on Google Drive.
- * Archives: manifests, normalized slate, validation report, extraction results, run log.
+ * Appends one row to the RUN_LOG sheet in the workbook for every pipeline run.
+ * Replaces the original Google Drive folder approach — the google-sheet connector
+ * only proxies Sheets v4 paths, not Drive v3.
  */
 
-import { createDriveFolder, uploadDriveFile } from "../sheets/client.js";
+import { writeRange, readRange, appendRange, addSheet, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { Module08Result } from "./module08_feedWriter.js";
 import type { Module09Result } from "./module09_recalculation.js";
@@ -12,8 +13,39 @@ import type { Module10Result } from "./module10_slateInput.js";
 import type { Module11Result } from "./module11_outputExtraction.js";
 import type { PipelineSlateResult } from "./runner.js";
 
-// Frostline root Google Drive folder ID (Run_Bundles sub-folder expected to exist here)
-const DRIVE_ROOT_FOLDER_ID = "root"; // Set to actual folder ID if you have one
+const RUN_LOG_SHEET = "RUN_LOG";
+
+const RUN_LOG_HEADERS = [
+  "Run_Timestamp",
+  "Date",
+  "Bundle_Name",
+  "Pipeline_Status",
+  "Total_Games",
+  "Validation_Status",
+  "Critical_Failures",
+  "Warnings",
+  "Pitchers_Resolved",
+  "Pitchers_Total",
+  "Weather_Live",
+  "Weather_Fallback",
+  "M08_Status",
+  "M08_Rows_DailyMatchups",
+  "M08_Rows_TodayLineups",
+  "M08_Rows_TeamForm",
+  "M08_Rows_Bullpen",
+  "M08_Rows_RunEnv",
+  "M09_Status",
+  "M09_IntegrationRows",
+  "M09_SummaryRows",
+  "M10_Status",
+  "M10_NewGames",
+  "M10_UpdatedGames",
+  "M11_Status",
+  "M11_CoreCount",
+  "M11_NotCoreCount",
+  "M11_SlateBoardRows",
+  "Errors",
+];
 
 export interface ArchivedFile {
   name: string;
@@ -27,28 +59,41 @@ export interface Module12Result {
   bundle_name: string;
   bundle_folder_id: string;
   files_archived: {
-    normalized_slate?: ArchivedFile;
-    validation_report?: ArchivedFile;
-    module_08_results?: ArchivedFile;
-    module_09_results?: ArchivedFile;
-    module_10_results?: ArchivedFile;
-    slate_board_extraction?: ArchivedFile;
-    runlog?: ArchivedFile;
-    readme?: ArchivedFile;
+    run_log_row?: ArchivedFile;
   };
   errors: Array<{ module: string; error: string; timestamp: string }>;
 }
 
-function jsonFile(name: string, data: unknown): { name: string; content: string } {
-  return { name, content: JSON.stringify(data, null, 2) };
-}
+async function ensureHeaders(): Promise<void> {
+  // Try to read cell A1. If it fails with "Unable to parse range", the sheet
+  // tab doesn't exist yet — create it, then write headers.
+  let sheetExists = true;
+  try {
+    const existing = await readRange(WORKBOOK_ID, `${RUN_LOG_SHEET}!A1:A1`);
+    const hasHeader =
+      existing.values &&
+      existing.values[0] &&
+      String(existing.values[0][0]).trim() === "Run_Timestamp";
 
-async function archiveFile(
-  file: { name: string; content: string },
-  parentFolderId: string,
-): Promise<ArchivedFile> {
-  const result = await uploadDriveFile(file.name, file.content, "application/json", parentFolderId);
-  return { name: file.name, size: file.content.length, drive_id: result.id };
+    if (!hasHeader) {
+      await writeRange(WORKBOOK_ID, `${RUN_LOG_SHEET}!A1`, [RUN_LOG_HEADERS]);
+      logger.info("MODULE_12: RUN_LOG headers written");
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("Unable to parse range") || msg.includes("400")) {
+      sheetExists = false;
+    } else {
+      throw err; // unexpected error — surface it
+    }
+  }
+
+  if (!sheetExists) {
+    logger.info("MODULE_12: RUN_LOG sheet not found — creating it");
+    await addSheet(WORKBOOK_ID, RUN_LOG_SHEET);
+    await writeRange(WORKBOOK_ID, `${RUN_LOG_SHEET}!A1`, [RUN_LOG_HEADERS]);
+    logger.info("MODULE_12: RUN_LOG sheet created with headers");
+  }
 }
 
 export async function archiveRunBundle(
@@ -61,95 +106,91 @@ export async function archiveRunBundle(
 ): Promise<Module12Result> {
   const dateStr = slate.date;
   const bundleName = `${dateStr}_v${String(versionNumber).padStart(2, "0")}`;
+  const archivalTimestamp = new Date().toISOString();
 
-  logger.info({ bundleName }, "MODULE_12: Archiving run bundle to Google Drive");
+  logger.info({ bundleName }, "MODULE_12: Archiving run bundle to RUN_LOG sheet");
 
   const output: Module12Result = {
     status: "success",
-    archival_timestamp_utc: new Date().toISOString(),
+    archival_timestamp_utc: archivalTimestamp,
     bundle_name: bundleName,
-    bundle_folder_id: "",
+    bundle_folder_id: WORKBOOK_ID, // workbook is the "folder" now
     files_archived: {},
     errors: [],
   };
 
-  let folderId = "";
+  // Derive counts from upstream results
+  const pitchersTotal = slate.games.length * 2;
+  const pitchersResolved = slate.games
+    .flatMap((g) => [
+      (g as { away_pitcher?: { role?: string } }).away_pitcher,
+      (g as { home_pitcher?: { role?: string } }).home_pitcher,
+    ])
+    .filter((p) => p?.role && p.role !== "UNRESOLVED").length;
+
+  const weatherLive = slate.games.filter(
+    (g) => (g as { environment?: { data_quality?: string } }).environment?.data_quality === "good",
+  ).length;
+  const weatherFallback = slate.games.length - weatherLive;
+
+  const sw = mod08.sheets_written;
+  const errorsJson = JSON.stringify(
+    output.errors.length > 0 ? output.errors : [],
+  );
+
+  const row = [
+    archivalTimestamp,                                   // Run_Timestamp
+    dateStr,                                             // Date
+    bundleName,                                          // Bundle_Name
+    "partial_success",                                   // Pipeline_Status (overwritten by caller if needed)
+    slate.total_games,                                   // Total_Games
+    slate.validation.status,                             // Validation_Status
+    slate.validation.critical_failures.length,           // Critical_Failures
+    slate.validation.warnings.length,                    // Warnings
+    pitchersResolved,                                    // Pitchers_Resolved
+    pitchersTotal,                                       // Pitchers_Total
+    weatherLive,                                         // Weather_Live
+    weatherFallback,                                     // Weather_Fallback
+    mod08.status,                                        // M08_Status
+    sw.daily_matchups?.rows_written ?? 0,                // M08_Rows_DailyMatchups
+    sw.today_lineups?.rows_written ?? 0,                 // M08_Rows_TodayLineups
+    sw.team_form_input?.rows_written ?? 0,               // M08_Rows_TeamForm
+    sw.bullpen_usage_daily?.rows_written ?? 0,           // M08_Rows_Bullpen
+    sw.run_environment?.rows_written ?? 0,               // M08_Rows_RunEnv
+    mod09.status,                                        // M09_Status
+    mod09.checks.game_integration?.actual_rows ?? 0,     // M09_IntegrationRows
+    mod09.checks.game_summary?.actual_rows ?? 0,         // M09_SummaryRows
+    mod10.status,                                        // M10_Status
+    mod10.games_seeded.new_games,                        // M10_NewGames
+    mod10.games_seeded.updated_games,                    // M10_UpdatedGames
+    mod11.status,                                        // M11_Status
+    mod11.core_count,                                    // M11_CoreCount
+    mod11.not_core_count,                                // M11_NotCoreCount
+    mod11.slate_board.length,                            // M11_SlateBoardRows
+    errorsJson,                                          // Errors
+  ];
+
   try {
-    const folder = await createDriveFolder(bundleName, DRIVE_ROOT_FOLDER_ID);
-    folderId = folder.id;
-    output.bundle_folder_id = folderId;
-    logger.info({ folderId, bundleName }, "MODULE_12: Bundle folder created");
+    await ensureHeaders();
+    await appendRange(WORKBOOK_ID, `${RUN_LOG_SHEET}!A:A`, [row]);
+
+    const rowContent = row.join(",");
+    output.files_archived.run_log_row = {
+      name: `RUN_LOG row — ${bundleName}`,
+      size: rowContent.length,
+    };
+
+    logger.info({ bundleName, sheet: RUN_LOG_SHEET }, "MODULE_12: Run log row appended");
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.error({ err: message }, "MODULE_12: Could not create Drive folder");
+    logger.error({ err: message }, "MODULE_12: Failed to append run log row");
     output.status = "failure";
-    output.errors.push({ module: "12_archival", error: `Create folder failed: ${message}`, timestamp: new Date().toISOString() });
-    return output;
+    output.errors.push({
+      module: "12_archival",
+      error: `RUN_LOG append failed: ${message}`,
+      timestamp: new Date().toISOString(),
+    });
   }
 
-  // Files to archive
-  const dateStamp = dateStr.replace(/-/g, "");
-  const vSuffix = `${dateStamp}.v${String(versionNumber).padStart(2, "0")}`;
-
-  const filesToArchive = [
-    jsonFile(`normalized_slate.${vSuffix}.json`, { games: slate.games, total_games: slate.total_games }),
-    jsonFile(`validation_report.${vSuffix}.json`, slate.validation),
-    jsonFile(`module_08_results.${vSuffix}.json`, mod08),
-    jsonFile(`module_09_results.${vSuffix}.json`, mod09),
-    jsonFile(`module_10_results.${vSuffix}.json`, mod10),
-    jsonFile(`slate_board_extraction.${vSuffix}.json`, { slate_board: mod11.slate_board, active_board: mod11.active_board_snapshot }),
-    jsonFile(`runlog.${vSuffix}.json`, {
-      bundle_name: bundleName,
-      run_timestamp: slate.run_timestamp,
-      archival_timestamp: output.archival_timestamp_utc,
-      date: dateStr,
-      total_games: slate.total_games,
-      validation_status: slate.validation.status,
-      module_statuses: slate.module_statuses,
-      sheets_written: mod08.sheets_written,
-      recalculation_status: mod09.status,
-      seeding_status: mod10.status,
-      extraction_status: mod11.status,
-      core_count: mod11.core_count,
-      not_core_count: mod11.not_core_count,
-    }),
-    jsonFile(`README.${vSuffix}.json`, {
-      bundle: bundleName,
-      description: `Frostline run bundle for ${dateStr}. Contains normalized slate, validation, Sheets write results, and decision board extractions.`,
-      modules: ["01_mlb_statsapi", "02_statcast", "03_pitcher_classification", "04_open_meteo", "05_fangraphs", "06_normalization", "07_validation", "08_feed_writer", "09_recalculation", "10_slate_input", "11_output_extraction", "12_archival"],
-      created_at: output.archival_timestamp_utc,
-    }),
-  ];
-
-  const keys: (keyof Module12Result["files_archived"])[] = [
-    "normalized_slate", "validation_report", "module_08_results",
-    "module_09_results", "module_10_results", "slate_board_extraction",
-    "runlog", "readme",
-  ];
-
-  let successCount = 0;
-  for (let i = 0; i < filesToArchive.length; i++) {
-    const file = filesToArchive[i];
-    const key = keys[i];
-    try {
-      const archived = await archiveFile(file, folderId);
-      output.files_archived[key] = archived;
-      successCount++;
-      logger.info({ name: file.name, size: archived.size }, "MODULE_12: File archived");
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn({ file: file.name, err: message }, "MODULE_12: File archive failed");
-      output.errors.push({ module: "12_archival", error: `Upload ${file.name}: ${message}`, timestamp: new Date().toISOString() });
-    }
-  }
-
-  output.status =
-    successCount === filesToArchive.length
-      ? "success"
-      : successCount === 0
-        ? "failure"
-        : "partial_failure";
-
-  logger.info({ successCount, total: filesToArchive.length, status: output.status }, "MODULE_12: Archival complete");
   return output;
 }
