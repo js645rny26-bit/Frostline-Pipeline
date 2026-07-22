@@ -196,15 +196,16 @@ async function safeWrite(
   clearRng: string,
   writeRng: string,
   rows: unknown[][],
+  workbookId: string,
 ): Promise<SheetWriteStatus> {
   const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      await clearRange(WORKBOOK_ID, clearRng);
+      await clearRange(workbookId, clearRng);
       if (rows.length === 0) {
         return { status: "success", rows_written: 0, range: writeRng };
       }
-      const result = await writeRange(WORKBOOK_ID, writeRng, rows);
+      const result = await writeRange(workbookId, writeRng, rows);
       logger.info({ sheet: label, rows: result.updatedRows }, "MODULE_08: Sheet written");
       return { status: "success", rows_written: result.updatedRows, range: result.updatedRange };
     } catch (err: unknown) {
@@ -225,6 +226,7 @@ export async function writeGoogleSheetsFeed(
   normalized: NormalizationResult,
   splits: FangraphsResult,
   runDate: string,
+  workbookId = WORKBOOK_ID,
 ): Promise<Module08Result> {
   logger.info({ games: normalized.games.length }, "MODULE_08: Writing feeds to Google Sheets");
 
@@ -238,6 +240,7 @@ export async function writeGoogleSheetsFeed(
     "DAILY_MATCHUPS!A3:AB32",
     `DAILY_MATCHUPS!A3:AB${2 + Math.max(dmRows.length, 1)}`,
     dmRows,
+    workbookId,
   );
   if (dmResult.status === "failure") {
     failed.push("daily_matchups");
@@ -251,6 +254,7 @@ export async function writeGoogleSheetsFeed(
     "TODAY_LINEUPS!A3:Q602",
     `TODAY_LINEUPS!A3:Q${2 + Math.max(tlRows.length, 1)}`,
     tlRows,
+    workbookId,
   );
   if (tlResult.status === "failure") {
     failed.push("today_lineups");
@@ -264,6 +268,7 @@ export async function writeGoogleSheetsFeed(
     "TEAM_FORM_INPUT!A3:P62",
     "TEAM_FORM_INPUT!A3:P62",
     tfRows,
+    workbookId,
   );
   if (tfResult.status === "failure") {
     failed.push("team_form_input");
@@ -274,9 +279,9 @@ export async function writeGoogleSheetsFeed(
   let buResult: SheetWriteStatus = { status: "skipped", rows_written: 0, range: "BULLPEN_USAGE_DAILY!D1:I1" };
   try {
     const dateHeaders = buildBullpenDateHeaders(runDate);
-    await clearRange(WORKBOOK_ID, "BULLPEN_USAGE_DAILY!A2:L300");
-    await clearRange(WORKBOOK_ID, "BULLPEN_USAGE_DAILY!O2:U31");
-    await writeRange(WORKBOOK_ID, "BULLPEN_USAGE_DAILY!D1:I1", [dateHeaders]);
+    await clearRange(workbookId, "BULLPEN_USAGE_DAILY!A2:L300");
+    await clearRange(workbookId, "BULLPEN_USAGE_DAILY!O2:U31");
+    await writeRange(workbookId, "BULLPEN_USAGE_DAILY!D1:I1", [dateHeaders]);
     // No per-player workload rows to write in this version (data source TBD)
     buResult = { status: "success", rows_written: 0, range: "BULLPEN_USAGE_DAILY!D1:I1" };
     logger.info("MODULE_08: BULLPEN_USAGE_DAILY date headers written");
@@ -294,6 +299,7 @@ export async function writeGoogleSheetsFeed(
     "RUN_ENVIRONMENT!A2:Q31",
     `RUN_ENVIRONMENT!A2:Q${1 + Math.max(reRows.length, 1)}`,
     reRows,
+    workbookId,
   );
   if (reResult.status === "failure") {
     failed.push("run_environment");
@@ -313,7 +319,7 @@ export async function writeGoogleSheetsFeed(
   return {
     status: overallStatus,
     write_timestamp_utc: new Date().toISOString(),
-    workbook_id: WORKBOOK_ID,
+    workbook_id: workbookId,
     sheets_written: {
       daily_matchups: dmResult,
       today_lineups: tlResult,

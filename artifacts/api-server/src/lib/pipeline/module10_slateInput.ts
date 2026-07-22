@@ -66,7 +66,7 @@ function rowToArray(obj: Record<number, unknown>, maxIdx: number): unknown[] {
   return arr;
 }
 
-export async function seedSlateInput(normalized: NormalizationResult): Promise<Module10Result> {
+export async function seedSlateInput(normalized: NormalizationResult, workbookId = WORKBOOK_ID): Promise<Module10Result> {
   logger.info({ games: normalized.games.length }, "MODULE_10: Seeding SLATE_INPUT");
 
   const output: Module10Result = {
@@ -80,7 +80,7 @@ export async function seedSlateInput(normalized: NormalizationResult): Promise<M
 
   try {
     // Read existing SLATE_INPUT (including header)
-    const existing = await readRange(WORKBOOK_ID, "SLATE_INPUT!A:W");
+    const existing = await readRange(workbookId, "SLATE_INPUT!A:W");
     const existingRows = existing.values ?? [];
     const header = existingRows[0] ?? [];
     const dataRows = existingRows.slice(1);
@@ -140,7 +140,7 @@ export async function seedSlateInput(normalized: NormalizationResult): Promise<M
     // Write all rows starting at row 2 (after header)
     if (seededRows.length > 0) {
       await writeRange(
-        WORKBOOK_ID,
+        workbookId,
         `SLATE_INPUT!A2:W${1 + seededRows.length}`,
         seededRows,
       );

@@ -11,4 +11,8 @@ export type PublishPipelineParams = {
  * Date in YYYY-MM-DD format (defaults to today)
  */
 date?: string;
+/**
+ * Google Spreadsheet ID to publish into (defaults to the canonical workbook)
+ */
+workbook_id?: string;
 };

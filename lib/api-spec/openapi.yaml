@@ -141,6 +141,12 @@ paths:
           schema:
             type: string
             description: Date in YYYY-MM-DD format (defaults to today)
+        - name: workbook_id
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Google Spreadsheet ID to publish into (defaults to the canonical workbook)
       responses:
         "200":
           description: Full pipeline publish result

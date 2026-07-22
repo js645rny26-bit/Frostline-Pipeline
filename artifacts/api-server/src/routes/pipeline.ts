@@ -45,9 +45,11 @@ router.get("/pipeline/schedule", async (req, res): Promise<void> => {
 
 router.post("/pipeline/publish", async (req, res): Promise<void> => {
   const dateParam = req.query.date;
+  const workbookParam = req.query.workbook_id;
   const date = typeof dateParam === "string" ? dateParam : getTodayDateStr();
+  const workbookId = typeof workbookParam === "string" && workbookParam ? workbookParam : undefined;
   try {
-    const result = await runFullPipeline(date);
+    const result = await runFullPipeline(date, workbookId);
     const statusCode = result.pipeline_status === "failure" ? 500 : 200;
     res.status(statusCode).json(result);
   } catch (err: unknown) {

@@ -76,7 +76,7 @@ function parseStr(v: unknown): string {
   return v == null ? "" : String(v);
 }
 
-export async function extractOutputBoards(): Promise<Module11Result> {
+export async function extractOutputBoards(workbookId = WORKBOOK_ID): Promise<Module11Result> {
   logger.info("MODULE_11: Extracting output boards");
 
   const output: Module11Result = {
@@ -90,7 +90,7 @@ export async function extractOutputBoards(): Promise<Module11Result> {
 
   try {
     // Read SLATE_BOARD
-    const slateBoardData = await readRange(WORKBOOK_ID, "SLATE_BOARD!A:Z");
+    const slateBoardData = await readRange(workbookId, "SLATE_BOARD!A:Z");
     const slateBoardRows = (slateBoardData.values ?? []).slice(1); // skip header
 
     for (const row of slateBoardRows) {
@@ -121,7 +121,7 @@ export async function extractOutputBoards(): Promise<Module11Result> {
     }
 
     // Read ACTIVE_BOARD_SNAPSHOT
-    const activeBoardData = await readRange(WORKBOOK_ID, "ACTIVE_BOARD_SNAPSHOT!A:Z");
+    const activeBoardData = await readRange(workbookId, "ACTIVE_BOARD_SNAPSHOT!A:Z");
     const activeBoardRows = (activeBoardData.values ?? []).slice(1);
 
     for (const row of activeBoardRows) {

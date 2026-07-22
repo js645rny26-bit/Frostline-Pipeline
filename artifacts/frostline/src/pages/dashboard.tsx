@@ -31,6 +31,7 @@ export default function Dashboard() {
 
   const publish = usePublishPipeline();
   const createWb = useCreateWorkbook();
+  const [activeWorkbookId, setActiveWorkbookId] = useState<string | null>(null);
   const [createResult, setCreateResult] = useState<{ workbook_url: string; workbook_name: string; errors: unknown[] } | null>(null);
 
   const isLoading = isLoadingSummary || isLoadingSlate;
@@ -41,6 +42,7 @@ export default function Dashboard() {
       { params: { date } },
       {
         onSuccess: (result) => {
+          setActiveWorkbookId(result.workbook_id);
           setCreateResult({
             workbook_url: result.workbook_url,
             workbook_name: result.workbook_name,
@@ -57,7 +59,7 @@ export default function Dashboard() {
   function handlePublish() {
     setPublishResult(null);
     publish.mutate(
-      { params: { date } },
+      { params: { date, ...(activeWorkbookId ? { workbook_id: activeWorkbookId } : {}) } },
       {
         onSuccess: (result) => {
           setPublishResult({

@@ -209,7 +209,8 @@ export const CreateWorkbookResponse = zod.object({
  * @summary Run full pipeline (Modules 01–12) and publish to Google Sheets
  */
 export const PublishPipelineQueryParams = zod.object({
-  "date": zod.coerce.string().optional()
+  "date": zod.coerce.string().optional(),
+  "workbook_id": zod.coerce.string().optional()
 })
 
 export const PublishPipelineResponse = zod.object({

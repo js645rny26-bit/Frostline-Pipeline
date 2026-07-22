@@ -52,6 +52,7 @@ export async function verifyRecalculation(
   expectedGameCount: number,
   maxRetries = 5,
   retryDelayMs = 2000,
+  workbookId = WORKBOOK_ID,
 ): Promise<Module09Result> {
   logger.info({ expectedGameCount }, "MODULE_09: Verifying workbook recalculation");
 
@@ -81,12 +82,12 @@ export async function verifyRecalculation(
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       // Read GAME_INTEGRATION column A
-      const integrationData = await readRange(WORKBOOK_ID, "GAME_INTEGRATION!A:A");
+      const integrationData = await readRange(workbookId, "GAME_INTEGRATION!A:A");
       const integrationRows = (integrationData.values?.length ?? 0) - 1; // subtract header
       const integrationErrors = checkFormulaErrors(integrationData.values ?? []);
 
       // Read GAME_SUMMARY column A
-      const summaryData = await readRange(WORKBOOK_ID, "GAME_SUMMARY!A:A");
+      const summaryData = await readRange(workbookId, "GAME_SUMMARY!A:A");
       const summaryRows = (summaryData.values?.length ?? 0) - 1;
       const summaryErrors = checkFormulaErrors(summaryData.values ?? []);
 
@@ -123,12 +124,12 @@ export async function verifyRecalculation(
 
       if (integrationOk && summaryOk) {
         // Stability check: read GAME_INTEGRATION summary column twice, 1 s apart
-        const read1 = await readRange(WORKBOOK_ID, "GAME_INTEGRATION!A:B");
+        const read1 = await readRange(workbookId, "GAME_INTEGRATION!A:B");
         const read1Time = new Date().toISOString();
 
         await sleep(1000);
 
-        const read2 = await readRange(WORKBOOK_ID, "GAME_INTEGRATION!A:B");
+        const read2 = await readRange(workbookId, "GAME_INTEGRATION!A:B");
         const read2Time = new Date().toISOString();
 
         const isConsistent = JSON.stringify(read1) === JSON.stringify(read2);

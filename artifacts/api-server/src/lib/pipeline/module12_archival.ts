@@ -64,19 +64,19 @@ export interface Module12Result {
   errors: Array<{ module: string; error: string; timestamp: string }>;
 }
 
-async function ensureHeaders(): Promise<void> {
+async function ensureHeaders(workbookId: string): Promise<void> {
   // Try to read cell A1. If it fails with "Unable to parse range", the sheet
   // tab doesn't exist yet — create it, then write headers.
   let sheetExists = true;
   try {
-    const existing = await readRange(WORKBOOK_ID, `${RUN_LOG_SHEET}!A1:A1`);
+    const existing = await readRange(workbookId, `${RUN_LOG_SHEET}!A1:A1`);
     const hasHeader =
       existing.values &&
       existing.values[0] &&
       String(existing.values[0][0]).trim() === "Run_Timestamp";
 
     if (!hasHeader) {
-      await writeRange(WORKBOOK_ID, `${RUN_LOG_SHEET}!A1`, [RUN_LOG_HEADERS]);
+      await writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [RUN_LOG_HEADERS]);
       logger.info("MODULE_12: RUN_LOG headers written");
     }
   } catch (err: unknown) {
@@ -90,8 +90,8 @@ async function ensureHeaders(): Promise<void> {
 
   if (!sheetExists) {
     logger.info("MODULE_12: RUN_LOG sheet not found — creating it");
-    await addSheet(WORKBOOK_ID, RUN_LOG_SHEET);
-    await writeRange(WORKBOOK_ID, `${RUN_LOG_SHEET}!A1`, [RUN_LOG_HEADERS]);
+    await addSheet(workbookId, RUN_LOG_SHEET);
+    await writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [RUN_LOG_HEADERS]);
     logger.info("MODULE_12: RUN_LOG sheet created with headers");
   }
 }
@@ -103,6 +103,7 @@ export async function archiveRunBundle(
   mod10: Module10Result,
   mod11: Module11Result,
   versionNumber = 1,
+  workbookId = WORKBOOK_ID,
 ): Promise<Module12Result> {
   const dateStr = slate.date;
   const bundleName = `${dateStr}_v${String(versionNumber).padStart(2, "0")}`;
@@ -114,7 +115,7 @@ export async function archiveRunBundle(
     status: "success",
     archival_timestamp_utc: archivalTimestamp,
     bundle_name: bundleName,
-    bundle_folder_id: WORKBOOK_ID, // workbook is the "folder" now
+    bundle_folder_id: workbookId,
     files_archived: {},
     errors: [],
   };
@@ -171,8 +172,8 @@ export async function archiveRunBundle(
   ];
 
   try {
-    await ensureHeaders();
-    await appendRange(WORKBOOK_ID, `${RUN_LOG_SHEET}!A:A`, [row]);
+    await ensureHeaders(workbookId);
+    await appendRange(workbookId, `${RUN_LOG_SHEET}!A:A`, [row]);
 
     const rowContent = row.join(",");
     output.files_archived.run_log_row = {

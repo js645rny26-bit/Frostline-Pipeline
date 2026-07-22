@@ -184,9 +184,9 @@ export interface PublishResult {
   errors: Array<{ module: string; error: string; timestamp: string }>;
 }
 
-export async function runFullPipeline(dateStr?: string): Promise<PublishResult> {
+export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID): Promise<PublishResult> {
   const date = dateStr ?? getTodayDateStr();
-  logger.info({ date }, "Full pipeline: starting 12-module run");
+  logger.info({ date, workbookId }, "Full pipeline: starting 12-module run");
 
   // Modules 01–07
   const slate = await runPipeline(date);
@@ -196,7 +196,7 @@ export async function runFullPipeline(dateStr?: string): Promise<PublishResult> 
   const allErrors: Array<{ module: string; error: string; timestamp: string }> = [];
 
   // Module 08: Write feeds to Google Sheets
-  const mod08 = await writeGoogleSheetsFeed(normalized as Parameters<typeof writeGoogleSheetsFeed>[0], splits, date);
+  const mod08 = await writeGoogleSheetsFeed(normalized as Parameters<typeof writeGoogleSheetsFeed>[0], splits, date, workbookId);
   if (mod08.status === "failure") {
     logger.error("Full pipeline: Module 08 failed — aborting Sheets workflow");
     return {
@@ -210,25 +210,25 @@ export async function runFullPipeline(dateStr?: string): Promise<PublishResult> 
       module_10: { status: "failure", seeding_timestamp_utc: new Date().toISOString(), games_seeded: { new_games: 0, updated_games: 0, total_games: 0 }, rows_written: 0, seed_results: [], errors: [{ module: "10", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, not_core_count: 0, error: "Skipped: Module 08 failed" },
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
-      workbook_url: `https://docs.google.com/spreadsheets/d/${WORKBOOK_ID}`,
+      workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
     };
   }
 
   // Module 09: Verify recalculation
-  const mod09 = await verifyRecalculation(slate.total_games);
+  const mod09 = await verifyRecalculation(slate.total_games, 5, 2000, workbookId);
   if (mod09.status === "timeout" || mod09.status === "error") {
     logger.warn({ status: mod09.status }, "Full pipeline: Module 09 non-verified — continuing with caution");
   }
 
   // Module 10: Seed SLATE_INPUT (run regardless of recalc status to preserve operator fields)
-  const mod10 = await seedSlateInput(normalized as Parameters<typeof seedSlateInput>[0]);
+  const mod10 = await seedSlateInput(normalized as Parameters<typeof seedSlateInput>[0], workbookId);
   if (mod10.status === "failure") {
     allErrors.push(...mod10.errors);
   }
 
   // Module 11: Extract decision boards
-  const mod11 = await extractOutputBoards();
+  const mod11 = await extractOutputBoards(workbookId);
 
   // Overall status before archival (so we can write it into the run log row)
   const overallStatus =
@@ -239,13 +239,13 @@ export async function runFullPipeline(dateStr?: string): Promise<PublishResult> 
         : "success";
 
   // Module 12: Append run log row to RUN_LOG sheet (non-blocking — failure is advisory)
-  const mod12 = await archiveRunBundle(slate, mod08, mod09, mod10, mod11);
+  const mod12 = await archiveRunBundle(slate, mod08, mod09, mod10, mod11, 1, workbookId);
   if (mod12.status !== "success") {
     // Run log is best-effort; don't downgrade overall status for it
     allErrors.push(...mod12.errors);
   }
 
-  logger.info({ overallStatus, date }, "Full pipeline: 12-module run complete");
+  logger.info({ overallStatus, date, workbookId }, "Full pipeline: 12-module run complete");
 
   return {
     run_timestamp: slate.run_timestamp,
@@ -258,7 +258,7 @@ export async function runFullPipeline(dateStr?: string): Promise<PublishResult> 
     module_10: mod10,
     module_11: mod11,
     module_12: mod12,
-    workbook_url: `https://docs.google.com/spreadsheets/d/${WORKBOOK_ID}`,
+    workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
     errors: allErrors,
   };
 }
