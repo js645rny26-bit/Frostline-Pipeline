@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Frostline Pipeline"
+version = "1.0.0"
+id = "artifacts/frostline"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19405
+
+[services.development]
+run = "pnpm --filter @workspace/frostline run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/frostline", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/frostline/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19405"
+BASE_PATH = "/"

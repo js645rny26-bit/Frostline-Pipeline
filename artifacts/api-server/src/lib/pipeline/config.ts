@@ -1,0 +1,97 @@
+/**
+ * Static config: team mappings, stadium coords, validation rules.
+ * Equivalent to the Python config/ JSON files, inlined as TypeScript constants.
+ */
+
+export const SOURCE_MAPPINGS: Record<string, { canonical_abbr: string; full_name: string }> = {
+  "147": { canonical_abbr: "NYY", full_name: "New York Yankees" },
+  "110": { canonical_abbr: "BAL", full_name: "Baltimore Orioles" },
+  "141": { canonical_abbr: "TOR", full_name: "Toronto Blue Jays" },
+  "111": { canonical_abbr: "BOS", full_name: "Boston Red Sox" },
+  "139": { canonical_abbr: "TBR", full_name: "Tampa Bay Rays" },
+  "142": { canonical_abbr: "MIN", full_name: "Minnesota Twins" },
+  "116": { canonical_abbr: "DET", full_name: "Detroit Tigers" },
+  "118": { canonical_abbr: "KCR", full_name: "Kansas City Royals" },
+  "145": { canonical_abbr: "CHW", full_name: "Chicago White Sox" },
+  "114": { canonical_abbr: "CLE", full_name: "Cleveland Guardians" },
+  "158": { canonical_abbr: "MIL", full_name: "Milwaukee Brewers" },
+  "112": { canonical_abbr: "CHC", full_name: "Chicago Cubs" },
+  "113": { canonical_abbr: "CIN", full_name: "Cincinnati Reds" },
+  "134": { canonical_abbr: "PIT", full_name: "Pittsburgh Pirates" },
+  "138": { canonical_abbr: "STL", full_name: "St. Louis Cardinals" },
+  "120": { canonical_abbr: "WSN", full_name: "Washington Nationals" },
+  "143": { canonical_abbr: "PHI", full_name: "Philadelphia Phillies" },
+  "144": { canonical_abbr: "ATL", full_name: "Atlanta Braves" },
+  "146": { canonical_abbr: "MIA", full_name: "Miami Marlins" },
+  "121": { canonical_abbr: "NYM", full_name: "New York Mets" },
+  "119": { canonical_abbr: "LAD", full_name: "Los Angeles Dodgers" },
+  "135": { canonical_abbr: "SDP", full_name: "San Diego Padres" },
+  "115": { canonical_abbr: "COL", full_name: "Colorado Rockies" },
+  "109": { canonical_abbr: "ARI", full_name: "Arizona Diamondbacks" },
+  "137": { canonical_abbr: "SFG", full_name: "San Francisco Giants" },
+  "133": { canonical_abbr: "OAK", full_name: "Oakland Athletics" },
+  "136": { canonical_abbr: "SEA", full_name: "Seattle Mariners" },
+  "140": { canonical_abbr: "TEX", full_name: "Texas Rangers" },
+  "108": { canonical_abbr: "LAA", full_name: "Los Angeles Angels" },
+  "117": { canonical_abbr: "HOU", full_name: "Houston Astros" },
+};
+
+export const STADIUM_COORDS: Record<string, { latitude: number; longitude: number; timezone: string }> = {
+  "Yankee Stadium":               { latitude: 40.8296,  longitude: -73.9262,  timezone: "America/New_York" },
+  "Oriole Park at Camden Yards":  { latitude: 39.2847,  longitude: -76.6413,  timezone: "America/New_York" },
+  "Rogers Centre":                { latitude: 43.6426,  longitude: -79.3957,  timezone: "America/Toronto" },
+  "Fenway Park":                  { latitude: 42.3467,  longitude: -71.0972,  timezone: "America/New_York" },
+  "Tropicana Field":              { latitude: 27.7686,  longitude: -82.6534,  timezone: "America/New_York" },
+  "Target Field":                 { latitude: 44.9815,  longitude: -93.2789,  timezone: "America/Chicago" },
+  "Comerica Park":                { latitude: 42.3391,  longitude: -83.0485,  timezone: "America/Detroit" },
+  "Kauffman Stadium":             { latitude: 39.0520,  longitude: -94.4803,  timezone: "America/Chicago" },
+  "Guaranteed Rate Field":        { latitude: 41.8300,  longitude: -87.6337,  timezone: "America/Chicago" },
+  "Progressive Field":            { latitude: 41.4956,  longitude: -81.6852,  timezone: "America/New_York" },
+  "American Family Field":        { latitude: 43.0285,  longitude: -87.9714,  timezone: "America/Chicago" },
+  "Wrigley Field":                { latitude: 41.9484,  longitude: -87.6553,  timezone: "America/Chicago" },
+  "Great American Ball Park":     { latitude: 39.0974,  longitude: -84.5076,  timezone: "America/New_York" },
+  "PNC Park":                     { latitude: 40.4474,  longitude: -80.0075,  timezone: "America/New_York" },
+  "Busch Stadium":                { latitude: 38.6226,  longitude: -90.1928,  timezone: "America/Chicago" },
+  "Nationals Park":               { latitude: 38.8729,  longitude: -77.0074,  timezone: "America/New_York" },
+  "Citizens Bank Park":           { latitude: 39.9060,  longitude: -75.1673,  timezone: "America/New_York" },
+  "Truist Park":                  { latitude: 33.8908,  longitude: -84.4677,  timezone: "America/New_York" },
+  "loanDepot Park":               { latitude: 25.7784,  longitude: -80.2195,  timezone: "America/New_York" },
+  "Citi Field":                   { latitude: 40.7571,  longitude: -73.8456,  timezone: "America/New_York" },
+  "Dodger Stadium":               { latitude: 34.0742,  longitude: -118.2400, timezone: "America/Los_Angeles" },
+  "Petco Park":                   { latitude: 32.7075,  longitude: -117.1571, timezone: "America/Los_Angeles" },
+  "Coors Field":                  { latitude: 39.7560,  longitude: -104.9942, timezone: "America/Denver" },
+  "Chase Field":                  { latitude: 33.4454,  longitude: -112.0667, timezone: "America/Phoenix" },
+  "Oracle Park":                  { latitude: 37.7786,  longitude: -122.3893, timezone: "America/Los_Angeles" },
+  "Oakland Coliseum":             { latitude: 37.7516,  longitude: -122.2008, timezone: "America/Los_Angeles" },
+  "Sacramento's Sutter Health Park": { latitude: 38.5808, longitude: -121.5003, timezone: "America/Los_Angeles" },
+  "T-Mobile Park":                { latitude: 47.5912,  longitude: -122.3320, timezone: "America/Los_Angeles" },
+  "Globe Life Field":             { latitude: 32.7456,  longitude: -97.0832,  timezone: "America/Chicago" },
+  "Angel Stadium":                { latitude: 33.8003,  longitude: -117.8827, timezone: "America/Los_Angeles" },
+  "Minute Maid Park":             { latitude: 29.7571,  longitude: -95.3555,  timezone: "America/Chicago" },
+};
+
+export const VALIDATION_RULES = {
+  game_count: { min_expected: 13, max_expected: 16 },
+  pitcher_role_categories: [
+    "CONVENTIONAL_STARTER", "OPENER", "BULK", "PIGGYBACK_PRIMARY",
+    "PIGGYBACK_SECONDARY", "RELIEF_ARM_LISTED_AS_STARTER", "BULLPEN_GAME", "UNRESOLVED",
+  ],
+  workload_flags: [
+    "RESTRICTED_WORKLOAD", "RETURNING_FROM_IL", "REHAB_RETURN",
+    "REPORTED_PITCH_LIMIT", "SHORT_REST", "ROLE_CHANGE",
+  ],
+};
+
+export function getTodayDateStr(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+export function celsiusToFahrenheit(c: number | null): number | null {
+  if (c === null || c === undefined) return null;
+  return Math.round(((c * 9) / 5 + 32) * 10) / 10;
+}
+
+export function kmhToMph(kmh: number | null): number | null {
+  if (kmh === null || kmh === undefined) return null;
+  return Math.round(kmh * 0.621371 * 10) / 10;
+}

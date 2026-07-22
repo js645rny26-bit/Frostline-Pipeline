@@ -3,13 +3,15 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Frostline Pipeline API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: pipeline
+    description: Frostline data pipeline operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,76 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /pipeline/slate:
+    get:
+      operationId: getPipelineSlate
+      tags: [pipeline]
+      summary: Run full pipeline and return normalized slate
+      description: Runs all 7 modules and returns normalized, validated game slate for the given date
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Date in YYYY-MM-DD format (defaults to today)
+      responses:
+        "200":
+          description: Pipeline slate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineSlate"
+        "400":
+          description: Bad request
+
+  /pipeline/summary:
+    get:
+      operationId: getPipelineSummary
+      tags: [pipeline]
+      summary: Quick pipeline summary stats
+      description: Returns high-level summary stats for the given date slate
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Date in YYYY-MM-DD format (defaults to today)
+      responses:
+        "200":
+          description: Pipeline summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineSummary"
+        "400":
+          description: Bad request
+
+  /pipeline/schedule:
+    get:
+      operationId: getPipelineSchedule
+      tags: [pipeline]
+      summary: Fetch MLB schedule only (Module 01)
+      description: Returns raw MLB schedule for the given date without running the full pipeline
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Date in YYYY-MM-DD format (defaults to today)
+      responses:
+        "200":
+          description: MLB schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GameSchedule"
+        "400":
+          description: Bad request
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +106,353 @@ components:
       required:
         - status
 
+    ProbablePitcher:
+      type: object
+      properties:
+        id:
+          type: ["integer", "null"]
+        fullName:
+          type: ["string", "null"]
+        hand:
+          type: ["string", "null"]
+      required:
+        - id
+        - fullName
+        - hand
+
+    GameTeamInfo:
+      type: object
+      properties:
+        id:
+          type: ["integer", "null"]
+        name:
+          type: ["string", "null"]
+        abbreviation:
+          type: string
+      required:
+        - id
+        - name
+        - abbreviation
+
+    VenueInfo:
+      type: object
+      properties:
+        id:
+          type: ["integer", "null"]
+        name:
+          type: ["string", "null"]
+        timeZone:
+          type: ["string", "null"]
+      required:
+        - id
+        - name
+        - timeZone
+
+    GameStatusInfo:
+      type: object
+      properties:
+        abstractGameState:
+          type: ["string", "null"]
+        detailedState:
+          type: ["string", "null"]
+        codedGameState:
+          type: ["string", "null"]
+      required:
+        - abstractGameState
+        - detailedState
+        - codedGameState
+
+    ScheduleGame:
+      type: object
+      properties:
+        gamePk:
+          type: integer
+        legacy_game_id:
+          type: string
+        gameDateTime:
+          type: ["string", "null"]
+        venue:
+          $ref: "#/components/schemas/VenueInfo"
+        awayTeam:
+          $ref: "#/components/schemas/GameTeamInfo"
+        homeTeam:
+          $ref: "#/components/schemas/GameTeamInfo"
+        awayProbablePitcher:
+          $ref: "#/components/schemas/ProbablePitcher"
+        homeProbablePitcher:
+          $ref: "#/components/schemas/ProbablePitcher"
+        status:
+          $ref: "#/components/schemas/GameStatusInfo"
+        doubleheaderStatus:
+          type: string
+        gameNumber:
+          type: ["integer", "null"]
+      required:
+        - gamePk
+        - legacy_game_id
+        - gameDateTime
+        - venue
+        - awayTeam
+        - homeTeam
+        - awayProbablePitcher
+        - homeProbablePitcher
+        - status
+        - doubleheaderStatus
+        - gameNumber
+
+    GameSchedule:
+      type: object
+      properties:
+        retrieval_timestamp_utc:
+          type: string
+        date:
+          type: string
+        total_games:
+          type: integer
+        games:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScheduleGame"
+        status:
+          type: string
+      required:
+        - retrieval_timestamp_utc
+        - date
+        - total_games
+        - games
+        - status
+
+    WeatherData:
+      type: object
+      properties:
+        temperature_f:
+          type: ["number", "null"]
+        humidity_pct:
+          type: ["number", "null"]
+        wind_speed_mph:
+          type: ["number", "null"]
+        wind_direction_degrees:
+          type: ["number", "null"]
+        precipitation_probability_pct:
+          type: ["number", "null"]
+        data_quality:
+          type: string
+      required:
+        - temperature_f
+        - humidity_pct
+        - wind_speed_mph
+        - wind_direction_degrees
+        - precipitation_probability_pct
+        - data_quality
+
+    PitcherClassification:
+      type: object
+      properties:
+        player_id:
+          type: ["integer", "null"]
+        name:
+          type: ["string", "null"]
+        hand:
+          type: ["string", "null"]
+        role:
+          type: string
+        role_confidence:
+          type: string
+        workload_flags:
+          type: array
+          items:
+            type: string
+        expected_pitches:
+          type: ["integer", "null"]
+        expected_innings:
+          type: ["number", "null"]
+        reasoning:
+          type: string
+      required:
+        - player_id
+        - name
+        - hand
+        - role
+        - role_confidence
+        - workload_flags
+        - expected_pitches
+        - expected_innings
+        - reasoning
+
+    NormalizedGameTeam:
+      type: object
+      properties:
+        team_id:
+          type: ["integer", "null"]
+        team_abbr:
+          type: ["string", "null"]
+        team_name:
+          type: ["string", "null"]
+      required:
+        - team_id
+        - team_abbr
+        - team_name
+
+    NormalizedGame:
+      type: object
+      properties:
+        gamePk:
+          type: integer
+        legacy_game_id:
+          type: string
+        date:
+          type: string
+        scheduled_utc_time:
+          type: ["string", "null"]
+        venue:
+          $ref: "#/components/schemas/VenueInfo"
+        away_team:
+          $ref: "#/components/schemas/NormalizedGameTeam"
+        home_team:
+          $ref: "#/components/schemas/NormalizedGameTeam"
+        away_pitcher:
+          $ref: "#/components/schemas/PitcherClassification"
+        home_pitcher:
+          $ref: "#/components/schemas/PitcherClassification"
+        environment:
+          $ref: "#/components/schemas/WeatherData"
+        game_status:
+          $ref: "#/components/schemas/GameStatusInfo"
+        doubleheader_status:
+          type: string
+      required:
+        - gamePk
+        - legacy_game_id
+        - date
+        - scheduled_utc_time
+        - venue
+        - away_team
+        - home_team
+        - away_pitcher
+        - home_pitcher
+        - environment
+        - game_status
+        - doubleheader_status
+
+    ValidationResult:
+      type: object
+      properties:
+        validation_timestamp_utc:
+          type: string
+        status:
+          type: string
+        critical_failures:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        info_notes:
+          type: array
+          items:
+            type: string
+      required:
+        - validation_timestamp_utc
+        - status
+        - critical_failures
+        - warnings
+        - info_notes
+
+    ModuleStatus:
+      type: object
+      properties:
+        module:
+          type: string
+        status:
+          type: string
+        message:
+          type: ["string", "null"]
+        count:
+          type: ["integer", "null"]
+      required:
+        - module
+        - status
+        - message
+        - count
+
+    PipelineSlate:
+      type: object
+      properties:
+        run_timestamp:
+          type: string
+        date:
+          type: string
+        total_games:
+          type: integer
+        games:
+          type: array
+          items:
+            $ref: "#/components/schemas/NormalizedGame"
+        validation:
+          $ref: "#/components/schemas/ValidationResult"
+        module_statuses:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModuleStatus"
+        fangraphs_source:
+          type: string
+        fangraphs_freshness:
+          type: string
+      required:
+        - run_timestamp
+        - date
+        - total_games
+        - games
+        - validation
+        - module_statuses
+        - fangraphs_source
+        - fangraphs_freshness
+
+    PipelineSummary:
+      type: object
+      properties:
+        date:
+          type: string
+        total_games:
+          type: integer
+        pitchers_resolved:
+          type: integer
+        pitchers_total:
+          type: integer
+        pitcher_resolution_pct:
+          type: number
+        weather_live_count:
+          type: integer
+        weather_fallback_count:
+          type: integer
+        weather_live_pct:
+          type: number
+        validation_status:
+          type: string
+        critical_failures:
+          type: integer
+        warnings:
+          type: integer
+        fangraphs_source:
+          type: string
+        fangraphs_freshness:
+          type: string
+        doubleheaders:
+          type: integer
+      required:
+        - date
+        - total_games
+        - pitchers_resolved
+        - pitchers_total
+        - pitcher_resolution_pct
+        - weather_live_count
+        - weather_fallback_count
+        - weather_live_pct
+        - validation_status
+        - critical_failures
+        - warnings
+        - fangraphs_source
+        - fangraphs_freshness
+        - doubleheaders
