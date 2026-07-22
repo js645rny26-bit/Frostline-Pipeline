@@ -69,7 +69,8 @@ function normalizeGame(raw: any): ScheduleGameData {
   const awayAbbr = awayInfo?.canonical_abbr ?? awayRaw?.team?.abbreviation ?? "UNK";
   const homeAbbr = homeInfo?.canonical_abbr ?? homeRaw?.team?.abbreviation ?? "UNK";
 
-  const gameDateTime: string | null = raw?.gameDateTime ?? null;
+  // MLB StatsAPI uses "gameDate" (not "gameDateTime") for the full ISO datetime
+  const gameDateTime: string | null = raw?.gameDate ?? raw?.officialDate ?? null;
   const gameDate = gameDateTime ? gameDateTime.split("T")[0].replace(/-/g, "") : "00000000";
   const legacyGameId = `${gameDate}_${awayAbbr}_${homeAbbr}`;
 

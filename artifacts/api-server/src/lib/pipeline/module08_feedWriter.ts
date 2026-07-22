@@ -36,36 +36,42 @@ export interface Module08Result {
 
 // ─── Row builders ─────────────────────────────────────────────────────────────
 
+// Schema: DAILY_MATCHUPS — 25 cols A–Y, data starts row 2 (frozenRows: 1)
+function confidenceNum(c: string | null | undefined): number {
+  if (c === "high") return 0.9;
+  if (c === "medium") return 0.75;
+  return 0.5;
+}
+
 function buildDailyMatchupsRows(games: NormalizedGame[]): unknown[][] {
+  const now = new Date().toISOString();
   return games.map((g) => [
-    g.date,                                  // A: date
-    g.legacy_game_id,                        // B: legacy_game_id
-    g.away_team.team_abbr ?? "",             // C: away_team_abbr
-    g.home_team.team_abbr ?? "",             // D: home_team_abbr
-    g.away_pitcher.name ?? "",               // E: away_pitcher_name
-    null,                                    // F: [formula] skip
-    g.away_pitcher.hand ?? "",               // G: away_pitcher_hand
-    g.away_pitcher.role ?? "UNRESOLVED",     // H: away_pitcher_role
-    g.away_pitcher.role_confidence === "high", // I: away_role_confirmed
-    g.away_pitcher.expected_pitches ?? "",   // J: away_expected_pitches
-    g.away_pitcher.expected_innings ?? "",   // K: away_expected_innings
-    g.home_pitcher.name ?? "",               // L: home_pitcher_name
-    null,                                    // M: [formula] skip
-    g.home_pitcher.hand ?? "",               // N: home_pitcher_hand
-    g.home_pitcher.role ?? "UNRESOLVED",     // O: home_pitcher_role
-    g.home_pitcher.role_confidence === "high", // P: home_role_confirmed
-    g.home_pitcher.expected_pitches ?? "",   // Q: home_expected_pitches
-    g.home_pitcher.expected_innings ?? "",   // R: home_expected_innings
-    g.venue.name ?? "",                      // S: park
-    buildWeatherTag(g),                      // T: weather_tag
-    "",                                      // U: umpire_tag
-    "",                                      // V: context_tag
-    1,                                       // W: context_multiplier
-    false,                                   // X: weather_ump_clear
-    null,                                    // Y: market_total
-    g.game_status.codedGameState ?? "",      // Z: game_status
-    "statsapi",                              // AA: source
-    "valid",                                 // AB: data_status
+    g.date,                                                          // A: Date
+    g.legacy_game_id,                                                // B: Game_ID
+    g.game_status.detailedState ?? "Scheduled",                      // C: Game_Status
+    g.away_team.team_abbr ?? "",                                     // D: Away_Team
+    g.home_team.team_abbr ?? "",                                     // E: Home_Team
+    g.away_pitcher.name ?? "",                                       // F: Away_Pitcher
+    g.home_pitcher.name ?? "",                                       // G: Home_Pitcher
+    g.away_pitcher.role ?? "UNRESOLVED",                             // H: Away_Pitcher_Role
+    g.home_pitcher.role ?? "UNRESOLVED",                             // I: Home_Pitcher_Role
+    confidenceNum(g.away_pitcher.role_confidence),                   // J: Away_Pitcher_Confidence
+    confidenceNum(g.home_pitcher.role_confidence),                   // K: Home_Pitcher_Confidence
+    g.away_pitcher.expected_pitches ?? "",                           // L: Away_Expected_Pitches
+    g.home_pitcher.expected_pitches ?? "",                           // M: Home_Expected_Pitches
+    g.away_pitcher.expected_innings ?? "",                           // N: Away_Expected_Innings
+    g.home_pitcher.expected_innings ?? "",                           // O: Home_Expected_Innings
+    g.environment.temperature_f ?? "",                               // P: Temperature_F
+    g.environment.wind_speed_mph ?? "",                              // Q: Wind_MPH
+    g.environment.precipitation_probability_pct !== null
+      ? g.environment.precipitation_probability_pct / 100 : "",     // R: Precipitation_Pct (0–1)
+    g.environment.data_quality === "fallback" ? "CLIMATOLOGY" : "LIVE_WX", // S: Weather_Source
+    g.venue.name ?? "",                                              // T: Stadium
+    1.0,                                                             // U: Park_Factor_HR (stub)
+    4.75,                                                            // V: Run_Environment (stub)
+    now,                                                             // W: FanGraphs_Last_Updated
+    now,                                                             // X: Statcast_Last_Updated
+    "",                                                              // Y: Notes
   ]);
 }
 
@@ -80,38 +86,31 @@ function buildWeatherTag(g: NormalizedGame): string {
   return "NEUTRAL";
 }
 
+// Schema: TODAY_LINEUPS — 14 cols A–N, data starts row 2 (frozenRows: 1)
+// Projected placeholder rows: 9 batting slots × 2 teams per game.
+// Player-level data (name, ID, wRC+, salary) will be populated once a roster source is wired up.
 function buildTodayLineupsRows(games: NormalizedGame[]): unknown[][] {
-  // We don't have confirmed lineup data — write projected slots (9 batters × 2 teams per game)
   const rows: unknown[][] = [];
-  const today = games[0]?.date ?? new Date().toISOString().split("T")[0];
 
   for (const g of games) {
     for (const side of ["A", "H"] as const) {
       const team = side === "A" ? g.away_team : g.home_team;
-      const opponent = side === "A" ? g.home_team : g.away_team;
-      const starterHand = side === "A"
-        ? (g.home_pitcher.hand ?? "R")   // away batters face home starter
-        : (g.away_pitcher.hand ?? "R");  // home batters face away starter
-
       for (let order = 1; order <= 9; order++) {
         rows.push([
-          today,                           // A: date
-          g.legacy_game_id,               // B: legacy_game_id
-          team.team_abbr ?? "",           // C: team_abbr
-          opponent.team_abbr ?? "",       // D: opponent_abbr
-          side === "A" ? "A" : "H",       // E: home_away
-          "projected",                    // F: lineup_status
-          "",                             // G: confirmed_time
-          order,                          // H: batting_order
-          "",                             // I: player_name (unknown — not yet sourced)
-          null,                           // J: [formula] player_id
-          "",                             // K: bats
-          "",                             // L: position
-          starterHand,                    // M: starter_hand_faced
-          "",                             // N: pinch_hit_risk
-          "",                             // O: injury_note
-          "pipeline",                     // P: source
-          "",                             // Q: operator_note
+          g.date,              // A: Date
+          g.legacy_game_id,   // B: Game_ID
+          team.team_abbr ?? "", // C: Team
+          order,              // D: Batting_Order
+          "",                 // E: Player_Name (no source yet)
+          "",                 // F: Player_ID
+          "",                 // G: Position
+          "",                 // H: vs_LHP_wRC_plus
+          "",                 // I: vs_RHP_wRC_plus
+          "",                 // J: Last_30_Days_wRC_plus
+          "ACTIVE",           // K: Injury_Status
+          "",                 // L: Salary
+          "",                 // M: FanGraphs_Projection
+          "",                 // N: Notes
         ]);
       }
     }
@@ -119,24 +118,32 @@ function buildTodayLineupsRows(games: NormalizedGame[]): unknown[][] {
   return rows;
 }
 
+// Schema: TEAM_FORM_INPUT — 8 cols A–H, 1 row per team (30 rows), data starts row 2
+// FanGraphs provides vs_RHP / vs_LHP splits; we average them into a single team row.
+// Runs scored/allowed are estimated from wRC+ (100 wRC+ ≈ 4.5 R/G league average).
 function buildTeamFormRows(splits: FangraphsResult["teams"]): unknown[][] {
-  return splits.map((s) => [
-    s.team,                   // A: team_abbr
-    s.split,                  // B: split (vs_RHP / vs_LHP)
-    null,                     // C: [formula] season_wrc_plus
-    s.l30_wrc_plus,           // D: l30_wrc_plus
-    s.l30_k_pct,              // E: l30_k_pct
-    null,                     // F: [formula] season_k_pct
-    s.l14_wrc_plus,           // G: l14_wrc_plus
-    s.l14_k_pct,              // H: l14_k_pct
-    null,                     // I: [formula] season_bb_pct
-    s.l30_bb_pct,             // J: l30_bb_pct
-    s.l14_bb_pct,             // K: l14_bb_pct
-    null,                     // L: [formula] season_iso
-    s.l30_iso,                // M: l30_iso
-    s.l14_iso,                // N: l14_iso
-    "fangraphs",              // O: source
-    new Date().toISOString().split("T")[0], // P: refresh_date
+  const date = new Date().toISOString().split("T")[0];
+  // Collapse two splits per team into one row, keyed by team abbr
+  const byTeam = new Map<string, { rsTotal: number; raTotal: number; woba: number; n: number }>();
+  for (const s of splits) {
+    const entry = byTeam.get(s.team) ?? { rsTotal: 0, raTotal: 0, woba: 0, n: 0 };
+    // Estimate runs scored per game from wRC+ and runs allowed as its mirror
+    entry.rsTotal += (s.l30_wrc_plus / 100) * 4.5;
+    entry.raTotal += 4.5; // league-average placeholder until RA source is wired up
+    entry.woba += 0.315 + (s.l30_wrc_plus - 100) * 0.001; // rough wOBA from wRC+
+    entry.n++;
+    byTeam.set(s.team, entry);
+  }
+
+  return Array.from(byTeam.entries()).map(([team, d]) => [
+    date,                                                  // A: Date
+    team,                                                  // B: Team
+    parseFloat((d.rsTotal / d.n).toFixed(2)),              // C: Last_10_Runs_Scored (est.)
+    parseFloat((d.raTotal / d.n).toFixed(2)),              // D: Last_10_Runs_Allowed (stub)
+    parseFloat((d.woba / d.n).toFixed(3)),                 // E: Last_10_wOBA (est.)
+    "MEDIUM",                                              // F: Recent_Strength_of_Schedule
+    1,                                                     // G: Bullpen_Rest_Days (stub)
+    "",                                                    // H: Notes
   ]);
 }
 
@@ -148,33 +155,24 @@ function buildBullpenRows(_date: string): unknown[][] {
   return []; // No reliever data source yet; sheet cleared and left ready for operator input
 }
 
+// Schema: RUN_ENVIRONMENT — 12 cols A–L, data starts row 2 (frozenRows: 1)
 function buildRunEnvironmentRows(games: NormalizedGame[]): unknown[][] {
   return games.map((g) => {
     const e = g.environment;
-    const wind = `${compassDirection(e.wind_direction_degrees)} ${e.wind_speed_mph ?? "?"}mph`;
-    const scheduledLocal = g.scheduled_utc_time
-      ? new Date(g.scheduled_utc_time).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })
-      : "";
-
     return [
-      g.date,                              // A: date
-      scheduledLocal,                      // B: time_local
-      g.venue.name ?? "",                  // C: park
-      g.away_team.team_abbr ?? "",         // D: away_abbr
-      g.home_team.team_abbr ?? "",         // E: home_abbr
-      "Open",                              // F: roof (default)
-      e.temperature_f ?? "",               // G: temperature_f
-      wind,                                // H: wind
-      e.humidity_pct ?? "",                // I: humidity_pct
-      e.precipitation_probability_pct ?? "", // J: rain_probability_pct
-      1.0,                                 // K: park_run_factor (stub)
-      1.0,                                 // L: park_hr_factor (stub)
-      0.330,                               // M: park_woba (stub)
-      "",                                  // N: umpire_name
-      buildWeatherTag(g),                  // O: environment_tag
-      e.data_quality === "fallback" ? "Fallback weather data" : "Live Open-Meteo", // P: weather_note
-      "projected",                         // Q: lineup_status
-      // R: operator truth_note — DO NOT WRITE (preserve)
+      g.date,                                                              // A: Date
+      g.legacy_game_id,                                                    // B: Game_ID
+      g.venue.name ?? "",                                                  // C: Stadium
+      0,                                                                   // D: Elevation_Feet (stub — add per-venue lookup later)
+      e.temperature_f ?? "",                                               // E: Temperature_F
+      e.wind_speed_mph ?? "",                                              // F: Wind_MPH
+      compassDirection(e.wind_direction_degrees),                          // G: Wind_Direction
+      e.precipitation_probability_pct !== null
+        ? e.precipitation_probability_pct / 100 : "",                     // H: Precipitation_Pct (0–1)
+      e.humidity_pct !== null ? e.humidity_pct / 100 : "",                // I: Humidity_Pct (0–1)
+      1.0,                                                                 // J: Home_Run_Factor (stub)
+      1.0,                                                                 // K: Run_Multiplier (stub)
+      "",                                                                  // L: Notes
     ];
   });
 }
@@ -229,12 +227,12 @@ export async function writeGoogleSheetsFeed(
   const errors: Module08Result["errors"] = [];
   const failed: string[] = [];
 
-  // 1. DAILY_MATCHUPS
+  // 1. DAILY_MATCHUPS — 25 cols A–Y, starts row 2
   const dmRows = buildDailyMatchupsRows(normalized.games);
   const dmResult = await safeWrite(
     "DAILY_MATCHUPS",
-    "DAILY_MATCHUPS!A3:AB32",
-    `DAILY_MATCHUPS!A3:AB${2 + Math.max(dmRows.length, 1)}`,
+    "DAILY_MATCHUPS!A2:Y32",
+    `DAILY_MATCHUPS!A2:Y${1 + Math.max(dmRows.length, 1)}`,
     dmRows,
     workbookId,
   );
@@ -243,12 +241,12 @@ export async function writeGoogleSheetsFeed(
     errors.push({ module: "08_daily_matchups", error: dmResult.error ?? "write failed", timestamp: new Date().toISOString() });
   }
 
-  // 2. TODAY_LINEUPS
+  // 2. TODAY_LINEUPS — 14 cols A–N, starts row 2
   const tlRows = buildTodayLineupsRows(normalized.games);
   const tlResult = await safeWrite(
     "TODAY_LINEUPS",
-    "TODAY_LINEUPS!A3:Q602",
-    `TODAY_LINEUPS!A3:Q${2 + Math.max(tlRows.length, 1)}`,
+    "TODAY_LINEUPS!A2:N602",
+    `TODAY_LINEUPS!A2:N${1 + Math.max(tlRows.length, 1)}`,
     tlRows,
     workbookId,
   );
@@ -257,12 +255,12 @@ export async function writeGoogleSheetsFeed(
     errors.push({ module: "08_today_lineups", error: tlResult.error ?? "write failed", timestamp: new Date().toISOString() });
   }
 
-  // 3. TEAM_FORM_INPUT (always 60 rows — 30 teams × 2 splits)
+  // 3. TEAM_FORM_INPUT — 8 cols A–H, 30 rows (1 per team), starts row 2
   const tfRows = buildTeamFormRows(splits.teams);
   const tfResult = await safeWrite(
     "TEAM_FORM_INPUT",
-    "TEAM_FORM_INPUT!A3:P62",
-    "TEAM_FORM_INPUT!A3:P62",
+    "TEAM_FORM_INPUT!A2:H62",
+    `TEAM_FORM_INPUT!A2:H${1 + Math.max(tfRows.length, 1)}`,
     tfRows,
     workbookId,
   );
@@ -288,12 +286,12 @@ export async function writeGoogleSheetsFeed(
     buResult = { status: "failure", rows_written: 0, range: "BULLPEN_USAGE_DAILY!A2:I300", error: message };
   }
 
-  // 5. RUN_ENVIRONMENT
+  // 5. RUN_ENVIRONMENT — 12 cols A–L, starts row 2
   const reRows = buildRunEnvironmentRows(normalized.games);
   const reResult = await safeWrite(
     "RUN_ENVIRONMENT",
-    "RUN_ENVIRONMENT!A2:Q31",
-    `RUN_ENVIRONMENT!A2:Q${1 + Math.max(reRows.length, 1)}`,
+    "RUN_ENVIRONMENT!A2:L32",
+    `RUN_ENVIRONMENT!A2:L${1 + Math.max(reRows.length, 1)}`,
     reRows,
     workbookId,
   );
