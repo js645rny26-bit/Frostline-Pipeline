@@ -169,6 +169,163 @@ export interface PipelineSummary {
   doubleheaders: number;
 }
 
+export interface PipelineError {
+  module: string;
+  error: string;
+  timestamp: string;
+}
+
+export interface SheetWriteStatus {
+  status: string;
+  rows_written: number;
+  range: string;
+  /** @nullable */
+  error?: string | null;
+}
+
+export interface SheetsWritten {
+  daily_matchups: SheetWriteStatus;
+  today_lineups: SheetWriteStatus;
+  team_form_input: SheetWriteStatus;
+  bullpen_usage_daily: SheetWriteStatus;
+  run_environment: SheetWriteStatus;
+}
+
+export interface Module08Result {
+  status: string;
+  write_timestamp_utc: string;
+  workbook_id: string;
+  sheets_written: SheetsWritten;
+  errors: PipelineError[];
+}
+
+export interface RecalcCheck {
+  status: string;
+  expected_rows: number;
+  actual_rows: number;
+  formula_errors: string[];
+}
+
+export interface ConsistencyCheck {
+  status: string;
+  read_1_timestamp: string;
+  read_2_timestamp: string;
+  diff_seconds: number;
+}
+
+export interface RecalcChecks {
+  game_integration: RecalcCheck;
+  game_summary: RecalcCheck;
+  consistency_check: ConsistencyCheck;
+}
+
+export interface Module09Result {
+  status: string;
+  verification_timestamp_utc: string;
+  recalculation_time_ms: number;
+  checks: RecalcChecks;
+}
+
+export interface GamesSeeded {
+  new_games: number;
+  updated_games: number;
+  total_games: number;
+}
+
+export interface SeedResult {
+  legacy_game_id: string;
+  action: string;
+  model_fields_refreshed: string[];
+  operator_fields_preserved: string[];
+}
+
+export interface Module10Result {
+  status: string;
+  seeding_timestamp_utc: string;
+  games_seeded: GamesSeeded;
+  rows_written: number;
+  seed_results: SeedResult[];
+  errors: PipelineError[];
+}
+
+export interface SlateBoardEntry {
+  legacy_game_id: string;
+  matchup: string;
+  final_decision: string;
+  truth_score: number;
+  vehicle_score: number;
+  best_vehicle_decision: string;
+  /** @nullable */
+  not_core_reason?: string | null;
+  confidence: string;
+}
+
+export interface ActiveBoardEntry {
+  date: string;
+  game_id: string;
+  matchup: string;
+  decision: string;
+  /** @nullable */
+  side_lean?: string | null;
+  /** @nullable */
+  total_lean?: string | null;
+  away_confidence: string;
+  home_confidence: string;
+}
+
+export interface Module11Result {
+  status: string;
+  extraction_timestamp_utc: string;
+  slate_board: SlateBoardEntry[];
+  active_board_snapshot: ActiveBoardEntry[];
+  core_count: number;
+  not_core_count: number;
+  /** @nullable */
+  error?: string | null;
+}
+
+export interface ArchivedFile {
+  name: string;
+  size: number;
+  /** @nullable */
+  drive_id?: string | null;
+}
+
+export interface FilesArchived {
+  normalized_slate?: ArchivedFile;
+  validation_report?: ArchivedFile;
+  module_08_results?: ArchivedFile;
+  module_09_results?: ArchivedFile;
+  module_10_results?: ArchivedFile;
+  slate_board_extraction?: ArchivedFile;
+  runlog?: ArchivedFile;
+  readme?: ArchivedFile;
+}
+
+export interface Module12Result {
+  status: string;
+  archival_timestamp_utc: string;
+  bundle_name: string;
+  bundle_folder_id: string;
+  files_archived: FilesArchived;
+  errors: PipelineError[];
+}
+
+export interface PublishResult {
+  run_timestamp: string;
+  date: string;
+  pipeline_status: string;
+  total_games: number;
+  validation_status: string;
+  module_08: Module08Result;
+  module_09: Module09Result;
+  module_10: Module10Result;
+  module_11: Module11Result;
+  module_12: Module12Result;
+  workbook_url: string;
+  errors: PipelineError[];
+}
+
 export type GetPipelineSlateParams = {
 /**
  * Date in YYYY-MM-DD format (defaults to today)
@@ -184,6 +341,13 @@ date?: string;
 };
 
 export type GetPipelineScheduleParams = {
+/**
+ * Date in YYYY-MM-DD format (defaults to today)
+ */
+date?: string;
+};
+
+export type PublishPipelineParams = {
 /**
  * Date in YYYY-MM-DD format (defaults to today)
  */

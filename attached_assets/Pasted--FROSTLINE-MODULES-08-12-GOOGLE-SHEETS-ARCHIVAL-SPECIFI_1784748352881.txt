@@ -1,0 +1,1168 @@
+# FROSTLINE MODULES 08–12: GOOGLE SHEETS & ARCHIVAL SPECIFICATIONS
+
+---
+
+# MODULE 08: GOOGLE SHEETS FEED WRITER
+
+**Purpose:** Write normalized data from Modules 01–07 to 5 input sheets in canonical Google Sheets workbook.
+
+**Workbook ID:** `1FY2FgpFbr2pSmFF-0Gowh-HXW3z5QOnj2ujpcTQQRB4`
+
+---
+
+## 08.1 INPUTS
+
+```typescript
+interface Module08Input {
+  normalized_slate: NormalizedSlate;  // From Module 06
+  sheets_client: GoogleSheetsClient;  // Authenticated
+  workbook_id: string;
+  run_timestamp: string;              // ISO 8601
+}
+```
+
+## 08.2 OUTPUTS
+
+```typescript
+interface Module08Output {
+  status: "success" | "failure" | "partial_failure";
+  write_timestamp_utc: string;
+  sheets_written: {
+    daily_matchups: {
+      status: "success" | "failure";
+      rows_written: number;
+      range: string;  // e.g., "DAILY_MATCHUPS!A3:AB32"
+    };
+    today_lineups: {
+      status: "success" | "failure";
+      rows_written: number;
+      range: string;
+    };
+    team_form_input: {
+      status: "success" | "failure";
+      rows_written: number;
+      range: string;
+    };
+    bullpen_usage_daily: {
+      status: "success" | "failure";
+      rows_written: number;
+      range: string;
+    };
+    run_environment: {
+      status: "success" | "failure";
+      rows_written: number;
+      range: string;
+    };
+  };
+  errors: ErrorLog[];
+}
+```
+
+## 08.3 WRITE CONTRACTS (BY SHEET)
+
+### DAILY_MATCHUPS
+
+**Writable ranges:**
+- A3:E32 (away game identity: Date, Game_ID, Away_Team, Home_Team, Away_Starter_Name)
+- G3:L32 (away workload: Hand, Role, Role_Confirmed, Expected_Pitches, Expected_IP, Home_Starter_Name)
+- N3:AB32 (home context: Hand, Role, Role_Confirmed, Expected_Pitches, Expected_IP, Park, Weather_Tag, etc.)
+
+**Protected (do NOT write):**
+- F3:F32 (formula: Away_Starter_ID lookup)
+- M3:M32 (formula: Home_Starter_ID lookup)
+
+**Clear before write:**
+- A3:AB32 (full clear, all writable + protected together; protection prevents overwrite)
+
+**Row count:** Max 30 games (rows 3–32)
+
+**Column mapping:**
+```typescript
+const DAILY_MATCHUPS_WRITE_MAP = {
+  A: "date",                    // YYYY-MM-DD
+  B: "legacy_game_id",          // YYYYMMDD_AWAY_HOME
+  C: "away_team_abbr",
+  D: "home_team_abbr",
+  E: "away_pitcher_name",
+  // F: [formula] away_pitcher_id
+  G: "away_pitcher_hand",
+  H: "away_pitcher_role",
+  I: "away_role_confirmed",
+  J: "away_expected_pitches",
+  K: "away_expected_innings",
+  L: "home_pitcher_name",
+  // M: [formula] home_pitcher_id
+  N: "home_pitcher_hand",
+  O: "home_pitcher_role",
+  P: "home_role_confirmed",
+  Q: "home_expected_pitches",
+  R: "home_expected_innings",
+  S: "park",
+  T: "weather_tag",
+  U: "umpire_tag",
+  V: "context_tag",
+  W: "context_multiplier",
+  X: "weather_ump_clear",
+  Y: "market_total",
+  Z: "game_status",
+  AA: "source",
+  AB: "data_status"
+};
+```
+
+### TODAY_LINEUPS
+
+**Writable ranges:**
+- A3:I602 (player identity: Date, Game_ID, Team, Opponent, Home_Away, Lineup_Status, Confirmed_Time, Batting_Order, Player_Name)
+- K3:Q602 (player context: Bats, Position, Starter_Hand_Faced, Pinch_Hit_Risk, Injury_Note, Source, Operator_Note)
+
+**Protected (do NOT write):**
+- J3:J602 (formula: Player_ID lookup)
+- R3:T602 (helpers: Player_Key, Data_Status, Lineup_Key)
+
+**Clear before write:** A3:Q602
+
+**Row count:** Typically ~270 rows (9 batters × 2 teams × 15 games), max 600
+
+**Column mapping:**
+```typescript
+const TODAY_LINEUPS_WRITE_MAP = {
+  A: "date",
+  B: "legacy_game_id",
+  C: "team_abbr",
+  D: "opponent_abbr",
+  E: "home_away",  // "H" or "A"
+  F: "lineup_status",  // "projected" or "confirmed"
+  G: "confirmed_time",
+  H: "batting_order",
+  I: "player_name",
+  // J: [formula] player_id
+  K: "bats",  // "L", "R", or "S"
+  L: "position",
+  M: "starter_hand_faced",
+  N: "pinch_hit_risk",
+  O: "injury_note",
+  P: "source",
+  Q: "operator_note"
+};
+```
+
+### TEAM_FORM_INPUT
+
+**Writable ranges:**
+- A3:B62 (team identity: Team, Split)
+- D:E (L30 wRC+/K%)
+- G:H (L14 wRC+/K%)
+- J:K (L30 BB%, L14 BB%)
+- M:P (L30 ISO, L14 ISO, Source, Refresh_Date)
+
+**Protected (do NOT write):**
+- C, F, I, L (formulas pulling season values from TEAM_OFFENSE_SPLITS)
+- Q, R (helpers: Form_Key, Data_Status)
+
+**Clear before write:** A3:P62 (only if FanGraphs refreshed; otherwise preserve)
+
+**Row count:** Exactly 60 rows
+- Rows 3–32: 30 teams vs RHP
+- Rows 33–62: 30 teams vs LHP
+
+**Column mapping:**
+```typescript
+const TEAM_FORM_INPUT_WRITE_MAP = {
+  A: "team_abbr",
+  B: "split",  // "vs_RHP" or "vs_LHP"
+  // C: [formula] season_wrc_plus
+  D: "l30_wrc_plus",
+  E: "l30_k_pct",
+  // F: [formula] season_k_pct
+  G: "l14_wrc_plus",
+  H: "l14_k_pct",
+  // I: [formula] season_bb_pct
+  J: "l30_bb_pct",
+  K: "l14_bb_pct",
+  // L: [formula] season_iso
+  M: "l30_iso",
+  N: "l14_iso",
+  O: "source",
+  P: "refresh_date"
+};
+```
+
+### BULLPEN_USAGE_DAILY
+
+**Writable ranges:**
+- A2:L[max] (player-level workload: Team, Team_Abbr, Player, Last_1_Days through Last_6_IP, Workload_Flag, Availability_Note)
+- D1:I1 (date headers: regenerate each run for 6-day window)
+- O2:U31 (team-level state: Team_Abbr, Bullpen_Flag, Max_Last_3, Max_Last_6, Taxed_Arms, Watch_Arms, Top_Load_Note)
+
+**Protected:** M:N (spacer columns; never touch)
+
+**Clear before write:** 
+- A2:L[max_rows] (all player-level data)
+- D1:I1 (date headers)
+- O2:U31 (all team-level data)
+
+**Date header regeneration (D1:I1):**
+```typescript
+// For run on 2026-07-22, generate:
+const dates = [
+  "2026-07-17",  // 6 days ago
+  "2026-07-18",
+  "2026-07-19",
+  "2026-07-20",
+  "2026-07-21",
+  "2026-07-22"   // today
+];
+// Write to D1, E1, F1, G1, H1, I1
+```
+
+**Row count:** 
+- Player: typically 200–300 rows (30 teams × variable reliever count)
+- Team: exactly 30 rows (O2:O31)
+
+**Column mapping (player):**
+```typescript
+const BULLPEN_USAGE_DAILY_PLAYER_MAP = {
+  A: "team_abbr",
+  B: "team_abbr_dup",
+  C: "player_name",
+  D_to_I: "daily_pitch_counts",  // [6 days of data]
+  J: "last_6_pitches",
+  K: "workload_flag",
+  L: "availability_note"
+};
+
+const BULLPEN_USAGE_DAILY_TEAM_MAP = {
+  O: "team_abbr",
+  P: "bullpen_flag",
+  Q: "max_last_3_pitches",
+  R: "max_last_6_pitches",
+  S: "taxed_arms_count",
+  T: "watch_arms_count",
+  U: "top_load_note"
+};
+```
+
+### RUN_ENVIRONMENT
+
+**Writable ranges:**
+- A2:Q31 (weather/umpire/park: Date, Time, Park, Away, Home, Roof, Temp, Wind, Humidity, Rain%, ParkRunFactor, ParkHRFactor, ParkwOBA, Umpire, EnvironmentTag, WeatherNote, LineupStatus)
+
+**Preserve (do NOT clear):**
+- R2:R31 (operator Truth_Note)
+
+**Clear before write:** A2:Q31 (preserve R column)
+
+**Row count:** Max 30 games (rows 2–31)
+
+**Column mapping:**
+```typescript
+const RUN_ENVIRONMENT_WRITE_MAP = {
+  A: "date",
+  B: "time_local",
+  C: "park",
+  D: "away_abbr",
+  E: "home_abbr",
+  F: "roof",  // "Open", "Closed", etc.
+  G: "temperature_f",
+  H: "wind",  // "ESE 8 mph"
+  I: "humidity_pct",
+  J: "rain_probability_pct",
+  K: "park_run_factor",
+  L: "park_hr_factor",
+  M: "park_woba",
+  N: "umpire_name",
+  O: "environment_tag",
+  P: "weather_note",
+  Q: "lineup_status"
+  // R: [operator] truth_note - do not write
+};
+```
+
+---
+
+## 08.4 IMPLEMENTATION LOGIC
+
+```typescript
+async function writeGoogleSheetsFeed(
+  input: Module08Input
+): Promise<Module08Output> {
+  const results = {
+    status: "success" as const,
+    write_timestamp_utc: new Date().toISOString(),
+    sheets_written: {} as any,
+    errors: [] as ErrorLog[]
+  };
+
+  try {
+    // 1. Write DAILY_MATCHUPS
+    const dailyMatchupsRows = prepareDailyMatchupRows(input.normalized_slate);
+    await clearRange(input.sheets_client, input.workbook_id, "DAILY_MATCHUPS!A3:AB32");
+    const dmResult = await writeRows(
+      input.sheets_client,
+      input.workbook_id,
+      "DAILY_MATCHUPS!A3:AB32",
+      dailyMatchupsRows
+    );
+    results.sheets_written.daily_matchups = dmResult;
+
+    // 2. Write TODAY_LINEUPS
+    const todayLineupsRows = prepareTodayLineupsRows(input.normalized_slate);
+    await clearRange(input.sheets_client, input.workbook_id, "TODAY_LINEUPS!A3:Q602");
+    const tlResult = await writeRows(
+      input.sheets_client,
+      input.workbook_id,
+      "TODAY_LINEUPS!A3:Q602",
+      todayLineupsRows
+    );
+    results.sheets_written.today_lineups = tlResult;
+
+    // 3. Write TEAM_FORM_INPUT (conditional on FanGraphs refresh)
+    if (shouldRefreshTeamForm(input.normalized_slate)) {
+      const teamFormRows = prepareTeamFormRows(input.normalized_slate);
+      await clearRange(input.sheets_client, input.workbook_id, "TEAM_FORM_INPUT!A3:P62");
+      const tfResult = await writeRows(
+        input.sheets_client,
+        input.workbook_id,
+        "TEAM_FORM_INPUT!A3:P62",
+        teamFormRows
+      );
+      results.sheets_written.team_form_input = tfResult;
+    }
+
+    // 4. Write BULLPEN_USAGE_DAILY
+    const bullpenRows = prepareBullpenRows(input.normalized_slate);
+    await clearRange(input.sheets_client, input.workbook_id, "BULLPEN_USAGE_DAILY!A2:U31");
+    // Also regenerate date headers
+    await writeRows(
+      input.sheets_client,
+      input.workbook_id,
+      "BULLPEN_USAGE_DAILY!D1:I1",
+      [generateBullpenDateHeaders(input.normalized_slate)]
+    );
+    const buResult = await writeRows(
+      input.sheets_client,
+      input.workbook_id,
+      "BULLPEN_USAGE_DAILY!A2:U31",
+      bullpenRows
+    );
+    results.sheets_written.bullpen_usage_daily = buResult;
+
+    // 5. Write RUN_ENVIRONMENT (preserve operator notes in column R)
+    const runEnvRows = prepareRunEnvironmentRows(input.normalized_slate);
+    await clearRange(input.sheets_client, input.workbook_id, "RUN_ENVIRONMENT!A2:Q31");
+    const reResult = await writeRows(
+      input.sheets_client,
+      input.workbook_id,
+      "RUN_ENVIRONMENT!A2:Q31",
+      runEnvRows
+    );
+    results.sheets_written.run_environment = reResult;
+
+    return results;
+
+  } catch (error) {
+    results.status = "failure";
+    results.errors.push({
+      module: "08_google_sheets_feed",
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+    return results;
+  }
+}
+
+// Helper: prepare row data from normalized slate
+function prepareDailyMatchupRows(slate: NormalizedSlate): any[][] {
+  return slate.games.map(game => [
+    game.date,
+    game.legacy_game_id,
+    game.away_team.team_abbr,
+    game.home_team.team_abbr,
+    game.away_pitcher.name,
+    null,  // F: formula
+    game.away_pitcher.hand,
+    game.away_pitcher.role,
+    false, // role_confirmed
+    game.away_pitcher.expected_pitches,
+    game.away_pitcher.expected_innings,
+    game.home_pitcher.name,
+    null,  // M: formula
+    game.home_pitcher.hand,
+    game.home_pitcher.role,
+    false, // role_confirmed
+    game.home_pitcher.expected_pitches,
+    game.home_pitcher.expected_innings,
+    game.venue.name,
+    "", // weather_tag
+    "", // umpire_tag
+    "", // context_tag
+    1, // context_multiplier
+    false, // weather_ump_clear
+    null, // market_total
+    game.game_status.codedGameState,
+    "statsapi",
+    "valid"
+  ]);
+}
+```
+
+---
+
+## 08.5 ERROR HANDLING & FALLBACKS
+
+| Scenario | Action |
+|---|---|
+| **Single sheet write fails** | Log ERROR for that sheet; continue with others (PARTIAL_FAILURE status) |
+| **Protected column overwrite attempted** | Catch by Google Sheets API; log ERROR; do not write that row |
+| **Row count mismatch** | Truncate or pad to expected row count; log WARNING |
+| **Timeout on write** | Retry 3 times; if still fails, mark sheet as FAILURE |
+| **All writes fail** | Return status="failure"; do not proceed to Module 09 |
+
+---
+
+## 08.6 VALIDATION
+
+**CRITICAL checks (in this module):**
+- [ ] No protected columns (F, M in DAILY_MATCHUPS) are written to
+- [ ] Row counts match game count (except TEAM_FORM_INPUT which is always 60)
+- [ ] All nullable fields properly handled (null vs empty string)
+- [ ] Date formats consistent (YYYY-MM-DD)
+
+**WARNING checks:**
+- [ ] Any sheet write took >10 seconds (slow API)
+- [ ] Bullpen date headers not regenerated properly
+
+---
+
+## 08.7 TEST CRITERIA
+
+**Test 1: Happy path (all 5 sheets)**
+```
+Input: 15 normalized games, no stale data
+Expected:
+  - DAILY_MATCHUPS: 15 rows written
+  - TODAY_LINEUPS: ~135 rows written (9 batters × 15 games)
+  - TEAM_FORM_INPUT: 60 rows written
+  - BULLPEN_USAGE_DAILY: ~200–300 rows + team summary
+  - RUN_ENVIRONMENT: 15 rows written
+  - Status: "success"
+```
+
+**Test 2: Partial failure (one sheet fails)**
+```
+Input: Write fails on TEAM_FORM_INPUT
+Expected:
+  - Other 4 sheets written successfully
+  - TEAM_FORM_INPUT status: "failure"
+  - Overall status: "partial_failure"
+```
+
+---
+
+# MODULE 09: RECALCULATION VERIFICATION
+
+**Purpose:** Poll Google Sheets after writes. Verify GAME_INTEGRATION and GAME_SUMMARY recalculated without errors.
+
+---
+
+## 09.1 INPUTS
+
+```typescript
+interface Module09Input {
+  sheets_client: GoogleSheetsClient;
+  workbook_id: string;
+  expected_game_count: number;  // From Module 01
+  max_retries: number;  // Default 5
+  retry_delay_ms: number;  // Default 2000
+}
+```
+
+## 09.2 OUTPUTS
+
+```typescript
+interface Module09Output {
+  status: "verified" | "timeout" | "error" | "incomplete";
+  verification_timestamp_utc: string;
+  checks: {
+    game_integration: {
+      status: "verified" | "error" | "timeout";
+      expected_rows: number;
+      actual_rows: number;
+      formula_errors: string[];
+    };
+    game_summary: {
+      status: "verified" | "error" | "timeout";
+      expected_rows: number;
+      actual_rows: number;
+      formula_errors: string[];
+    };
+    consistency_check: {
+      status: "consistent" | "inconsistent";
+      read_1_timestamp: string;
+      read_2_timestamp: string;
+      diff_seconds: number;
+    };
+  };
+  recalculation_time_ms: number;
+}
+```
+
+## 09.3 VERIFICATION LOGIC
+
+```typescript
+async function verifyRecalculation(
+  input: Module09Input
+): Promise<Module09Output> {
+  const startTime = Date.now();
+  const output: Module09Output = {
+    status: "verified",
+    verification_timestamp_utc: new Date().toISOString(),
+    checks: {
+      game_integration: { status: "verified", expected_rows: 0, actual_rows: 0, formula_errors: [] },
+      game_summary: { status: "verified", expected_rows: 0, actual_rows: 0, formula_errors: [] },
+      consistency_check: { status: "consistent", read_1_timestamp: "", read_2_timestamp: "", diff_seconds: 0 }
+    },
+    recalculation_time_ms: 0
+  };
+
+  // Expected: 2 rows per game (away + home)
+  const expectedIntegrationRows = input.expected_game_count * 2;
+  const expectedSummaryRows = input.expected_game_count;
+
+  for (let attempt = 0; attempt < input.max_retries; attempt++) {
+    try {
+      // Read GAME_INTEGRATION column A (game IDs)
+      const integrationRange = await input.sheets_client.getRange(
+        input.workbook_id,
+        "GAME_INTEGRATION!A:A"
+      );
+      const integrationRows = integrationRange.values?.length || 0;
+
+      // Check for formula errors in key columns
+      const integrationErrors = checkForFormulaErrors(integrationRange);
+
+      // Read GAME_SUMMARY column A
+      const summaryRange = await input.sheets_client.getRange(
+        input.workbook_id,
+        "GAME_SUMMARY!A:A"
+      );
+      const summaryRows = summaryRange.values?.length || 0;
+      const summaryErrors = checkForFormulaErrors(summaryRange);
+
+      output.checks.game_integration = {
+        status: integrationErrors.length > 0 ? "error" : "verified",
+        expected_rows: expectedIntegrationRows,
+        actual_rows: integrationRows,
+        formula_errors: integrationErrors
+      };
+
+      output.checks.game_summary = {
+        status: summaryErrors.length > 0 ? "error" : "verified",
+        expected_rows: expectedSummaryRows,
+        actual_rows: summaryRows,
+        formula_errors: summaryErrors
+      };
+
+      // If row counts match and no errors, proceed to consistency check
+      if (
+        integrationRows >= expectedIntegrationRows &&
+        summaryRows >= expectedSummaryRows &&
+        integrationErrors.length === 0 &&
+        summaryErrors.length === 0
+      ) {
+        // Consistency check: read twice, verify no change
+        const read1 = await input.sheets_client.getRange(
+          input.workbook_id,
+          "GAME_SUMMARY!B:C"  // Sample columns
+        );
+        const read1Time = new Date().toISOString();
+
+        await sleep(1000);
+
+        const read2 = await input.sheets_client.getRange(
+          input.workbook_id,
+          "GAME_SUMMARY!B:C"
+        );
+        const read2Time = new Date().toISOString();
+
+        const isConsistent = JSON.stringify(read1) === JSON.stringify(read2);
+
+        output.checks.consistency_check = {
+          status: isConsistent ? "consistent" : "inconsistent",
+          read_1_timestamp: read1Time,
+          read_2_timestamp: read2Time,
+          diff_seconds: 1
+        };
+
+        if (isConsistent) {
+          output.status = "verified";
+          output.recalculation_time_ms = Date.now() - startTime;
+          return output;
+        }
+      }
+
+      // If row counts don't match, retry
+      if (
+        integrationRows < expectedIntegrationRows ||
+        summaryRows < expectedSummaryRows
+      ) {
+        if (attempt < input.max_retries - 1) {
+          await sleep(input.retry_delay_ms);
+          continue;
+        } else {
+          output.status = "incomplete";
+          output.recalculation_time_ms = Date.now() - startTime;
+          return output;
+        }
+      }
+
+    } catch (error) {
+      if (attempt < input.max_retries - 1) {
+        await sleep(input.retry_delay_ms);
+        continue;
+      } else {
+        output.status = "error";
+        output.recalculation_time_ms = Date.now() - startTime;
+        return output;
+      }
+    }
+  }
+
+  output.status = "timeout";
+  output.recalculation_time_ms = Date.now() - startTime;
+  return output;
+}
+
+function checkForFormulaErrors(range: any): string[] {
+  const errors: string[] = [];
+  if (!range.values) return errors;
+
+  range.values.forEach((row: any[], idx: number) => {
+    row.forEach((cell: any, col: number) => {
+      if (typeof cell === "string") {
+        if (
+          cell.startsWith("#REF!") ||
+          cell.startsWith("#VALUE!") ||
+          cell.startsWith("#NAME?") ||
+          cell.startsWith("#DIV/0!") ||
+          cell.startsWith("#N/A")
+        ) {
+          errors.push(`${String.fromCharCode(65 + col)}${idx + 1}: ${cell}`);
+        }
+      }
+    });
+  });
+
+  return errors;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+```
+
+## 09.4 ERROR HANDLING
+
+| Scenario | Action |
+|---|---|
+| **Timeout (retries exhausted)** | Return status="timeout"; do not proceed to Module 10 |
+| **Formula errors detected** | Return status="error"; include error locations |
+| **Row count mismatch** | Retry; if still mismatched after retries, return status="incomplete" |
+| **Consistency check fails** | Return status="inconsistent"; something is still calculating |
+
+---
+
+## 09.5 TEST CRITERIA
+
+**Test 1: Successful recalculation**
+```
+Input: 15 games written, expected recalculation
+Expected:
+  - GAME_INTEGRATION: 30 rows (2 per game), no errors
+  - GAME_SUMMARY: 15 rows, no errors
+  - Consistency: passes
+  - Status: "verified"
+```
+
+**Test 2: Timeout on recalculation**
+```
+Input: Sheets API slow/unresponsive
+Expected:
+  - Retries 5 times with 2s delay between each
+  - Total timeout ~10 seconds
+  - Status: "timeout"
+  - Module 10 does NOT run
+```
+
+---
+
+# MODULE 10: SLATE_INPUT SEEDING
+
+**Purpose:** Seed SLATE_INPUT with model-derived data. Preserve operator fields for existing games. Create rows for new games.
+
+---
+
+## 10.1 INPUTS
+
+```typescript
+interface Module10Input {
+  normalized_slate: NormalizedSlate;  // From Module 06
+  game_integration_data: any[];  // From Module 09 verification
+  game_summary_data: any[];      // From Module 09 verification
+  current_slate_input_rows: any[];  // Read from Google Sheets before seeding
+  sheets_client: GoogleSheetsClient;
+  workbook_id: string;
+}
+```
+
+## 10.2 OUTPUTS
+
+```typescript
+interface Module10Output {
+  status: "success" | "failure";
+  seeding_timestamp_utc: string;
+  games_seeded: {
+    new_games: number;
+    updated_games: number;
+    total_games: number;
+  };
+  rows_written: number;
+  seed_results: Array<{
+    legacy_game_id: string;
+    action: "created" | "updated";
+    model_fields_refreshed: string[];
+    operator_fields_preserved: string[];
+  }>;
+  errors: ErrorLog[];
+}
+```
+
+## 10.3 SEEDING LOGIC (TWO-STAGE)
+
+```typescript
+async function seedSlateInput(
+  input: Module10Input
+): Promise<Module10Output> {
+  const output: Module10Output = {
+    status: "success",
+    seeding_timestamp_utc: new Date().toISOString(),
+    games_seeded: { new_games: 0, updated_games: 0, total_games: 0 },
+    rows_written: 0,
+    seed_results: [],
+    errors: []
+  };
+
+  try {
+    // Index existing SLATE_INPUT rows by Game_ID
+    const existingByGameId = new Map<string, any>();
+    for (const row of input.current_slate_input_rows) {
+      const gameId = row["Game_ID"] || row[0];  // Column A
+      if (gameId) {
+        existingByGameId.set(gameId, row);
+      }
+    }
+
+    const seededRows: any[] = [];
+
+    for (const game of input.normalized_slate.games) {
+      const gameId = game.legacy_game_id;
+      let seededRow: any;
+
+      if (existingByGameId.has(gameId)) {
+        // EXISTING GAME: Update model fields, preserve operator fields
+        const existingRow = existingByGameId.get(gameId);
+        seededRow = { ...existingRow };  // Start with existing row
+
+        // MODEL FIELDS: Extract from GAME_INTEGRATION and GAME_SUMMARY
+        const modelData = extractModelData(
+          gameId,
+          input.game_integration_data,
+          input.game_summary_data
+        );
+
+        // Update model fields (example fields)
+        seededRow["Truth_Family"] = modelData.truth_family;
+        seededRow["Event_Score"] = modelData.event_score;
+        seededRow["Run_Conversion"] = modelData.run_conversion;
+        seededRow["Early_Conversion"] = modelData.early_conversion;
+        seededRow["Contact_Quality"] = modelData.contact_quality;
+        seededRow["Truth_Score"] = modelData.truth_score;
+        seededRow["Vehicle_Score"] = modelData.vehicle_score;
+        seededRow["Confirmation_Gate"] = modelData.confirmation_gate;
+        seededRow["Execution_Status"] = modelData.execution_status;
+
+        // OPERATOR FIELDS: DO NOT OVERWRITE
+        // seededRow["Candidate_Vehicle"] stays as-is
+        // seededRow["Line"] stays as-is
+        // seededRow["Odds"] stays as-is
+        // seededRow["Notes"] stays as-is
+        // seededRow["Owner"] stays as-is
+        // etc.
+
+        output.games_seeded.updated_games++;
+
+        output.seed_results.push({
+          legacy_game_id: gameId,
+          action: "updated",
+          model_fields_refreshed: [
+            "Truth_Family",
+            "Event_Score",
+            "Run_Conversion",
+            "Truth_Score",
+            "Vehicle_Score"
+          ],
+          operator_fields_preserved: [
+            "Candidate_Vehicle",
+            "Line",
+            "Odds",
+            "Notes",
+            "Owner"
+          ]
+        });
+
+      } else {
+        // NEW GAME: Seed with model data + operator defaults
+        seededRow = {
+          "Game_ID": gameId,
+          "Date": game.date,
+          "Matchup": `${game.away_team.team_abbr} @ ${game.home_team.team_abbr}`,
+          "Target": "Game/Side",
+          "Opposing_Starter": game.home_pitcher.name,
+          // Model fields
+          ...extractModelData(gameId, input.game_integration_data, input.game_summary_data),
+          // Operator defaults
+          "Candidate_Vehicle": "TBD",
+          "Line": null,
+          "Odds": null,
+          "Market_Available": false,
+          "Kill_Flag": false,
+          "Notes": "Seeded by pipeline; awaiting vehicle selection and market data",
+          "Owner": "Pending",
+          "Manual_Kill_Override": false,
+          "Model_Freeze_Reason": null
+        };
+
+        output.games_seeded.new_games++;
+
+        output.seed_results.push({
+          legacy_game_id: gameId,
+          action: "created",
+          model_fields_refreshed: Object.keys(extractModelData(gameId, input.game_integration_data, input.game_summary_data)),
+          operator_fields_preserved: [
+            "Candidate_Vehicle (default: TBD)",
+            "Line (default: null)",
+            "Owner (default: Pending)"
+          ]
+        });
+      }
+
+      seededRows.push(seededRow);
+    }
+
+    // Write seeded rows back to SLATE_INPUT
+    // Match by Game_ID for existing, append for new
+    const writeResult = await writeSeedSlateInput(
+      input.sheets_client,
+      input.workbook_id,
+      seededRows
+    );
+
+    output.rows_written = seededRows.length;
+    output.games_seeded.total_games = seededRows.length;
+
+    if (!writeResult.success) {
+      output.status = "failure";
+      output.errors.push({
+        module: "10_slate_input_seeding",
+        error: writeResult.error,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return output;
+
+  } catch (error) {
+    output.status = "failure";
+    output.errors.push({
+      module: "10_slate_input_seeding",
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+    return output;
+  }
+}
+
+function extractModelData(gameId: string, integrationData: any[], summaryData: any[]): any {
+  // Look up game in GAME_INTEGRATION and GAME_SUMMARY
+  // Extract: truth_family, event_score, conversions, contact_quality, scores, etc.
+  
+  // This is where Module 08 writes and Module 09 verifies
+  // For now, stub out the extraction
+  
+  return {
+    truth_family: "TBD",
+    event_score: 0,
+    run_conversion: 0,
+    early_conversion: 0,
+    contact_quality: "unknown",
+    truth_score: 0,
+    vehicle_score: 0,
+    confirmation_gate: false,
+    execution_status: "pending"
+  };
+}
+
+async function writeSeedSlateInput(
+  sheetsClient: any,
+  workbookId: string,
+  seededRows: any[]
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Strategy: append all rows to SLATE_INPUT (or use a batch update to match by Game_ID)
+    // This depends on your Google Sheets connector implementation
+    
+    const range = "SLATE_INPUT!A:Z";  // Dynamic range
+    const result = await sheetsClient.appendRows(workbookId, range, seededRows);
+    
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+```
+
+---
+
+# MODULE 11: OUTPUT EXTRACTION
+
+**Purpose:** Read SLATE_BOARD and ACTIVE_BOARD_SNAPSHOT after recalculation. Extract to JSON for mobile display.
+
+---
+
+## 11.1 INPUTS
+
+```typescript
+interface Module11Input {
+  sheets_client: GoogleSheetsClient;
+  workbook_id: string;
+  run_id: string;
+}
+```
+
+## 11.2 OUTPUTS
+
+```typescript
+interface Module11Output {
+  status: "success" | "failure";
+  extraction_timestamp_utc: string;
+  slate_board: Array<{
+    gamePk: number;
+    legacy_game_id: string;
+    matchup: string;
+    final_decision: "CORE" | "NOT_CORE";
+    truth_score: number;
+    vehicle_score: number;
+    best_vehicle_decision: string;
+    not_core_reason?: string;
+    confidence: "high" | "moderate" | "low";
+    // ... other fields as defined in workbook
+  }>;
+  active_board_snapshot: Array<{
+    date: string;
+    game_id: string;
+    matchup: string;
+    decision: "CORE" | "NOT_CORE";
+    side_lean?: string;
+    total_lean?: string;
+    away_confidence: string;
+    home_confidence: string;
+    // ... mobile-friendly fields
+  }>;
+  core_count: number;
+  not_core_count: number;
+}
+```
+
+## 11.3 EXTRACTION LOGIC
+
+```typescript
+async function extractOutputBoards(
+  input: Module11Input
+): Promise<Module11Output> {
+  const output: Module11Output = {
+    status: "success",
+    extraction_timestamp_utc: new Date().toISOString(),
+    slate_board: [],
+    active_board_snapshot: [],
+    core_count: 0,
+    not_core_count: 0
+  };
+
+  try {
+    // Read SLATE_BOARD (entire sheet or specific range)
+    const slateBoard = await input.sheets_client.getRange(
+      input.workbook_id,
+      "SLATE_BOARD!A:Z"
+    );
+
+    // Parse SLATE_BOARD rows (skip header)
+    if (slateBoard.values) {
+      for (let i = 1; i < slateBoard.values.length; i++) {
+        const row = slateBoard.values[i];
+        
+        const finalDecision = row[columnIndex("Final_Decision")] as "CORE" | "NOT_CORE";
+        
+        output.slate_board.push({
+          gamePk: row[columnIndex("GamePk")],
+          legacy_game_id: row[columnIndex("Game_ID")],
+          matchup: row[columnIndex("Matchup")],
+          final_decision: finalDecision,
+          truth_score: row[columnIndex("Truth_Score")] || 0,
+          vehicle_score: row[columnIndex("Vehicle_Score")] || 0,
+          best_vehicle_decision: row[columnIndex("Best_Vehicle_Decision")],
+          not_core_reason: finalDecision === "NOT_CORE" ? row[columnIndex("NOT_CORE_Reason")] : undefined,
+          confidence: determineConfidence(row[columnIndex("Truth_Score")])
+        });
+
+        if (finalDecision === "CORE") output.core_count++;
+        if (finalDecision === "NOT_CORE") output.not_core_count++;
+      }
+    }
+
+    // Read ACTIVE_BOARD_SNAPSHOT
+    const activeBoard = await input.sheets_client.getRange(
+      input.workbook_id,
+      "ACTIVE_BOARD_SNAPSHOT!A:Z"
+    );
+
+    if (activeBoard.values) {
+      for (let i = 1; i < activeBoard.values.length; i++) {
+        const row = activeBoard.values[i];
+
+        output.active_board_snapshot.push({
+          date: row[columnIndex("Date")],
+          game_id: row[columnIndex("Game_ID")],
+          matchup: row[columnIndex("Matchup")],
+          decision: row[columnIndex("Decision")] as "CORE" | "NOT_CORE",
+          side_lean: row[columnIndex("Side_Lean")],
+          total_lean: row[columnIndex("Total_Lean")],
+          away_confidence: row[columnIndex("Away_Confidence")],
+          home_confidence: row[columnIndex("Home_Confidence")]
+        });
+      }
+    }
+
+    return output;
+
+  } catch (error) {
+    output.status = "failure";
+    return output;
+  }
+}
+
+function columnIndex(columnName: string): number {
+  // Map column names to indices
+  const columns: Record<string, number> = {
+    "GamePk": 0,
+    "Game_ID": 1,
+    "Matchup": 2,
+    "Final_Decision": 10,
+    "Truth_Score": 15,
+    "Vehicle_Score": 16,
+    "Best_Vehicle_Decision": 17,
+    "NOT_CORE_Reason": 18,
+    // ... add all columns from your SLATE_BOARD
+  };
+  
+  return columns[columnName] || -1;
+}
+
+function determineConfidence(truthScore: number): "high" | "moderate" | "low" {
+  if (truthScore >= 80) return "high";
+  if (truthScore >= 65) return "moderate";
+  return "low";
+}
+```
+
+---
+
+# MODULE 12: RUN LOGGING & ARCHIVAL
+
+**Purpose:** Create immutable Run Bundle on Google Drive. Archive manifests, logs, workbook export, extraction results.
+
+---
+
+## 12.1 INPUTS
+
+```typescript
+interface Module12Input {
+  run_id: string;
+  date_str: string;  // YYYY-MM-DD
+  version_number: number;  // v01, v02, v03
+  manifest: any;  // From Module 01
+  normalized_slate: any;  // From Module 06
+  validation_report: any;  // From Module 07
+  module08_results: any;  // Google Sheets write results
+  module09_results: any;  // Recalculation verification
+  module10_results: any;  // SLATE_INPUT seeding
+  module11_results: any;  // Output extraction
+  workbook_export: Buffer;  // .xlsx export from Google Sheets
+  drive_client: GoogleDriveClient;
+  drive_folder_id: string;  // Frostline root folder
+}
+```
+
+## 12.2 OUTPUTS
+
+```typescript
+interface Module12Output {
+  status: "success" | "failure";
+  archival_timestamp_utc: string;
+  bundle_name: string;  // e.g., "2026-07-22_v01"
+  bundle_folder_id: string;  // Google Drive folder ID
+  files_archived: {
+    manifest: { name: string; size: number };
+    normalized_slate: { name: string; size: number };
+    validation_report: { name: string; size: number };
+    slate_board_extraction: { name: string; size: number };
+    active_board_snapshot_extraction: { name: string; size: number };
+    workbook_snapshot: { name: string; size: number };
+    runlog: { name: string; size: number };
+    readme: { name: string; size: number };
+  };
+  manifests_index_updated: boolean;
+  logs_index_updated: boolean;
+  errors: ErrorLog[];
+}
+```
+
+## 12.3 ARCHIVAL LOGIC
+
+```typescript
+async function archiveRunBundle(
+  input: Module12Input
+): Promise<Module12Output> {
+  const output: Module12Output = {
+    status: "success",
+    archival_timestamp_utc: new Date().toISOString(),
+    bundle_name: `${input.date_str}_v${String(input.version_number).padStart(2, "0")}`,
+    bundle_folder_id: "",
+    files_archived: {} as any,
+    manifests_index_updated: false,
+    logs_index_updated: false,
+    errors: []
+  };
+
+  try {
+    // 1. Create Run Bundle folder in Google Drive
+    const bundleFolderName = output.bundle_name;
+    const bundleFolderId = await input.drive_client.createFolder(
+      bundleFolderName,
+      input.drive_folder_id  // Parent: Frostline/Run_Bundles/
+    );
+    output.bundle_folder_id = bundleFolderId;
+
+    // 2. Prepare JSON files
+    const dateYYYYMMDD = input.date_str.replace(/-/g, "");
+    const versionSuffix = `.${dateYYYYMMDD}.v${String(input.version_number).padStart(2, "

@@ -96,6 +96,31 @@ paths:
         "400":
           description: Bad request
 
+  /pipeline/publish:
+    post:
+      operationId: publishPipeline
+      tags: [pipeline]
+      summary: Run full pipeline (Modules 01–12) and publish to Google Sheets
+      description: Runs all 12 modules — normalizes the slate, writes 5 input sheets, verifies recalculation, seeds SLATE_INPUT, extracts decision boards, and archives a Run Bundle to Google Drive
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Date in YYYY-MM-DD format (defaults to today)
+      responses:
+        "200":
+          description: Full pipeline publish result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishResult"
+        "400":
+          description: Bad request
+        "500":
+          description: Pipeline failure
+
 components:
   schemas:
     HealthStatus:
@@ -456,3 +481,318 @@ components:
         - fangraphs_source
         - fangraphs_freshness
         - doubleheaders
+
+    PipelineError:
+      type: object
+      properties:
+        module:
+          type: string
+        error:
+          type: string
+        timestamp:
+          type: string
+      required: [module, error, timestamp]
+
+    SheetWriteStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        rows_written:
+          type: integer
+        range:
+          type: string
+        error:
+          type: ["string", "null"]
+      required: [status, rows_written, range]
+
+    SheetsWritten:
+      type: object
+      properties:
+        daily_matchups:
+          $ref: "#/components/schemas/SheetWriteStatus"
+        today_lineups:
+          $ref: "#/components/schemas/SheetWriteStatus"
+        team_form_input:
+          $ref: "#/components/schemas/SheetWriteStatus"
+        bullpen_usage_daily:
+          $ref: "#/components/schemas/SheetWriteStatus"
+        run_environment:
+          $ref: "#/components/schemas/SheetWriteStatus"
+      required: [daily_matchups, today_lineups, team_form_input, bullpen_usage_daily, run_environment]
+
+    Module08Result:
+      type: object
+      properties:
+        status:
+          type: string
+        write_timestamp_utc:
+          type: string
+        workbook_id:
+          type: string
+        sheets_written:
+          $ref: "#/components/schemas/SheetsWritten"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineError"
+      required: [status, write_timestamp_utc, workbook_id, sheets_written, errors]
+
+    RecalcCheck:
+      type: object
+      properties:
+        status:
+          type: string
+        expected_rows:
+          type: integer
+        actual_rows:
+          type: integer
+        formula_errors:
+          type: array
+          items:
+            type: string
+      required: [status, expected_rows, actual_rows, formula_errors]
+
+    ConsistencyCheck:
+      type: object
+      properties:
+        status:
+          type: string
+        read_1_timestamp:
+          type: string
+        read_2_timestamp:
+          type: string
+        diff_seconds:
+          type: number
+      required: [status, read_1_timestamp, read_2_timestamp, diff_seconds]
+
+    RecalcChecks:
+      type: object
+      properties:
+        game_integration:
+          $ref: "#/components/schemas/RecalcCheck"
+        game_summary:
+          $ref: "#/components/schemas/RecalcCheck"
+        consistency_check:
+          $ref: "#/components/schemas/ConsistencyCheck"
+      required: [game_integration, game_summary, consistency_check]
+
+    Module09Result:
+      type: object
+      properties:
+        status:
+          type: string
+        verification_timestamp_utc:
+          type: string
+        recalculation_time_ms:
+          type: integer
+        checks:
+          $ref: "#/components/schemas/RecalcChecks"
+      required: [status, verification_timestamp_utc, recalculation_time_ms, checks]
+
+    GamesSeeded:
+      type: object
+      properties:
+        new_games:
+          type: integer
+        updated_games:
+          type: integer
+        total_games:
+          type: integer
+      required: [new_games, updated_games, total_games]
+
+    SeedResult:
+      type: object
+      properties:
+        legacy_game_id:
+          type: string
+        action:
+          type: string
+        model_fields_refreshed:
+          type: array
+          items:
+            type: string
+        operator_fields_preserved:
+          type: array
+          items:
+            type: string
+      required: [legacy_game_id, action, model_fields_refreshed, operator_fields_preserved]
+
+    Module10Result:
+      type: object
+      properties:
+        status:
+          type: string
+        seeding_timestamp_utc:
+          type: string
+        games_seeded:
+          $ref: "#/components/schemas/GamesSeeded"
+        rows_written:
+          type: integer
+        seed_results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SeedResult"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineError"
+      required: [status, seeding_timestamp_utc, games_seeded, rows_written, seed_results, errors]
+
+    SlateBoardEntry:
+      type: object
+      properties:
+        legacy_game_id:
+          type: string
+        matchup:
+          type: string
+        final_decision:
+          type: string
+        truth_score:
+          type: number
+        vehicle_score:
+          type: number
+        best_vehicle_decision:
+          type: string
+        not_core_reason:
+          type: ["string", "null"]
+        confidence:
+          type: string
+      required: [legacy_game_id, matchup, final_decision, truth_score, vehicle_score, best_vehicle_decision, confidence]
+
+    ActiveBoardEntry:
+      type: object
+      properties:
+        date:
+          type: string
+        game_id:
+          type: string
+        matchup:
+          type: string
+        decision:
+          type: string
+        side_lean:
+          type: ["string", "null"]
+        total_lean:
+          type: ["string", "null"]
+        away_confidence:
+          type: string
+        home_confidence:
+          type: string
+      required: [date, game_id, matchup, decision, away_confidence, home_confidence]
+
+    Module11Result:
+      type: object
+      properties:
+        status:
+          type: string
+        extraction_timestamp_utc:
+          type: string
+        slate_board:
+          type: array
+          items:
+            $ref: "#/components/schemas/SlateBoardEntry"
+        active_board_snapshot:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActiveBoardEntry"
+        core_count:
+          type: integer
+        not_core_count:
+          type: integer
+        error:
+          type: ["string", "null"]
+      required: [status, extraction_timestamp_utc, slate_board, active_board_snapshot, core_count, not_core_count]
+
+    ArchivedFile:
+      type: object
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+        drive_id:
+          type: ["string", "null"]
+      required: [name, size]
+
+    FilesArchived:
+      type: object
+      properties:
+        normalized_slate:
+          $ref: "#/components/schemas/ArchivedFile"
+        validation_report:
+          $ref: "#/components/schemas/ArchivedFile"
+        module_08_results:
+          $ref: "#/components/schemas/ArchivedFile"
+        module_09_results:
+          $ref: "#/components/schemas/ArchivedFile"
+        module_10_results:
+          $ref: "#/components/schemas/ArchivedFile"
+        slate_board_extraction:
+          $ref: "#/components/schemas/ArchivedFile"
+        runlog:
+          $ref: "#/components/schemas/ArchivedFile"
+        readme:
+          $ref: "#/components/schemas/ArchivedFile"
+
+    Module12Result:
+      type: object
+      properties:
+        status:
+          type: string
+        archival_timestamp_utc:
+          type: string
+        bundle_name:
+          type: string
+        bundle_folder_id:
+          type: string
+        files_archived:
+          $ref: "#/components/schemas/FilesArchived"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineError"
+      required: [status, archival_timestamp_utc, bundle_name, bundle_folder_id, files_archived, errors]
+
+    PublishResult:
+      type: object
+      properties:
+        run_timestamp:
+          type: string
+        date:
+          type: string
+        pipeline_status:
+          type: string
+        total_games:
+          type: integer
+        validation_status:
+          type: string
+        module_08:
+          $ref: "#/components/schemas/Module08Result"
+        module_09:
+          $ref: "#/components/schemas/Module09Result"
+        module_10:
+          $ref: "#/components/schemas/Module10Result"
+        module_11:
+          $ref: "#/components/schemas/Module11Result"
+        module_12:
+          $ref: "#/components/schemas/Module12Result"
+        workbook_url:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineError"
+      required:
+        - run_timestamp
+        - date
+        - pipeline_status
+        - total_games
+        - validation_status
+        - module_08
+        - module_09
+        - module_10
+        - module_11
+        - module_12
+        - workbook_url
+        - errors

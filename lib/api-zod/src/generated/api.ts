@@ -183,3 +183,194 @@ export const GetPipelineScheduleResponse = zod.object({
 })
 
 
+/**
+ * Runs all 12 modules — normalizes the slate, writes 5 input sheets, verifies recalculation, seeds SLATE_INPUT, extracts decision boards, and archives a Run Bundle to Google Drive
+ * @summary Run full pipeline (Modules 01–12) and publish to Google Sheets
+ */
+export const PublishPipelineQueryParams = zod.object({
+  "date": zod.coerce.string().optional()
+})
+
+export const PublishPipelineResponse = zod.object({
+  "run_timestamp": zod.string(),
+  "date": zod.string(),
+  "pipeline_status": zod.string(),
+  "total_games": zod.number(),
+  "validation_status": zod.string(),
+  "module_08": zod.object({
+  "status": zod.string(),
+  "write_timestamp_utc": zod.string(),
+  "workbook_id": zod.string(),
+  "sheets_written": zod.object({
+  "daily_matchups": zod.object({
+  "status": zod.string(),
+  "rows_written": zod.number(),
+  "range": zod.string(),
+  "error": zod.string().nullish()
+}),
+  "today_lineups": zod.object({
+  "status": zod.string(),
+  "rows_written": zod.number(),
+  "range": zod.string(),
+  "error": zod.string().nullish()
+}),
+  "team_form_input": zod.object({
+  "status": zod.string(),
+  "rows_written": zod.number(),
+  "range": zod.string(),
+  "error": zod.string().nullish()
+}),
+  "bullpen_usage_daily": zod.object({
+  "status": zod.string(),
+  "rows_written": zod.number(),
+  "range": zod.string(),
+  "error": zod.string().nullish()
+}),
+  "run_environment": zod.object({
+  "status": zod.string(),
+  "rows_written": zod.number(),
+  "range": zod.string(),
+  "error": zod.string().nullish()
+})
+}),
+  "errors": zod.array(zod.object({
+  "module": zod.string(),
+  "error": zod.string(),
+  "timestamp": zod.string()
+}))
+}),
+  "module_09": zod.object({
+  "status": zod.string(),
+  "verification_timestamp_utc": zod.string(),
+  "recalculation_time_ms": zod.number(),
+  "checks": zod.object({
+  "game_integration": zod.object({
+  "status": zod.string(),
+  "expected_rows": zod.number(),
+  "actual_rows": zod.number(),
+  "formula_errors": zod.array(zod.string())
+}),
+  "game_summary": zod.object({
+  "status": zod.string(),
+  "expected_rows": zod.number(),
+  "actual_rows": zod.number(),
+  "formula_errors": zod.array(zod.string())
+}),
+  "consistency_check": zod.object({
+  "status": zod.string(),
+  "read_1_timestamp": zod.string(),
+  "read_2_timestamp": zod.string(),
+  "diff_seconds": zod.number()
+})
+})
+}),
+  "module_10": zod.object({
+  "status": zod.string(),
+  "seeding_timestamp_utc": zod.string(),
+  "games_seeded": zod.object({
+  "new_games": zod.number(),
+  "updated_games": zod.number(),
+  "total_games": zod.number()
+}),
+  "rows_written": zod.number(),
+  "seed_results": zod.array(zod.object({
+  "legacy_game_id": zod.string(),
+  "action": zod.string(),
+  "model_fields_refreshed": zod.array(zod.string()),
+  "operator_fields_preserved": zod.array(zod.string())
+})),
+  "errors": zod.array(zod.object({
+  "module": zod.string(),
+  "error": zod.string(),
+  "timestamp": zod.string()
+}))
+}),
+  "module_11": zod.object({
+  "status": zod.string(),
+  "extraction_timestamp_utc": zod.string(),
+  "slate_board": zod.array(zod.object({
+  "legacy_game_id": zod.string(),
+  "matchup": zod.string(),
+  "final_decision": zod.string(),
+  "truth_score": zod.number(),
+  "vehicle_score": zod.number(),
+  "best_vehicle_decision": zod.string(),
+  "not_core_reason": zod.string().nullish(),
+  "confidence": zod.string()
+})),
+  "active_board_snapshot": zod.array(zod.object({
+  "date": zod.string(),
+  "game_id": zod.string(),
+  "matchup": zod.string(),
+  "decision": zod.string(),
+  "side_lean": zod.string().nullish(),
+  "total_lean": zod.string().nullish(),
+  "away_confidence": zod.string(),
+  "home_confidence": zod.string()
+})),
+  "core_count": zod.number(),
+  "not_core_count": zod.number(),
+  "error": zod.string().nullish()
+}),
+  "module_12": zod.object({
+  "status": zod.string(),
+  "archival_timestamp_utc": zod.string(),
+  "bundle_name": zod.string(),
+  "bundle_folder_id": zod.string(),
+  "files_archived": zod.object({
+  "normalized_slate": zod.object({
+  "name": zod.string(),
+  "size": zod.number(),
+  "drive_id": zod.string().nullish()
+}).optional(),
+  "validation_report": zod.object({
+  "name": zod.string(),
+  "size": zod.number(),
+  "drive_id": zod.string().nullish()
+}).optional(),
+  "module_08_results": zod.object({
+  "name": zod.string(),
+  "size": zod.number(),
+  "drive_id": zod.string().nullish()
+}).optional(),
+  "module_09_results": zod.object({
+  "name": zod.string(),
+  "size": zod.number(),
+  "drive_id": zod.string().nullish()
+}).optional(),
+  "module_10_results": zod.object({
+  "name": zod.string(),
+  "size": zod.number(),
+  "drive_id": zod.string().nullish()
+}).optional(),
+  "slate_board_extraction": zod.object({
+  "name": zod.string(),
+  "size": zod.number(),
+  "drive_id": zod.string().nullish()
+}).optional(),
+  "runlog": zod.object({
+  "name": zod.string(),
+  "size": zod.number(),
+  "drive_id": zod.string().nullish()
+}).optional(),
+  "readme": zod.object({
+  "name": zod.string(),
+  "size": zod.number(),
+  "drive_id": zod.string().nullish()
+}).optional()
+}),
+  "errors": zod.array(zod.object({
+  "module": zod.string(),
+  "error": zod.string(),
+  "timestamp": zod.string()
+}))
+}),
+  "workbook_url": zod.string(),
+  "errors": zod.array(zod.object({
+  "module": zod.string(),
+  "error": zod.string(),
+  "timestamp": zod.string()
+}))
+})
+
+

@@ -4,7 +4,7 @@ import {
   GetPipelineSummaryQueryParams,
   GetPipelineScheduleQueryParams,
 } from "@workspace/api-zod";
-import { runPipeline, getPipelineSummary } from "../lib/pipeline/runner.js";
+import { runPipeline, getPipelineSummary, runFullPipeline } from "../lib/pipeline/runner.js";
 import { fetchMlbSchedule } from "../lib/pipeline/module01_mlbStatsApi.js";
 import { getTodayDateStr } from "../lib/pipeline/config.js";
 
@@ -41,6 +41,19 @@ router.get("/pipeline/schedule", async (req, res): Promise<void> => {
   const date = parsed.data.date ?? getTodayDateStr();
   const schedule = await fetchMlbSchedule(date);
   res.json(schedule);
+});
+
+router.post("/pipeline/publish", async (req, res): Promise<void> => {
+  const dateParam = req.query.date;
+  const date = typeof dateParam === "string" ? dateParam : getTodayDateStr();
+  try {
+    const result = await runFullPipeline(date);
+    const statusCode = result.pipeline_status === "failure" ? 500 : 200;
+    res.status(statusCode).json(result);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: message });
+  }
 });
 
 export default router;

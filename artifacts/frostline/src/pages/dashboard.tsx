@@ -1,14 +1,22 @@
 import React, { useState } from "react";
 import { Layout } from "@/components/layout";
 import { DatePicker } from "@/components/ui/date-picker";
-import { useGetPipelineSummary, useGetPipelineSlate, getGetPipelineSlateQueryKey, getGetPipelineSummaryQueryKey } from "@workspace/api-client-react";
+import {
+  useGetPipelineSummary,
+  useGetPipelineSlate,
+  getGetPipelineSlateQueryKey,
+  getGetPipelineSummaryQueryKey,
+  usePublishPipeline,
+} from "@workspace/api-client-react";
 import { GameCard } from "@/components/game-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CheckCircle2, XCircle, AlertTriangle, Users, Cloud, Database } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { CheckCircle2, XCircle, AlertTriangle, Users, Cloud, Database, Upload, ExternalLink, Loader2 } from "lucide-react";
 
 export default function Dashboard() {
   const [date, setDate] = useState("2026-07-22");
+  const [publishResult, setPublishResult] = useState<{ status: string; workbook_url: string; bundle_name?: string; errors: unknown[] } | null>(null);
 
   const { data: summary, isLoading: isLoadingSummary } = useGetPipelineSummary(
     { date },
@@ -20,7 +28,29 @@ export default function Dashboard() {
     { query: { queryKey: getGetPipelineSlateQueryKey({ date }) } }
   );
 
+  const publish = usePublishPipeline();
+
   const isLoading = isLoadingSummary || isLoadingSlate;
+
+  function handlePublish() {
+    setPublishResult(null);
+    publish.mutate(
+      { params: { date } },
+      {
+        onSuccess: (result) => {
+          setPublishResult({
+            status: result.pipeline_status,
+            workbook_url: result.workbook_url,
+            bundle_name: result.module_12?.bundle_name,
+            errors: result.errors ?? [],
+          });
+        },
+        onError: () => {
+          setPublishResult({ status: "error", workbook_url: "", errors: ["Publish request failed"] });
+        },
+      }
+    );
+  }
 
   return (
     <Layout>
@@ -30,11 +60,65 @@ export default function Dashboard() {
             <h1 className="text-2xl font-bold tracking-tight text-foreground">Pipeline Dashboard</h1>
             <p className="text-sm text-muted-foreground">High-level overview of MLB slate data</p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             {isLoading && <span className="text-sm text-muted-foreground animate-pulse">Running pipeline...</span>}
             <DatePicker date={date} onDateChange={setDate} />
+            <Button
+              data-testid="button-publish-sheets"
+              onClick={handlePublish}
+              disabled={publish.isPending || isLoading}
+              className="gap-2 font-semibold"
+            >
+              {publish.isPending ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Publishing…</>
+              ) : (
+                <><Upload className="w-4 h-4" /> Publish to Sheets</>
+              )}
+            </Button>
           </div>
         </div>
+
+        {/* Publish result banner */}
+        {publishResult && (
+          <div
+            data-testid="publish-result-banner"
+            className={`rounded-md border px-4 py-3 flex items-center justify-between gap-4 text-sm ${
+              publishResult.status === "success"
+                ? "border-success/40 bg-success/10 text-success"
+                : publishResult.status === "partial_success"
+                ? "border-warning/40 bg-warning/10 text-warning"
+                : "border-destructive/40 bg-destructive/10 text-destructive"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              {publishResult.status === "success" ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              ) : publishResult.status === "partial_success" ? (
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+              ) : (
+                <XCircle className="w-4 h-4 shrink-0" />
+              )}
+              <span>
+                {publishResult.status === "success"
+                  ? `Published successfully${publishResult.bundle_name ? ` — bundle ${publishResult.bundle_name}` : ""}`
+                  : publishResult.status === "partial_success"
+                  ? "Partial publish — some modules had warnings"
+                  : "Publish failed"}
+              </span>
+            </div>
+            {publishResult.workbook_url && (
+              <a
+                data-testid="link-open-workbook"
+                href={publishResult.workbook_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 underline underline-offset-2 shrink-0"
+              >
+                Open Workbook <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        )}
 
         {isLoading ? (
           <div className="space-y-6">

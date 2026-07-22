@@ -11,6 +11,12 @@ import { fetchWeatherForecasts } from "./module04_openMeteo.js";
 import { fetchTeamSplitsWithFallback } from "./module05_fangraphs.js";
 import { normalizeSlate } from "./module06_normalization.js";
 import { validateNormalizedSlate } from "./module07_validation.js";
+import { writeGoogleSheetsFeed, type Module08Result } from "./module08_feedWriter.js";
+import { verifyRecalculation, type Module09Result } from "./module09_recalculation.js";
+import { seedSlateInput, type Module10Result } from "./module10_slateInput.js";
+import { extractOutputBoards, type Module11Result } from "./module11_outputExtraction.js";
+import { archiveRunBundle, type Module12Result } from "./module12_archival.js";
+import { WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 
 export interface ModuleStatus {
@@ -160,6 +166,98 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
     module_statuses: moduleStatuses,
     fangraphs_source: splits.retrieval_source,
     fangraphs_freshness: splits.freshness_status,
+  };
+}
+
+export interface PublishResult {
+  run_timestamp: string;
+  date: string;
+  pipeline_status: string;
+  total_games: number;
+  validation_status: string;
+  module_08: Module08Result;
+  module_09: Module09Result;
+  module_10: Module10Result;
+  module_11: Module11Result;
+  module_12: Module12Result;
+  workbook_url: string;
+  errors: Array<{ module: string; error: string; timestamp: string }>;
+}
+
+export async function runFullPipeline(dateStr?: string): Promise<PublishResult> {
+  const date = dateStr ?? getTodayDateStr();
+  logger.info({ date }, "Full pipeline: starting 12-module run");
+
+  // Modules 01–07
+  const slate = await runPipeline(date);
+  const normalized = { games: slate.games, normalization_timestamp_utc: slate.run_timestamp, status: "success" };
+  const splits = await fetchTeamSplitsWithFallback();
+
+  const allErrors: Array<{ module: string; error: string; timestamp: string }> = [];
+
+  // Module 08: Write feeds to Google Sheets
+  const mod08 = await writeGoogleSheetsFeed(normalized as Parameters<typeof writeGoogleSheetsFeed>[0], splits, date);
+  if (mod08.status === "failure") {
+    logger.error("Full pipeline: Module 08 failed — aborting Sheets workflow");
+    return {
+      run_timestamp: slate.run_timestamp,
+      date,
+      pipeline_status: "failure",
+      total_games: slate.total_games,
+      validation_status: slate.validation.status,
+      module_08: mod08,
+      module_09: { status: "error", verification_timestamp_utc: new Date().toISOString(), checks: { game_integration: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, game_summary: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, consistency_check: { status: "inconsistent", read_1_timestamp: "", read_2_timestamp: "", diff_seconds: 0 } }, recalculation_time_ms: 0 },
+      module_10: { status: "failure", seeding_timestamp_utc: new Date().toISOString(), games_seeded: { new_games: 0, updated_games: 0, total_games: 0 }, rows_written: 0, seed_results: [], errors: [{ module: "10", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
+      module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, not_core_count: 0, error: "Skipped: Module 08 failed" },
+      module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
+      workbook_url: `https://docs.google.com/spreadsheets/d/${WORKBOOK_ID}`,
+      errors: [...mod08.errors],
+    };
+  }
+
+  // Module 09: Verify recalculation
+  const mod09 = await verifyRecalculation(slate.total_games);
+  if (mod09.status === "timeout" || mod09.status === "error") {
+    logger.warn({ status: mod09.status }, "Full pipeline: Module 09 non-verified — continuing with caution");
+  }
+
+  // Module 10: Seed SLATE_INPUT (run regardless of recalc status to preserve operator fields)
+  const mod10 = await seedSlateInput(normalized as Parameters<typeof seedSlateInput>[0]);
+  if (mod10.status === "failure") {
+    allErrors.push(...mod10.errors);
+  }
+
+  // Module 11: Extract decision boards
+  const mod11 = await extractOutputBoards();
+
+  // Module 12: Archive run bundle
+  const mod12 = await archiveRunBundle(slate, mod08, mod09, mod10, mod11);
+  if (mod12.status !== "success") {
+    allErrors.push(...mod12.errors);
+  }
+
+  const overallStatus =
+    mod08.status === "failure" || mod10.status === "failure"
+      ? "failure"
+      : mod08.status === "partial_failure" || mod09.status !== "verified" || mod12.status === "partial_failure"
+        ? "partial_success"
+        : "success";
+
+  logger.info({ overallStatus, date }, "Full pipeline: 12-module run complete");
+
+  return {
+    run_timestamp: slate.run_timestamp,
+    date,
+    pipeline_status: overallStatus,
+    total_games: slate.total_games,
+    validation_status: slate.validation.status,
+    module_08: mod08,
+    module_09: mod09,
+    module_10: mod10,
+    module_11: mod11,
+    module_12: mod12,
+    workbook_url: `https://docs.google.com/spreadsheets/d/${WORKBOOK_ID}`,
+    errors: allErrors,
   };
 }
 

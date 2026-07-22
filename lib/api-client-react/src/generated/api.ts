@@ -6,11 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 import {
+  useMutation,
   useQuery
 } from '@tanstack/react-query';
 import type {
+  MutationFunction,
   QueryFunction,
   QueryKey,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult
 } from '@tanstack/react-query';
@@ -22,7 +26,9 @@ import type {
   GetPipelineSummaryParams,
   HealthStatus,
   PipelineSlate,
-  PipelineSummary
+  PipelineSummary,
+  PublishPipelineParams,
+  PublishResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -384,4 +390,83 @@ export function useGetPipelineSchedule<TData = Awaited<ReturnType<typeof getPipe
 
 
 
+
+export const getPublishPipelineUrl = (params?: PublishPipelineParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/pipeline/publish?${stringifiedParams}` : `/api/pipeline/publish`
+}
+
+/**
+ * Runs all 12 modules — normalizes the slate, writes 5 input sheets, verifies recalculation, seeds SLATE_INPUT, extracts decision boards, and archives a Run Bundle to Google Drive
+ * @summary Run full pipeline (Modules 01–12) and publish to Google Sheets
+ */
+export const publishPipeline = async (params?: PublishPipelineParams, options?: RequestInit): Promise<PublishResult> => {
+
+  return customFetch<PublishResult>(getPublishPipelineUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getPublishPipelineMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishPipeline>>, TError,{params?: PublishPipelineParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof publishPipeline>>, TError,{params?: PublishPipelineParams}, TContext> => {
+
+const mutationKey = ['publishPipeline'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof publishPipeline>>, {params?: PublishPipelineParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  publishPipeline(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PublishPipelineMutationResult = NonNullable<Awaited<ReturnType<typeof publishPipeline>>>
+
+    export type PublishPipelineMutationError = ErrorType<void>
+
+    /**
+ * @summary Run full pipeline (Modules 01–12) and publish to Google Sheets
+ */
+export const usePublishPipeline = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishPipeline>>, TError,{params?: PublishPipelineParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof publishPipeline>>,
+        TError,
+        {params?: PublishPipelineParams},
+        TContext
+      > => {
+      return useMutation(getPublishPipelineMutationOptions(options));
+    }
 
