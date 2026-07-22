@@ -1,32 +1,39 @@
 /**
- * Module 11: Output Extraction
- * Reads SLATE_BOARD and ACTIVE_BOARD_SNAPSHOT after recalculation.
- * Converts raw sheet values to typed JSON for API response / mobile display.
+ * Module 11: Slate Board Computation & Output Extraction
+ * Reads SLATE_INPUT for operator market lines, computes decisions against
+ * GAME_SUMMARY projections, writes SLATE_BOARD and ACTIVE_BOARD_SNAPSHOT,
+ * then returns typed results for the API response.
  */
 
-import { readRange, WORKBOOK_ID } from "../sheets/client.js";
+import { readRange, clearRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
+import type { GameSummaryRow } from "./module09_recalculation.js";
 
 export interface SlateBoardEntry {
   legacy_game_id: string;
-  matchup: string;
+  away_team: string;
+  home_team: string;
+  vehicle_type: string;
+  projected_total: number;
+  market_line: number | null;
+  variance: number | null;
   final_decision: "CORE" | "NOT_CORE" | "PENDING";
-  truth_score: number;
-  vehicle_score: number;
-  best_vehicle_decision: string;
-  not_core_reason?: string;
-  confidence: "high" | "moderate" | "low";
+  confidence: number;
+  expected_roi: number;
+  recommendation: string;
 }
 
 export interface ActiveBoardEntry {
   date: string;
   game_id: string;
-  matchup: string;
-  decision: "CORE" | "NOT_CORE" | "PENDING";
-  side_lean?: string;
-  total_lean?: string;
-  away_confidence: string;
-  home_confidence: string;
+  away_team: string;
+  home_team: string;
+  vehicle: string;
+  model_projection: number;
+  market_line: number | null;
+  edge: number;
+  confidence: number;
+  recommendation: string;
 }
 
 export interface Module11Result {
@@ -39,45 +46,60 @@ export interface Module11Result {
   error?: string;
 }
 
-// Column maps — match actual SLATE_BOARD and ACTIVE_BOARD_SNAPSHOT layouts
-const SLATE_BOARD_COLS = {
-  GAME_ID: 1,       // B
-  MATCHUP: 2,       // C
-  FINAL_DECISION: 10, // K
-  TRUTH_SCORE: 15,  // P
-  VEHICLE_SCORE: 16, // Q
-  BEST_VEHICLE: 17, // R
-  NOT_CORE_REASON: 18, // S
+// SLATE_INPUT column indices (0-based):
+// A=0: Game_ID, B=1: Date, C=2: Matchup, D=3: Target, E=4: Opposing_Starter
+// F–N = model fields (5–13), O=14: Candidate_Vehicle, P=15: Line, Q=16: Odds
+const SLATE_INPUT_COLS = {
+  GAME_ID:           0,
+  CANDIDATE_VEHICLE: 14,
+  LINE:              15,
+  ODDS:              16,
 };
 
-const ACTIVE_BOARD_COLS = {
-  DATE: 0,           // A
-  GAME_ID: 1,        // B
-  MATCHUP: 2,        // C
-  DECISION: 3,       // D
-  SIDE_LEAN: 4,      // E
-  TOTAL_LEAN: 5,     // F
-  AWAY_CONFIDENCE: 6, // G
-  HOME_CONFIDENCE: 7, // H
-};
-
-function determineConfidence(truthScore: number): "high" | "moderate" | "low" {
-  if (truthScore >= 80) return "high";
-  if (truthScore >= 65) return "moderate";
-  return "low";
-}
-
-function parseNum(v: unknown): number {
-  const n = Number(v);
-  return isNaN(n) ? 0 : n;
+function parseNum(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = parseFloat(String(v));
+  return isNaN(n) ? null : n;
 }
 
 function parseStr(v: unknown): string {
-  return v == null ? "" : String(v);
+  return v == null ? "" : String(v).trim();
 }
 
-export async function extractOutputBoards(workbookId = WORKBOOK_ID): Promise<Module11Result> {
-  logger.info("MODULE_11: Extracting output boards");
+function computeDecision(
+  projectedTotal: number,
+  marketLine: number | null,
+  vehicle: string,
+): { decision: "CORE" | "NOT_CORE" | "PENDING"; confidence: number; roi: number; recommendation: string } {
+  if (marketLine === null || !vehicle || vehicle === "TBD" || vehicle === "") {
+    return { decision: "PENDING", confidence: 0, roi: 0, recommendation: "PENDING" };
+  }
+
+  const variance   = projectedTotal - marketLine;
+  const absVar     = Math.abs(variance);
+  const isCore     = absVar >= 0.5;
+  const decision   = isCore ? "CORE" : "NOT_CORE";
+
+  const confidence = isCore
+    ? parseFloat(Math.min(0.95, 0.55 + absVar * 0.08).toFixed(2))
+    : parseFloat(Math.max(0.05, 0.45 - absVar * 0.05).toFixed(2));
+
+  const roi = isCore ? parseFloat((variance * 0.05).toFixed(3)) : 0;
+
+  let recommendation: string;
+  if (!isCore)        recommendation = "PASS";
+  else if (absVar >= 2.0) recommendation = "STRONG_BUY";
+  else if (absVar >= 1.0) recommendation = "BUY";
+  else                    recommendation = "HOLD";
+
+  return { decision, confidence, roi, recommendation };
+}
+
+export async function extractOutputBoards(
+  gameSummary: GameSummaryRow[],
+  workbookId = WORKBOOK_ID,
+): Promise<Module11Result> {
+  logger.info({ games: gameSummary.length }, "MODULE_11: Computing SLATE_BOARD + ACTIVE_BOARD_SNAPSHOT");
 
   const output: Module11Result = {
     status: "success",
@@ -89,74 +111,131 @@ export async function extractOutputBoards(workbookId = WORKBOOK_ID): Promise<Mod
   };
 
   try {
-    // Read SLATE_BOARD
-    const slateBoardData = await readRange(workbookId, "SLATE_BOARD!A:Z");
-    const slateBoardRows = (slateBoardData.values ?? []).slice(1); // skip header
+    // ── Read SLATE_INPUT for operator-provided market lines ──
+    const slateInputData = await readRange(workbookId, "SLATE_INPUT!A:Q");
+    const slateInputRows = (slateInputData.values ?? []).slice(1); // skip header row
 
-    for (const row of slateBoardRows) {
-      const gameId = parseStr(row[SLATE_BOARD_COLS.GAME_ID]);
+    const marketMap = new Map<string, { vehicle: string; line: number | null; odds: number | null }>();
+    for (const row of slateInputRows) {
+      const gameId = parseStr(row[SLATE_INPUT_COLS.GAME_ID]);
       if (!gameId) continue;
-
-      const rawDecision = parseStr(row[SLATE_BOARD_COLS.FINAL_DECISION]).toUpperCase();
-      const decision: SlateBoardEntry["final_decision"] =
-        rawDecision === "CORE" ? "CORE" : rawDecision === "NOT_CORE" ? "NOT_CORE" : "PENDING";
-
-      const entry: SlateBoardEntry = {
-        legacy_game_id: gameId,
-        matchup: parseStr(row[SLATE_BOARD_COLS.MATCHUP]),
-        final_decision: decision,
-        truth_score: parseNum(row[SLATE_BOARD_COLS.TRUTH_SCORE]),
-        vehicle_score: parseNum(row[SLATE_BOARD_COLS.VEHICLE_SCORE]),
-        best_vehicle_decision: parseStr(row[SLATE_BOARD_COLS.BEST_VEHICLE]),
-        confidence: determineConfidence(parseNum(row[SLATE_BOARD_COLS.TRUTH_SCORE])),
-      };
-
-      if (decision === "NOT_CORE") {
-        entry.not_core_reason = parseStr(row[SLATE_BOARD_COLS.NOT_CORE_REASON]);
-      }
-
-      output.slate_board.push(entry);
-      if (decision === "CORE") output.core_count++;
-      if (decision === "NOT_CORE") output.not_core_count++;
-    }
-
-    // Read ACTIVE_BOARD_SNAPSHOT
-    const activeBoardData = await readRange(workbookId, "ACTIVE_BOARD_SNAPSHOT!A:Z");
-    const activeBoardRows = (activeBoardData.values ?? []).slice(1);
-
-    for (const row of activeBoardRows) {
-      const gameId = parseStr(row[ACTIVE_BOARD_COLS.GAME_ID]);
-      if (!gameId) continue;
-
-      const rawDecision = parseStr(row[ACTIVE_BOARD_COLS.DECISION]).toUpperCase();
-      const decision: ActiveBoardEntry["decision"] =
-        rawDecision === "CORE" ? "CORE" : rawDecision === "NOT_CORE" ? "NOT_CORE" : "PENDING";
-
-      output.active_board_snapshot.push({
-        date: parseStr(row[ACTIVE_BOARD_COLS.DATE]),
-        game_id: gameId,
-        matchup: parseStr(row[ACTIVE_BOARD_COLS.MATCHUP]),
-        decision,
-        side_lean: parseStr(row[ACTIVE_BOARD_COLS.SIDE_LEAN]) || undefined,
-        total_lean: parseStr(row[ACTIVE_BOARD_COLS.TOTAL_LEAN]) || undefined,
-        away_confidence: parseStr(row[ACTIVE_BOARD_COLS.AWAY_CONFIDENCE]),
-        home_confidence: parseStr(row[ACTIVE_BOARD_COLS.HOME_CONFIDENCE]),
+      marketMap.set(gameId, {
+        vehicle: parseStr(row[SLATE_INPUT_COLS.CANDIDATE_VEHICLE]),
+        line:    parseNum(row[SLATE_INPUT_COLS.LINE]),
+        odds:    parseNum(row[SLATE_INPUT_COLS.ODDS]),
       });
     }
 
-    logger.info({
-      slateBoardRows: output.slate_board.length,
-      core: output.core_count,
-      notCore: output.not_core_count,
-    }, "MODULE_11: Extraction complete");
+    // ── Compute SLATE_BOARD — 13 cols A–M, starts row 2 ──
+    const sbRows: unknown[][] = [];
 
-    return output;
+    for (const gs of gameSummary) {
+      const market  = marketMap.get(gs.game_id) ?? { vehicle: "", line: null, odds: null };
+      const variance = market.line !== null
+        ? parseFloat((gs.projected_total_runs - market.line).toFixed(2))
+        : null;
+      const { decision, confidence, roi, recommendation } = computeDecision(
+        gs.projected_total_runs,
+        market.line,
+        market.vehicle,
+      );
+
+      const entry: SlateBoardEntry = {
+        legacy_game_id: gs.game_id,
+        away_team:      gs.away_team,
+        home_team:      gs.home_team,
+        vehicle_type:   market.vehicle || "TBD",
+        projected_total: gs.projected_total_runs,
+        market_line:    market.line,
+        variance,
+        final_decision: decision,
+        confidence,
+        expected_roi:   roi,
+        recommendation,
+      };
+      output.slate_board.push(entry);
+      if (decision === "CORE")     output.core_count++;
+      if (decision === "NOT_CORE") output.not_core_count++;
+
+      sbRows.push([
+        gs.date,                         // A: Date
+        gs.game_id,                      // B: Game_ID
+        gs.away_team,                    // C: Away_Team
+        gs.home_team,                    // D: Home_Team
+        market.vehicle || "TBD",         // E: Vehicle_Type
+        gs.projected_total_runs,         // F: Projected_Value
+        market.line ?? "",               // G: Market_Line
+        variance ?? "",                  // H: Variance_from_Projection
+        decision,                        // I: Decision
+        confidence,                      // J: Confidence
+        roi,                             // K: Expected_ROI
+        recommendation,                  // L: Recommendation
+        "",                              // M: Notes
+      ]);
+    }
+
+    await clearRange(workbookId, "SLATE_BOARD!A2:M100");
+    if (sbRows.length > 0) {
+      await writeRange(workbookId, `SLATE_BOARD!A2:M${1 + sbRows.length}`, sbRows);
+    }
+    logger.info(
+      { rows: sbRows.length, core: output.core_count, notCore: output.not_core_count },
+      "MODULE_11: SLATE_BOARD written",
+    );
+
+    // ── Compute ACTIVE_BOARD_SNAPSHOT — CORE games only, 15 cols A–O ──
+    const abRows: unknown[][] = [];
+    const now = new Date().toISOString();
+
+    for (const entry of output.slate_board) {
+      if (entry.final_decision !== "CORE") continue;
+      const edge = entry.variance !== null ? parseFloat(Math.abs(entry.variance).toFixed(2)) : 0;
+
+      const abEntry: ActiveBoardEntry = {
+        date:             gameSummary.find((g) => g.game_id === entry.legacy_game_id)?.date ?? "",
+        game_id:          entry.legacy_game_id,
+        away_team:        entry.away_team,
+        home_team:        entry.home_team,
+        vehicle:          entry.vehicle_type,
+        model_projection: entry.projected_total,
+        market_line:      entry.market_line,
+        edge,
+        confidence:       entry.confidence,
+        recommendation:   entry.recommendation,
+      };
+      output.active_board_snapshot.push(abEntry);
+
+      abRows.push([
+        abEntry.date,                    // A: Date
+        abEntry.game_id,                 // B: Game_ID
+        abEntry.away_team,               // C: Away_Team
+        abEntry.home_team,               // D: Home_Team
+        abEntry.vehicle,                 // E: Vehicle
+        abEntry.model_projection,        // F: Model_Projection
+        abEntry.market_line ?? "",       // G: Market_Line
+        edge,                            // H: Edge
+        abEntry.confidence,              // I: Confidence
+        abEntry.recommendation,          // J: Recommendation
+        now,                             // K: Time_Added
+        "PENDING",                       // L: Status
+        "",                              // M: Placed_At
+        "",                              // N: Result
+        "",                              // O: Notes
+      ]);
+    }
+
+    await clearRange(workbookId, "ACTIVE_BOARD_SNAPSHOT!A2:O100");
+    if (abRows.length > 0) {
+      await writeRange(workbookId, `ACTIVE_BOARD_SNAPSHOT!A2:O${1 + abRows.length}`, abRows);
+    }
+    logger.info({ rows: abRows.length }, "MODULE_11: ACTIVE_BOARD_SNAPSHOT written");
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.error({ err: message }, "MODULE_11: Extraction failed");
+    logger.error({ err: message }, "MODULE_11: Failed");
     output.status = "failure";
     output.error = message;
-    return output;
   }
+
+  return output;
 }
