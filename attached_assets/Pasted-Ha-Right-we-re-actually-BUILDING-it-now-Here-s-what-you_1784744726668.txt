@@ -1,0 +1,180 @@
+Ha! Right, we're actually BUILDING it now. 😄
+
+**Here's what you do RIGHT NOW:**
+
+---
+
+## STEP 1: Create Replit Project (2 minutes)
+
+1. Go to [Replit.com](https://replit.com)
+2. Click **Create** (top left)
+3. Click **Create Replit**
+4. **Language:** Python
+5. **Name:** `frostline-pipeline`
+6. Click **Create Replit**
+
+Done. You now have a blank Python project.
+
+---
+
+## STEP 2: Create File Structure (1 minute)
+
+In the Replit file explorer on the left:
+
+1. Right-click → **New Folder**
+2. Name it: `config`
+3. Repeat: Create folders `cache`, `logs`, `modules`
+
+You should now have:
+```
+frostline-pipeline/
+├── config/
+├── cache/
+├── logs/
+├── modules/
+```
+
+---
+
+## STEP 3: Create `requirements.txt` (30 seconds)
+
+1. Click **+ File** (top of file list)
+2. Name: `requirements.txt`
+3. Copy/paste this:
+
+```txt
+requests==2.31.0
+python-dateutil==2.8.2
+```
+
+4. Save (Cmd+S or Ctrl+S)
+
+---
+
+## STEP 4: Create `modules/__init__.py` (20 seconds)
+
+1. Right-click `modules/` folder → **New File**
+2. Name: `__init__.py`
+3. Leave it empty
+4. Save
+
+---
+
+## STEP 5: Create `modules/utils.py`
+
+1. Right-click `modules/` → **New File**
+2. Name: `utils.py`
+3. **Copy the entire `modules/utils.py` code from above** (the big code block titled "`modules/utils.py`")
+4. Paste into the file
+5. Save
+
+---
+
+## STEP 6: Create `config/source_mappings.json`
+
+1. Right-click `config/` → **New File**
+2. Name: `source_mappings.json`
+3. Copy the JSON from "`config/source_mappings.json`" above
+4. Paste into file
+5. Save
+
+---
+
+## STEP 7: Create `config/stadium_coordinates.json`
+
+1. Right-click `config/` → **New File**
+2. Name: `stadium_coordinates.json`
+3. Copy the JSON from "`config/stadium_coordinates.json`" above
+4. Paste
+5. Save
+
+---
+
+## STEP 8: Create `config/validation_rules.json`
+
+1. Right-click `config/` → **New File**
+2. Name: `validation_rules.json`
+3. Copy the JSON from "`config/validation_rules.json`" above
+4. Paste
+5. Save
+
+---
+
+## STEP 9–15: Create the 7 Modules
+
+For each module file:
+
+1. Right-click `modules/` → **New File**
+2. Name: `module_0X_name.py` (e.g., `module_01_mlb_statsapi.py`)
+3. Copy the Python code from the section above
+4. Paste
+5. Save
+
+**Create these files:**
+- `module_01_mlb_statsapi.py`
+- `module_02_statcast.py`
+- `module_03_pitcher_classification.py`
+- `module_04_open_meteo.py`
+- `module_05_fangraphs.py`
+- `module_06_normalization.py`
+- `module_07_validation.py`
+
+---
+
+## STEP 16: Create `test_pipeline.py`
+
+1. Click **+ File** at root level
+2. Name: `test_pipeline.py`
+3. Copy the entire test code from "`test_pipeline.py`" section above
+4. Paste
+5. Save
+
+---
+
+## STEP 17: Install Dependencies
+
+1. Click **Shell** tab (bottom of screen)
+2. Type:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Press Enter
+4. Wait for it to finish (should say "Successfully installed")
+
+---
+
+## STEP 18: RUN THE TEST
+
+In the Shell, type:
+
+```bash
+python test_pipeline.py
+```
+
+Press Enter and watch it run! 🚀
+
+You should see:
+```
+======================================================================
+FROSTLINE PIPELINE TEST: MODULES 01–07
+======================================================================
+
+[1/7] MLB StatsAPI Schedule
+----------------------------------------------------------------------
+✓ Retrieved 15 games
+...
+```
+
+---
+
+## That's it for now!
+
+Once the test **finishes and says "ALL TESTS PASSED ✓"**, reply with:
+- ✅ or "It worked!"
+- 🛑 or paste the error if it fails
+
+**Estimated time: 20–30 minutes** (mostly copy-pasting)
+
+---
+
+**Which step are you on? Just start with Step 1 and let me know when you hit a snag!**
