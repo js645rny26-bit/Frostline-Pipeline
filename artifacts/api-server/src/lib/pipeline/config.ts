@@ -70,6 +70,46 @@ export const STADIUM_COORDS: Record<string, { latitude: number; longitude: numbe
   "Minute Maid Park":             { latitude: 29.7571,  longitude: -95.3555,  timezone: "America/Chicago" },
 };
 
+/**
+ * Venue name aliases — maps alternate names returned by the MLB Stats API
+ * to the canonical keys used in STADIUM_COORDS above.
+ * Add entries here whenever a new variant is observed in pipeline logs.
+ */
+export const VENUE_ALIASES: Record<string, string> = {
+  // Oakland Athletics — moved to Sacramento in 2025
+  "Sutter Health Park":                  "Sacramento's Sutter Health Park",
+  "Sutter Health Park (Sacramento)":     "Sacramento's Sutter Health Park",
+  // Houston Astros — renamed Minute Maid Park → Daikin Park in 2025
+  "Daikin Park":                         "Minute Maid Park",
+  // Common MLB API alternate spellings
+  "loanDepot park":                      "loanDepot Park",
+  "loandepot park":                      "loanDepot Park",
+  "LoanDepot Park":                      "loanDepot Park",
+  "Loan Depot Park":                     "loanDepot Park",
+  "American Family Fields of Phoenix":   "American Family Field",  // spring training overflow
+  "Guaranteed Rate Field ":              "Guaranteed Rate Field",  // trailing-space variant
+  "PNC Park ":                           "PNC Park",
+  "Citi Field ":                         "Citi Field",
+  "Yankee Stadium ":                     "Yankee Stadium",
+  "Oriole Park":                         "Oriole Park at Camden Yards",
+  "Camden Yards":                        "Oriole Park at Camden Yards",
+};
+
+/** Resolve a venue name from the MLB API to the STADIUM_COORDS key. */
+export function resolveVenueName(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (STADIUM_COORDS[trimmed]) return trimmed;
+  const aliased = VENUE_ALIASES[trimmed];
+  if (aliased && STADIUM_COORDS[aliased]) return aliased;
+  // Case-insensitive fallback
+  const lower = trimmed.toLowerCase();
+  for (const key of Object.keys(STADIUM_COORDS)) {
+    if (key.toLowerCase() === lower) return key;
+  }
+  return null;
+}
+
 export const VALIDATION_RULES = {
   game_count: { min_expected: 13, max_expected: 16 },
   pitcher_role_categories: [

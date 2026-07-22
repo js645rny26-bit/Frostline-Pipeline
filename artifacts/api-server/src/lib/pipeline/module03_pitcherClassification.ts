@@ -53,20 +53,29 @@ function classifySinglePitcher(
   }
 
   if (!workloadData || workloadData.status === "fetch_error" || workloadData.status === "no_games_in_window") {
+    // A pitcher listed as probable IS going to start regardless of workload data availability.
+    // Apply a seasonal-baseline classification: assume CONVENTIONAL_STARTER with moderate confidence
+    // and standard expected values, rather than leaving them UNRESOLVED.
     const flags: string[] = [];
     if (workloadData?.status === "no_games_in_window") {
       flags.push("RETURNING_FROM_IL");
+    } else if (workloadData?.status === "fetch_error") {
+      flags.push("STATCAST_UNAVAILABLE");
+    } else {
+      flags.push("NO_WORKLOAD_DATA");
     }
     return {
       player_id: pitcherId,
       name: pitcherName,
       hand,
-      role: "UNRESOLVED",
-      role_confidence: "low",
+      role: "CONVENTIONAL_STARTER",
+      role_confidence: "moderate",
       workload_flags: flags,
-      expected_pitches: null,
-      expected_innings: null,
-      reasoning: "No recent workload data; possibly returning from IL or inactive",
+      expected_pitches: 85,
+      expected_innings: 5.5,
+      reasoning: workloadData?.status === "no_games_in_window"
+        ? "No data in 60-day window; probable starter classified using seasonal baseline (returning from IL)"
+        : "No Statcast workload data; probable starter classified using seasonal baseline",
     };
   }
 

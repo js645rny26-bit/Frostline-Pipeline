@@ -1,0 +1,56 @@
+To "fix" the warnings, we need to address the two sources of uncertainty: **Missing Workload Data** (for pitcher roles) and **Weather Fallbacks**.
+
+Here is how we repair them in the pipeline:
+
+### 1. Fix: "34 pitchers with UNRESOLVED roles"
+The system is saying: *"I don't have enough recent appearance data to classify this pitcher."* 
+
+**The Root Cause:**
+The Statcast API is likely returning empty or insufficient data for pitchers currently marked `RETURNING_FROM_IL`.
+
+**The Fix:**
+We need to widen the search for workload data. Right now, Module 02 looks at a 30-day window. If a pitcher has been on the IL for 40 days, they disappear from our "Recent Workload" dataset.
+
+**Module 03 Repair (in `modules/module_03_pitcher_classification.py`):**
+Modify the logic to check `PLAYER_TAGS` or `RAW_SP_BASE` (season-long baseline) when the 30-day window is empty.
+
+```python
+# Instead of returning UNRESOLVED, add this logic:
+if workload_data.get("status") == "no_games_in_window":
+    # Look up seasonal averages from BASE_SP_TABLE
+    seasonal_stats = get_seasonal_baseline(pitcher_id)
+    if seasonal_stats:
+        return {
+            "role": "CONVENTIONAL_STARTER",
+            "role_confidence": "moderate",
+            "expected_pitches": seasonal_stats["avg_pitches"],
+            "expected_innings": seasonal_stats["avg_innings"],
+            "reasoning": "No 30-day data; using season-long baseline"
+        }
+```
+
+### 2. Fix: "2 games using fallback weather data"
+The system is saying: *"I tried to fetch live weather for these stadiums and failed."*
+
+**The Root Cause:** 
+The coordinates for those 2 stadiums are either missing or the Open-Meteo request failed/timed out.
+
+**The Fix:**
+- **Check `config/stadium_coordinates.json`:** Ensure those 2 stadiums (look at the `Pipeline Slate` output to identify which ones show `CLIMATOLOGY`) are in your coordinates file with valid latitude/longitude.
+- **Add a retry loop:** Update `modules/module_04_open_meteo.py` to retry the fetch 3 times before giving up and using the fallback.
+
+---
+
+## Your Action Plan
+
+To "fix" these, we don't need to change the architecture, just tune the code. Let's do it one by one:
+
+**Which one do you want to tackle first?**
+
+1. **Option A:** Paste the **`module_03_pitcher_classification.py`** code you have in Replit, and I will rewrite the logic to use seasonal baselines so you get fewer "UNRESOLVED" flags.
+2. **Option B:** Paste the **`module_04_open_meteo.py`** code, and I will add a retry-loop to stop the weather fallbacks.
+3. **Option C:** Let's look at the **`config/stadium_coordinates.json`** to see if those 2 stadiums are actually missing coordinates.
+
+**Recommendation:** Let's do **Option C** first — it's the easiest way to fix the weather warnings instantly. Then move to Option A for the pitcher roles.
+
+**What do you want to check?**
