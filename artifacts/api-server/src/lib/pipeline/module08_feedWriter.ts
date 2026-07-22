@@ -140,16 +140,12 @@ function buildTeamFormRows(splits: FangraphsResult["teams"]): unknown[][] {
   ]);
 }
 
-function buildBullpenDateHeaders(date: string): unknown[] {
-  // Generate 6-day window headers ending on date
-  const headers: string[] = [];
-  const end = new Date(date);
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(end);
-    d.setDate(d.getDate() - i);
-    headers.push(d.toISOString().split("T")[0]);
-  }
-  return headers; // D1:I1 — 6 values
+// BULLPEN_USAGE_DAILY columns (A–I):
+//   A: Date | B: Team | C: Reliever_Name | D: Player_ID
+//   E: Innings_Last_7_Days | F: Games_Last_7_Days | G: Days_Rest | H: Role | I: Notes
+// Per-reliever rows will be populated once the Statcast bullpen usage source is wired up.
+function buildBullpenRows(_date: string): unknown[][] {
+  return []; // No reliever data source yet; sheet cleared and left ready for operator input
 }
 
 function buildRunEnvironmentRows(games: NormalizedGame[]): unknown[][] {
@@ -275,21 +271,21 @@ export async function writeGoogleSheetsFeed(
     errors.push({ module: "08_team_form_input", error: tfResult.error ?? "write failed", timestamp: new Date().toISOString() });
   }
 
-  // 4. BULLPEN_USAGE_DAILY — date headers first, then no player rows (no per-day data yet)
-  let buResult: SheetWriteStatus = { status: "skipped", rows_written: 0, range: "BULLPEN_USAGE_DAILY!D1:I1" };
+  // 4. BULLPEN_USAGE_DAILY — clear data rows; reliever rows written when data source available
+  let buResult: SheetWriteStatus = { status: "skipped", rows_written: 0, range: "BULLPEN_USAGE_DAILY!A2:I300" };
   try {
-    const dateHeaders = buildBullpenDateHeaders(runDate);
-    await clearRange(workbookId, "BULLPEN_USAGE_DAILY!A2:L300");
-    await clearRange(workbookId, "BULLPEN_USAGE_DAILY!O2:U31");
-    await writeRange(workbookId, "BULLPEN_USAGE_DAILY!D1:I1", [dateHeaders]);
-    // No per-player workload rows to write in this version (data source TBD)
-    buResult = { status: "success", rows_written: 0, range: "BULLPEN_USAGE_DAILY!D1:I1" };
-    logger.info("MODULE_08: BULLPEN_USAGE_DAILY date headers written");
+    const buRows = buildBullpenRows(runDate);
+    await clearRange(workbookId, "BULLPEN_USAGE_DAILY!A2:I300");
+    if (buRows.length > 0) {
+      await writeRange(workbookId, `BULLPEN_USAGE_DAILY!A2:I${1 + buRows.length}`, buRows);
+    }
+    buResult = { status: "success", rows_written: buRows.length, range: "BULLPEN_USAGE_DAILY!A2:I300" };
+    logger.info({ rows: buRows.length }, "MODULE_08: BULLPEN_USAGE_DAILY cleared and ready");
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     failed.push("bullpen_usage_daily");
     errors.push({ module: "08_bullpen_usage_daily", error: message, timestamp: new Date().toISOString() });
-    buResult = { status: "failure", rows_written: 0, range: "BULLPEN_USAGE_DAILY!D1:I1", error: message };
+    buResult = { status: "failure", rows_written: 0, range: "BULLPEN_USAGE_DAILY!A2:I300", error: message };
   }
 
   // 5. RUN_ENVIRONMENT
