@@ -7,12 +7,13 @@ import {
   getGetPipelineSlateQueryKey,
   getGetPipelineSummaryQueryKey,
   usePublishPipeline,
+  useCreateWorkbook,
 } from "@workspace/api-client-react";
 import { GameCard } from "@/components/game-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, XCircle, AlertTriangle, Users, Cloud, Database, Upload, ExternalLink, Loader2 } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, Users, Cloud, Database, Upload, ExternalLink, Loader2, PlusSquare } from "lucide-react";
 
 export default function Dashboard() {
   const [date, setDate] = useState("2026-07-22");
@@ -29,8 +30,29 @@ export default function Dashboard() {
   );
 
   const publish = usePublishPipeline();
+  const createWb = useCreateWorkbook();
+  const [createResult, setCreateResult] = useState<{ workbook_url: string; workbook_name: string; errors: unknown[] } | null>(null);
 
   const isLoading = isLoadingSummary || isLoadingSlate;
+
+  function handleCreateWorkbook() {
+    setCreateResult(null);
+    createWb.mutate(
+      { params: { date } },
+      {
+        onSuccess: (result) => {
+          setCreateResult({
+            workbook_url: result.workbook_url,
+            workbook_name: result.workbook_name,
+            errors: result.errors ?? [],
+          });
+        },
+        onError: () => {
+          setCreateResult({ workbook_url: "", workbook_name: "", errors: ["Workbook creation failed"] });
+        },
+      }
+    );
+  }
 
   function handlePublish() {
     setPublishResult(null);
@@ -64,6 +86,19 @@ export default function Dashboard() {
             {isLoading && <span className="text-sm text-muted-foreground animate-pulse">Running pipeline...</span>}
             <DatePicker date={date} onDateChange={setDate} />
             <Button
+              data-testid="button-create-workbook"
+              onClick={handleCreateWorkbook}
+              disabled={createWb.isPending}
+              variant="outline"
+              className="gap-2 font-semibold"
+            >
+              {createWb.isPending ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Creating…</>
+              ) : (
+                <><PlusSquare className="w-4 h-4" /> New Workbook</>
+              )}
+            </Button>
+            <Button
               data-testid="button-publish-sheets"
               onClick={handlePublish}
               disabled={publish.isPending || isLoading}
@@ -77,6 +112,42 @@ export default function Dashboard() {
             </Button>
           </div>
         </div>
+
+        {/* Create workbook result banner */}
+        {createResult && (
+          <div
+            data-testid="create-workbook-result-banner"
+            className={`rounded-md border px-4 py-3 flex items-center justify-between gap-4 text-sm ${
+              createResult.errors.length === 0
+                ? "border-success/40 bg-success/10 text-success"
+                : "border-warning/40 bg-warning/10 text-warning"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              {createResult.errors.length === 0 ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+              )}
+              <span>
+                {createResult.errors.length === 0
+                  ? `New workbook created — ${createResult.workbook_name}`
+                  : `Workbook created with ${createResult.errors.length} warning(s) — ${createResult.workbook_name}`}
+              </span>
+            </div>
+            {createResult.workbook_url && (
+              <a
+                data-testid="link-open-new-workbook"
+                href={createResult.workbook_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 underline underline-offset-2 shrink-0"
+              >
+                Open Workbook <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Publish result banner */}
         {publishResult && (

@@ -184,6 +184,27 @@ export const GetPipelineScheduleResponse = zod.object({
 
 
 /**
+ * Creates a brand-new Google Spreadsheet with all 13 sheets (schema, column widths, frozen headers, number formats) and populates SCHEMA_REFERENCE. Returns the new workbook ID and URL.
+ * @summary Create a new optimised Frostline workbook
+ */
+export const CreateWorkbookQueryParams = zod.object({
+  "date": zod.coerce.string().optional()
+})
+
+export const CreateWorkbookResponse = zod.object({
+  "workbook_id": zod.string(),
+  "workbook_name": zod.string(),
+  "workbook_url": zod.string(),
+  "sheets_created": zod.array(zod.string()),
+  "schema_reference_rows": zod.number(),
+  "errors": zod.array(zod.object({
+  "step": zod.string(),
+  "error": zod.string()
+}))
+})
+
+
+/**
  * Runs all 12 modules — normalizes the slate, writes 5 input sheets, verifies recalculation, seeds SLATE_INPUT, extracts decision boards, and archives a Run Bundle to Google Drive
  * @summary Run full pipeline (Modules 01–12) and publish to Google Sheets
  */

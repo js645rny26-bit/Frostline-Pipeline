@@ -1,0 +1,331 @@
+# Complete Workbook Setup Specification
+
+---
+
+## FILE 1: `src/config/workbookSchema.ts`
+
+```typescript
+export interface ColumnDef {
+  name: string;
+  index: number;
+  type: "string" | "number" | "date" | "formula" | "currency" | "percent";
+  formula?: string;  // For computed columns
+  width?: number;
+  format?: string;   // Number format code, e.g. "0.00" or "mm/dd/yyyy"
+  readOnly?: boolean;
+}
+
+export interface SheetDef {
+  name: string;
+  description: string;
+  columns: ColumnDef[];
+  protectedRanges?: Array<{ startRow: number; endRow?: number; startCol: number; endCol: number }>;
+  frozenRows?: number;
+}
+
+export const WORKBOOK_SCHEMA: SheetDef[] = [
+  // ===== INPUT SECTION =====
+  {
+    name: "DAILY_MATCHUPS",
+    description: "Game identity, pitcher workload, weather, park effects",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy" },
+      { name: "Game_ID", index: 1, type: "string", width: 80 },
+      { name: "Game_Status", index: 2, type: "string", width: 80 }, // TBD, Scheduled, In Progress, Final
+      { name: "Away_Team", index: 3, type: "string", width: 70 },
+      { name: "Home_Team", index: 4, type: "string", width: 70 },
+      { name: "Away_Pitcher", index: 5, type: "string", width: 120 },
+      { name: "Home_Pitcher", index: 6, type: "string", width: 120 },
+      { name: "Away_Pitcher_Role", index: 7, type: "string", width: 100 }, // CONVENTIONAL_STARTER, BULLPEN_GAME, etc.
+      { name: "Home_Pitcher_Role", index: 8, type: "string", width: 100 },
+      { name: "Away_Pitcher_Confidence", index: 9, type: "percent", width: 90, format: "0%" },
+      { name: "Home_Pitcher_Confidence", index: 10, type: "percent", width: 90, format: "0%" },
+      { name: "Away_Expected_Pitches", index: 11, type: "number", width: 100, format: "0" },
+      { name: "Home_Expected_Pitches", index: 12, type: "number", width: 100, format: "0" },
+      { name: "Away_Expected_Innings", index: 13, type: "number", width: 100, format: "0.0" },
+      { name: "Home_Expected_Innings", index: 14, type: "number", width: 100, format: "0.0" },
+      { name: "Temperature_F", index: 15, type: "number", width: 90, format: "0" },
+      { name: "Wind_MPH", index: 16, type: "number", width: 90, format: "0.0" },
+      { name: "Precipitation_Pct", index: 17, type: "percent", width: 100, format: "0%" },
+      { name: "Weather_Source", index: 18, type: "string", width: 100 }, // LIVE_WX, CLIMATOLOGY
+      { name: "Stadium", index: 19, type: "string", width: 140 },
+      { name: "Park_Factor_HR", index: 20, type: "number", width: 90, format: "0.000" },
+      { name: "Run_Environment", index: 21, type: "number", width: 90, format: "0.00" },
+      { name: "FanGraphs_Last_Updated", index: 22, type: "date", width: 130, format: "mm/dd/yyyy hh:mm" },
+      { name: "Statcast_Last_Updated", index: 23, type: "date", width: 130, format: "mm/dd/yyyy hh:mm" },
+      { name: "Notes", index: 24, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  {
+    name: "TODAY_LINEUPS",
+    description: "Batting order projections, recent form splits",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy" },
+      { name: "Game_ID", index: 1, type: "string", width: 80 },
+      { name: "Team", index: 2, type: "string", width: 70 },
+      { name: "Batting_Order", index: 3, type: "number", width: 80, format: "0" },
+      { name: "Player_Name", index: 4, type: "string", width: 120 },
+      { name: "Player_ID", index: 5, type: "string", width: 100 },
+      { name: "Position", index: 6, type: "string", width: 70 },
+      { name: "vs_LHP_wRC_plus", index: 7, type: "number", width: 100, format: "0" },
+      { name: "vs_RHP_wRC_plus", index: 8, type: "number", width: 100, format: "0" },
+      { name: "Last_30_Days_wRC_plus", index: 9, type: "number", width: 110, format: "0" },
+      { name: "Injury_Status", index: 10, type: "string", width: 100 },
+      { name: "Salary", index: 11, type: "currency", width: 100, format: "$#,##0" },
+      { name: "FanGraphs_Projection", index: 12, type: "number", width: 110, format: "0.000" },
+      { name: "Notes", index: 13, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  {
+    name: "TEAM_FORM_INPUT",
+    description: "Recent team-level offensive + defensive context",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy" },
+      { name: "Team", index: 1, type: "string", width: 70 },
+      { name: "Last_10_Runs_Scored", index: 2, type: "number", width: 120, format: "0.0" },
+      { name: "Last_10_Runs_Allowed", index: 3, type: "number", width: 120, format: "0.0" },
+      { name: "Last_10_wOBA", index: 4, type: "number", width: 100, format: "0.000" },
+      { name: "Recent_Strength_of_Schedule", index: 5, type: "string", width: 120 },
+      { name: "Bullpen_Rest_Days", index: 6, type: "number", width: 110, format: "0" },
+      { name: "Notes", index: 7, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  {
+    name: "BULLPEN_USAGE_DAILY",
+    description: "Relief pitcher availability and workload tracking",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy" },
+      { name: "Team", index: 1, type: "string", width: 70 },
+      { name: "Reliever_Name", index: 2, type: "string", width: 120 },
+      { name: "Player_ID", index: 3, type: "string", width: 100 },
+      { name: "Innings_Last_7_Days", index: 4, type: "number", width: 120, format: "0.0" },
+      { name: "Games_Last_7_Days", index: 5, type: "number", width: 120, format: "0" },
+      { name: "Days_Rest", index: 6, type: "number", width: 100, format: "0" },
+      { name: "Role", index: 7, type: "string", width: 100 }, // CLOSER, SETUP, MIDDLE
+      { name: "Notes", index: 8, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  {
+    name: "RUN_ENVIRONMENT",
+    description: "Game context: weather, umpire, park, altitude effects",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy" },
+      { name: "Game_ID", index: 1, type: "string", width: 80 },
+      { name: "Stadium", index: 2, type: "string", width: 140 },
+      { name: "Elevation_Feet", index: 3, type: "number", width: 120, format: "0" },
+      { name: "Temperature_F", index: 4, type: "number", width: 100, format: "0" },
+      { name: "Wind_MPH", index: 5, type: "number", width: 90, format: "0.0" },
+      { name: "Wind_Direction", index: 6, type: "string", width: 100 },
+      { name: "Precipitation_Pct", index: 7, type: "percent", width: 100, format: "0%" },
+      { name: "Humidity_Pct", index: 8, type: "percent", width: 100, format: "0%" },
+      { name: "Home_Run_Factor", index: 9, type: "number", width: 100, format: "0.000" },
+      { name: "Run_Multiplier", index: 10, type: "number", width: 110, format: "0.000" },
+      { name: "Notes", index: 11, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  // ===== COMPUTATION SECTION =====
+  {
+    name: "GAME_INTEGRATION",
+    description: "Per-team aggregation: pulls DAILY_MATCHUPS + computes derived fields",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy", readOnly: true },
+      { name: "Game_ID", index: 1, type: "string", width: 80, readOnly: true },
+      { name: "Team", index: 2, type: "string", width: 70, readOnly: true },
+      { name: "Opponent", index: 3, type: "string", width: 70, readOnly: true },
+      { name: "Is_Home", index: 4, type: "string", width: 70, readOnly: true }, // YES / NO
+      { name: "Pitcher", index: 5, type: "string", width: 120, readOnly: true },
+      { name: "Pitcher_Role", index: 6, type: "string", width: 100, readOnly: true },
+      { name: "Pitcher_Confidence", index: 7, type: "percent", width: 100, format: "0%", readOnly: true },
+      { name: "Expected_Pitches", index: 8, type: "number", width: 110, format: "0", readOnly: true },
+      { name: "Expected_Innings", index: 9, type: "number", width: 110, format: "0.0", readOnly: true },
+      { name: "Opp_Pitcher", index: 10, type: "string", width: 120, readOnly: true },
+      { name: "Opp_Pitcher_Role", index: 11, type: "string", width: 100, readOnly: true },
+      { name: "Lineup_Strength", index: 12, type: "number", width: 110, format: "0.000", readOnly: true }, // VLOOKUP to TODAY_LINEUPS avg
+      { name: "Recent_RS_per_9", index: 13, type: "number", width: 120, format: "0.00", readOnly: true }, // From TEAM_FORM_INPUT
+      { name: "Recent_RA_per_9", index: 14, type: "number", width: 120, format: "0.00", readOnly: true },
+      { name: "Temperature_F", index: 15, type: "number", width: 100, format: "0", readOnly: true },
+      { name: "Wind_MPH", index: 16, type: "number", width: 90, format: "0.0", readOnly: true },
+      { name: "Run_Multiplier", index: 17, type: "number", width: 110, format: "0.000", readOnly: true },
+      { name: "Adjusted_Scoring_Rate", index: 18, type: "number", width: 140, format: "0.00", readOnly: true }, // Recent_RS_per_9 * Run_Multiplier
+      { name: "Notes", index: 19, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  {
+    name: "GAME_SUMMARY",
+    description: "One row per game (17 total). Aggregates GAME_INTEGRATION to game level.",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy", readOnly: true },
+      { name: "Game_ID", index: 1, type: "string", width: 80, readOnly: true },
+      { name: "Away_Team", index: 2, type: "string", width: 70, readOnly: true },
+      { name: "Home_Team", index: 3, type: "string", width: 70, readOnly: true },
+      { name: "Away_Pitcher", index: 4, type: "string", width: 120, readOnly: true },
+      { name: "Home_Pitcher", index: 5, type: "string", width: 120, readOnly: true },
+      { name: "Away_Lineup_Strength", index: 6, type: "number", width: 130, format: "0.000", readOnly: true },
+      { name: "Home_Lineup_Strength", index: 7, type: "number", width: 130, format: "0.000", readOnly: true },
+      { name: "Away_Adjusted_Scoring_Rate", index: 8, type: "number", width: 150, format: "0.00", readOnly: true },
+      { name: "Home_Adjusted_Scoring_Rate", index: 9, type: "number", width: 150, format: "0.00", readOnly: true },
+      { name: "Projected_Away_Runs", index: 10, type: "number", width: 130, format: "0.00", readOnly: true }, // Away_Adjusted_Scoring_Rate * Away_Pitcher_Expected_Innings
+      { name: "Projected_Home_Runs", index: 11, type: "number", width: 130, format: "0.00", readOnly: true },
+      { name: "Projected_Total_Runs", index: 12, type: "number", width: 130, format: "0.00", readOnly: true }, // Projected_Away_Runs + Projected_Home_Runs
+      { name: "Temperature_F", index: 13, type: "number", width: 100, format: "0", readOnly: true },
+      { name: "Wind_MPH", index: 14, type: "number", width: 90, format: "0.0", readOnly: true },
+      { name: "Run_Multiplier", index: 15, type: "number", width: 110, format: "0.000", readOnly: true },
+      { name: "Stadium", index: 16, type: "string", width: 140, readOnly: true },
+      { name: "Notes", index: 17, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  {
+    name: "PLAYER_INTEGRATION",
+    description: "One row per batter. Pulls TODAY_LINEUPS + context from GAME_INTEGRATION.",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy", readOnly: true },
+      { name: "Game_ID", index: 1, type: "string", width: 80, readOnly: true },
+      { name: "Team", index: 2, type: "string", width: 70, readOnly: true },
+      { name: "Player_Name", index: 3, type: "string", width: 120, readOnly: true },
+      { name: "Player_ID", index: 4, type: "string", width: 100, readOnly: true },
+      { name: "Position", index: 5, type: "string", width: 70, readOnly: true },
+      { name: "Batting_Order", index: 6, type: "number", width: 100, format: "0", readOnly: true },
+      { name: "Vs_Pitcher", index: 7, type: "string", width: 120, readOnly: true },
+      { name: "Pitcher_Handedness", index: 8, type: "string", width: 120, readOnly: true }, // L / R
+      { name: "Player_vs_Handedness_wRC", index: 9, type: "number", width: 140, format: "0", readOnly: true }, // VLOOKUP to TODAY_LINEUPS
+      { name: "Player_Last_30_wRC", index: 10, type: "number", width: 120, format: "0", readOnly: true },
+      { name: "Game_Run_Environment", index: 11, type: "number", width: 130, format: "0.000", readOnly: true }, // From GAME_SUMMARY
+      { name: "Adjusted_wRC_plus", index: 12, type: "number", width: 130, format: "0", readOnly: true }, // (Player_vs_Handedness_wRC + Player_Last_30_wRC) / 2 * Game_Run_Environment / 100
+      { name: "Salary", index: 13, type: "currency", width: 100, format: "$#,##0", readOnly: true },
+      { name: "Projected_FPTS", index: 14, type: "number", width: 110, format: "0.00" }, // Manual operator input OR formula
+      { name: "Notes", index: 15, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  // ===== OUTPUT SECTION =====
+  {
+    name: "SLATE_INPUT",
+    description: "Operator input: Vehicle, Line, Odds, Notes. Module 10 seeds with new games.",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy", readOnly: true },
+      { name: "Game_ID", index: 1, type: "string", width: 80, readOnly: true },
+      { name: "Away_Team", index: 2, type: "string", width: 70, readOnly: true },
+      { name: "Home_Team", index: 3, type: "string", width: 70, readOnly: true },
+      { name: "Away_Pitcher", index: 4, type: "string", width: 120, readOnly: true },
+      { name: "Home_Pitcher", index: 5, type: "string", width: 120, readOnly: true },
+      { name: "Candidate_Vehicle", index: 6, type: "string", width: 200 }, // GAME_TOTAL, SPREAD, O3.5, U8.5, etc. Operator fills
+      { name: "Line", index: 7, type: "number", width: 100, format: "0.0" }, // Operator fills: 8.5, -115, etc.
+      { name: "Implied_Probability", index: 8, type: "percent", width: 130, format: "0.0%", readOnly: true }, // Formula from Line
+      { name: "Odds_Decimal", index: 9, type: "number", width: 110, format: "0.000" }, // Operator fills: 1.909, 2.105, etc.
+      { name: "Your_Confidence", index: 10, type: "percent", width: 130, format: "0%" }, // Operator fills
+      { name: "Projected_Value", index: 11, type: "number", width: 120, format: "0.00%", readOnly: true }, // Formula: Your_Confidence - Implied_Probability
+      { name: "Model_Confidence", index: 12, type: "percent", width: 130, format: "0%", readOnly: true }, // From SLATE_BOARD, pulled in
+      { name: "Notes", index: 13, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  {
+    name: "SLATE_BOARD",
+    description: "Decision output: CORE/NOT_CORE + confidence, based on projections vs lines.",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy", readOnly: true },
+      { name: "Game_ID", index: 1, type: "string", width: 80, readOnly: true },
+      { name: "Away_Team", index: 2, type: "string", width: 70, readOnly: true },
+      { name: "Home_Team", index: 3, type: "string", width: 70, readOnly: true },
+      { name: "Vehicle_Type", index: 4, type: "string", width: 150, readOnly: true }, // Game Total, Spread, etc.
+      { name: "Projected_Value", index: 5, type: "string", width: 150, readOnly: true }, // From GAME_SUMMARY
+      { name: "Market_Line", index: 6, type: "number", width: 100, format: "0.0", readOnly: true }, // From SLATE_INPUT
+      { name: "Variance_from_Projection", index: 7, type: "number", width: 150, format: "0.00", readOnly: true }, // Projected - Market
+      { name: "Decision", index: 8, type: "string", width: 100, readOnly: true }, // CORE, NOT_CORE
+      { name: "Confidence", index: 9, type: "percent", width: 110, format: "0%", readOnly: true }, // Based on variance magnitude
+      { name: "Expected_ROI", index: 10, type: "percent", width: 120, format: "0.0%", readOnly: true }, // If Decision=CORE, what's the expected ROI?
+      { name: "Recommendation", index: 11, type: "string", width: 150, readOnly: true }, // STRONG_BUY, BUY, HOLD, PASS
+      { name: "Notes", index: 12, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  {
+    name: "ACTIVE_BOARD_SNAPSHOT",
+    description: "Filtered, live view: only CORE picks + decision history for this slate.",
+    columns: [
+      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy", readOnly: true },
+      { name: "Game_ID", index: 1, type: "string", width: 80, readOnly: true },
+      { name: "Away_Team", index: 2, type: "string", width: 70, readOnly: true },
+      { name: "Home_Team", index: 3, type: "string", width: 70, readOnly: true },
+      { name: "Vehicle", index: 4, type: "string", width: 200, readOnly: true },
+      { name: "Model_Projection", index: 5, type: "number", width: 120, format: "0.00", readOnly: true },
+      { name: "Market_Line", index: 6, type: "number", width: 100, format: "0.0", readOnly: true },
+      { name: "Edge", index: 7, type: "number", width: 90, format: "0.00", readOnly: true },
+      { name: "Confidence", index: 8, type: "percent", width: 110, format: "0%", readOnly: true },
+      { name: "Recommendation", index: 9, type: "string", width: 150, readOnly: true },
+      { name: "Time_Added", index: 10, type: "date", width: 130, format: "mm/dd/yyyy hh:mm:ss", readOnly: true },
+      { name: "Status", index: 11, type: "string", width: 100 }, // PENDING, PLACED, FILLED, WON, LOST, CANCELLED
+      { name: "Placed_At", index: 12, type: "date", width: 130, format: "mm/dd/yyyy hh:mm:ss" },
+      { name: "Result", index: 13, type: "number", width: 100, format: "+$#,##0" },
+      { name: "Notes", index: 14, type: "string", width: 200 },
+    ],
+    frozenRows: 1,
+  },
+
+  // ===== REFERENCE SECTION =====
+  {
+    name: "SCHEMA_REFERENCE",
+    description: "Data dictionary. Column definitions, formulas, data types.",
+    columns: [
+      { name: "Sheet_Name", index: 0, type: "string", width: 120 },
+      { name: "Column_Name", index: 1, type: "string", width: 150 },
+      { name: "Data_Type", index: 2, type: "string", width: 100 },
+      { name: "Purpose", index: 3, type: "string", width: 250 },
+      { name: "Formula_If_Computed", index: 4, type: "string", width: 300 },
+      { name: "Filled_By", index: 5, type: "string", width: 150 }, // MODULE_08, FORMULA, OPERATOR, etc.
+      { name: "Read_Only", index: 6, type: "string", width: 100 }, // YES / NO
+      { name: "Example_Value", index: 7, type: "string", width: 150 },
+    ],
+    frozenRows: 1,
+  },
+];
+
+export const WORKBOOK_NAME_TEMPLATE = "FROSTLINE_Pipeline_{DATE}"; // e.g., FROSTLINE_Pipeline_2026-07-22
+
+```
+
+---
+
+## FILE 2: `src/utils/workbookSetup.ts`
+
+```typescript
+import { GoogleAuth } from "google-auth-library";
+import { sheets_v4, drive_v3, google } from "googleapis";
+import { WORKBOOK_SCHEMA, WORKBOOK_NAME_TEMPLATE } from "../config/workbookSchema";
+
+const auth = new GoogleAuth({
+  scopes: ["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"],
+});
+
+const sheetsClient = google.sheets({ version: "v4", auth });
+const driveClient = google.drive({ version: "v3", auth });
+
+/**
+ * Create a new optimized workbook with all sheets and formulas
+ */
+export async function createOptimizedWorkbook(parentFolderId?: string): Promise<string> {
+  const date = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  const workbookName = WORKBOOK_NAME_TEMPLATE.replace("{DATE}", date);
+
+  console.log(`Creating workbook: ${workbookName}`);
+
+  // 1. Create the workbook
+  const createResponse = await sheetsClient.spreadsheets.create({
+    request

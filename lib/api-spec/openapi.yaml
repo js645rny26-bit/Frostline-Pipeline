@@ -96,6 +96,38 @@ paths:
         "400":
           description: Bad request
 
+  /workbook/create:
+    post:
+      operationId: createWorkbook
+      tags: [pipeline]
+      summary: Create a new optimised Frostline workbook
+      description: >
+        Creates a brand-new Google Spreadsheet with all 13 sheets (schema, column
+        widths, frozen headers, number formats) and populates SCHEMA_REFERENCE.
+        Returns the new workbook ID and URL.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Date stamp to embed in the workbook name (YYYY-MM-DD, defaults to today)
+      responses:
+        "200":
+          description: Workbook created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkbookCreateResult"
+        "207":
+          description: Workbook created with non-fatal errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkbookCreateResult"
+        "500":
+          description: Workbook creation failed
+
   /pipeline/publish:
     post:
       operationId: publishPipeline
@@ -795,4 +827,39 @@ components:
         - module_11
         - module_12
         - workbook_url
+        - errors
+
+    WorkbookCreateResult:
+      type: object
+      properties:
+        workbook_id:
+          type: string
+        workbook_name:
+          type: string
+        workbook_url:
+          type: string
+        sheets_created:
+          type: array
+          items:
+            type: string
+        schema_reference_rows:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              step:
+                type: string
+              error:
+                type: string
+            required:
+              - step
+              - error
+      required:
+        - workbook_id
+        - workbook_name
+        - workbook_url
+        - sheets_created
+        - schema_reference_rows
         - errors

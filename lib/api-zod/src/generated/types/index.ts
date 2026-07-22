@@ -9,6 +9,7 @@
 export * from './activeBoardEntry';
 export * from './archivedFile';
 export * from './consistencyCheck';
+export * from './createWorkbookParams';
 export * from './filesArchived';
 export * from './gameSchedule';
 export * from './gamesSeeded';
@@ -43,3 +44,5 @@ export * from './slateBoardEntry';
 export * from './validationResult';
 export * from './venueInfo';
 export * from './weatherData';
+export * from './workbookCreateResult';
+export * from './workbookCreateResultErrorsItem';

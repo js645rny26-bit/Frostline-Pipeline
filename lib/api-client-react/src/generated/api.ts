@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  CreateWorkbookParams,
   GameSchedule,
   GetPipelineScheduleParams,
   GetPipelineSlateParams,
@@ -28,7 +29,8 @@ import type {
   PipelineSlate,
   PipelineSummary,
   PublishPipelineParams,
-  PublishResult
+  PublishResult,
+  WorkbookCreateResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -390,6 +392,85 @@ export function useGetPipelineSchedule<TData = Awaited<ReturnType<typeof getPipe
 
 
 
+
+export const getCreateWorkbookUrl = (params?: CreateWorkbookParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/workbook/create?${stringifiedParams}` : `/api/workbook/create`
+}
+
+/**
+ * Creates a brand-new Google Spreadsheet with all 13 sheets (schema, column widths, frozen headers, number formats) and populates SCHEMA_REFERENCE. Returns the new workbook ID and URL.
+ * @summary Create a new optimised Frostline workbook
+ */
+export const createWorkbook = async (params?: CreateWorkbookParams, options?: RequestInit): Promise<WorkbookCreateResult> => {
+
+  return customFetch<WorkbookCreateResult>(getCreateWorkbookUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateWorkbookMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWorkbook>>, TError,{params?: CreateWorkbookParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createWorkbook>>, TError,{params?: CreateWorkbookParams}, TContext> => {
+
+const mutationKey = ['createWorkbook'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createWorkbook>>, {params?: CreateWorkbookParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  createWorkbook(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateWorkbookMutationResult = NonNullable<Awaited<ReturnType<typeof createWorkbook>>>
+
+    export type CreateWorkbookMutationError = ErrorType<void>
+
+    /**
+ * @summary Create a new optimised Frostline workbook
+ */
+export const useCreateWorkbook = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWorkbook>>, TError,{params?: CreateWorkbookParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createWorkbook>>,
+        TError,
+        {params?: CreateWorkbookParams},
+        TContext
+      > => {
+      return useMutation(getCreateWorkbookMutationOptions(options));
+    }
 
 export const getPublishPipelineUrl = (params?: PublishPipelineParams,) => {
   const normalizedParams = new URLSearchParams();

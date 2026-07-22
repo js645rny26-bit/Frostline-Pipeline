@@ -326,6 +326,20 @@ export interface PublishResult {
   errors: PipelineError[];
 }
 
+export type WorkbookCreateResultErrorsItem = {
+  step: string;
+  error: string;
+};
+
+export interface WorkbookCreateResult {
+  workbook_id: string;
+  workbook_name: string;
+  workbook_url: string;
+  sheets_created: string[];
+  schema_reference_rows: number;
+  errors: WorkbookCreateResultErrorsItem[];
+}
+
 export type GetPipelineSlateParams = {
 /**
  * Date in YYYY-MM-DD format (defaults to today)
@@ -343,6 +357,13 @@ date?: string;
 export type GetPipelineScheduleParams = {
 /**
  * Date in YYYY-MM-DD format (defaults to today)
+ */
+date?: string;
+};
+
+export type CreateWorkbookParams = {
+/**
+ * Date stamp to embed in the workbook name (YYYY-MM-DD, defaults to today)
  */
 date?: string;
 };

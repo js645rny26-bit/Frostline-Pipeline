@@ -120,6 +120,47 @@ export async function addSheet(workbookId: string, title: string): Promise<void>
   });
 }
 
+export interface CreatedSpreadsheet {
+  spreadsheetId: string;
+  spreadsheetUrl: string;
+  sheets: Array<{ sheetId: number; title: string; index: number }>;
+}
+
+/**
+ * Create a brand-new Google Spreadsheet.
+ * `sheetDefs` is the raw sheets[] array accepted by the Sheets v4 spreadsheets.create body.
+ */
+export async function createSpreadsheet(
+  title: string,
+  sheetDefs: unknown[],
+): Promise<CreatedSpreadsheet> {
+  const raw = (await sheetsRequest("/v4/spreadsheets", {
+    method: "POST",
+    body: { properties: { title }, sheets: sheetDefs },
+  })) as {
+    spreadsheetId: string;
+    spreadsheetUrl: string;
+    sheets: Array<{ properties: { sheetId: number; title: string; index: number } }>;
+  };
+  return {
+    spreadsheetId: raw.spreadsheetId,
+    spreadsheetUrl: raw.spreadsheetUrl,
+    sheets: raw.sheets.map((s) => ({
+      sheetId: s.properties.sheetId,
+      title: s.properties.title,
+      index: s.properties.index,
+    })),
+  };
+}
+
+/** Run a batchUpdate on an existing workbook. */
+export async function batchUpdate(workbookId: string, requests: unknown[]): Promise<void> {
+  await sheetsRequest(`/v4/spreadsheets/${workbookId}:batchUpdate`, {
+    method: "POST",
+    body: { requests },
+  });
+}
+
 // ─── Drive helpers ───────────────────────────────────────────────────────────
 
 export interface DriveFile {
