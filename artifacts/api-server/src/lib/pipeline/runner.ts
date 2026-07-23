@@ -16,7 +16,7 @@ import { fetchPlateUmpires } from "./module04e_umpires.js";
 import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { trackLineMovement } from "./module05d_oddsHistory.js";
-import { fetchMarketOdds, buildOddsMap } from "./module05b_marketOdds.js";
+import { fetchMarketOddsWithFallback, buildOddsMap } from "./module05c_startingNineScraper.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 import { normalizeSlate } from "./module06_normalization.js";
 import { validateNormalizedSlate } from "./module07_validation.js";
@@ -241,7 +241,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: teamRunRates fetch threw — skipping");
       return null;
     }),
-    fetchMarketOdds(date), // never throws — returns status "no_key" | "error" on failure
+    fetchMarketOddsWithFallback(date), // mlbstartingnine primary, OddsAPI fallback
   ]);
 
   if (bullpenResult) {
