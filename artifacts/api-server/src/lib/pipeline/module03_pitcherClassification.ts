@@ -54,28 +54,40 @@ function classifySinglePitcher(
 
   if (!workloadData || workloadData.status === "fetch_error" || workloadData.status === "no_games_in_window") {
     // A pitcher listed as probable IS going to start regardless of workload data availability.
-    // Apply a seasonal-baseline classification: assume CONVENTIONAL_STARTER with moderate confidence
-    // and standard expected values, rather than leaving them UNRESOLVED.
-    const flags: string[] = [];
-    if (workloadData?.status === "no_games_in_window") {
-      flags.push("RETURNING_FROM_IL");
-    } else if (workloadData?.status === "fetch_error") {
-      flags.push("STATCAST_UNAVAILABLE");
-    } else {
-      flags.push("NO_WORKLOAD_DATA");
-    }
+    // Apply a seasonal-baseline classification rather than leaving them UNRESOLVED.
+    // NOTE: "no_games_in_window" means Statcast has no pitch-level data for this pitcher in 60 days —
+    // it does NOT reliably mean they are returning from IL (could be a data lag, new acquisition, etc.).
+    const flag = workloadData?.status === "fetch_error" ? "STATCAST_UNAVAILABLE" : "NO_RECENT_DATA";
     return {
       player_id: pitcherId,
       name: pitcherName,
       hand,
       role: "CONVENTIONAL_STARTER",
-      role_confidence: "moderate",
-      workload_flags: flags,
+      role_confidence: "medium",
+      workload_flags: [flag],
       expected_pitches: 85,
       expected_innings: 5.5,
-      reasoning: workloadData?.status === "no_games_in_window"
-        ? "No data in 60-day window; probable starter classified using seasonal baseline (returning from IL)"
-        : "No Statcast workload data; probable starter classified using seasonal baseline",
+      reasoning: "No Statcast workload data; probable starter classified using seasonal baseline",
+    };
+  }
+
+  // active_wide_window: 30-day window was empty but 60-day had data — genuine IL-return signal.
+  if (workloadData.status === "active_wide_window") {
+    const l30 = workloadData.rolling_stats?.l30;
+    const avgPitches = l30?.avg_pitches_per_appearance ?? 85;
+    const appearances = l30?.appearances ?? 0;
+    const expectedPitches = avgPitches > 0 ? Math.min(avgPitches + 10, 100) : 85;
+    const expectedInnings = parseFloat((expectedPitches / 15).toFixed(1));
+    return {
+      player_id: pitcherId,
+      name: pitcherName,
+      hand,
+      role: "CONVENTIONAL_STARTER",
+      role_confidence: "medium",
+      workload_flags: ["RETURNING_FROM_IL"],
+      expected_pitches: expectedPitches,
+      expected_innings: expectedInnings,
+      reasoning: `No pitches in last 30 days but active in 60-day window (${appearances} appearances); probable IL returnee`,
     };
   }
 

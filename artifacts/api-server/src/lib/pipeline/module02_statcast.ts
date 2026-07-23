@@ -1,11 +1,13 @@
 /**
- * Module 02: Statcast Pitcher Workload
- * Fetches recent pitcher usage data from Baseball Savant.
+ * Module 02: Pitcher Workload
+ * Fetches per-start pitch counts and innings from the MLB Stats API game log endpoint.
+ * Baseball Savant's statcast_search/csv endpoint now returns only aggregated career stats
+ * (one row per pitcher) and no longer serves pitch-level or date-filtered data.
  */
 
 import { logger } from "../../lib/logger.js";
 
-const SAVANT_CSV = "https://baseballsavant.mlb.com/statcast_search/csv";
+const MLB_API = "https://statsapi.mlb.com/api/v1";
 
 export interface PitcherRollingStats {
   appearances: number;
@@ -35,105 +37,104 @@ export interface WorkloadResult {
   status: string;
 }
 
-async function fetchSingleWindow(
-  pitcherId: number,
-  endDate: string,
-  lookbackDays: number,
-): Promise<{ rows: string[]; header: string[]; pitcherName: string } | null> {
-  const startDate = new Date(endDate);
-  startDate.setDate(startDate.getDate() - lookbackDays);
-  const startStr = startDate.toISOString().split("T")[0];
-
-  const url = new URL(SAVANT_CSV);
-  url.searchParams.set("pitcher_id", String(pitcherId));
-  url.searchParams.set("game_date_gte", startStr);
-  url.searchParams.set("game_date_lte", endDate);
-  url.searchParams.set("type", "pitcher");
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
-
-  const response = await fetch(url.toString(), { signal: controller.signal });
-  clearTimeout(timer);
-
-  if (!response.ok) throw new Error(`Statcast HTTP ${response.status}`);
-
-  const text = await response.text();
-  const lines = text.trim().split("\n");
-  if (lines.length < 2) return null;
-
-  const header = lines[0].split(",");
-  const dataRows = lines.slice(1).filter(Boolean);
-  if (dataRows.length === 0) return null;
-
-  const pitcherIdx = header.indexOf("player_name");
-  let pitcherName = "Unknown";
-  if (pitcherIdx >= 0) {
-    pitcherName = dataRows[0].split(",")[pitcherIdx] ?? "Unknown";
-  }
-
-  return { rows: dataRows, header, pitcherName };
+interface GameLogSplit {
+  date: string;
+  stat: {
+    inningsPitched?: string | number;
+    numberOfPitches?: number;
+    battersFaced?: number;
+  };
 }
 
-async function fetchSinglePitcher(
-  pitcherId: number,
-  endDate: string,
-): Promise<PitcherWorkloadData> {
+function parseInnings(ip: string | number | undefined): number {
+  if (ip == null) return 0;
+  const s = String(ip);
+  // "6.2" = 6 full innings + 2 outs = 6.667 innings
+  const parts = s.split(".");
+  const full = parseInt(parts[0] ?? "0", 10);
+  const thirds = parseInt(parts[1] ?? "0", 10);
+  return full + thirds / 3;
+}
+
+function rollingStats(splits: GameLogSplit[], afterDate: string, beforeOrOnDate: string): PitcherRollingStats {
+  const filtered = splits.filter((s) => s.date > afterDate && s.date <= beforeOrOnDate);
+  if (filtered.length === 0) {
+    return { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 };
+  }
+  const totalPitches = filtered.reduce((acc, s) => acc + (s.stat.numberOfPitches ?? 0), 0);
+  const totalInnings = filtered.reduce((acc, s) => acc + parseInnings(s.stat.inningsPitched), 0);
+  const appearances = filtered.length;
+  return {
+    appearances,
+    total_pitch_count: totalPitches,
+    total_innings: parseFloat(totalInnings.toFixed(1)),
+    avg_pitches_per_appearance: appearances > 0 ? Math.round(totalPitches / appearances) : 0,
+  };
+}
+
+async function fetchSinglePitcher(pitcherId: number, endDate: string): Promise<PitcherWorkloadData> {
+  const season = endDate.slice(0, 4);
+  const url = `${MLB_API}/people/${pitcherId}/stats?stats=gameLog&group=pitching&season=${season}`;
+
   try {
-    // Primary: 30-day window. Fallback: 60-day window (catches IL returnees).
-    let result = await fetchSingleWindow(pitcherId, endDate, 30);
-    let windowDays = 30;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
 
-    if (!result) {
-      result = await fetchSingleWindow(pitcherId, endDate, 60);
-      windowDays = 60;
-    }
+    if (!response.ok) throw new Error(`MLB Stats API HTTP ${response.status}`);
 
-    if (!result) {
+    const json = (await response.json()) as { stats?: Array<{ splits?: GameLogSplit[] }> };
+    const splits: GameLogSplit[] = json.stats?.[0]?.splits ?? [];
+
+    if (splits.length === 0) {
       return {
         playerId: pitcherId,
         name: "Unknown",
         status: "no_games_in_window",
         rolling_stats: {
-          l30: { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
-          l14:  { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
+          l30:    { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
+          l14:    { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
           season: { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
         },
         recent_games_count: 0,
       };
     }
 
-    const { rows: dataRows, header, pitcherName } = result;
+    // Date arithmetic — endDate is the game date (today); look back from the day before
+    const through = new Date(endDate);
+    through.setDate(through.getDate() - 1);
+    const throughStr = through.toISOString().split("T")[0]!;
 
-    // Count appearances as unique game dates
-    const gameDateIdx = header.indexOf("game_date");
-    const gameDates = new Set<string>();
-    for (const row of dataRows) {
-      const cols = row.split(",");
-      if (gameDateIdx >= 0 && cols[gameDateIdx]) gameDates.add(cols[gameDateIdx]);
+    const d30 = new Date(through); d30.setDate(d30.getDate() - 30);
+    const d14 = new Date(through); d14.setDate(d14.getDate() - 14);
+    const d60 = new Date(through); d60.setDate(d60.getDate() - 60);
+    const seasonStart = `${season}-01-01`;
+
+    const l30    = rollingStats(splits, d30.toISOString().split("T")[0]!, throughStr);
+    const l14    = rollingStats(splits, d14.toISOString().split("T")[0]!, throughStr);
+    const seasonStats = rollingStats(splits, seasonStart, throughStr);
+    const l60    = rollingStats(splits, d60.toISOString().split("T")[0]!, throughStr);
+
+    // Determine status:
+    // "active"             — pitched in last 30 days
+    // "active_wide_window" — no starts in 30 days but did pitch in 60 days (IL return signal)
+    // "no_games_in_window" — nothing in 60 days (debut / off-season / extended absence)
+    let status: string;
+    if (l30.appearances > 0) {
+      status = "active";
+    } else if (l60.appearances > 0) {
+      status = "active_wide_window";
+    } else {
+      status = "no_games_in_window";
     }
-
-    const appearances = gameDates.size || 1;
-    const totalPitches = dataRows.length; // each row = one pitch in Statcast CSV
-    const avgPitches = appearances > 0 ? Math.round(totalPitches / appearances) : 0;
-
-    const stats = {
-      appearances,
-      total_pitch_count: totalPitches,
-      total_innings: Math.round((totalPitches / 15) * 10) / 10,
-      avg_pitches_per_appearance: avgPitches,
-    };
 
     return {
       playerId: pitcherId,
-      name: pitcherName,
-      status: windowDays > 30 ? "active_wide_window" : "active",
-      rolling_stats: {
-        l30: stats,
-        l14:  { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
-        season: { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
-      },
-      recent_games_count: dataRows.length,
+      name: "Unknown", // name sourced from MLB API in module01, not needed here
+      status,
+      rolling_stats: { l30, l14, season: seasonStats },
+      recent_games_count: l30.appearances,
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -142,8 +143,8 @@ async function fetchSinglePitcher(
       name: "Unknown",
       status: "fetch_error",
       rolling_stats: {
-        l30:   { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
-        l14:   { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
+        l30:    { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
+        l14:    { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
         season: { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
       },
       recent_games_count: 0,
@@ -161,26 +162,23 @@ export async function fetchPitcherWorkload(
   if (pitcherIds.length === 0) {
     return {
       retrieval_timestamp_utc: new Date().toISOString(),
-      retrieval_source: "statcast",
+      retrieval_source: "mlb_stats_api",
       data_through_date: endDate,
       pitchers: [],
       status: "no_pitchers",
     };
   }
 
-  const endDateObj = new Date(endDate);
-  endDateObj.setDate(endDateObj.getDate() - 1);
-  const dataThroughDate = endDateObj.toISOString().split("T")[0];
+  const throughDate = new Date(endDate);
+  throughDate.setDate(throughDate.getDate() - 1);
+  const dataThroughDate = throughDate.toISOString().split("T")[0]!;
 
-  // Fetch all pitchers concurrently (with a concurrency cap)
-  const CONCURRENCY = 5;
+  const CONCURRENCY = 8;
   const results: PitcherWorkloadData[] = [];
 
   for (let i = 0; i < pitcherIds.length; i += CONCURRENCY) {
     const batch = pitcherIds.slice(i, i + CONCURRENCY);
-    const batchResults = await Promise.all(
-      batch.map((id) => fetchSinglePitcher(id, endDate))
-    );
+    const batchResults = await Promise.all(batch.map((id) => fetchSinglePitcher(id, endDate)));
     results.push(...batchResults);
   }
 
@@ -188,7 +186,7 @@ export async function fetchPitcherWorkload(
 
   return {
     retrieval_timestamp_utc: new Date().toISOString(),
-    retrieval_source: "statcast",
+    retrieval_source: "mlb_stats_api",
     data_through_date: dataThroughDate,
     pitchers: results,
     status: results.length > 0 ? "success" : "no_data",
