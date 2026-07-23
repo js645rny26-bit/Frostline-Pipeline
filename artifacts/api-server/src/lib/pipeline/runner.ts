@@ -9,7 +9,9 @@ import { fetchPitcherWorkload } from "./module02_statcast.js";
 import { classifyPitcherRoles } from "./module03_pitcherClassification.js";
 import { fetchWeatherForecasts } from "./module04_openMeteo.js";
 import { fetchTeamSplitsWithFallback } from "./module05_fangraphs.js";
+import { fetchBullpenUsage, buildTeamIdAbbrMap } from "./module04b_bullpenUsage.js";
 import { fetchMarketOdds, buildOddsMap } from "./module05b_marketOdds.js";
+import { SOURCE_MAPPINGS } from "./config.js";
 import { normalizeSlate } from "./module06_normalization.js";
 import { validateNormalizedSlate } from "./module07_validation.js";
 import { writeGoogleSheetsFeed, type Module08Result } from "./module08_feedWriter.js";
@@ -196,8 +198,26 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
 
   const allErrors: Array<{ module: string; error: string; timestamp: string }> = [];
 
+  // Module 04b: Bullpen usage (runs alongside mod08 prep; non-blocking on failure)
+  const slateTeamIds = Array.from(
+    new Set(
+      slate.games.flatMap((g) => [g.away_team?.team_id, g.home_team?.team_id]).filter((id): id is number => typeof id === "number"),
+    ),
+  );
+  const teamAbbrMap = buildTeamIdAbbrMap(SOURCE_MAPPINGS);
+  void teamAbbrMap; // used inside module04b via imported SOURCE_MAPPINGS directly
+  const bullpenResult = await fetchBullpenUsage(date, slateTeamIds).catch((err: unknown) => {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: bullpen fetch threw — continuing without bullpen data");
+    return null;
+  });
+  if (bullpenResult?.status === "partial" || bullpenResult?.status === "failure") {
+    logger.warn({ errors: bullpenResult.errors }, "Full pipeline: bullpen fetch partial/failed");
+  } else if (bullpenResult) {
+    logger.info({ relievers: bullpenResult.relievers.length }, "Full pipeline: bullpen usage ready");
+  }
+
   // Module 08: Write feeds to Google Sheets
-  const mod08 = await writeGoogleSheetsFeed(normalized as Parameters<typeof writeGoogleSheetsFeed>[0], splits, date, workbookId);
+  const mod08 = await writeGoogleSheetsFeed(normalized as Parameters<typeof writeGoogleSheetsFeed>[0], splits, date, workbookId, bullpenResult);
   if (mod08.status === "failure") {
     logger.error("Full pipeline: Module 08 failed — aborting Sheets workflow");
     return {
