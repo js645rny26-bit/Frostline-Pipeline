@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 
 export default function SlatePage() {
-  const [date, setDate] = useState("2026-07-22");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   const { data: slate, isLoading } = useGetPipelineSlate(
     { date },
