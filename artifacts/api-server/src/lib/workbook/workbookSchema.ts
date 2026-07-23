@@ -3,6 +3,16 @@
  * Canonical source of truth for sheet names, column layout, types, and formats.
  */
 
+/**
+ * Schema version — bump whenever column layout changes; stamped into every
+ * RUN_LOG row so each run records which schema wrote it.
+ *  v1 (2026-07-20): initial workbook — 25-col DAILY_MATCHUPS, core sheets.
+ *  v2 (2026-07-23): totals expansion — DAILY_MATCHUPS Z–AU (starter last outing,
+ *      plate ump, season stats, line movement, platoon), bullpen ERA/WHIP/tier,
+ *      ODDS_HISTORY sheet, RUN_LOG Schema_Version column, README sheet.
+ */
+export const WORKBOOK_SCHEMA_VERSION = 2;
+
 export interface ColumnDef {
   name: string;
   index: number;
@@ -405,6 +415,18 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "M11_NotCoreCount", index: 26, type: "number", width: 120, format: "0", filledBy: "MODULE_12", exampleValue: "14" },
       { name: "M11_SlateBoardRows", index: 27, type: "number", width: 130, format: "0", filledBy: "MODULE_12", exampleValue: "17" },
       { name: "Errors", index: 28, type: "string", width: 300, filledBy: "MODULE_12", exampleValue: "[]" },
+      { name: "Schema_Version", index: 29, type: "number", width: 110, format: "0", filledBy: "MODULE_12", description: "WORKBOOK_SCHEMA_VERSION that produced this row", exampleValue: "2" },
+    ],
+  },
+
+  {
+    name: "README",
+    description: "Operator orientation: schema version, SOP links, ownership rules.",
+    section: "META",
+    frozenRows: 0,
+    columns: [
+      { name: "Key", index: 0, type: "string", width: 220, filledBy: "SYSTEM", exampleValue: "Schema version" },
+      { name: "Value", index: 1, type: "string", width: 520, filledBy: "SYSTEM", exampleValue: "2" },
     ],
   },
 ];

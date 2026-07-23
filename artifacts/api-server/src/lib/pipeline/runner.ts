@@ -345,7 +345,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
         : "success";
 
   // Module 12: Append run log row to RUN_LOG sheet (non-blocking — failure is advisory)
-  const mod12 = await archiveRunBundle(slate, mod08, mod09, mod10, mod11, 1, workbookId);
+  const mod12 = await archiveRunBundle(slate, mod08, mod09, mod10, mod11, overallStatus, 1, workbookId);
   if (mod12.status !== "success") {
     // Run log is best-effort; don't downgrade overall status for it
     allErrors.push(...mod12.errors);

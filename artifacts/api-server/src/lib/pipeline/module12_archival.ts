@@ -6,6 +6,7 @@
  */
 
 import { writeRange, readRange, appendRange, addSheet, WORKBOOK_ID } from "../sheets/client.js";
+import { WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
 import { logger } from "../../lib/logger.js";
 import type { Module08Result } from "./module08_feedWriter.js";
 import type { Module09Result } from "./module09_recalculation.js";
@@ -45,6 +46,7 @@ const RUN_LOG_HEADERS = [
   "M11_NotCoreCount",
   "M11_SlateBoardRows",
   "Errors",
+  "Schema_Version",
 ];
 
 export interface ArchivedFile {
@@ -65,19 +67,23 @@ export interface Module12Result {
 }
 
 async function ensureHeaders(workbookId: string): Promise<void> {
-  // Try to read cell A1. If it fails with "Unable to parse range", the sheet
-  // tab doesn't exist yet — create it, then write headers.
+  // Try to read the header row. If it fails with "Unable to parse range", the
+  // sheet tab doesn't exist yet — create it, then write headers. If the row
+  // exists but is missing newer columns (schema grew), rewrite the full header
+  // row in place — data rows are unaffected.
   let sheetExists = true;
   try {
-    const existing = await readRange(workbookId, `${RUN_LOG_SHEET}!A1:A1`);
-    const hasHeader =
-      existing.values &&
-      existing.values[0] &&
-      String(existing.values[0][0]).trim() === "Run_Timestamp";
+    const existing = await readRange(workbookId, `${RUN_LOG_SHEET}!A1:AZ1`);
+    const headerRow = (existing.values?.[0] ?? []).map((c) => String(c ?? "").trim());
+    const lastIdx = RUN_LOG_HEADERS.length - 1;
+    const upToDate =
+      headerRow[0] === "Run_Timestamp" &&
+      headerRow.length >= RUN_LOG_HEADERS.length &&
+      headerRow[lastIdx] === RUN_LOG_HEADERS[lastIdx];
 
-    if (!hasHeader) {
+    if (!upToDate) {
       await writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [RUN_LOG_HEADERS]);
-      logger.info("MODULE_12: RUN_LOG headers written");
+      logger.info("MODULE_12: RUN_LOG headers written/refreshed");
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -102,6 +108,7 @@ export async function archiveRunBundle(
   mod09: Module09Result,
   mod10: Module10Result,
   mod11: Module11Result,
+  pipelineStatus: "success" | "partial_success" | "failure" = "partial_success",
   versionNumber = 1,
   workbookId = WORKBOOK_ID,
 ): Promise<Module12Result> {
@@ -143,7 +150,7 @@ export async function archiveRunBundle(
     archivalTimestamp,                                   // Run_Timestamp
     dateStr,                                             // Date
     bundleName,                                          // Bundle_Name
-    "partial_success",                                   // Pipeline_Status (overwritten by caller if needed)
+    pipelineStatus,                                      // Pipeline_Status (computed by runner)
     slate.total_games,                                   // Total_Games
     slate.validation.status,                             // Validation_Status
     slate.validation.critical_failures.length,           // Critical_Failures
@@ -169,6 +176,7 @@ export async function archiveRunBundle(
     mod11.not_core_count,                                // M11_NotCoreCount
     mod11.slate_board.length,                            // M11_SlateBoardRows
     errorsJson,                                          // Errors
+    WORKBOOK_SCHEMA_VERSION,                             // Schema_Version
   ];
 
   try {

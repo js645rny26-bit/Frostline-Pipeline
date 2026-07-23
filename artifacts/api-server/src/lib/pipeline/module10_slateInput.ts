@@ -142,9 +142,17 @@ export async function seedSlateInput(
         // (preserves anything the operator typed manually)
         let linePopulated = false;
         if (marketLine && isBlank(row[COL_LINE])) {
-          row[COL_CANDIDATE_VEHICLE] = "GAME_TOTAL";
-          row[COL_LINE]             = marketLine.total;
-          row[COL_ODDS]             = marketLine.over_odds;
+          // Per-cell backfill: only fill cells that are blank (or still the seeded
+          // "TBD" placeholder). An operator-typed Candidate_Vehicle or Odds with the
+          // Line left pending must survive the refresh. Market_Available is the one
+          // pipeline-maintained flag in the operator range.
+          if (isBlank(row[COL_CANDIDATE_VEHICLE]) || row[COL_CANDIDATE_VEHICLE] === "TBD") {
+            row[COL_CANDIDATE_VEHICLE] = "GAME_TOTAL";
+          }
+          row[COL_LINE] = marketLine.total;
+          if (isBlank(row[COL_ODDS])) {
+            row[COL_ODDS] = marketLine.over_odds;
+          }
           row[COL_MARKET_AVAILABLE] = true;
           linePopulated = true;
         }

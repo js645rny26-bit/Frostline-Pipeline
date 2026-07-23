@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, CalendarDays, Database, Activity, Snowflake } from "lucide-react";
+import { LayoutDashboard, CalendarDays, Database, Activity, Snowflake, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -9,6 +9,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
     { name: "Pipeline Slate", href: "/slate", icon: Database },
     { name: "Raw Schedule", href: "/schedule", icon: CalendarDays },
+    { name: "Daily SOP", href: "/sop", icon: BookOpen },
   ];
 
   return (
@@ -39,6 +40,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     ? "bg-primary/10 text-primary" 
                     : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                 )}
+                data-testid={`link-nav-${item.href === "/" ? "dashboard" : item.href.slice(1)}`}
               >
                 <Icon className="h-4 w-4" />
                 {item.name}

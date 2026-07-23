@@ -55,12 +55,14 @@ function consensusTotal(points: number[]): number {
   if (points.length === 0) return 0;
   const freq = new Map<number, number>();
   for (const p of points) freq.set(p, (freq.get(p) ?? 0) + 1);
-  let best = points[0]!;
-  let bestCount = 0;
-  for (const [pt, count] of freq) {
-    if (count > bestCount) { bestCount = count; best = pt; }
-  }
-  return best;
+  const bestCount = Math.max(...freq.values());
+  const modes = [...freq.entries()].filter(([, c]) => c === bestCount).map(([pt]) => pt);
+  if (modes.length === 1) return modes[0]!;
+  // Tie between equally common totals — fall back to the median posted total.
+  // Lower-middle element on even counts, so the result is always a line some
+  // book actually posted (never an averaged x.25 that no book offers).
+  const sorted = [...points].sort((a, b) => a - b);
+  return sorted[Math.floor((sorted.length - 1) / 2)]!;
 }
 
 export async function fetchMarketOdds(date: string): Promise<OddsResult> {

@@ -3,6 +3,7 @@ import { Route, Switch, Router as WouterRouter } from 'wouter';
 import Dashboard from '@/pages/dashboard';
 import SlatePage from '@/pages/slate';
 import SchedulePage from '@/pages/schedule';
+import SopPage from '@/pages/sop';
 
 const queryClient = new QueryClient();
 
@@ -23,6 +24,7 @@ function Router() {
       <Route path="/" component={Dashboard} />
       <Route path="/slate" component={SlatePage} />
       <Route path="/schedule" component={SchedulePage} />
+      <Route path="/sop" component={SopPage} />
       <Route component={NotFound} />
     </Switch>
   );

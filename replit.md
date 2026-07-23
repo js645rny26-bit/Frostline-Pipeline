@@ -43,3 +43,5 @@ _Populate as you build — sharp edges, "always run X before Y" rules._
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+
+- Daily operating procedure: `docs/DAILY_SOP.md` — rendered at `/sop` in the dashboard, linked from the workbook README tab. Workbook schema version lives in `workbookSchema.ts` (`WORKBOOK_SCHEMA_VERSION`) and is stamped into each RUN_LOG row.
