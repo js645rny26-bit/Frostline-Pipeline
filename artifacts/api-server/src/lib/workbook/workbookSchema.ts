@@ -310,6 +310,12 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Projected_Value", index: 11, type: "percent", width: 120, format: "0.00%", readOnly: true, filledBy: "FORMULA", description: "Your_Confidence - Implied_Probability", exampleValue: "0.079" },
       { name: "Model_Confidence", index: 12, type: "percent", width: 130, format: "0%", readOnly: true, filledBy: "FORMULA", description: "From SLATE_BOARD", exampleValue: "0.68" },
       { name: "Notes", index: 13, type: "string", width: 200, filledBy: "OPERATOR", exampleValue: "" },
+      // ── Pregame lock fields (X–AB, indices 23–27) — pipeline-maintained ──
+      { name: "Market_Phase", index: 23, type: "string", width: 110, readOnly: true, filledBy: "MODULE_10", description: "PREGAME | LIVE | FINAL — derived from MLB Stats API abstractGameState each publish.", exampleValue: "PREGAME" },
+      { name: "Authoritative_Pregame_Total", index: 24, type: "number", width: 190, format: "0.0", readOnly: true, filledBy: "MODULE_10", description: "Line frozen at the moment Market_Phase first becomes LIVE or FINAL. Never overwritten after that. Module 11 prefers this over the live Line.", exampleValue: "8.5" },
+      { name: "Authoritative_Over_Odds", index: 25, type: "number", width: 170, readOnly: true, filledBy: "MODULE_10", description: "Over odds frozen at the same instant as Authoritative_Pregame_Total.", exampleValue: "-110" },
+      { name: "Authoritative_Under_Odds", index: 26, type: "number", width: 175, readOnly: true, filledBy: "MODULE_10", description: "Under odds frozen at pregame lock time. Defaults to -110 when source does not publish separately.", exampleValue: "-110" },
+      { name: "Pregame_Line_Locked_TS", index: 27, type: "string", width: 185, readOnly: true, filledBy: "MODULE_10", description: "ISO 8601 UTC timestamp when the pregame line was frozen. Null until lock occurs.", exampleValue: "2026-07-23T17:05:12.000Z" },
     ],
   },
 

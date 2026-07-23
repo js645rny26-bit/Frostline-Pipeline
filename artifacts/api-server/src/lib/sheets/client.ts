@@ -166,6 +166,42 @@ export async function batchUpdate(workbookId: string, requests: unknown[]): Prom
   });
 }
 
+/**
+ * Expand a sheet's column grid to at least `targetCols` columns.
+ * No-ops if the sheet is already wide enough.
+ */
+export async function expandSheetColumns(
+  workbookId: string,
+  sheetTitle: string,
+  targetCols: number,
+): Promise<void> {
+  const meta = (await sheetsRequest(
+    `/v4/spreadsheets/${workbookId}?fields=sheets.properties`,
+  )) as {
+    sheets: Array<{
+      properties: {
+        sheetId: number;
+        title: string;
+        gridProperties: { columnCount: number };
+      };
+    }>;
+  };
+  const sheet = meta.sheets.find((s) => s.properties.title === sheetTitle);
+  if (!sheet) throw new Error(`Sheet "${sheetTitle}" not found in workbook`);
+  if ((sheet.properties.gridProperties.columnCount ?? 0) >= targetCols) return;
+  await batchUpdate(workbookId, [
+    {
+      updateSheetProperties: {
+        properties: {
+          sheetId: sheet.properties.sheetId,
+          gridProperties: { columnCount: targetCols },
+        },
+        fields: "gridProperties.columnCount",
+      },
+    },
+  ]);
+}
+
 // ─── Drive helpers ───────────────────────────────────────────────────────────
 
 export interface DriveFile {

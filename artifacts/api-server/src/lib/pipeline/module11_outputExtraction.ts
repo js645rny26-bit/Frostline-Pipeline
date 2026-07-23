@@ -56,11 +56,17 @@ export interface Module11Result {
 // SLATE_INPUT column indices (0-based):
 // A=0: Game_ID, B=1: Date, C=2: Matchup, D=3: Target, E=4: Opposing_Starter
 // F–N = model fields (5–13), O=14: Candidate_Vehicle, P=15: Line, Q=16: Odds
+// X=23: Market_Phase, Y=24: Authoritative_Pregame_Total
+// Z=25: Authoritative_Over_Odds, AA=26: Authoritative_Under_Odds, AB=27: Pregame_Line_Locked_TS
 const SLATE_INPUT_COLS = {
-  GAME_ID:           0,
-  CANDIDATE_VEHICLE: 14,
-  LINE:              15,
-  ODDS:              16,
+  GAME_ID:            0,
+  CANDIDATE_VEHICLE:  14,
+  LINE:               15,   // live market line (may shift during day)
+  ODDS:               16,
+  MARKET_PHASE:       23,
+  AUTH_PREGAME_TOTAL: 24,   // frozen at game-time; prefer this when set
+  AUTH_OVER_ODDS:     25,
+  AUTH_UNDER_ODDS:    26,
 };
 
 function parseNum(v: unknown): number | null {
@@ -156,17 +162,27 @@ export async function extractOutputBoards(
 
   try {
     // ── Read SLATE_INPUT for operator-provided market lines ──
-    const slateInputData = await readRange(workbookId, "SLATE_INPUT!A:Q");
+    // Range extends to AB to cover the pregame lock fields (cols X–AB = 23–27)
+    const slateInputData = await readRange(workbookId, "SLATE_INPUT!A:AB");
     const slateInputRows = (slateInputData.values ?? []).slice(1); // skip header row
 
-    const marketMap = new Map<string, { vehicle: string; line: number | null; odds: number | null }>();
+    const marketMap = new Map<string, { vehicle: string; line: number | null; odds: number | null; phase: string }>();
     for (const row of slateInputRows) {
       const gameId = parseStr(row[SLATE_INPUT_COLS.GAME_ID]);
       if (!gameId) continue;
+
+      // Prefer Authoritative_Pregame_Total (frozen at game-time) over the live
+      // Line (which may have moved after the operator's board-final publish).
+      // Falls back to Line when Auth is not yet set (PREGAME phase).
+      const authTotal = parseNum(row[SLATE_INPUT_COLS.AUTH_PREGAME_TOTAL]);
+      const liveTotal = parseNum(row[SLATE_INPUT_COLS.LINE]);
+      const authOverOdds = parseNum(row[SLATE_INPUT_COLS.AUTH_OVER_ODDS]);
+
       marketMap.set(gameId, {
         vehicle: parseStr(row[SLATE_INPUT_COLS.CANDIDATE_VEHICLE]),
-        line:    parseNum(row[SLATE_INPUT_COLS.LINE]),
-        odds:    parseNum(row[SLATE_INPUT_COLS.ODDS]),
+        line:    authTotal ?? liveTotal,
+        odds:    authOverOdds ?? parseNum(row[SLATE_INPUT_COLS.ODDS]),
+        phase:   parseStr(row[SLATE_INPUT_COLS.MARKET_PHASE]) || "PREGAME",
       });
     }
 

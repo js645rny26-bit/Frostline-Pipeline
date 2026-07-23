@@ -39,7 +39,11 @@ export interface Module10Result {
 // M=12: Confirmation_Gate, N=13: Execution_Status
 // O=14: Candidate_Vehicle, P=15: Line, Q=16: Odds, R=17: Market_Available
 // S=18: Kill_Flag, T=19: Notes, U=20: Owner, V=21: Manual_Kill_Override, W=22: Model_Freeze_Reason
-const OPERATOR_FIELD_INDICES = [14, 15, 16, 17, 18, 19, 20, 21, 22]; // O–W
+// ── Pipeline-maintained pregame lock fields (X–AB) ──────────────────────────
+// X=23: Market_Phase, Y=24: Authoritative_Pregame_Total
+// Z=25: Authoritative_Over_Odds, AA=26: Authoritative_Under_Odds
+// AB=27: Pregame_Line_Locked_TS
+const OPERATOR_FIELD_INDICES = [14, 15, 16, 17, 18, 19, 20, 21, 22]; // O–W (operator-owned)
 const MODEL_FIELDS = [
   "Truth_Family", "Event_Score", "Run_Conversion", "Early_Conversion",
   "Contact_Quality", "Truth_Score", "Vehicle_Score", "Confirmation_Gate", "Execution_Status",
@@ -55,6 +59,15 @@ const COL_LINE             = 15;
 const COL_ODDS             = 16;
 const COL_MARKET_AVAILABLE = 17;
 
+// Column indices for pregame lock fields (pipeline-maintained, never operator-overwritten)
+const COL_MARKET_PHASE         = 23; // X
+const COL_AUTH_PREGAME_TOTAL   = 24; // Y
+const COL_AUTH_OVER_ODDS       = 25; // Z
+const COL_AUTH_UNDER_ODDS      = 26; // AA
+const COL_LINE_LOCKED_TS       = 27; // AB
+
+const MAX_COL_IDX = 27; // AB (was 22/W)
+
 function rowToObject(row: unknown[]): Record<number, unknown> {
   const obj: Record<number, unknown> = {};
   row.forEach((v, i) => { obj[i] = v; });
@@ -68,18 +81,34 @@ function buildModelDefaults() {
 function buildOperatorDefaults(gameId: string, line?: MarketLine) {
   const hasLine = !!line;
   return [
-    hasLine ? "GAME_TOTAL" : "TBD",            // Candidate_Vehicle
-    hasLine ? line.total : null,               // Line
-    hasLine ? line.over_odds : null,           // Odds (over, American)
-    hasLine,                                   // Market_Available
-    false,                                     // Kill_Flag
+    hasLine ? "GAME_TOTAL" : "TBD",            // O: Candidate_Vehicle
+    hasLine ? line.total : null,               // P: Line
+    hasLine ? line.over_odds : null,           // Q: Odds (over, American)
+    hasLine,                                   // R: Market_Available
+    false,                                     // S: Kill_Flag
     hasLine
       ? `Seeded by pipeline; line ${line.total} (${line.bookmaker})`
       : `Seeded by pipeline; awaiting vehicle selection (${gameId})`,
-    "Pending",                                 // Owner
-    false,                                     // Manual_Kill_Override
-    null,                                      // Model_Freeze_Reason
+    "Pending",                                 // U: Owner
+    false,                                     // V: Manual_Kill_Override
+    null,                                      // W: Model_Freeze_Reason
+    // ── Pregame lock fields (X–AB) — pipeline-maintained, never operator-overwritten ──
+    "PREGAME",                                 // X: Market_Phase
+    null,                                      // Y: Authoritative_Pregame_Total
+    null,                                      // Z: Authoritative_Over_Odds
+    null,                                      // AA: Authoritative_Under_Odds
+    null,                                      // AB: Pregame_Line_Locked_TS
   ];
+}
+
+/**
+ * Determine Market_Phase from the game's MLB Stats API abstract game state.
+ * abstractGameState: "Preview" | "Live" | "Final" | null
+ */
+function deriveMarketPhase(abstractGameState: string | null): "PREGAME" | "LIVE" | "FINAL" {
+  if (abstractGameState === "Final") return "FINAL";
+  if (abstractGameState === "Live")  return "LIVE";
+  return "PREGAME";
 }
 
 function rowToArray(obj: Record<number, unknown>, maxIdx: number): unknown[] {
@@ -112,8 +141,8 @@ export async function seedSlateInput(
   };
 
   try {
-    // Read existing SLATE_INPUT (including header)
-    const existing = await readRange(workbookId, "SLATE_INPUT!A:W");
+    // Read existing SLATE_INPUT (including header) — A:AB covers all 28 cols
+    const existing = await readRange(workbookId, "SLATE_INPUT!A:AB");
     const existingRows = existing.values ?? [];
     const dataRows = existingRows.slice(1);
 
@@ -142,10 +171,6 @@ export async function seedSlateInput(
         // (preserves anything the operator typed manually)
         let linePopulated = false;
         if (marketLine && isBlank(row[COL_LINE])) {
-          // Per-cell backfill: only fill cells that are blank (or still the seeded
-          // "TBD" placeholder). An operator-typed Candidate_Vehicle or Odds with the
-          // Line left pending must survive the refresh. Market_Available is the one
-          // pipeline-maintained flag in the operator range.
           if (isBlank(row[COL_CANDIDATE_VEHICLE]) || row[COL_CANDIDATE_VEHICLE] === "TBD") {
             row[COL_CANDIDATE_VEHICLE] = "GAME_TOTAL";
           }
@@ -157,7 +182,24 @@ export async function seedSlateInput(
           linePopulated = true;
         }
 
-        seededRows.push(rowToArray(row, 22));
+        // ── Pregame lock logic (pipeline-maintained, X–AB) ─────────────────
+        const phase = deriveMarketPhase(game.game_status.abstractGameState);
+        row[COL_MARKET_PHASE] = phase;
+
+        // Freeze the line the moment the game goes LIVE or FINAL, once only.
+        // Auth fields survive all subsequent publishes unchanged.
+        if ((phase === "LIVE" || phase === "FINAL") && isBlank(row[COL_AUTH_PREGAME_TOTAL])) {
+          const currentLine = row[COL_LINE];
+          if (!isBlank(currentLine)) {
+            row[COL_AUTH_PREGAME_TOTAL] = currentLine;
+            row[COL_AUTH_OVER_ODDS]     = row[COL_ODDS] ?? -110;
+            row[COL_AUTH_UNDER_ODDS]    = -110; // mlbstartingnine doesn't publish under odds separately
+            row[COL_LINE_LOCKED_TS]     = new Date().toISOString();
+            logger.info({ gameId, phase, line: currentLine }, "MODULE_10: Pregame line frozen");
+          }
+        }
+
+        seededRows.push(rowToArray(row, MAX_COL_IDX));
         output.games_seeded.updated_games++;
         output.seed_results.push({
           legacy_game_id: gameId,
@@ -178,6 +220,8 @@ export async function seedSlateInput(
           ...modelValues,                                                  // F–N: model fields
           ...operatorDefaults,                                             // O–W: operator defaults
         ];
+        // New rows: Market_Phase based on current game state
+        newRow[COL_MARKET_PHASE] = deriveMarketPhase(game.game_status.abstractGameState);
         seededRows.push(newRow);
         output.games_seeded.new_games++;
         output.seed_results.push({
@@ -194,7 +238,7 @@ export async function seedSlateInput(
     if (seededRows.length > 0) {
       await writeRange(
         workbookId,
-        `SLATE_INPUT!A2:W${1 + seededRows.length}`,
+        `SLATE_INPUT!A2:AB${1 + seededRows.length}`,
         seededRows,
       );
     }
