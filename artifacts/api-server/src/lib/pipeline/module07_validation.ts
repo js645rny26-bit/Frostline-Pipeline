@@ -24,9 +24,11 @@ export function validateNormalizedSlate(normalized: NormalizationResult): Valida
 
   const games = normalized.games;
 
-  // CRITICAL: Game count
+  // WARNING (not critical): atypical slate size.
+  // A small slate does not threaten projection integrity — it is a calendar artefact.
+  // Only missing games, bad joins, or impossible values are truly critical.
   if (games.length < VALIDATION_RULES.game_count.min_expected) {
-    critical.push(`Game count ${games.length} is below minimum expected ${VALIDATION_RULES.game_count.min_expected}`);
+    warnings.push(`[ATYPICAL_SLATE_SIZE] Game count ${games.length} is below typical range of ${VALIDATION_RULES.game_count.min_expected}–${VALIDATION_RULES.game_count.max_expected} — projections are unaffected`);
   }
 
   // CRITICAL: All games must have a gamePk

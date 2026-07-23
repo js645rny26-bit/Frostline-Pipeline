@@ -18,10 +18,14 @@ export interface SlateBoardEntry {
   market_line: number | null;
   variance: number | null;
   direction: "OVER" | "UNDER" | "NONE";
-  final_decision: "CORE" | "NOT_CORE" | "PENDING";
+  /** Final truth label. CORE = authorized bet; NO_CORE = blocked; PENDING = no market line. */
+  final_decision: "CORE" | "NO_CORE" | "PENDING";
   confidence: number;
   expected_roi: number;
-  recommendation: string;
+  /** Edge-strength metadata — STRONG_BUY | BUY | LEAN. Not an authorization label. */
+  edge_strength: string;
+  /** Named reason a game did not authorize. Empty string for CORE or PENDING. */
+  core_blocker: string;
 }
 
 export interface ActiveBoardEntry {
@@ -35,7 +39,8 @@ export interface ActiveBoardEntry {
   edge: number;
   direction: "OVER" | "UNDER" | "NONE";
   confidence: number;
-  recommendation: string;
+  /** Edge-strength metadata — STRONG_BUY | BUY | LEAN. */
+  edge_strength: string;
 }
 
 export interface Module11Result {
@@ -44,7 +49,7 @@ export interface Module11Result {
   slate_board: SlateBoardEntry[];
   active_board_snapshot: ActiveBoardEntry[];
   core_count: number;
-  not_core_count: number;
+  no_core_count: number;
   error?: string;
 }
 
@@ -68,40 +73,70 @@ function parseStr(v: unknown): string {
   return v == null ? "" : String(v).trim();
 }
 
+/** Provisional commissioning threshold. Replay historical slates to calibrate. */
+const CORE_THRESHOLD = 1.5;
+
+interface GameEligibilityContext {
+  awayPitcherRole: string;
+  homePitcherRole: string;
+  awayExpectedInnings: number | null;
+  homeExpectedInnings: number | null;
+  bullpenAvailable: boolean;
+}
+
 function computeDecision(
   projectedTotal: number,
   marketLine: number | null,
   vehicle: string,
-): { decision: "CORE" | "NOT_CORE" | "PENDING"; direction: "OVER" | "UNDER" | "NONE"; confidence: number; roi: number; recommendation: string } {
+  gameCtx: GameEligibilityContext,
+): {
+  decision: "CORE" | "NO_CORE" | "PENDING";
+  direction: "OVER" | "UNDER" | "NONE";
+  edgeStrength: string;
+  coreBlocker: string;
+  confidence: number;
+  roi: number;
+} {
+  // Gate 1 — no market line yet
   if (marketLine === null || !vehicle || vehicle === "TBD" || vehicle === "") {
-    return { decision: "PENDING", direction: "NONE", confidence: 0, roi: 0, recommendation: "PENDING" };
+    return { decision: "PENDING", direction: "NONE", edgeStrength: "", coreBlocker: "NO_MARKET_LINE", confidence: 0, roi: 0 };
   }
 
-  const variance   = projectedTotal - marketLine;
-  const absVar     = Math.abs(variance);
-  const isCore     = absVar >= 0.5;
-  const decision   = isCore ? "CORE" : "NOT_CORE";
-
-  // Direction: positive variance → model is above the line → OVER edge
-  //            negative variance → model is below the line → UNDER edge
+  const variance  = projectedTotal - marketLine;
+  const absVar    = Math.abs(variance);
   const direction: "OVER" | "UNDER" | "NONE" =
     variance > 0 ? "OVER" : variance < 0 ? "UNDER" : "NONE";
 
-  const confidence = isCore
+  // Edge-strength metadata (magnitude only — not an authorization label)
+  const edgeStrength =
+    absVar >= 3.0 ? "STRONG_BUY" :
+    absVar >= 2.0 ? "BUY" :
+    absVar >= CORE_THRESHOLD ? "LEAN" : "";
+
+  const confidence = absVar >= CORE_THRESHOLD
     ? parseFloat(Math.min(0.95, 0.55 + absVar * 0.08).toFixed(2))
     : parseFloat(Math.max(0.05, 0.45 - absVar * 0.05).toFixed(2));
 
-  // ROI uses absolute variance — direction is captured separately.
-  // A STRONG_BUY UNDER should show the same positive ROI as a STRONG_BUY OVER.
-  const roi = isCore ? parseFloat((absVar * 0.05).toFixed(3)) : 0;
+  const roi = absVar >= CORE_THRESHOLD ? parseFloat((absVar * 0.05).toFixed(3)) : 0;
 
-  let recommendation: string;
-  if (!isCore)            recommendation = "PASS";
-  else if (absVar >= 2.0) recommendation = "STRONG_BUY";
-  else if (absVar >= 1.0) recommendation = "BUY";
-  else                    recommendation = "HOLD";
+  // Eligibility gates — checked before separation threshold so a large-variance
+  // game backed by incomplete inputs does not slip into CORE.
+  if (gameCtx.awayPitcherRole === "UNRESOLVED" || gameCtx.homePitcherRole === "UNRESOLVED") {
+    return { decision: "NO_CORE", direction, edgeStrength, coreBlocker: "UNRESOLVED_STARTER", confidence, roi: 0 };
+  }
+  if (!gameCtx.awayExpectedInnings || !gameCtx.homeExpectedInnings) {
+    return { decision: "NO_CORE", direction, edgeStrength, coreBlocker: "MISSING_EXPECTED_INNINGS", confidence, roi: 0 };
+  }
+  if (!gameCtx.bullpenAvailable) {
+    return { decision: "NO_CORE", direction, edgeStrength, coreBlocker: "BULLPEN_DATA_UNAVAILABLE", confidence, roi: 0 };
+  }
 
-  return { decision, direction, confidence, roi, recommendation };
+  // Separation gate — provisional 1.5-run threshold
+  if (absVar < CORE_THRESHOLD) {
+    return { decision: "NO_CORE", direction, edgeStrength, coreBlocker: "INSUFFICIENT_PROJECTION_SEPARATION", confidence, roi: 0 };
+  }
+
+  return { decision: "CORE", direction, edgeStrength, coreBlocker: "", confidence, roi };
 }
 
 export async function extractOutputBoards(
@@ -116,7 +151,7 @@ export async function extractOutputBoards(
     slate_board: [],
     active_board_snapshot: [],
     core_count: 0,
-    not_core_count: 0,
+    no_core_count: 0,
   };
 
   try {
@@ -135,7 +170,7 @@ export async function extractOutputBoards(
       });
     }
 
-    // ── Compute SLATE_BOARD — 14 cols A–N, starts row 2 ──
+    // ── Compute SLATE_BOARD — 15 cols A–O, starts row 2 ──
     const sbRows: unknown[][] = [];
 
     for (const gs of gameSummary) {
@@ -143,29 +178,39 @@ export async function extractOutputBoards(
       const variance = market.line !== null
         ? parseFloat((gs.projected_total_runs - market.line).toFixed(2))
         : null;
-      const { decision, direction, confidence, roi, recommendation } = computeDecision(
+
+      const gameCtx: GameEligibilityContext = {
+        awayPitcherRole:      gs.away_pitcher_role,
+        homePitcherRole:      gs.home_pitcher_role,
+        awayExpectedInnings:  gs.away_expected_innings,
+        homeExpectedInnings:  gs.home_expected_innings,
+        bullpenAvailable:     gs.bullpen_available,
+      };
+      const { decision, direction, edgeStrength, coreBlocker, confidence, roi } = computeDecision(
         gs.projected_total_runs,
         market.line,
         market.vehicle,
+        gameCtx,
       );
 
       const entry: SlateBoardEntry = {
-        legacy_game_id: gs.game_id,
-        away_team:      gs.away_team,
-        home_team:      gs.home_team,
-        vehicle_type:   market.vehicle || "TBD",
+        legacy_game_id:  gs.game_id,
+        away_team:       gs.away_team,
+        home_team:       gs.home_team,
+        vehicle_type:    market.vehicle || "TBD",
         projected_total: gs.projected_total_runs,
-        market_line:    market.line,
+        market_line:     market.line,
         variance,
         direction,
-        final_decision: decision,
+        final_decision:  decision,
         confidence,
-        expected_roi:   roi,
-        recommendation,
+        expected_roi:    roi,
+        edge_strength:   edgeStrength,
+        core_blocker:    coreBlocker,
       };
       output.slate_board.push(entry);
-      if (decision === "CORE")     output.core_count++;
-      if (decision === "NOT_CORE") output.not_core_count++;
+      if (decision === "CORE")    output.core_count++;
+      if (decision === "NO_CORE") output.no_core_count++;
 
       sbRows.push([
         gs.date,                         // A: Date
@@ -175,22 +220,23 @@ export async function extractOutputBoards(
         market.vehicle || "TBD",         // E: Vehicle_Type
         gs.projected_total_runs,         // F: Projected_Value
         market.line ?? "",               // G: Market_Line
-        variance ?? "",                  // H: Variance_from_Projection (Model − Market; + = OVER edge, − = UNDER edge)
+        variance ?? "",                  // H: Variance_from_Projection (Model − Market)
         direction,                       // I: Direction (OVER | UNDER | NONE)
-        decision,                        // J: Decision
+        decision,                        // J: Decision (CORE | NO_CORE | PENDING)
         confidence,                      // K: Confidence
-        roi,                             // L: Expected_ROI (always positive; direction tells you which side)
-        recommendation,                  // M: Recommendation
-        "",                              // N: Notes
+        roi,                             // L: Expected_ROI (always positive)
+        edgeStrength,                    // M: Edge_Strength (STRONG_BUY | BUY | LEAN — metadata, not auth)
+        coreBlocker,                     // N: CORE_Blocker (named reason; empty for CORE)
+        "",                              // O: Notes
       ]);
     }
 
-    await clearRange(workbookId, "SLATE_BOARD!A2:N100");
+    await clearRange(workbookId, "SLATE_BOARD!A2:O100");
     if (sbRows.length > 0) {
-      await writeRange(workbookId, `SLATE_BOARD!A2:N${1 + sbRows.length}`, sbRows);
+      await writeRange(workbookId, `SLATE_BOARD!A2:O${1 + sbRows.length}`, sbRows);
     }
     logger.info(
-      { rows: sbRows.length, core: output.core_count, notCore: output.not_core_count },
+      { rows: sbRows.length, core: output.core_count, noCore: output.no_core_count },
       "MODULE_11: SLATE_BOARD written",
     );
 
@@ -213,7 +259,7 @@ export async function extractOutputBoards(
         edge,
         direction:        entry.direction,
         confidence:       entry.confidence,
-        recommendation:   entry.recommendation,
+        edge_strength:    entry.edge_strength,
       };
       output.active_board_snapshot.push(abEntry);
 
@@ -228,7 +274,7 @@ export async function extractOutputBoards(
         edge,                            // H: Edge (absolute value; always positive)
         entry.direction,                 // I: Direction (OVER | UNDER | NONE)
         abEntry.confidence,              // J: Confidence
-        abEntry.recommendation,          // K: Recommendation
+        entry.edge_strength,             // K: Edge_Strength (STRONG_BUY | BUY | LEAN — metadata)
         now,                             // L: Time_Added
         "PENDING",                       // M: Status
         "",                              // N: Placed_At

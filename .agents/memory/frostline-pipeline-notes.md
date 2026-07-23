@@ -18,35 +18,46 @@ DAILY_MATCHUPS col Y (Notes) and BULLPEN_USAGE_DAILY col I (Notes) are pipeline-
 ## Schema drift rule: new board columns need one-off live header writes
 `workbookSetup.ts` only applies to new workbooks. Adding a column to SLATE_BOARD, ACTIVE_BOARD_SNAPSHOT, DAILY_MATCHUPS, etc. requires a one-off `writeRange` to the live workbook's header row (pattern: `.mts` script in artifacts/api-server using `../frostline/node_modules/.bin/tsx`).
 
-## SLATE_BOARD / ACTIVE_BOARD_SNAPSHOT sign convention (as of schema v2, fixed 2026-07-23)
+## SLATE_BOARD / ACTIVE_BOARD_SNAPSHOT sign convention (schema v2+)
 - **Variance_from_Projection = Model − Market** (positive = OVER edge, negative = UNDER edge)
 - **Direction** column (OVER | UNDER | NONE) is explicit in both output sheets
-- **Expected_ROI = |variance| × 0.05** — always positive; direction tells you which side
-- Before this fix, ROI was `variance × 0.05` (sign-preserving), causing negative ROI on UNDER plays despite STRONG_BUY recommendation — a visible contradiction
+- **Expected_ROI = |variance| × 0.05** — always positive
+- **SLATE_BOARD is now A:O (15 cols)**: added CORE_Blocker at N, Notes moved to O
+- **ACTIVE_BOARD_SNAPSHOT is A:P (16 cols)**: K header renamed to Edge_Strength
 
-**Why:** CORE decision is magnitude-only (|variance| ≥ 0.5); Recommendation tiers are also magnitude-only. ROI must follow the same convention or it contradicts the recommendation on UNDER plays.
+## CORE authorization model (commissioning v1, 2026-07-23)
+- **Truth labels**: CORE or NO_CORE only (PENDING if no market line). BUY/STRONG_BUY removed as auth labels.
+- **CORE threshold**: 1.5 runs provisional. Replay historical slates to calibrate (1.25 / 1.5 / 1.75 / 2.0).
+- **Edge_Strength metadata** (not auth): STRONG_BUY ≥ 3.0, BUY ≥ 2.0, LEAN ≥ 1.5, blank for NO_CORE.
+- **Eligibility gates** (checked before separation): UNRESOLVED_STARTER, MISSING_EXPECTED_INNINGS, BULLPEN_DATA_UNAVAILABLE; then INSUFFICIENT_PROJECTION_SEPARATION if absVar < 1.5.
+- **CORE_Blocker column** in SLATE_BOARD (col N) — named reason for every NO_CORE.
+- **Why**: 0.5-run threshold produced 5/5 CORE on every 5-game slate — no filtering value. Eligibility gates prevent large variance from incomplete inputs slipping into CORE.
 
-## Module09 projection formula — two-component model (fixed 2026-07-23)
-The original formula was `projAway = awayAdj × starterIP/9`, which modelled only the starter's innings and zeroed out bullpen innings. This caused structural all-UNDER bias (model always below market) especially severe for opener games (2 IP opener → 78% of team offense vanished).
+## Module09 projection formula — two-component model (2026-07-23)
+Original formula `projAway = awayAdj × starterIP/9` zeroed bullpen innings. Caused structural all-UNDER bias.
 
-**Correct formula:**
+**Current formula (starter + bullpen):**
 ```
-projAway = awayAdj × (starterIP/9) × starterQuality   ← starter innings, ERA-adjusted
-         + awayAdj × ((9−starterIP)/9)                 ← bullpen innings, league average
+projAway = awayAdj × (starterIP/9) × starterQual   ← ERA-adjusted starter innings
+         + awayAdj × ((9−starterIP)/9) × bullpenQual ← individualized bullpen ERA
 ```
-- `starterQuality = clamp(ERA, 2.0, 7.0) / LEAGUE_AVG_ERA (4.20)`
-- Elite starter (ERA 2.06) → quality 0.49 → team scores 49% of usual rate during starter innings
-- Bad starter (ERA 5.70) → quality 1.36 → team scores 136% during starter innings
-- Bullpen always at 1.0 (league-average assumption)
-- `pitcherStatsMap` (Map<number, PitcherSeasonStats>) now passed from runner.ts to `verifyRecalculation`; falls back to ERA = LEAGUE_AVG_ERA (neutral) if no stats
+- `starterQual = clamp(ERA, 2.0, 7.0) / LEAGUE_AVG_ERA (4.20)`
+- `bullpenQual = Available_Bullpen_ERA / LEAGUE_AVG_ERA` — weighted avg ERA of available relievers (days_rest ≥ 1, not HIGH_WORKLOAD), weighted by innings_last_7; falls back to 1.0 (league avg) if < 2 relievers have ERA data
+- Direction note: home bullpen faces away batters; away bullpen faces home batters
+- `pitcherStatsMap` and `bullpenResult` both passed from runner.ts to `verifyRecalculation`
+- **Why**: `awayAdj` is runs/9 innings. Multiplying by `starterIP/9` discarded bullpen innings. Opener games (2 IP) were catastrophically undermodelled.
 
-**Why:** `awayAdj` is in runs/9 innings. Multiplying by `starterIP/9` produced nonsense units and discarded bullpen innings entirely. ERA ratio correctly separates pitcher quality from game-length coverage.
+## GameSummaryRow carries eligibility context
+Fields added: `away_pitcher_role`, `home_pitcher_role`, `away_expected_innings`, `home_expected_innings`, `environment_quality`, `bullpen_available`. Populated in module09, consumed by module11 eligibility gates.
+
+## Validation: slate-size warning not critical (2026-07-23)
+Game count < 13 moved from `critical_failures` to `warnings` in module07_validation.ts. Warning message prefixed `[ATYPICAL_SLATE_SIZE]`. Small slates now produce `validation_status: PASS` and `pipeline_status: success`. Only missing games, bad joins, impossible values, or failed projection outputs are truly critical.
 
 ## Module12 pipeline status was hardcoded (fixed 2026-07-23)
-RUN_LOG `Pipeline_Status` was always `partial_success` regardless of actual outcome. Fixed: runner now computes `overallStatus` and passes it through to `archiveRunBundle`.
+RUN_LOG `Pipeline_Status` was always `partial_success`. Fixed: runner passes true `overallStatus` to `archiveRunBundle`.
 
 ## Odds consensus: mode with median tiebreak (fixed 2026-07-23)
-`consensusTotal()` finds all modes then falls back to lower-middle element of sorted points when tied. Result is always a line some book actually posted.
+`consensusTotal()` finds all modes, falls back to lower-middle sorted element on ties. Always returns a line some book actually posted.
 
 ## SLATE_INPUT backfill is per-cell (fixed 2026-07-23)
 Module 10 back-fills `Candidate_Vehicle` only if blank or "TBD"; `Odds` only if blank. `Market_Available` is the one pipeline-maintained flag in the operator range.

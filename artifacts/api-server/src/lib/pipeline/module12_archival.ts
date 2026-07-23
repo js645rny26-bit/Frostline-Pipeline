@@ -173,7 +173,7 @@ export async function archiveRunBundle(
     mod10.games_seeded.updated_games,                    // M10_UpdatedGames
     mod11.status,                                        // M11_Status
     mod11.core_count,                                    // M11_CoreCount
-    mod11.not_core_count,                                // M11_NotCoreCount
+    mod11.no_core_count,                                 // M11_NoCoreCount
     mod11.slate_board.length,                            // M11_SlateBoardRows
     errorsJson,                                          // Errors
     WORKBOOK_SCHEMA_VERSION,                             // Schema_Version

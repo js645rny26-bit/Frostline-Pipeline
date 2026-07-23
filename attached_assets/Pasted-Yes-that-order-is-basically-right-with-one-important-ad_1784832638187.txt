@@ -1,0 +1,98 @@
+Yes, that order is basically right, with one important adjustment.
+
+1. Tighten CORE first, but do not hard-code 1.5 as truth yet
+
+Raising the threshold from 0.5 to 1.5 runs is directionally correct because 0.5 is clearly not filtering anything meaningful.
+
+But 1.5 should initially be treated as a provisional commissioning threshold, not a proven calibration boundary.
+
+Use:
+
+* CORE: absolute model-to-market separation ≥ 1.5 runs
+* NO CORE: below 1.5 runs
+* Every NO CORE gets the blocker: INSUFFICIENT_PROJECTION_SEPARATION
+
+Then replay historical slates to determine whether 1.25, 1.5, 1.75, or 2.0 actually produces the best combination of accuracy and scarcity.
+
+I would not retain BUY and STRONG_BUY as separate truth classifications. Frostline’s final truth label remains:
+
+* CORE
+* NO CORE
+
+BUY and STRONG_BUY can exist as execution or edge-strength metadata, but they should not become competing authorization labels.
+
+2. Connect bullpen quality immediately afterward
+
+This is the biggest analytical repair.
+
+However, do not simply substitute the average ERA of every reliever listed in BULLPEN_USAGE_DAILY. The bullpen component should represent the likely available relief unit, weighted by:
+
+* projected bullpen innings
+* reliever role
+* recent workload
+* days of rest
+* availability
+* quality tier or ERA
+* opener/bulk-game context
+
+At minimum, build a team-level value such as:
+
+Available_Bullpen_ERA
+
+Then blend:
+
+starter run rate × expected starter innings
+plus
+available bullpen run rate × expected bullpen innings
+
+The current league-average bullpen assumption suppresses real matchup differentiation, especially in opener games and short-leash starts.
+
+3. Rename the slate-size validation result
+
+Agreed. This is operational clarity, not model performance.
+
+A five-game slate should produce something like:
+
+* Pipeline_Status = SUCCESS
+* Validation_Status = VALID_WITH_WARNING
+* Warning_Code = ATYPICAL_SLATE_SIZE
+* Critical_Failures = 0
+
+The validator should only fail when something threatens the integrity of the projections, such as:
+
+* missing games
+* unresolved starters
+* duplicate Game IDs
+* failed joins
+* invalid market lines
+* missing projection outputs
+* impossible values
+
+One additional repair to include with step 1
+
+CORE eligibility should require more than raw separation.
+
+For a total-only engine, use a minimal authorization gate:
+
+* projection separation ≥ provisional threshold
+* valid market line
+* valid starter assignments
+* credible expected innings
+* bullpen input available
+* environment input available
+* projection not dependent on a known stub
+* no unresolved opener/bulk ambiguity
+
+That prevents a 2.0-run projection edge from becoming CORE merely because incomplete inputs produced a large number.
+
+Recommended execution order
+
+1. Raise CORE separation threshold to provisional 1.5 runs
+2. Preserve only CORE / NO CORE as final labels
+3. Add total-specific eligibility gates
+4. Wire individualized available-bullpen quality into projections
+5. Recalculate the slate
+6. Rename the atypical-slate validation warning
+7. Replay prior slates to calibrate the permanent CORE threshold
+
+That is the correct commissioning sequence. The bullpen repair may materially change the projection deltas, so the current five-game slate should be rerun before judging whether the new 1.5 threshold creates appropriate scarcity.

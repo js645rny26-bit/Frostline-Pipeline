@@ -9,16 +9,21 @@ import { logger } from "../../lib/logger.js";
 import type { NormalizationResult, NormalizedGame } from "./module06_normalization.js";
 import type { FangraphsResult } from "./module05_fangraphs.js";
 import type { PitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
+import type { BullpenResult, RelieverStat } from "./module04b_bullpenUsage.js";
 
-/** 2026 MLB league-average ERA used to normalise starter quality. */
+/** 2026 MLB league-average ERA used to normalise pitcher quality. */
 const LEAGUE_AVG_ERA = 4.20;
 
+function clampERA(era: number): number {
+  return Math.max(2.0, Math.min(7.0, era));
+}
+
 /**
- * Starter quality multiplier relative to a league-average pitcher.
- * ERA 2.06 (Sale)  → 2.06/4.20 = 0.49  → batter scores at 49% of usual rate
- * ERA 4.20 (avg)   → 4.20/4.20 = 1.00  → neutral
- * ERA 5.70 (rough) → 5.70/4.20 = 1.36  → batter scores at 136% of usual rate
- * ERA clamped to [2.0, 7.0] to prevent extreme values from unknown or outlier seasons.
+ * Starter quality multiplier: how many runs per inning does this pitcher
+ * allow relative to a league-average pitcher?
+ * ERA 2.06 (Sale)  → 0.49 → batter scores at 49% of usual rate
+ * ERA 4.20 (avg)   → 1.00 → neutral
+ * ERA 5.70 (rough) → 1.36 → batter scores at 136% of usual rate
  */
 function starterQualityFactor(
   pitcherId: number | null,
@@ -26,7 +31,43 @@ function starterQualityFactor(
 ): number {
   if (!pitcherId) return 1.0;
   const era = statsMap.get(pitcherId)?.era ?? LEAGUE_AVG_ERA;
-  return Math.max(2.0, Math.min(7.0, era)) / LEAGUE_AVG_ERA;
+  return clampERA(era) / LEAGUE_AVG_ERA;
+}
+
+/**
+ * Compute a team's Available_Bullpen_ERA: weighted-average ERA of relievers
+ * with ≥ 1 day of rest, weighted by innings pitched over the last 7 days
+ * (more frequent pitchers are more likely to appear).
+ * Returns null if fewer than 2 relievers have season ERA data (caller falls
+ * back to LEAGUE_AVG_ERA).
+ */
+function computeTeamBullpenERA(
+  teamAbbr: string,
+  relievers: RelieverStat[],
+  statsMap: Map<number, PitcherSeasonStats>,
+): number | null {
+  const available = relievers.filter(
+    (r) => r.team_abbr === teamAbbr && r.days_rest >= 1 && r.role !== "HIGH_WORKLOAD",
+  );
+
+  let weightedERASum = 0;
+  let totalWeight = 0;
+
+  for (const r of available) {
+    if (!r.player_id) continue;
+    const era = statsMap.get(r.player_id)?.era;
+    if (era === null || era === undefined) continue;
+    // Weight = recent innings (more appearances → higher weight), min 0.1
+    const weight = Math.max(0.1, r.innings_last_7);
+    weightedERASum += clampERA(era) * weight;
+    totalWeight += weight;
+  }
+
+  if (totalWeight === 0 || available.filter((r) => r.player_id && statsMap.get(r.player_id ?? 0)?.era != null).length < 2) {
+    return null;
+  }
+
+  return parseFloat((weightedERASum / totalWeight).toFixed(2));
 }
 
 export interface RecalcCheck {
@@ -50,11 +91,18 @@ export interface GameSummaryRow {
   home_team: string;
   away_pitcher: string;
   home_pitcher: string;
+  away_pitcher_role: string;
+  home_pitcher_role: string;
+  away_expected_innings: number | null;
+  home_expected_innings: number | null;
   projected_away_runs: number;
   projected_home_runs: number;
   projected_total_runs: number;
   run_multiplier: number;
   stadium: string;
+  environment_quality: "good" | "fallback";
+  /** True when bullpen ERA data was available for both teams in this game. */
+  bullpen_available: boolean;
 }
 
 export interface Module09Result {
@@ -101,11 +149,25 @@ export async function verifyRecalculation(
   splits: FangraphsResult,
   workbookId = WORKBOOK_ID,
   pitcherStatsMap: Map<number, PitcherSeasonStats> = new Map(),
+  bullpenResult: BullpenResult | null = null,
 ): Promise<Module09Result> {
   const startTime = Date.now();
   logger.info({ games: normalized.games.length }, "MODULE_09: Computing GAME_INTEGRATION + GAME_SUMMARY");
 
   const gameSummaryRows: GameSummaryRow[] = [];
+
+  // ── Build team Available_Bullpen_ERA map ──
+  const teamBullpenERAMap = new Map<string, number>();
+  if (bullpenResult && bullpenResult.status !== "failure") {
+    const teamsOnSlate = [...new Set(
+      normalized.games.flatMap((g) => [g.away_team.team_abbr ?? "", g.home_team.team_abbr ?? ""].filter(Boolean)),
+    )];
+    for (const team of teamsOnSlate) {
+      const era = computeTeamBullpenERA(team, bullpenResult.relievers, pitcherStatsMap);
+      if (era !== null) teamBullpenERAMap.set(team, era);
+    }
+    logger.info({ teams: teamBullpenERAMap.size }, "MODULE_09: Team bullpen ERA map built");
+  }
 
   // ── GAME_INTEGRATION — 2 rows per game (away-perspective + home-perspective) ──
   // Schema: 20 cols A–T, data starts row 2
@@ -171,22 +233,36 @@ export async function verifyRecalculation(
     const homeQual = starterQualityFactor(g.home_pitcher.player_id, pitcherStatsMap);
     const awayQual = starterQualityFactor(g.away_pitcher.player_id, pitcherStatsMap);
 
-    const projAway  = parseFloat((awayAdj * (homePitchExp / 9) * homeQual + awayAdj * (9 - homePitchExp) / 9).toFixed(2));
-    const projHome  = parseFloat((homeAdj * (awayPitchExp / 9) * awayQual + homeAdj * (9 - awayPitchExp) / 9).toFixed(2));
+    // Bullpen quality: use team's Available_Bullpen_ERA; fall back to league average.
+    // Note direction: home BULLPEN faces AWAY batters; away BULLPEN faces HOME batters.
+    const homeBullpenQual = (teamBullpenERAMap.get(g.home_team.team_abbr ?? "") ?? LEAGUE_AVG_ERA) / LEAGUE_AVG_ERA;
+    const awayBullpenQual = (teamBullpenERAMap.get(g.away_team.team_abbr ?? "") ?? LEAGUE_AVG_ERA) / LEAGUE_AVG_ERA;
+
+    const projAway  = parseFloat((awayAdj * (homePitchExp / 9) * homeQual + awayAdj * (9 - homePitchExp) / 9 * homeBullpenQual).toFixed(2));
+    const projHome  = parseFloat((homeAdj * (awayPitchExp / 9) * awayQual + homeAdj * (9 - awayPitchExp) / 9 * awayBullpenQual).toFixed(2));
     const projTotal = parseFloat((projAway + projHome).toFixed(2));
 
+    const bullpenCoverage = teamBullpenERAMap.has(g.home_team.team_abbr ?? "") &&
+                            teamBullpenERAMap.has(g.away_team.team_abbr ?? "");
+
     gameSummaryRows.push({
-      game_id:              g.legacy_game_id,
-      date:                 g.date,
-      away_team:            g.away_team.team_abbr ?? "",
-      home_team:            g.home_team.team_abbr ?? "",
-      away_pitcher:         g.away_pitcher.name ?? "",
-      home_pitcher:         g.home_pitcher.name ?? "",
-      projected_away_runs:  projAway,
-      projected_home_runs:  projHome,
-      projected_total_runs: projTotal,
-      run_multiplier:       runMult,
-      stadium:              g.venue.name ?? "",
+      game_id:               g.legacy_game_id,
+      date:                  g.date,
+      away_team:             g.away_team.team_abbr ?? "",
+      home_team:             g.home_team.team_abbr ?? "",
+      away_pitcher:          g.away_pitcher.name ?? "",
+      home_pitcher:          g.home_pitcher.name ?? "",
+      away_pitcher_role:     g.away_pitcher.role ?? "UNRESOLVED",
+      home_pitcher_role:     g.home_pitcher.role ?? "UNRESOLVED",
+      away_expected_innings: g.away_pitcher.expected_innings ?? null,
+      home_expected_innings: g.home_pitcher.expected_innings ?? null,
+      projected_away_runs:   projAway,
+      projected_home_runs:   projHome,
+      projected_total_runs:  projTotal,
+      run_multiplier:        runMult,
+      stadium:               g.venue.name ?? "",
+      environment_quality:   g.environment.data_quality === "good" ? "good" : "fallback",
+      bullpen_available:     bullpenCoverage,
     });
 
     gsRows.push([

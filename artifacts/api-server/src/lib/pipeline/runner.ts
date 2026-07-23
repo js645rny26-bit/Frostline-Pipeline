@@ -312,7 +312,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_08: mod08,
       module_09: { status: "error", verification_timestamp_utc: new Date().toISOString(), checks: { game_integration: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, game_summary: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, consistency_check: { status: "inconsistent", read_1_timestamp: "", read_2_timestamp: "", diff_seconds: 0 } }, recalculation_time_ms: 0, game_summary_rows: [] },
       module_10: { status: "failure", seeding_timestamp_utc: new Date().toISOString(), games_seeded: { new_games: 0, updated_games: 0, total_games: 0 }, rows_written: 0, seed_results: [], errors: [{ module: "10", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
-      module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, not_core_count: 0, error: "Skipped: Module 08 failed" },
+      module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, no_core_count: 0, error: "Skipped: Module 08 failed" },
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
@@ -325,6 +325,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     splits,
     workbookId,
     pitcherSeasonStats?.stats ?? new Map(),
+    bullpenResult,
   );
   if (mod09.status === "error") {
     logger.warn({ status: mod09.status }, "Full pipeline: Module 09 computation error — continuing");
