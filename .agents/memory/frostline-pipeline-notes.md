@@ -20,20 +20,36 @@ DAILY_MATCHUPS col Y (Notes) and BULLPEN_USAGE_DAILY col I (Notes) are pipeline-
 
 ## SLATE_BOARD / ACTIVE_BOARD_SNAPSHOT sign convention (as of schema v2, fixed 2026-07-23)
 - **Variance_from_Projection = Model − Market** (positive = OVER edge, negative = UNDER edge)
-- **Direction** column (OVER | UNDER | NONE) is now explicit in both output sheets
+- **Direction** column (OVER | UNDER | NONE) is explicit in both output sheets
 - **Expected_ROI = |variance| × 0.05** — always positive; direction tells you which side
 - Before this fix, ROI was `variance × 0.05` (sign-preserving), causing negative ROI on UNDER plays despite STRONG_BUY recommendation — a visible contradiction
 
 **Why:** CORE decision is magnitude-only (|variance| ≥ 0.5); Recommendation tiers are also magnitude-only. ROI must follow the same convention or it contradicts the recommendation on UNDER plays.
 
+## Module09 projection formula — two-component model (fixed 2026-07-23)
+The original formula was `projAway = awayAdj × starterIP/9`, which modelled only the starter's innings and zeroed out bullpen innings. This caused structural all-UNDER bias (model always below market) especially severe for opener games (2 IP opener → 78% of team offense vanished).
+
+**Correct formula:**
+```
+projAway = awayAdj × (starterIP/9) × starterQuality   ← starter innings, ERA-adjusted
+         + awayAdj × ((9−starterIP)/9)                 ← bullpen innings, league average
+```
+- `starterQuality = clamp(ERA, 2.0, 7.0) / LEAGUE_AVG_ERA (4.20)`
+- Elite starter (ERA 2.06) → quality 0.49 → team scores 49% of usual rate during starter innings
+- Bad starter (ERA 5.70) → quality 1.36 → team scores 136% during starter innings
+- Bullpen always at 1.0 (league-average assumption)
+- `pitcherStatsMap` (Map<number, PitcherSeasonStats>) now passed from runner.ts to `verifyRecalculation`; falls back to ERA = LEAGUE_AVG_ERA (neutral) if no stats
+
+**Why:** `awayAdj` is in runs/9 innings. Multiplying by `starterIP/9` produced nonsense units and discarded bullpen innings entirely. ERA ratio correctly separates pitcher quality from game-length coverage.
+
 ## Module12 pipeline status was hardcoded (fixed 2026-07-23)
-RUN_LOG `Pipeline_Status` was always `partial_success` regardless of actual outcome. Fixed: runner now computes `overallStatus` and passes it through to `archiveRunBundle`. The `partial_success` in earlier RUN_LOG rows reflects the bug, not small-slate validation.
+RUN_LOG `Pipeline_Status` was always `partial_success` regardless of actual outcome. Fixed: runner now computes `overallStatus` and passes it through to `archiveRunBundle`.
 
 ## Odds consensus: mode with median tiebreak (fixed 2026-07-23)
-`consensusTotal()` now finds all modes (equally most-common totals), then falls back to the lower-middle element of the full sorted points array when there's a tie. Result is always a line some book actually posted — never an averaged x.25 half-point.
+`consensusTotal()` finds all modes then falls back to lower-middle element of sorted points when tied. Result is always a line some book actually posted.
 
 ## SLATE_INPUT backfill is per-cell (fixed 2026-07-23)
-Module 10 back-fills blank Line/Odds/Vehicle only when `Line` is blank. After the fix: `Candidate_Vehicle` is only overwritten if it is blank or still "TBD"; `Odds` is only overwritten if blank. `Market_Available` is the one pipeline-maintained flag inside the operator range.
+Module 10 back-fills `Candidate_Vehicle` only if blank or "TBD"; `Odds` only if blank. `Market_Available` is the one pipeline-maintained flag in the operator range.
 
 ## One-off workbook script pattern
 Run `.mts` scripts in `artifacts/api-server/` using `../frostline/node_modules/.bin/tsx <file>.mts`. Plain `pnpm exec tsx` fails there. Import from `./src/lib/sheets/client.js` and `./src/lib/workbook/workbookSchema.js` (compiled JS extensions required).

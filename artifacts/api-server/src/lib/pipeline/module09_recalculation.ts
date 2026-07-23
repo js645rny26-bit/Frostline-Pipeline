@@ -8,6 +8,26 @@ import { clearRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { NormalizationResult, NormalizedGame } from "./module06_normalization.js";
 import type { FangraphsResult } from "./module05_fangraphs.js";
+import type { PitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
+
+/** 2026 MLB league-average ERA used to normalise starter quality. */
+const LEAGUE_AVG_ERA = 4.20;
+
+/**
+ * Starter quality multiplier relative to a league-average pitcher.
+ * ERA 2.06 (Sale)  → 2.06/4.20 = 0.49  → batter scores at 49% of usual rate
+ * ERA 4.20 (avg)   → 4.20/4.20 = 1.00  → neutral
+ * ERA 5.70 (rough) → 5.70/4.20 = 1.36  → batter scores at 136% of usual rate
+ * ERA clamped to [2.0, 7.0] to prevent extreme values from unknown or outlier seasons.
+ */
+function starterQualityFactor(
+  pitcherId: number | null,
+  statsMap: Map<number, PitcherSeasonStats>,
+): number {
+  if (!pitcherId) return 1.0;
+  const era = statsMap.get(pitcherId)?.era ?? LEAGUE_AVG_ERA;
+  return Math.max(2.0, Math.min(7.0, era)) / LEAGUE_AVG_ERA;
+}
 
 export interface RecalcCheck {
   status: "verified" | "error" | "timeout";
@@ -80,6 +100,7 @@ export async function verifyRecalculation(
   normalized: NormalizationResult,
   splits: FangraphsResult,
   workbookId = WORKBOOK_ID,
+  pitcherStatsMap: Map<number, PitcherSeasonStats> = new Map(),
 ): Promise<Module09Result> {
   const startTime = Date.now();
   logger.info({ games: normalized.games.length }, "MODULE_09: Computing GAME_INTEGRATION + GAME_SUMMARY");
@@ -139,13 +160,19 @@ export async function verifyRecalculation(
     const awayAdj = awayRS * runMult;
     const homeAdj = homeRS * runMult;
 
-    // Away team bats against HOME pitcher (home pitcher's innings = away batting innings)
-    // Home team bats against AWAY pitcher
+    // Away team bats against HOME pitcher; home team bats against AWAY pitcher.
+    // Two-component projection — models the full 9 innings:
+    //   Starter innings : team_rate × (starterIP/9) × starterQuality (ERA-adjusted)
+    //   Bullpen innings : team_rate × ((9−starterIP)/9) × 1.0 (league-average assumption)
+    // This prevents opener games from being drastically undermodelled.
     const homePitchExp = g.home_pitcher.expected_innings ?? 5.5;
     const awayPitchExp = g.away_pitcher.expected_innings ?? 5.5;
 
-    const projAway  = parseFloat((awayAdj * homePitchExp / 9).toFixed(2));
-    const projHome  = parseFloat((homeAdj * awayPitchExp / 9).toFixed(2));
+    const homeQual = starterQualityFactor(g.home_pitcher.player_id, pitcherStatsMap);
+    const awayQual = starterQualityFactor(g.away_pitcher.player_id, pitcherStatsMap);
+
+    const projAway  = parseFloat((awayAdj * (homePitchExp / 9) * homeQual + awayAdj * (9 - homePitchExp) / 9).toFixed(2));
+    const projHome  = parseFloat((homeAdj * (awayPitchExp / 9) * awayQual + homeAdj * (9 - awayPitchExp) / 9).toFixed(2));
     const projTotal = parseFloat((projAway + projHome).toFixed(2));
 
     gameSummaryRows.push({

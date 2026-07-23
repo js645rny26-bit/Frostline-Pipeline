@@ -320,7 +320,12 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   }
 
   // Module 09: Compute + write GAME_INTEGRATION and GAME_SUMMARY
-  const mod09 = await verifyRecalculation(normalized as Parameters<typeof verifyRecalculation>[0], splits, workbookId);
+  const mod09 = await verifyRecalculation(
+    normalized as Parameters<typeof verifyRecalculation>[0],
+    splits,
+    workbookId,
+    pitcherSeasonStats?.stats ?? new Map(),
+  );
   if (mod09.status === "error") {
     logger.warn({ status: mod09.status }, "Full pipeline: Module 09 computation error — continuing");
   }
