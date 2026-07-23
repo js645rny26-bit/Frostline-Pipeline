@@ -12,6 +12,10 @@ import { fetchTeamSplitsWithFallback } from "./module05_fangraphs.js";
 import { fetchBullpenUsage } from "./module04b_bullpenUsage.js";
 import { fetchStartingNine, buildStartingNineMap } from "./module04c_startingNine.js";
 import { fetchStarterPrevOutings } from "./module04d_starterPrevOuting.js";
+import { fetchPlateUmpires } from "./module04e_umpires.js";
+import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
+import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
+import { trackLineMovement } from "./module05d_oddsHistory.js";
 import { fetchMarketOdds, buildOddsMap } from "./module05b_marketOdds.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 import { normalizeSlate } from "./module06_normalization.js";
@@ -212,7 +216,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // Fetch schedule manifest for pitcher IDs (needed by module04d)
   const manifest = await fetchMlbSchedule(date).catch(() => null);
 
-  const [bullpenResult, startingNineResult, starterOutings] = await Promise.all([
+  const [bullpenResult, startingNineResult, starterOutings, umpireResult, teamRunRates, oddsResult] = await Promise.all([
     fetchBullpenUsage(date, slateTeamIds).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: bullpen fetch threw — skipping");
       return null;
@@ -227,6 +231,17 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
           return null;
         })
       : Promise.resolve(null),
+    manifest
+      ? fetchPlateUmpires(manifest).catch((err: unknown) => {
+          logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: umpire fetch threw — skipping");
+          return null;
+        })
+      : Promise.resolve(null),
+    fetchTeamRunRates(date).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: teamRunRates fetch threw — skipping");
+      return null;
+    }),
+    fetchMarketOdds(date), // never throws — returns status "no_key" | "error" on failure
   ]);
 
   if (bullpenResult) {
@@ -241,6 +256,36 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     const lvl = starterOutings.status === "success" ? "info" : "warn";
     logger[lvl]({ fetched: starterOutings.fetched, status: starterOutings.status }, "Full pipeline: starter outings ready");
   }
+  if (umpireResult) {
+    logger.info({ assigned: umpireResult.assigned, total: umpireResult.total_games }, "Full pipeline: plate umpires ready");
+  }
+
+  // Module 05b/05d: market odds → history snapshot → line movement
+  const oddsMap = buildOddsMap(oddsResult);
+  if (oddsResult.status === "success") {
+    logger.info({ lines: oddsMap.size, remaining: oddsResult.requests_remaining }, "Full pipeline: Market odds fetched");
+  } else if (oddsResult.status === "error") {
+    logger.warn({ err: oddsResult.error }, "Full pipeline: Market odds fetch failed — continuing without lines");
+  }
+  const lineMovement = await trackLineMovement(oddsResult, workbookId);
+
+  // Module 02b: season stats for every starter + reliever on the slate (batched)
+  const statIds: number[] = [];
+  if (manifest) {
+    for (const g of manifest.games) {
+      if (g.awayProbablePitcher.id) statIds.push(g.awayProbablePitcher.id);
+      if (g.homeProbablePitcher.id) statIds.push(g.homeProbablePitcher.id);
+    }
+  }
+  if (bullpenResult) {
+    for (const r of bullpenResult.relievers) {
+      if (r.player_id) statIds.push(r.player_id);
+    }
+  }
+  const pitcherSeasonStats = await fetchPitcherSeasonStats(statIds, date.slice(0, 4)).catch((err: unknown) => {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: pitcher season stats threw — skipping");
+    return null;
+  });
 
   // Module 08: Write feeds to Google Sheets
   const mod08 = await writeGoogleSheetsFeed(
@@ -251,6 +296,10 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     bullpenResult,
     startingNineResult,
     starterOutings,
+    umpireResult,
+    pitcherSeasonStats,
+    teamRunRates,
+    lineMovement,
   );
   if (mod08.status === "failure") {
     logger.error("Full pipeline: Module 08 failed — aborting Sheets workflow");
@@ -276,16 +325,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     logger.warn({ status: mod09.status }, "Full pipeline: Module 09 computation error — continuing");
   }
 
-  // Module 05b: Fetch market odds (non-blocking — empty map on failure/no key)
-  const oddsResult = await fetchMarketOdds(date);
-  const oddsMap = buildOddsMap(oddsResult);
-  if (oddsResult.status === "success") {
-    logger.info({ lines: oddsMap.size, remaining: oddsResult.requests_remaining }, "Full pipeline: Market odds fetched");
-  } else if (oddsResult.status === "error") {
-    logger.warn({ err: oddsResult.error }, "Full pipeline: Market odds fetch failed — continuing without lines");
-  }
-
-  // Module 10: Seed SLATE_INPUT (run regardless to preserve operator fields)
+  // Module 10: Seed SLATE_INPUT (odds fetched earlier, reused here)
   const mod10 = await seedSlateInput(normalized as Parameters<typeof seedSlateInput>[0], workbookId, oddsMap);
   if (mod10.status === "failure") {
     allErrors.push(...mod10.errors);

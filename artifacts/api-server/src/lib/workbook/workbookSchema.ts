@@ -12,7 +12,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_08" | "MODULE_10" | "FORMULA" | "OPERATOR" | "MODULE_12" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_10" | "FORMULA" | "OPERATOR" | "MODULE_12" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -66,6 +66,33 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "FanGraphs_Last_Updated", index: 22, type: "date", width: 130, format: "mm/dd/yyyy hh:mm", filledBy: "MODULE_08", exampleValue: "07/22/2026 08:00" },
       { name: "Statcast_Last_Updated", index: 23, type: "date", width: 130, format: "mm/dd/yyyy hh:mm", filledBy: "MODULE_08", exampleValue: "07/22/2026 06:00" },
       { name: "Notes", index: 24, type: "string", width: 200, filledBy: "OPERATOR", exampleValue: "Dome game — weather neutral" },
+      // ── Starter previous outing (module 04d) ────────────────────────────────
+      { name: "Away_Last_Outing_Date", index: 25, type: "string", width: 110, filledBy: "MODULE_08", exampleValue: "2026-07-18" },
+      { name: "Away_Last_IP", index: 26, type: "number", width: 90, format: "0.0", filledBy: "MODULE_08", description: "Baseball notation: 3.2 = 3⅔ IP", exampleValue: "5.2" },
+      { name: "Away_Last_Pitches", index: 27, type: "number", width: 100, format: "0", filledBy: "MODULE_08", exampleValue: "94" },
+      { name: "Away_Days_Rest", index: 28, type: "number", width: 90, format: "0", filledBy: "MODULE_08", exampleValue: "5" },
+      { name: "Away_Stress_Flag", index: 29, type: "string", width: 110, filledBy: "MODULE_08", description: "NORMAL, SHORT_REST, KNOCKED_OUT, DEEP_OUTING", exampleValue: "NORMAL" },
+      { name: "Home_Last_Outing_Date", index: 30, type: "string", width: 110, filledBy: "MODULE_08", exampleValue: "2026-07-17" },
+      { name: "Home_Last_IP", index: 31, type: "number", width: 90, format: "0.0", filledBy: "MODULE_08", description: "Baseball notation: 3.2 = 3⅔ IP", exampleValue: "7.0" },
+      { name: "Home_Last_Pitches", index: 32, type: "number", width: 100, format: "0", filledBy: "MODULE_08", exampleValue: "89" },
+      { name: "Home_Days_Rest", index: 33, type: "number", width: 90, format: "0", filledBy: "MODULE_08", exampleValue: "6" },
+      { name: "Home_Stress_Flag", index: 34, type: "string", width: 110, filledBy: "MODULE_08", description: "NORMAL, SHORT_REST, KNOCKED_OUT, DEEP_OUTING", exampleValue: "DEEP_OUTING" },
+      // ── Plate umpire (module 04e; blank before ~noon ET) ────────────────────
+      { name: "Plate_Umpire", index: 35, type: "string", width: 130, filledBy: "MODULE_08", exampleValue: "Pat Hoberg" },
+      // ── Starter season stats (module 02b) ───────────────────────────────────
+      { name: "Away_ERA", index: 36, type: "number", width: 80, format: "0.00", filledBy: "MODULE_08", exampleValue: "3.85" },
+      { name: "Away_FIP", index: 37, type: "number", width: 80, format: "0.00", filledBy: "MODULE_08", exampleValue: "3.99" },
+      { name: "Away_K_Pct", index: 38, type: "percent", width: 90, format: "0.0%", filledBy: "MODULE_08", exampleValue: "0.272" },
+      { name: "Home_ERA", index: 39, type: "number", width: 80, format: "0.00", filledBy: "MODULE_08", exampleValue: "2.06" },
+      { name: "Home_FIP", index: 40, type: "number", width: 80, format: "0.00", filledBy: "MODULE_08", exampleValue: "2.72" },
+      { name: "Home_K_Pct", index: 41, type: "percent", width: 90, format: "0.0%", filledBy: "MODULE_08", exampleValue: "0.289" },
+      // ── O/U line movement (module 05d) ──────────────────────────────────────
+      { name: "Total_Open", index: 42, type: "number", width: 90, format: "0.0", filledBy: "MODULE_08", exampleValue: "8.5" },
+      { name: "Total_Current", index: 43, type: "number", width: 90, format: "0.0", filledBy: "MODULE_08", exampleValue: "8.0" },
+      { name: "Total_Move", index: 44, type: "number", width: 90, format: "0.0", filledBy: "MODULE_08", description: "Current − open; negative = money on the under", exampleValue: "-0.5" },
+      // ── Lineup platoon advantage vs. opposing starter (module 08) ───────────
+      { name: "Away_Platoon_Adv", index: 45, type: "percent", width: 100, format: "0%", filledBy: "MODULE_08", description: "Share of lineup with platoon edge; blank until lineup posts", exampleValue: "0.67" },
+      { name: "Home_Platoon_Adv", index: 46, type: "percent", width: 100, format: "0%", filledBy: "MODULE_08", description: "Share of lineup with platoon edge; blank until lineup posts", exampleValue: "0.44" },
     ],
   },
 
@@ -124,6 +151,10 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Days_Rest", index: 6, type: "number", width: 100, format: "0", filledBy: "MODULE_08", exampleValue: "1" },
       { name: "Role", index: 7, type: "string", width: 100, filledBy: "MODULE_08", description: "CLOSER, SETUP, MIDDLE", exampleValue: "CLOSER" },
       { name: "Notes", index: 8, type: "string", width: 200, filledBy: "OPERATOR", exampleValue: "" },
+      // ── Reliever season quality (module 02b) ────────────────────────────────
+      { name: "ERA", index: 9, type: "number", width: 80, format: "0.00", filledBy: "MODULE_08", exampleValue: "2.95" },
+      { name: "WHIP", index: 10, type: "number", width: 80, format: "0.00", filledBy: "MODULE_08", exampleValue: "1.14" },
+      { name: "Quality_Tier", index: 11, type: "string", width: 90, filledBy: "MODULE_08", description: "ERA tier: A <3.20, B <4.00, C <5.00, D otherwise", exampleValue: "A" },
     ],
   },
 
@@ -145,6 +176,24 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Home_Run_Factor", index: 9, type: "number", width: 100, format: "0.000", filledBy: "MODULE_08", exampleValue: "1.052" },
       { name: "Run_Multiplier", index: 10, type: "number", width: 110, format: "0.000", filledBy: "MODULE_08", exampleValue: "1.035" },
       { name: "Notes", index: 11, type: "string", width: 200, filledBy: "OPERATOR", exampleValue: "" },
+    ],
+  },
+
+  {
+    name: "ODDS_HISTORY",
+    description: "Append-only O/U snapshot log; earliest row per game per day = opener",
+    section: "INPUT",
+    frozenRows: 1,
+    columns: [
+      // Snapshot_TS_UTC / Date stay type "string": module 05d compares raw
+      // values on read-back — a date display format would break the match.
+      { name: "Snapshot_TS_UTC", index: 0, type: "string", width: 190, filledBy: "MODULE_05d", exampleValue: "2026-07-23T06:05:37.958Z" },
+      { name: "Date", index: 1, type: "string", width: 100, filledBy: "MODULE_05d", exampleValue: "2026-07-23" },
+      { name: "Game_ID", index: 2, type: "string", width: 150, filledBy: "MODULE_05d", exampleValue: "20260723_SDP_ATL" },
+      { name: "Total", index: 3, type: "number", width: 80, format: "0.0", filledBy: "MODULE_05d", exampleValue: "8.5" },
+      { name: "Over_Odds", index: 4, type: "number", width: 90, format: "0", filledBy: "MODULE_05d", exampleValue: "-112" },
+      { name: "Under_Odds", index: 5, type: "number", width: 90, format: "0", filledBy: "MODULE_05d", exampleValue: "-85" },
+      { name: "Bookmaker", index: 6, type: "string", width: 110, filledBy: "MODULE_05d", exampleValue: "FanDuel" },
     ],
   },
 

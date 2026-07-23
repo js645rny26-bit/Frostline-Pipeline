@@ -102,13 +102,16 @@ export async function appendRange(
   workbookId: string,
   range: string,
   values: unknown[][],
-): Promise<{ updatedRows: number }> {
+): Promise<{ updatedRows: number; updatedRange: string | null }> {
   const encoded = encodeURIComponent(range);
   const result = (await sheetsRequest(
     `/v4/spreadsheets/${workbookId}/values/${encoded}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     { method: "POST", body: { values, majorDimension: "ROWS" } },
-  )) as { updates?: { updatedRows?: number } };
-  return { updatedRows: result.updates?.updatedRows ?? values.length };
+  )) as { updates?: { updatedRows?: number; updatedRange?: string } };
+  return {
+    updatedRows: result.updates?.updatedRows ?? values.length,
+    updatedRange: result.updates?.updatedRange ?? null,
+  };
 }
 
 // ─── Sheet management ────────────────────────────────────────────────────────

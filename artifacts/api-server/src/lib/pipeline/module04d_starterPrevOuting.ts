@@ -95,7 +95,8 @@ async function fetchLastStart(pitcherId: number, beforeDate: string): Promise<Ga
       stats?: Array<{
         splits?: Array<{
           date?: string;
-          game?: { gamePk?: number; gameType?: string };
+          gameType?: string;   // NOTE: lives at split level, NOT under game.*
+          game?: { gamePk?: number };
           stat?: { inningsPitched?: string; numberOfPitches?: number; gamesStarted?: number };
         }>;
       }>;
@@ -106,7 +107,7 @@ async function fetchLastStart(pitcherId: number, beforeDate: string): Promise<Ga
     // Filter to regular-season starts before today, sorted newest-first
     const starts = splits
       .filter((s) =>
-        s.game?.gameType === "R" &&
+        s.gameType === "R" &&
         (s.stat?.gamesStarted ?? 0) >= 1 &&
         s.date !== undefined &&
         s.date < beforeDate,
