@@ -9,6 +9,7 @@ import { fetchPitcherWorkload } from "./module02_statcast.js";
 import { classifyPitcherRoles } from "./module03_pitcherClassification.js";
 import { fetchWeatherForecasts } from "./module04_openMeteo.js";
 import { fetchTeamSplitsWithFallback } from "./module05_fangraphs.js";
+import { fetchMarketOdds, buildOddsMap } from "./module05b_marketOdds.js";
 import { normalizeSlate } from "./module06_normalization.js";
 import { validateNormalizedSlate } from "./module07_validation.js";
 import { writeGoogleSheetsFeed, type Module08Result } from "./module08_feedWriter.js";
@@ -221,8 +222,17 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     logger.warn({ status: mod09.status }, "Full pipeline: Module 09 computation error — continuing");
   }
 
+  // Module 05b: Fetch market odds (non-blocking — empty map on failure/no key)
+  const oddsResult = await fetchMarketOdds(date);
+  const oddsMap = buildOddsMap(oddsResult);
+  if (oddsResult.status === "success") {
+    logger.info({ lines: oddsMap.size, remaining: oddsResult.requests_remaining }, "Full pipeline: Market odds fetched");
+  } else if (oddsResult.status === "error") {
+    logger.warn({ err: oddsResult.error }, "Full pipeline: Market odds fetch failed — continuing without lines");
+  }
+
   // Module 10: Seed SLATE_INPUT (run regardless to preserve operator fields)
-  const mod10 = await seedSlateInput(normalized as Parameters<typeof seedSlateInput>[0], workbookId);
+  const mod10 = await seedSlateInput(normalized as Parameters<typeof seedSlateInput>[0], workbookId, oddsMap);
   if (mod10.status === "failure") {
     allErrors.push(...mod10.errors);
   }
@@ -231,8 +241,10 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   const mod11 = await extractOutputBoards(mod09.game_summary_rows, workbookId);
 
   // Overall status before archival (so we can write it into the run log row)
+  // mod08 "failure" case is already handled by the early return above;
+  // at this point mod08.status is "success" | "partial_failure".
   const overallStatus =
-    mod08.status === "failure" || mod10.status === "failure"
+    mod10.status === "failure"
       ? "failure"
       : mod08.status === "partial_failure"
         ? "partial_success"

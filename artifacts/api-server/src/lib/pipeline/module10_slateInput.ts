@@ -1,6 +1,9 @@
 /**
  * Module 10: SLATE_INPUT Seeding
  * Preserves operator fields for existing games; creates rows for new games.
+ * When an oddsMap is provided, new rows are seeded with market line data.
+ * Existing rows with null Line/Odds are updated from the odds map (operator
+ * overrides — non-null values — are always preserved).
  */
 
 import { readRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
@@ -13,6 +16,7 @@ export interface SeedResult {
   action: "created" | "updated";
   model_fields_refreshed: string[];
   operator_fields_preserved: string[];
+  line_populated?: boolean;
 }
 
 export interface Module10Result {
@@ -45,6 +49,12 @@ const OPERATOR_FIELDS = [
   "Kill_Flag", "Notes", "Owner", "Manual_Kill_Override", "Model_Freeze_Reason",
 ];
 
+// Column indices for line-related operator fields
+const COL_CANDIDATE_VEHICLE = 14;
+const COL_LINE             = 15;
+const COL_ODDS             = 16;
+const COL_MARKET_AVAILABLE = 17;
+
 function rowToObject(row: unknown[]): Record<number, unknown> {
   const obj: Record<number, unknown> = {};
   row.forEach((v, i) => { obj[i] = v; });
@@ -55,8 +65,21 @@ function buildModelDefaults() {
   return ["TBD", 0, 0, 0, "unknown", 0, 0, false, "pending"];
 }
 
-function buildOperatorDefaults(gameId: string) {
-  return ["TBD", null, null, false, false, `Seeded by pipeline; awaiting vehicle selection (${gameId})`, "Pending", false, null];
+function buildOperatorDefaults(gameId: string, line?: MarketLine) {
+  const hasLine = !!line;
+  return [
+    hasLine ? "GAME_TOTAL" : "TBD",            // Candidate_Vehicle
+    hasLine ? line.total : null,               // Line
+    hasLine ? line.over_odds : null,           // Odds (over, American)
+    hasLine,                                   // Market_Available
+    false,                                     // Kill_Flag
+    hasLine
+      ? `Seeded by pipeline; line ${line.total} (${line.bookmaker})`
+      : `Seeded by pipeline; awaiting vehicle selection (${gameId})`,
+    "Pending",                                 // Owner
+    false,                                     // Manual_Kill_Override
+    null,                                      // Model_Freeze_Reason
+  ];
 }
 
 function rowToArray(obj: Record<number, unknown>, maxIdx: number): unknown[] {
@@ -67,8 +90,17 @@ function rowToArray(obj: Record<number, unknown>, maxIdx: number): unknown[] {
   return arr;
 }
 
-export async function seedSlateInput(normalized: NormalizationResult, workbookId = WORKBOOK_ID): Promise<Module10Result> {
-  logger.info({ games: normalized.games.length }, "MODULE_10: Seeding SLATE_INPUT");
+/** Returns true if the cell value is absent/null/empty string */
+function isBlank(v: unknown): boolean {
+  return v === null || v === undefined || v === "";
+}
+
+export async function seedSlateInput(
+  normalized: NormalizationResult,
+  workbookId = WORKBOOK_ID,
+  oddsMap: Map<string, MarketLine> = new Map(),
+): Promise<Module10Result> {
+  logger.info({ games: normalized.games.length, oddsAvailable: oddsMap.size }, "MODULE_10: Seeding SLATE_INPUT");
 
   const output: Module10Result = {
     status: "success",
@@ -83,7 +115,6 @@ export async function seedSlateInput(normalized: NormalizationResult, workbookId
     // Read existing SLATE_INPUT (including header)
     const existing = await readRange(workbookId, "SLATE_INPUT!A:W");
     const existingRows = existing.values ?? [];
-    const header = existingRows[0] ?? [];
     const dataRows = existingRows.slice(1);
 
     // Index by Game_ID (column A = index 0)
@@ -98,26 +129,38 @@ export async function seedSlateInput(normalized: NormalizationResult, workbookId
     for (const game of normalized.games) {
       const gameId = game.legacy_game_id;
       const modelValues = buildModelDefaults();
+      const marketLine = oddsMap.get(gameId);
 
       if (existingByGameId.has(gameId)) {
-        // EXISTING: update model fields, preserve operator fields
-        const existing = existingByGameId.get(gameId)!;
+        // EXISTING: refresh model fields, preserve operator fields
+        const row = existingByGameId.get(gameId)!;
 
         // Refresh model fields (indices 5–13)
-        modelValues.forEach((v, i) => { existing[5 + i] = v; });
+        modelValues.forEach((v, i) => { row[5 + i] = v; });
 
-        // Operator fields untouched (already in the object)
-        seededRows.push(rowToArray(existing, 22));
+        // Back-fill Line/Odds from odds map only if currently blank
+        // (preserves anything the operator typed manually)
+        let linePopulated = false;
+        if (marketLine && isBlank(row[COL_LINE])) {
+          row[COL_CANDIDATE_VEHICLE] = "GAME_TOTAL";
+          row[COL_LINE]             = marketLine.total;
+          row[COL_ODDS]             = marketLine.over_odds;
+          row[COL_MARKET_AVAILABLE] = true;
+          linePopulated = true;
+        }
+
+        seededRows.push(rowToArray(row, 22));
         output.games_seeded.updated_games++;
         output.seed_results.push({
           legacy_game_id: gameId,
           action: "updated",
           model_fields_refreshed: MODEL_FIELDS,
           operator_fields_preserved: OPERATOR_FIELD_INDICES.map((i) => `col_${i}`),
+          line_populated: linePopulated,
         });
       } else {
-        // NEW: full seed with defaults
-        const operatorDefaults = buildOperatorDefaults(gameId);
+        // NEW: full seed; include odds if available
+        const operatorDefaults = buildOperatorDefaults(gameId, marketLine);
         const newRow = [
           gameId,                                                          // A: Game_ID
           game.date,                                                       // B: Date
@@ -134,6 +177,7 @@ export async function seedSlateInput(normalized: NormalizationResult, workbookId
           action: "created",
           model_fields_refreshed: MODEL_FIELDS,
           operator_fields_preserved: OPERATOR_FIELDS,
+          line_populated: !!marketLine,
         });
       }
     }
@@ -150,7 +194,11 @@ export async function seedSlateInput(normalized: NormalizationResult, workbookId
     output.rows_written = seededRows.length;
     output.games_seeded.total_games = seededRows.length;
 
-    logger.info({ new_games: output.games_seeded.new_games, updated: output.games_seeded.updated_games }, "MODULE_10: SLATE_INPUT seeding complete");
+    const linesPopulated = output.seed_results.filter((r) => r.line_populated).length;
+    logger.info(
+      { new_games: output.games_seeded.new_games, updated: output.games_seeded.updated_games, lines_populated: linesPopulated },
+      "MODULE_10: SLATE_INPUT seeding complete",
+    );
     return output;
 
   } catch (err: unknown) {
