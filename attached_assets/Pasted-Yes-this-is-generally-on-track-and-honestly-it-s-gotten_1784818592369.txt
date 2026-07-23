@@ -1,0 +1,72 @@
+Yes — this is **generally on track**, and honestly it’s gotten a lot more production-like.
+
+## My critique
+
+### What’s strong now
+* **Market context is in place**
+    * Live totals
+    * Line movement history
+    * Open vs current vs move
+* **Game-context coverage is much better**
+    * Bullpen usage
+    * Starting lineups
+    * Starter previous outing
+    * Umpires
+    * Weather
+    * Team run rates
+    * Pitcher season stats
+* **You fixed two real data integrity bugs**
+    * wrong starter-outing field
+    * Athletics alias issue
+* **The schema is now aligned with what the pipeline writes**
+    * that matters a lot more than people realize
+
+### What I’d still watch
+* **Column creep is real**
+    * `DAILY_MATCHUPS` going from 25 to 47 columns is fine for now, but it’s a warning sign
+    * The workbook is starting to become a dense operational table
+    * That’s okay if the schema is rigorously versioned and documented
+* **Source priority needs to stay explicit**
+    * If weather is now primarily `weathermlb.com`, make that a clear rule
+    * Same for odds: what’s authoritative if multiple books disagree?
+* **Price-blind logic can get polluted**
+    * Odds, line movement, and current totals should stay in the market layer
+    * They should not quietly influence the “truth” layer unless you explicitly want them to
+* **Lineup timing is still a fragile point**
+    * Posted lineups are great, but the system needs a clear stale/confirmed/projection state
+* **Scraped feeds need a fallback story**
+    * Bullpen data
+    * Umpires
+    * Weather
+    * If any of those fail, the pipeline should know exactly what to do
+* **You need a daily operational playbook**
+    * what gets refreshed first
+    * when lineups are pasted
+    * when odds are pulled
+    * when publish happens
+    * what is considered final
+
+## My honest grade
+
+I’d move it from about **7/10 to 8.5/10**.
+
+It’s no longer “a model with a bunch of moving parts.”  
+It’s now a **real runtime pipeline** with:
+* data acquisition
+* normalization
+* enrichment
+* market context
+* auditability
+* repeated publishing
+
+## The biggest remaining gap
+Not technical anymore — **operational clarity**.
+
+You’re close to needing a one-page daily SOP:
+* refresh sequence
+* what you paste manually
+* what auto-runs
+* what warnings matter
+* when the board is considered final
+
+If you want, I can turn this changelog into a **“what’s done / what’s left / risks”** checklist so you have a clean status doc.
