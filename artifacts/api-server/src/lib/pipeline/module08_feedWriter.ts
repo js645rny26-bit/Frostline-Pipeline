@@ -14,6 +14,7 @@ import type { NormalizationResult, NormalizedGame } from "./module06_normalizati
 import type { FangraphsResult } from "./module05_fangraphs.js";
 import { STADIUM_COORDS, resolveVenueName } from "./config.js";
 import type { BullpenResult } from "./module04b_bullpenUsage.js";
+import { type StartingNineResult, type StartingNineGame, buildStartingNineMap, pctToMultiplier } from "./module04c_startingNine.js";
 
 export interface SheetWriteStatus {
   status: "success" | "failure" | "skipped";
@@ -89,30 +90,37 @@ function buildWeatherTag(g: NormalizedGame): string {
 }
 
 // Schema: TODAY_LINEUPS — 14 cols A–N, data starts row 2 (frozenRows: 1)
-// Projected placeholder rows: 9 batting slots × 2 teams per game.
-// Player-level data (name, ID, wRC+, salary) will be populated once a roster source is wired up.
-function buildTodayLineupsRows(games: NormalizedGame[]): unknown[][] {
+function buildTodayLineupsRows(
+  games: NormalizedGame[],
+  sn: Map<string, StartingNineGame>,
+): unknown[][] {
   const rows: unknown[][] = [];
 
   for (const g of games) {
+    const snGame = sn.get(g.legacy_game_id);
+
     for (const side of ["A", "H"] as const) {
-      const team = side === "A" ? g.away_team : g.home_team;
+      const team    = side === "A" ? g.away_team : g.home_team;
+      const lineup  = snGame ? (side === "A" ? snGame.away_lineup : snGame.home_lineup) : [];
+      const status  = snGame?.lineup_status ?? "projected";
+
       for (let order = 1; order <= 9; order++) {
+        const player = lineup.find((p) => p.batting_order === order);
         rows.push([
-          g.date,              // A: Date
-          g.legacy_game_id,   // B: Game_ID
-          team.team_abbr ?? "", // C: Team
-          order,              // D: Batting_Order
-          "",                 // E: Player_Name (no source yet)
-          "",                 // F: Player_ID
-          "",                 // G: Position
-          "",                 // H: vs_LHP_wRC_plus
-          "",                 // I: vs_RHP_wRC_plus
-          "",                 // J: Last_30_Days_wRC_plus
-          "ACTIVE",           // K: Injury_Status
-          "",                 // L: Salary
-          "",                 // M: FanGraphs_Projection
-          "",                 // N: Notes
+          g.date,                                    // A: Date
+          g.legacy_game_id,                          // B: Game_ID
+          team.team_abbr ?? "",                      // C: Team
+          order,                                     // D: Batting_Order
+          player?.name ?? "",                        // E: Player_Name
+          "",                                        // F: Player_ID (not available from this source)
+          player?.position ?? "",                    // G: Position
+          "",                                        // H: vs_LHP_wRC_plus (not available)
+          "",                                        // I: vs_RHP_wRC_plus (not available)
+          "",                                        // J: Last_30_Days_wRC_plus (not available)
+          player?.handedness ? `${player.handedness} | ACTIVE` : "ACTIVE", // K: Injury_Status / Bats
+          "",                                        // L: Salary (not available)
+          "",                                        // M: FanGraphs_Projection (not available)
+          player ? status.toUpperCase() : "NO_LINEUP_DATA", // N: Notes
         ]);
       }
     }
@@ -168,14 +176,28 @@ function buildBullpenRows(date: string, bullpen: BullpenResult | null): unknown[
 }
 
 // Schema: RUN_ENVIRONMENT — 12 cols A–L, data starts row 2 (frozenRows: 1)
-function buildRunEnvironmentRows(games: NormalizedGame[]): unknown[][] {
+function buildRunEnvironmentRows(
+  games: NormalizedGame[],
+  sn: Map<string, StartingNineGame>,
+): unknown[][] {
   return games.map((g) => {
     const e = g.environment;
-    const venueKey = resolveVenueName(g.venue.name);
+    const venueKey    = resolveVenueName(g.venue.name);
     const elevationFt = venueKey ? (STADIUM_COORDS[venueKey]?.elevation_ft ?? 0) : 0;
-    const notes = !venueKey
-      ? `Unresolved venue: "${g.venue.name}" — elevation defaulted to 0`
-      : "";
+    const snGame      = sn.get(g.legacy_game_id);
+    const pf          = snGame?.park_factors;
+
+    // HR factor: average of LHB and RHB park factors
+    const hrFactor = pf
+      ? pctToMultiplier(Math.round((pf.hr_l_pct + pf.hr_r_pct) / 2))
+      : 1.0;
+    // Run multiplier: overall runs park factor
+    const runMultiplier = pf ? pctToMultiplier(pf.runs_pct) : 1.0;
+
+    const noteParts: string[] = [];
+    if (!venueKey) noteParts.push(`Unresolved venue: "${g.venue.name}" — elevation defaulted to 0`);
+    if (!pf)       noteParts.push("Park factors: not available");
+
     return [
       g.date,                                                              // A: Date
       g.legacy_game_id,                                                    // B: Game_ID
@@ -187,9 +209,9 @@ function buildRunEnvironmentRows(games: NormalizedGame[]): unknown[][] {
       e.precipitation_probability_pct !== null
         ? e.precipitation_probability_pct / 100 : "",                     // H: Precipitation_Pct (0–1)
       e.humidity_pct !== null ? e.humidity_pct / 100 : "",                // I: Humidity_Pct (0–1)
-      1.0,                                                                 // J: Home_Run_Factor (stub)
-      1.0,                                                                 // K: Run_Multiplier (stub)
-      notes,                                                               // L: Notes
+      hrFactor,                                                            // J: Home_Run_Factor
+      runMultiplier,                                                       // K: Run_Multiplier
+      noteParts.join(" | "),                                               // L: Notes
     ];
   });
 }
@@ -239,6 +261,7 @@ export async function writeGoogleSheetsFeed(
   runDate: string,
   workbookId = WORKBOOK_ID,
   bullpenData: BullpenResult | null = null,
+  startingNineData: StartingNineResult | null = null,
 ): Promise<Module08Result> {
   logger.info({ games: normalized.games.length }, "MODULE_08: Writing feeds to Google Sheets");
 
@@ -260,7 +283,8 @@ export async function writeGoogleSheetsFeed(
   }
 
   // 2. TODAY_LINEUPS — 14 cols A–N, starts row 2
-  const tlRows = buildTodayLineupsRows(normalized.games);
+  const snMap = buildStartingNineMap(startingNineData ?? { status: "failure", date: runDate, games: [], games_parsed: 0, games_matched: 0, errors: [] });
+  const tlRows = buildTodayLineupsRows(normalized.games, snMap);
   const tlResult = await safeWrite(
     "TODAY_LINEUPS",
     "TODAY_LINEUPS!A2:N602",
@@ -305,7 +329,7 @@ export async function writeGoogleSheetsFeed(
   }
 
   // 5. RUN_ENVIRONMENT — 12 cols A–L, starts row 2
-  const reRows = buildRunEnvironmentRows(normalized.games);
+  const reRows = buildRunEnvironmentRows(normalized.games, snMap);
   const reResult = await safeWrite(
     "RUN_ENVIRONMENT",
     "RUN_ENVIRONMENT!A2:L32",
