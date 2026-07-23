@@ -17,6 +17,7 @@ export interface SlateBoardEntry {
   projected_total: number;
   market_line: number | null;
   variance: number | null;
+  direction: "OVER" | "UNDER" | "NONE";
   final_decision: "CORE" | "NOT_CORE" | "PENDING";
   confidence: number;
   expected_roi: number;
@@ -32,6 +33,7 @@ export interface ActiveBoardEntry {
   model_projection: number;
   market_line: number | null;
   edge: number;
+  direction: "OVER" | "UNDER" | "NONE";
   confidence: number;
   recommendation: string;
 }
@@ -70,9 +72,9 @@ function computeDecision(
   projectedTotal: number,
   marketLine: number | null,
   vehicle: string,
-): { decision: "CORE" | "NOT_CORE" | "PENDING"; confidence: number; roi: number; recommendation: string } {
+): { decision: "CORE" | "NOT_CORE" | "PENDING"; direction: "OVER" | "UNDER" | "NONE"; confidence: number; roi: number; recommendation: string } {
   if (marketLine === null || !vehicle || vehicle === "TBD" || vehicle === "") {
-    return { decision: "PENDING", confidence: 0, roi: 0, recommendation: "PENDING" };
+    return { decision: "PENDING", direction: "NONE", confidence: 0, roi: 0, recommendation: "PENDING" };
   }
 
   const variance   = projectedTotal - marketLine;
@@ -80,19 +82,26 @@ function computeDecision(
   const isCore     = absVar >= 0.5;
   const decision   = isCore ? "CORE" : "NOT_CORE";
 
+  // Direction: positive variance → model is above the line → OVER edge
+  //            negative variance → model is below the line → UNDER edge
+  const direction: "OVER" | "UNDER" | "NONE" =
+    variance > 0 ? "OVER" : variance < 0 ? "UNDER" : "NONE";
+
   const confidence = isCore
     ? parseFloat(Math.min(0.95, 0.55 + absVar * 0.08).toFixed(2))
     : parseFloat(Math.max(0.05, 0.45 - absVar * 0.05).toFixed(2));
 
-  const roi = isCore ? parseFloat((variance * 0.05).toFixed(3)) : 0;
+  // ROI uses absolute variance — direction is captured separately.
+  // A STRONG_BUY UNDER should show the same positive ROI as a STRONG_BUY OVER.
+  const roi = isCore ? parseFloat((absVar * 0.05).toFixed(3)) : 0;
 
   let recommendation: string;
-  if (!isCore)        recommendation = "PASS";
+  if (!isCore)            recommendation = "PASS";
   else if (absVar >= 2.0) recommendation = "STRONG_BUY";
   else if (absVar >= 1.0) recommendation = "BUY";
   else                    recommendation = "HOLD";
 
-  return { decision, confidence, roi, recommendation };
+  return { decision, direction, confidence, roi, recommendation };
 }
 
 export async function extractOutputBoards(
@@ -126,7 +135,7 @@ export async function extractOutputBoards(
       });
     }
 
-    // ── Compute SLATE_BOARD — 13 cols A–M, starts row 2 ──
+    // ── Compute SLATE_BOARD — 14 cols A–N, starts row 2 ──
     const sbRows: unknown[][] = [];
 
     for (const gs of gameSummary) {
@@ -134,7 +143,7 @@ export async function extractOutputBoards(
       const variance = market.line !== null
         ? parseFloat((gs.projected_total_runs - market.line).toFixed(2))
         : null;
-      const { decision, confidence, roi, recommendation } = computeDecision(
+      const { decision, direction, confidence, roi, recommendation } = computeDecision(
         gs.projected_total_runs,
         market.line,
         market.vehicle,
@@ -148,6 +157,7 @@ export async function extractOutputBoards(
         projected_total: gs.projected_total_runs,
         market_line:    market.line,
         variance,
+        direction,
         final_decision: decision,
         confidence,
         expected_roi:   roi,
@@ -165,25 +175,26 @@ export async function extractOutputBoards(
         market.vehicle || "TBD",         // E: Vehicle_Type
         gs.projected_total_runs,         // F: Projected_Value
         market.line ?? "",               // G: Market_Line
-        variance ?? "",                  // H: Variance_from_Projection
-        decision,                        // I: Decision
-        confidence,                      // J: Confidence
-        roi,                             // K: Expected_ROI
-        recommendation,                  // L: Recommendation
-        "",                              // M: Notes
+        variance ?? "",                  // H: Variance_from_Projection (Model − Market; + = OVER edge, − = UNDER edge)
+        direction,                       // I: Direction (OVER | UNDER | NONE)
+        decision,                        // J: Decision
+        confidence,                      // K: Confidence
+        roi,                             // L: Expected_ROI (always positive; direction tells you which side)
+        recommendation,                  // M: Recommendation
+        "",                              // N: Notes
       ]);
     }
 
-    await clearRange(workbookId, "SLATE_BOARD!A2:M100");
+    await clearRange(workbookId, "SLATE_BOARD!A2:N100");
     if (sbRows.length > 0) {
-      await writeRange(workbookId, `SLATE_BOARD!A2:M${1 + sbRows.length}`, sbRows);
+      await writeRange(workbookId, `SLATE_BOARD!A2:N${1 + sbRows.length}`, sbRows);
     }
     logger.info(
       { rows: sbRows.length, core: output.core_count, notCore: output.not_core_count },
       "MODULE_11: SLATE_BOARD written",
     );
 
-    // ── Compute ACTIVE_BOARD_SNAPSHOT — CORE games only, 15 cols A–O ──
+    // ── Compute ACTIVE_BOARD_SNAPSHOT — CORE games only, 16 cols A–P ──
     const abRows: unknown[][] = [];
     const now = new Date().toISOString();
 
@@ -200,6 +211,7 @@ export async function extractOutputBoards(
         model_projection: entry.projected_total,
         market_line:      entry.market_line,
         edge,
+        direction:        entry.direction,
         confidence:       entry.confidence,
         recommendation:   entry.recommendation,
       };
@@ -213,20 +225,21 @@ export async function extractOutputBoards(
         abEntry.vehicle,                 // E: Vehicle
         abEntry.model_projection,        // F: Model_Projection
         abEntry.market_line ?? "",       // G: Market_Line
-        edge,                            // H: Edge
-        abEntry.confidence,              // I: Confidence
-        abEntry.recommendation,          // J: Recommendation
-        now,                             // K: Time_Added
-        "PENDING",                       // L: Status
-        "",                              // M: Placed_At
-        "",                              // N: Result
-        "",                              // O: Notes
+        edge,                            // H: Edge (absolute value; always positive)
+        entry.direction,                 // I: Direction (OVER | UNDER | NONE)
+        abEntry.confidence,              // J: Confidence
+        abEntry.recommendation,          // K: Recommendation
+        now,                             // L: Time_Added
+        "PENDING",                       // M: Status
+        "",                              // N: Placed_At
+        "",                              // O: Result
+        "",                              // P: Notes
       ]);
     }
 
-    await clearRange(workbookId, "ACTIVE_BOARD_SNAPSHOT!A2:O100");
+    await clearRange(workbookId, "ACTIVE_BOARD_SNAPSHOT!A2:P100");
     if (abRows.length > 0) {
-      await writeRange(workbookId, `ACTIVE_BOARD_SNAPSHOT!A2:O${1 + abRows.length}`, abRows);
+      await writeRange(workbookId, `ACTIVE_BOARD_SNAPSHOT!A2:P${1 + abRows.length}`, abRows);
     }
     logger.info({ rows: abRows.length }, "MODULE_11: ACTIVE_BOARD_SNAPSHOT written");
 
