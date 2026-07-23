@@ -1,0 +1,84 @@
+That materially changes the commissioning read.
+
+Corrected interpretation
+
+The Validation_Status = FAIL is not an engine defect if it is intentionally triggered by an atypical five-game slate-size expectation. In that case, it should be classified as a non-critical slate-shape warning, not a reason to freeze today’s projections.
+
+The underlying issue is mostly semantic:
+
+* the log says Critical_Failures = 1
+* the pipeline still completes successfully
+* all five games resolve through the downstream modules
+
+So the validator is behaving as designed, but the label “critical failure” overstates the condition. A cleaner status would be something like:
+
+VALID_WITH_SLATE_SIZE_EXCEPTION
+
+or:
+
+WARNING: ATYPICAL_GAME_COUNT
+
+That would keep us from mistaking an expected exception for a broken run.
+
+Total-only scope
+
+I’m also comfortable commissioning this as a total-only engine first.
+
+That is better than forcing unfinished vehicle breadth into the system. The immediate standard becomes:
+
+1. produce credible price-blind team-run and game-total projections
+2. determine Over, Under, or no trustworthy total
+3. apply total-specific failure modes
+4. issue CORE or NO CORE
+5. let price affect execution only after the total truth is established
+
+It does not need starter props, team totals, F5s, sides, or batter props to be useful right now.
+
+Revised assessment
+
+Strong foundation
+
+* automated daily ingestion
+* current lineups
+* pitcher role and workload estimates
+* weather and park environment
+* bullpen dataset
+* market snapshots
+* projection output
+* run logging and board snapshots
+* stable Game_ID relationships
+
+Actual priority defects
+
+The core critique now narrows to four meaningful areas:
+
+1. CORE authorization is too permissive.
+    Five CORE decisions from five games strongly suggests that meaningful projection separation automatically becomes CORE.
+2. Several analytical inputs are placeholders.
+    Lineup strength is universally 100, player integration is empty, and multiple recent-form values are league-average constants.
+3. Market odds parsing is unreliable.
+    Values such as +6, +11, +32, and -42 must not feed probability or ROI calculations.
+4. Sheet schemas are misaligned.
+    SLATE_INPUT, SLATE_BOARD, and ACTIVE_BOARD_SNAPSHOT headers do not accurately describe their populated values.
+
+Total-only commissioning target
+
+For the current scope, I would require:
+
+* individualized team offensive strength
+* correct opposing-starter influence
+* bullpen availability actually affecting full-game totals
+* environment modifiers working consistently
+* no malformed market prices
+* explicit total failure modes
+* CORE scarcity
+* NO CORE with a named blocker
+* historical replay graded on projection accuracy, direction, and ticket result separately
+
+So yes, the pipeline remains the correct authoritative system.
+
+The validation fail is not the concern I initially thought it was, and total-only is a perfectly legitimate first commissioned product. The key question is now much sharper:
+
+Are its total projections genuinely individualized and calibrated, or are placeholder inputs producing confident-looking numbers?
+
+That is the next audit boundary.
