@@ -55,6 +55,8 @@ const DEFAULT_WEATHER: WeatherData = {
   wind_speed_mph: 10,
   wind_direction_degrees: 180,
   precipitation_probability_pct: 10,
+  wind_context: null,
+  roof: false,
   data_quality: "fallback",
 };
 

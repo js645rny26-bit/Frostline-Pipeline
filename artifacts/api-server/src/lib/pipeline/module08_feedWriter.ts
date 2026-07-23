@@ -195,6 +195,8 @@ function buildRunEnvironmentRows(
     const runMultiplier = pf ? pctToMultiplier(pf.runs_pct) : 1.0;
 
     const noteParts: string[] = [];
+    if (e.roof)    noteParts.push("DOME/RETRACTABLE");
+    if (e.wind_context) noteParts.push(`Wind: ${e.wind_context}`);
     if (!venueKey) noteParts.push(`Unresolved venue: "${g.venue.name}" — elevation defaulted to 0`);
     if (!pf)       noteParts.push("Park factors: not available");
 
