@@ -11,6 +11,7 @@ import { fetchWeatherForecasts } from "./module04_openMeteo.js";
 import { fetchTeamSplitsWithFallback } from "./module05_fangraphs.js";
 import { fetchBullpenUsage } from "./module04b_bullpenUsage.js";
 import { fetchStartingNine, buildStartingNineMap } from "./module04c_startingNine.js";
+import { fetchStarterPrevOutings } from "./module04d_starterPrevOuting.js";
 import { fetchMarketOdds, buildOddsMap } from "./module05b_marketOdds.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 import { normalizeSlate } from "./module06_normalization.js";
@@ -208,7 +209,10 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     ),
   );
 
-  const [bullpenResult, startingNineResult] = await Promise.all([
+  // Fetch schedule manifest for pitcher IDs (needed by module04d)
+  const manifest = await fetchMlbSchedule(date).catch(() => null);
+
+  const [bullpenResult, startingNineResult, starterOutings] = await Promise.all([
     fetchBullpenUsage(date, slateTeamIds).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: bullpen fetch threw — skipping");
       return null;
@@ -217,6 +221,12 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: startingNine fetch threw — skipping");
       return null;
     }),
+    manifest
+      ? fetchStarterPrevOutings(manifest, date).catch((err: unknown) => {
+          logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: starterOutings fetch threw — skipping");
+          return null;
+        })
+      : Promise.resolve(null),
   ]);
 
   if (bullpenResult) {
@@ -227,6 +237,10 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     const lvl = startingNineResult.status === "success" ? "info" : "warn";
     logger[lvl]({ matched: startingNineResult.games_matched, status: startingNineResult.status }, "Full pipeline: starting lineups ready");
   }
+  if (starterOutings) {
+    const lvl = starterOutings.status === "success" ? "info" : "warn";
+    logger[lvl]({ fetched: starterOutings.fetched, status: starterOutings.status }, "Full pipeline: starter outings ready");
+  }
 
   // Module 08: Write feeds to Google Sheets
   const mod08 = await writeGoogleSheetsFeed(
@@ -236,6 +250,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     workbookId,
     bullpenResult,
     startingNineResult,
+    starterOutings,
   );
   if (mod08.status === "failure") {
     logger.error("Full pipeline: Module 08 failed — aborting Sheets workflow");

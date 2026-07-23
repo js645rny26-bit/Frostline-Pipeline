@@ -15,6 +15,7 @@ import type { FangraphsResult } from "./module05_fangraphs.js";
 import { STADIUM_COORDS, resolveVenueName } from "./config.js";
 import type { BullpenResult } from "./module04b_bullpenUsage.js";
 import { type StartingNineResult, type StartingNineGame, buildStartingNineMap, pctToMultiplier } from "./module04c_startingNine.js";
+import { type StarterOutingResult, type StarterOuting } from "./module04d_starterPrevOuting.js";
 
 export interface SheetWriteStatus {
   status: "success" | "failure" | "skipped";
@@ -46,36 +47,58 @@ function confidenceNum(c: string | null | undefined): number {
   return 0.5;
 }
 
-function buildDailyMatchupsRows(games: NormalizedGame[]): unknown[][] {
+// Schema: DAILY_MATCHUPS — 35 cols A–AI, data starts row 2 (frozenRows: 1)
+// Cols A–Y: existing matchup / pitcher classification / weather
+// Cols Z–AI: starter previous outing from Baseball Savant /gf
+function buildDailyMatchupsRows(
+  games:   NormalizedGame[],
+  outings: Map<number, StarterOuting>,
+): unknown[][] {
   const now = new Date().toISOString();
-  return games.map((g) => [
-    g.date,                                                          // A: Date
-    g.legacy_game_id,                                                // B: Game_ID
-    g.game_status.detailedState ?? "Scheduled",                      // C: Game_Status
-    g.away_team.team_abbr ?? "",                                     // D: Away_Team
-    g.home_team.team_abbr ?? "",                                     // E: Home_Team
-    g.away_pitcher.name ?? "",                                       // F: Away_Pitcher
-    g.home_pitcher.name ?? "",                                       // G: Home_Pitcher
-    g.away_pitcher.role ?? "UNRESOLVED",                             // H: Away_Pitcher_Role
-    g.home_pitcher.role ?? "UNRESOLVED",                             // I: Home_Pitcher_Role
-    confidenceNum(g.away_pitcher.role_confidence),                   // J: Away_Pitcher_Confidence
-    confidenceNum(g.home_pitcher.role_confidence),                   // K: Home_Pitcher_Confidence
-    g.away_pitcher.expected_pitches ?? "",                           // L: Away_Expected_Pitches
-    g.home_pitcher.expected_pitches ?? "",                           // M: Home_Expected_Pitches
-    g.away_pitcher.expected_innings ?? "",                           // N: Away_Expected_Innings
-    g.home_pitcher.expected_innings ?? "",                           // O: Home_Expected_Innings
-    g.environment.temperature_f ?? "",                               // P: Temperature_F
-    g.environment.wind_speed_mph ?? "",                              // Q: Wind_MPH
-    g.environment.precipitation_probability_pct !== null
-      ? g.environment.precipitation_probability_pct / 100 : "",     // R: Precipitation_Pct (0–1)
-    g.environment.data_quality === "fallback" ? "CLIMATOLOGY" : "LIVE_WX", // S: Weather_Source
-    g.venue.name ?? "",                                              // T: Stadium
-    1.0,                                                             // U: Park_Factor_HR (stub)
-    4.75,                                                            // V: Run_Environment (stub)
-    now,                                                             // W: FanGraphs_Last_Updated
-    now,                                                             // X: Statcast_Last_Updated
-    "",                                                              // Y: Notes
-  ]);
+  return games.map((g) => {
+    const awayOuting = g.away_pitcher.player_id ? outings.get(g.away_pitcher.player_id) : undefined;
+    const homeOuting = g.home_pitcher.player_id ? outings.get(g.home_pitcher.player_id) : undefined;
+    return [
+      g.date,                                                          // A: Date
+      g.legacy_game_id,                                                // B: Game_ID
+      g.game_status.detailedState ?? "Scheduled",                      // C: Game_Status
+      g.away_team.team_abbr ?? "",                                     // D: Away_Team
+      g.home_team.team_abbr ?? "",                                     // E: Home_Team
+      g.away_pitcher.name ?? "",                                       // F: Away_Pitcher
+      g.home_pitcher.name ?? "",                                       // G: Home_Pitcher
+      g.away_pitcher.role ?? "UNRESOLVED",                             // H: Away_Pitcher_Role
+      g.home_pitcher.role ?? "UNRESOLVED",                             // I: Home_Pitcher_Role
+      confidenceNum(g.away_pitcher.role_confidence),                   // J: Away_Pitcher_Confidence
+      confidenceNum(g.home_pitcher.role_confidence),                   // K: Home_Pitcher_Confidence
+      g.away_pitcher.expected_pitches ?? "",                           // L: Away_Expected_Pitches
+      g.home_pitcher.expected_pitches ?? "",                           // M: Home_Expected_Pitches
+      g.away_pitcher.expected_innings ?? "",                           // N: Away_Expected_Innings
+      g.home_pitcher.expected_innings ?? "",                           // O: Home_Expected_Innings
+      g.environment.temperature_f ?? "",                               // P: Temperature_F
+      g.environment.wind_speed_mph ?? "",                              // Q: Wind_MPH
+      g.environment.precipitation_probability_pct !== null
+        ? g.environment.precipitation_probability_pct / 100 : "",     // R: Precipitation_Pct (0–1)
+      g.environment.data_quality === "fallback" ? "CLIMATOLOGY" : "LIVE_WX", // S: Weather_Source
+      g.venue.name ?? "",                                              // T: Stadium
+      1.0,                                                             // U: Park_Factor_HR (stub)
+      4.75,                                                            // V: Run_Environment (stub)
+      now,                                                             // W: FanGraphs_Last_Updated
+      now,                                                             // X: Statcast_Last_Updated
+      "",                                                              // Y: Notes
+      // ── Away starter last outing (Baseball Savant) ─────────────────
+      awayOuting?.outing_date  ?? "",                                  // Z:  Away_Last_Outing_Date
+      awayOuting?.ip_display   ?? "",                                  // AA: Away_Last_IP
+      awayOuting?.pitch_count  ?? "",                                  // AB: Away_Last_Pitches
+      awayOuting?.days_rest    ?? "",                                  // AC: Away_Days_Rest
+      awayOuting?.stress_flag  ?? "",                                  // AD: Away_Stress_Flag
+      // ── Home starter last outing (Baseball Savant) ─────────────────
+      homeOuting?.outing_date  ?? "",                                  // AE: Home_Last_Outing_Date
+      homeOuting?.ip_display   ?? "",                                  // AF: Home_Last_IP
+      homeOuting?.pitch_count  ?? "",                                  // AG: Home_Last_Pitches
+      homeOuting?.days_rest    ?? "",                                  // AH: Home_Days_Rest
+      homeOuting?.stress_flag  ?? "",                                  // AI: Home_Stress_Flag
+    ];
+  });
 }
 
 function buildWeatherTag(g: NormalizedGame): string {
@@ -264,18 +287,20 @@ export async function writeGoogleSheetsFeed(
   workbookId = WORKBOOK_ID,
   bullpenData: BullpenResult | null = null,
   startingNineData: StartingNineResult | null = null,
+  starterOutings: StarterOutingResult | null = null,
 ): Promise<Module08Result> {
   logger.info({ games: normalized.games.length }, "MODULE_08: Writing feeds to Google Sheets");
 
   const errors: Module08Result["errors"] = [];
   const failed: string[] = [];
 
-  // 1. DAILY_MATCHUPS — 25 cols A–Y, starts row 2
-  const dmRows = buildDailyMatchupsRows(normalized.games);
+  // 1. DAILY_MATCHUPS — 35 cols A–AI, starts row 2
+  const outingsMap = starterOutings?.outings ?? new Map();
+  const dmRows = buildDailyMatchupsRows(normalized.games, outingsMap);
   const dmResult = await safeWrite(
     "DAILY_MATCHUPS",
-    "DAILY_MATCHUPS!A2:Y32",
-    `DAILY_MATCHUPS!A2:Y${1 + Math.max(dmRows.length, 1)}`,
+    "DAILY_MATCHUPS!A2:AI32",
+    `DAILY_MATCHUPS!A2:AI${1 + Math.max(dmRows.length, 1)}`,
     dmRows,
     workbookId,
   );
