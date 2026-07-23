@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
@@ -31,8 +31,24 @@ export default function Dashboard() {
 
   const publish = usePublishPipeline();
   const createWb = useCreateWorkbook();
-  const [activeWorkbookId, setActiveWorkbookId] = useState<string | null>(null);
+
+  const CANONICAL_WORKBOOK_ID = "1MWsGQYR13tFjwd-L4lMweGShKJkrOsSNJaHzdjiMNHs";
+  const LS_KEY = "frostline_active_workbook_id";
+
+  const [activeWorkbookId, setActiveWorkbookIdState] = useState<string>(
+    () => localStorage.getItem(LS_KEY) ?? CANONICAL_WORKBOOK_ID,
+  );
   const [createResult, setCreateResult] = useState<{ workbook_url: string; workbook_name: string; errors: unknown[] } | null>(null);
+
+  function setActiveWorkbookId(id: string) {
+    setActiveWorkbookIdState(id);
+    localStorage.setItem(LS_KEY, id);
+  }
+
+  useEffect(() => {
+    const stored = localStorage.getItem(LS_KEY);
+    if (stored) setActiveWorkbookIdState(stored);
+  }, []);
 
   const isLoading = isLoadingSummary || isLoadingSlate;
 
@@ -59,7 +75,7 @@ export default function Dashboard() {
   function handlePublish() {
     setPublishResult(null);
     publish.mutate(
-      { params: { date, ...(activeWorkbookId ? { workbook_id: activeWorkbookId } : {}) } },
+      { params: { date, workbook_id: activeWorkbookId } },
       {
         onSuccess: (result) => {
           setPublishResult({

@@ -6,7 +6,9 @@
 
 import { ReplitConnectors } from "@replit/connectors-sdk";
 
-const WORKBOOK_ID = "1FY2FgpFbr2pSmFF-0Gowh-HXW3z5QOnj2ujpcTQQRB4";
+// Canonical runtime workbook (FROSTLINE_Pipeline — optimised 13-sheet schema).
+// Old workbook 1FY2FgpFbr2pSmFF-0Gowh-HXW3z5QOnj2ujpcTQQRB4 kept as archive.
+const WORKBOOK_ID = "1MWsGQYR13tFjwd-L4lMweGShKJkrOsSNJaHzdjiMNHs";
 
 export { WORKBOOK_ID };
 
