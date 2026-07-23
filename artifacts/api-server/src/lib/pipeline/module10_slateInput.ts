@@ -186,17 +186,46 @@ export async function seedSlateInput(
         const phase = deriveMarketPhase(game.game_status.abstractGameState);
         row[COL_MARKET_PHASE] = phase;
 
-        // Freeze the line the moment the game goes LIVE or FINAL, once only.
-        // Auth fields survive all subsequent publishes unchanged.
-        if ((phase === "LIVE" || phase === "FINAL") && isBlank(row[COL_AUTH_PREGAME_TOTAL])) {
-          const currentLine = row[COL_LINE];
-          if (!isBlank(currentLine)) {
-            row[COL_AUTH_PREGAME_TOTAL] = currentLine;
-            row[COL_AUTH_OVER_ODDS]     = row[COL_ODDS] ?? -110;
+        const alreadyFrozen = !isBlank(row[COL_LINE_LOCKED_TS]);
+
+        if (phase === "PREGAME" && !alreadyFrozen) {
+          // During PREGAME, keep Auth fields as a rolling snapshot of the latest
+          // known market line so that the value is correct at the moment of freeze.
+          // COL_LINE_LOCKED_TS stays null — its presence is what marks a freeze.
+          if (marketLine) {
+            row[COL_AUTH_PREGAME_TOTAL] = marketLine.total;
+            row[COL_AUTH_OVER_ODDS]     = marketLine.over_odds;
             row[COL_AUTH_UNDER_ODDS]    = -110; // mlbstartingnine doesn't publish under odds separately
-            row[COL_LINE_LOCKED_TS]     = new Date().toISOString();
-            logger.info({ gameId, phase, line: currentLine }, "MODULE_10: Pregame line frozen");
+          } else if (!isBlank(row[COL_LINE])) {
+            // Operator-set or previously back-filled line: use as best-available snapshot
+            row[COL_AUTH_PREGAME_TOTAL] = row[COL_LINE];
+            row[COL_AUTH_OVER_ODDS]     = isBlank(row[COL_ODDS]) ? -110 : row[COL_ODDS];
+            row[COL_AUTH_UNDER_ODDS]    = -110;
           }
+        }
+
+        if ((phase === "LIVE" || phase === "FINAL") && !alreadyFrozen) {
+          // First LIVE/FINAL publish: stamp the freeze timestamp.
+          // Auth total was continuously updated during PREGAME, so it already
+          // holds the last pregame line. Only fall back to COL_LINE if somehow
+          // no PREGAME publish ever ran for this game (edge case).
+          if (isBlank(row[COL_AUTH_PREGAME_TOTAL])) {
+            const fallback = row[COL_LINE];
+            if (!isBlank(fallback)) {
+              row[COL_AUTH_PREGAME_TOTAL] = fallback;
+              row[COL_AUTH_OVER_ODDS]     = isBlank(row[COL_ODDS]) ? -110 : row[COL_ODDS];
+              row[COL_AUTH_UNDER_ODDS]    = -110;
+              logger.warn(
+                { gameId, phase, line: fallback },
+                "MODULE_10: Auth total sourced from COL_LINE at freeze (no prior PREGAME publish)",
+              );
+            }
+          }
+          row[COL_LINE_LOCKED_TS] = new Date().toISOString();
+          logger.info(
+            { gameId, phase, line: row[COL_AUTH_PREGAME_TOTAL] },
+            "MODULE_10: Pregame line frozen",
+          );
         }
 
         seededRows.push(rowToArray(row, MAX_COL_IDX));
@@ -221,7 +250,25 @@ export async function seedSlateInput(
           ...operatorDefaults,                                             // O–W: operator defaults
         ];
         // New rows: Market_Phase based on current game state
-        newRow[COL_MARKET_PHASE] = deriveMarketPhase(game.game_status.abstractGameState);
+        const newPhase = deriveMarketPhase(game.game_status.abstractGameState);
+        newRow[COL_MARKET_PHASE] = newPhase;
+
+        // Seed Auth fields on creation — consistent with rolling-snapshot approach.
+        // PREGAME: populate snapshot now so freeze is accurate when transition fires.
+        // LIVE/FINAL: game appeared mid-pipeline; freeze immediately.
+        if (marketLine) {
+          newRow[COL_AUTH_PREGAME_TOTAL] = marketLine.total;
+          newRow[COL_AUTH_OVER_ODDS]     = marketLine.over_odds;
+          newRow[COL_AUTH_UNDER_ODDS]    = -110;
+        } else if (!isBlank(newRow[COL_LINE])) {
+          newRow[COL_AUTH_PREGAME_TOTAL] = newRow[COL_LINE];
+          newRow[COL_AUTH_OVER_ODDS]     = isBlank(newRow[COL_ODDS]) ? -110 : newRow[COL_ODDS];
+          newRow[COL_AUTH_UNDER_ODDS]    = -110;
+        }
+        if (newPhase === "LIVE" || newPhase === "FINAL") {
+          newRow[COL_LINE_LOCKED_TS] = new Date().toISOString();
+        }
+
         seededRows.push(newRow);
         output.games_seeded.new_games++;
         output.seed_results.push({
