@@ -6,6 +6,7 @@
 import { readRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { NormalizationResult } from "./module06_normalization.js";
+import type { MarketLine } from "./module05b_marketOdds.js";
 
 export interface SeedResult {
   legacy_game_id: string;
