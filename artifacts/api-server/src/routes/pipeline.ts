@@ -17,6 +17,7 @@ import { WORKBOOK_SCHEMA, generateSchemaReferenceRows, WORKBOOK_SCHEMA_VERSION }
 
 const router: IRouter = Router();
 
+
 router.get("/pipeline/slate", async (req, res): Promise<void> => {
   const parsed = GetPipelineSlateQueryParams.safeParse(req.query);
   if (!parsed.success) {
