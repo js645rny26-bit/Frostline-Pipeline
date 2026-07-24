@@ -22,7 +22,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_10" | "FORMULA" | "OPERATOR" | "MODULE_12" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_10" | "MODULE_11" | "FORMULA" | "OPERATOR" | "MODULE_12" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -340,6 +340,16 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Edge_Strength", index: 12, type: "string", width: 130, readOnly: true, filledBy: "FORMULA", description: "STRONG_BUY | BUY | LEAN — edge-strength metadata based on separation magnitude. Not an authorization label.", exampleValue: "BUY" },
       { name: "CORE_Blocker", index: 13, type: "string", width: 220, readOnly: true, filledBy: "FORMULA", description: "Named reason game did not authorize. Empty for CORE. E.g. INSUFFICIENT_PROJECTION_SEPARATION, UNRESOLVED_STARTER.", exampleValue: "INSUFFICIENT_PROJECTION_SEPARATION" },
       { name: "Notes", index: 14, type: "string", width: 200, filledBy: "OPERATOR", exampleValue: "" },
+      // ── Prop market comparison fields (P–V, indices 15–21) — shadow mode ──
+      // These are informational signals produced by module05e (Rotowire props scraper).
+      // They must not influence CORE authorization until historical validation is complete.
+      { name: "Starter_K_Market_Signal", index: 15, type: "string", width: 220, readOnly: true, filledBy: "MODULE_11", description: "Hard Rock K lines for away and home starter. Shape comparison only — not a suppression vote. Format: '{awayK} (U:odds/O:odds) | {homeK} (U:odds/O:odds)'", exampleValue: "7.5 (U:-145/O:+110) | 6.5 (U:-120/O:-110)" },
+      { name: "Starter_ER_Market_Signal", index: 16, type: "string", width: 220, readOnly: true, filledBy: "MODULE_11", description: "Hard Rock ER lines for away and home starter. More directly relevant than K for run-scoring expectation, but does not account for bullpen or unearned runs. Format: '{awayER} (U:odds/O:odds) | {homeER} (U:odds/O:odds)'", exampleValue: "2.5 (U:-115/O:-115) | 2.5 (U:-155/O:+120)" },
+      { name: "Lineup_TB_Coverage_Pct", index: 17, type: "number", width: 160, format: "0.0", readOnly: true, filledBy: "MODULE_11", description: "Percentage of the 18 lineup slots (9 per team × 2) for this game that have a posted Hard Rock total-bases line. Indicates prop market depth, not run-scoring direction.", exampleValue: "38.9" },
+      { name: "Prop_Market_Direction", index: 18, type: "string", width: 160, readOnly: true, filledBy: "MODULE_11", description: "Direction implied by ER odds pricing (OVER | UNDER | MIXED | INSUFFICIENT_COVERAGE). Derived from which side is priced more expensively — not an additive run-total forecast.", exampleValue: "UNDER" },
+      { name: "Prop_Market_Agreement", index: 19, type: "string", width: 180, readOnly: true, filledBy: "MODULE_11", description: "AGREES | MIXED | CONTRADICTS | INSUFFICIENT_COVERAGE — whether prop market direction aligns with Frostline's OVER/UNDER. Shadow mode: informational only.", exampleValue: "AGREES" },
+      { name: "Prop_Market_Disagreement_Reason", index: 20, type: "string", width: 280, readOnly: true, filledBy: "MODULE_11", description: "Human-readable explanation when Prop_Market_Agreement is CONTRADICTS or MIXED. Empty for AGREES or INSUFFICIENT_COVERAGE.", exampleValue: "ER market implies UNDER (away ER: 2.5, home ER: 2.5); Frostline projects OVER" },
+      { name: "Prop_Snapshot_TS", index: 21, type: "string", width: 185, readOnly: true, filledBy: "MODULE_11", description: "ISO 8601 UTC timestamp of when the Rotowire props page was fetched for this publish run.", exampleValue: "2026-07-24T13:42:11.000Z" },
     ],
   },
 

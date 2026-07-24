@@ -22,8 +22,21 @@ DAILY_MATCHUPS col Y (Notes) and BULLPEN_USAGE_DAILY col I (Notes) are pipeline-
 - **Variance_from_Projection = Model − Market** (positive = OVER edge, negative = UNDER edge)
 - **Direction** column (OVER | UNDER | NONE) is explicit in both output sheets
 - **Expected_ROI = |variance| × 0.05** — always positive
-- **SLATE_BOARD is now A:O (15 cols)**: added CORE_Blocker at N, Notes moved to O
+- **SLATE_BOARD is now A:V (22 cols)**: A–O original, P–V prop comparison signals (shadow mode, no CORE impact)
 - **ACTIVE_BOARD_SNAPSHOT is A:P (16 cols)**: K header renamed to Edge_Strength
+
+## Module05e — Rotowire props scraper (shadow mode, 2026-07-24)
+- Fetches `rotowire.com/betting/mlb/player-props.php?book=hardrock` via plain HTTP (no browser, no auth)
+- Data is embedded as flat JSON arrays directly in server-rendered HTML — locate by searching for `"hardrock_{prop}"`, walk back/forward for enclosing `[...]`
+- Props available: `strikeouts` (key: strikeouts), `earned_runs` (key: er), `total_bases` (key: bases)
+- Team abbr normalization map: `WAS→WSH`, `OAK/SAC→ATH`, `KCR→KC`, `TBR→TB`, `SDP→SD`, `SFG→SF`
+- Starter matching uses last name only (safe for single-day slate; collisions negligible)
+- TB coverage uses team abbr matching against game away/home teams
+- **Why `isPaywalled: true` doesn't block**: controls export buttons only, not the embedded JSON
+- Prop market direction derived from ER odds pricing (under more expensive → UNDER), not K lines
+- K lines are shape comparison only — do NOT use as suppression vote (a high K line ≠ low scoring)
+- SLATE_BOARD columns P–V written by module11: K signal, ER signal, TB coverage %, direction, agreement, reason, snapshot TS
+- **Commissioning sequence**: ingestion → smoke test edge cases → shadow run → historical replay → only then consider CORE integration
 
 ## CORE authorization model (commissioning v1, 2026-07-23)
 - **Truth labels**: CORE or NO_CORE only (PENDING if no market line). BUY/STRONG_BUY removed as auth labels.

@@ -1,0 +1,143 @@
+SOURCES USED
+
+* The investigation report you pasted.
+* Existing Frostline canon: market information may confirm, contradict, or size a read, but must not originate baseball truth.
+
+REFRESH CHECK
+
+The report establishes a technically viable ingestion path:
+
+* no browser automation required
+* server-rendered JSON
+* Hard Rock lines and prices available
+* player and game identifiers included
+* strikeouts, earned runs, and total bases exposed
+
+That is enough to justify a controlled test module.
+
+Verdict
+
+Build the scraper, but do not wire prop_confirmation_score into CORE authorization yet.
+
+The collection layer is useful. The proposed interpretation layer is not sufficiently commissioned.
+
+What is solid
+
+The module has a durable operational purpose:
+
+1. capture available Hard Rock starter and hitter props
+2. normalize them to player/game IDs
+3. preserve a timestamped pregame market snapshot
+4. compare prop-market expectations with Frostline’s independent game projection
+5. support historical replay and disagreement analysis
+
+That is not clutter. It has a recurring producer, consumer, and audit purpose.
+
+What needs correction
+
+1. A high strikeout line does not automatically confirm an under
+
+A high K line may reflect:
+
+* pitcher dominance
+* opponent strikeout vulnerability
+* expected workload
+* favorable umpire or park context
+* market pricing
+
+But it does not independently establish low scoring.
+
+A starter can clear a high strikeout line while allowing:
+
+* home runs
+* walks
+* concentrated damage
+* early runs before settling
+* bullpen exposure after six innings
+
+Use the strikeout market as a starter-shape comparison, not an automatic suppression vote.
+
+2. Earned-runs lines are more directly relevant, but still market evidence
+
+The two starter ER lines can imply a rough starter-run expectation, but they do not account cleanly for:
+
+* unearned runs
+* bullpen scoring
+* opener/bulk ambiguity
+* hook timing
+* inherited runners
+* game-state changes
+
+ER props are useful comparative truth, not a replacement for the run-band model.
+
+3. Aggregating batter total-base lines is not a clean projected team total
+
+Total-base props are not additive team-run forecasts.
+
+They are affected by:
+
+* different plate-appearance expectations
+* juice and bookmaker margin
+* missing bottom-order markets
+* correlated lineup outcomes
+* unequal thresholds
+* players without posted lines
+* power without run conversion
+
+A lineup with several strong TB lines may signal damage access, but summing those lines would create false precision.
+
+Correct Frostline placement
+
+The layer should sit here:
+
+price-blind projection → Frostline game truth → run bands → vehicle ranking → prop-market comparison → market execution
+
+It should not sit before projection or create the thesis.
+
+For the first implementation, produce only comparative fields such as:
+
+* Starter_K_Market_Signal
+* Starter_ER_Market_Signal
+* Lineup_TB_Coverage_Pct
+* Prop_Market_Direction
+* Prop_Market_Agreement
+* Prop_Market_Disagreement_Reason
+* Prop_Snapshot_TS
+
+Use categorical outputs:
+
+* AGREES
+* MIXED
+* CONTRADICTS
+* INSUFFICIENT_COVERAGE
+
+Do not generate a composite authorization score yet.
+
+Workbook discipline
+
+Do not add a new tab merely because the scraper exists.
+
+The raw data belongs in an existing input/history surface only if that surface can hold player-level prop snapshots without mixing responsibilities. Otherwise, a dedicated prop-history tab is justified only when all three are true:
+
+* the scraper writes to it every publish
+* a comparison module reads from it
+* replay and audit use it later
+
+The board should receive only the summarized comparison fields, not hundreds of raw prop rows.
+
+Commissioning sequence
+
+1. Build scraper and normalization.
+2. Confirm IDs, names, teams, books, lines, odds, timestamps, and game matching.
+3. Smoke-test opener, scratched starter, missing prop, duplicate player, and postponed-game cases.
+4. Run in shadow mode with no CORE impact.
+5. Replay historical slates to determine whether agreement or disagreement improves calibration.
+6. Only then decide whether it can downgrade stability, veto a vehicle, or remain informational.
+
+Final label
+
+CORE: BUILD THE INGESTION MODULE
+
+NO CORE: IMMEDIATE AUTHORIZATION INTEGRATION
+
+Blocker: the proposed relationship between K, ER, TB markets and game-total truth has not yet been historically validated.

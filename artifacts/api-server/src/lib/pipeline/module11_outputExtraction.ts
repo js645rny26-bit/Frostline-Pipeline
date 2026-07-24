@@ -5,9 +5,10 @@
  * then returns typed results for the API response.
  */
 
-import { readRange, clearRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
+import { readRange, clearRange, writeRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
+import { computePropComparison, type RotowirePropsResult } from "./module05e_rotowireProps.js";
 
 export interface SlateBoardEntry {
   legacy_game_id: string;
@@ -26,6 +27,14 @@ export interface SlateBoardEntry {
   edge_strength: string;
   /** Named reason a game did not authorize. Empty string for CORE or PENDING. */
   core_blocker: string;
+  // ── Shadow-mode prop comparison fields (no CORE impact) ──
+  starter_k_market_signal: string;
+  starter_er_market_signal: string;
+  lineup_tb_coverage_pct: number | null;
+  prop_market_direction: string;
+  prop_market_agreement: string;
+  prop_market_disagreement_reason: string;
+  prop_snapshot_ts: string;
 }
 
 export interface ActiveBoardEntry {
@@ -148,6 +157,7 @@ function computeDecision(
 export async function extractOutputBoards(
   gameSummary: GameSummaryRow[],
   workbookId = WORKBOOK_ID,
+  propsResult: RotowirePropsResult | null = null,
 ): Promise<Module11Result> {
   logger.info({ games: gameSummary.length }, "MODULE_11: Computing SLATE_BOARD + ACTIVE_BOARD_SNAPSHOT");
 
@@ -186,7 +196,25 @@ export async function extractOutputBoards(
       });
     }
 
-    // ── Compute SLATE_BOARD — 15 cols A–O, starts row 2 ──
+    // ── Ensure SLATE_BOARD has at least 22 columns (A–V) for prop signal fields ──
+    await expandSheetColumns(workbookId, "SLATE_BOARD", 22).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not expand SLATE_BOARD columns — continuing");
+    });
+
+    // Write prop signal headers on row 1, columns P–V (indices 15–21)
+    await writeRange(workbookId, "SLATE_BOARD!P1:V1", [[
+      "Starter_K_Market_Signal",
+      "Starter_ER_Market_Signal",
+      "Lineup_TB_Coverage_Pct",
+      "Prop_Market_Direction",
+      "Prop_Market_Agreement",
+      "Prop_Market_Disagreement_Reason",
+      "Prop_Snapshot_TS",
+    ]]).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write prop signal headers — continuing");
+    });
+
+    // ── Compute SLATE_BOARD — 22 cols A–V, starts row 2 ──
     const sbRows: unknown[][] = [];
 
     for (const gs of gameSummary) {
@@ -209,6 +237,27 @@ export async function extractOutputBoards(
         gameCtx,
       );
 
+      // ── Shadow-mode prop comparison signals (no CORE impact) ────────────
+      const EMPTY_PROPS = {
+        starter_k_market_signal:          "INSUFFICIENT_COVERAGE",
+        starter_er_market_signal:         "INSUFFICIENT_COVERAGE",
+        lineup_tb_coverage_pct:           null as number | null,
+        prop_market_direction:            "INSUFFICIENT_COVERAGE" as string,
+        prop_market_agreement:            "INSUFFICIENT_COVERAGE" as string,
+        prop_market_disagreement_reason:  "",
+        prop_snapshot_ts:                 "",
+      };
+      const propSignals = propsResult
+        ? computePropComparison(
+            gs.away_team,
+            gs.home_team,
+            gs.away_pitcher || null,
+            gs.home_pitcher || null,
+            direction,
+            propsResult,
+          )
+        : EMPTY_PROPS;
+
       const entry: SlateBoardEntry = {
         legacy_game_id:  gs.game_id,
         away_team:       gs.away_team,
@@ -223,6 +272,13 @@ export async function extractOutputBoards(
         expected_roi:    roi,
         edge_strength:   edgeStrength,
         core_blocker:    coreBlocker,
+        starter_k_market_signal:         propSignals.starter_k_market_signal,
+        starter_er_market_signal:        propSignals.starter_er_market_signal,
+        lineup_tb_coverage_pct:          propSignals.lineup_tb_coverage_pct,
+        prop_market_direction:           propSignals.prop_market_direction,
+        prop_market_agreement:           propSignals.prop_market_agreement,
+        prop_market_disagreement_reason: propSignals.prop_market_disagreement_reason,
+        prop_snapshot_ts:                propSignals.prop_snapshot_ts,
       };
       output.slate_board.push(entry);
       if (decision === "CORE")    output.core_count++;
@@ -243,13 +299,20 @@ export async function extractOutputBoards(
         roi,                             // L: Expected_ROI (always positive)
         edgeStrength,                    // M: Edge_Strength (STRONG_BUY | BUY | LEAN — metadata, not auth)
         coreBlocker,                     // N: CORE_Blocker (named reason; empty for CORE)
-        "",                              // O: Notes
+        "",                              // O: Notes (operator)
+        propSignals.starter_k_market_signal,          // P: Starter_K_Market_Signal
+        propSignals.starter_er_market_signal,         // Q: Starter_ER_Market_Signal
+        propSignals.lineup_tb_coverage_pct ?? "",     // R: Lineup_TB_Coverage_Pct
+        propSignals.prop_market_direction,            // S: Prop_Market_Direction
+        propSignals.prop_market_agreement,            // T: Prop_Market_Agreement
+        propSignals.prop_market_disagreement_reason,  // U: Prop_Market_Disagreement_Reason
+        propSignals.prop_snapshot_ts,                 // V: Prop_Snapshot_TS
       ]);
     }
 
-    await clearRange(workbookId, "SLATE_BOARD!A2:O100");
+    await clearRange(workbookId, "SLATE_BOARD!A2:V100");
     if (sbRows.length > 0) {
-      await writeRange(workbookId, `SLATE_BOARD!A2:O${1 + sbRows.length}`, sbRows);
+      await writeRange(workbookId, `SLATE_BOARD!A2:V${1 + sbRows.length}`, sbRows);
     }
     logger.info(
       { rows: sbRows.length, core: output.core_count, noCore: output.no_core_count },

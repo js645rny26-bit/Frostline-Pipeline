@@ -17,6 +17,7 @@ import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { trackLineMovement } from "./module05d_oddsHistory.js";
 import { fetchMarketOddsWithFallback, buildOddsMap } from "./module05c_startingNineScraper.js";
+import { fetchRotowireProps, type RotowirePropsResult } from "./module05e_rotowireProps.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 import { normalizeSlate } from "./module06_normalization.js";
 import { validateNormalizedSlate } from "./module07_validation.js";
@@ -216,7 +217,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // Fetch schedule manifest for pitcher IDs (needed by module04d)
   const manifest = await fetchMlbSchedule(date).catch(() => null);
 
-  const [bullpenResult, startingNineResult, starterOutings, umpireResult, teamRunRates, oddsResult] = await Promise.all([
+  const [bullpenResult, startingNineResult, starterOutings, umpireResult, teamRunRates, oddsResult, rotowireProps] = await Promise.all([
     fetchBullpenUsage(date, slateTeamIds).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: bullpen fetch threw — skipping");
       return null;
@@ -242,6 +243,10 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       return null;
     }),
     fetchMarketOddsWithFallback(date), // mlbstartingnine primary, OddsAPI fallback
+    fetchRotowireProps().catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: Rotowire props fetch threw — skipping (shadow mode)");
+      return null as RotowirePropsResult | null;
+    }),
   ]);
 
   if (bullpenResult) {
@@ -338,7 +343,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   }
 
   // Module 11: Compute + write SLATE_BOARD and ACTIVE_BOARD_SNAPSHOT
-  const mod11 = await extractOutputBoards(mod09.game_summary_rows, workbookId);
+  // rotowireProps is passed for shadow-mode prop comparison signals — no CORE impact.
+  const mod11 = await extractOutputBoards(mod09.game_summary_rows, workbookId, rotowireProps);
 
   // Overall status before archival (so we can write it into the run log row)
   // mod08 "failure" case is already handled by the early return above;
