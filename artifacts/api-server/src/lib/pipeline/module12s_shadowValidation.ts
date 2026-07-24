@@ -114,7 +114,7 @@ export interface ShadowValidationResult {
  * Legacy adjusted rate for one side of a game.
  * Uses L30 rate only (no L10 blend); weather modifier only (no park factor).
  */
-function legacyAdjRate(l30Rate: number | null, weatherMultiplier: number): number {
+export function legacyAdjRate(l30Rate: number | null, weatherMultiplier: number): number {
   return parseFloat(((l30Rate ?? LEAGUE_AVG_RS) * weatherMultiplier).toFixed(3));
 }
 
@@ -129,7 +129,7 @@ function legacyAdjRate(l30Rate: number | null, weatherMultiplier: number): numbe
  * When repaired_adj ≤ 0 (degenerate), return legacy_adj directly as an
  * absolute estimate to avoid division by zero.
  */
-function scaleLegacyRuns(
+export function scaleLegacyRuns(
   repairedRuns: number,
   legacyAdj: number,
   repairedAdj: number,

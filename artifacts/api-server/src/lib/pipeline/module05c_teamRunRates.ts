@@ -30,6 +30,13 @@ export interface TeamRunRatesResult {
   error?: string;
 }
 
+export interface RunRateOptions {
+  /** Calendar days before `date` to include (default 15). */
+  lookbackDays?: number;
+  /** Most-recent finals per team to average (default 10). */
+  lastN?: number;
+}
+
 // full team name (lowercase) → canonical abbr, same pattern as module05b
 const FULL_NAME_TO_ABBR: Record<string, string> = {};
 for (const { canonical_abbr, full_name } of Object.values(SOURCE_MAPPINGS)) {
@@ -57,12 +64,17 @@ interface ScheduleRangeGame {
   };
 }
 
-export async function fetchTeamRunRates(date: string): Promise<TeamRunRatesResult> {
-  const startDate = shiftDate(date, -LOOKBACK_DAYS);
+export async function fetchTeamRunRates(
+  date: string,
+  opts: RunRateOptions = {},
+): Promise<TeamRunRatesResult> {
+  const lookbackDays = opts.lookbackDays ?? LOOKBACK_DAYS;
+  const lastNCap     = opts.lastN ?? LAST_N;
+  const startDate = shiftDate(date, -lookbackDays);
   const endDate   = shiftDate(date, -1);
   const url = `${MLB_API}/schedule?sportId=1&startDate=${startDate}&endDate=${endDate}`;
 
-  logger.info({ startDate, endDate }, "MODULE_05c: Fetching team run rates (L10 actual)");
+  logger.info({ startDate, endDate, lastN: lastNCap }, "MODULE_05c: Fetching team run rates (actual)");
 
   try {
     const ctrl  = new AbortController();
@@ -100,7 +112,7 @@ export async function fetchTeamRunRates(date: string): Promise<TeamRunRatesResul
     const rates = new Map<string, TeamRunRate>();
     for (const [abbr, log] of perTeam) {
       log.sort((a, b) => b.date.localeCompare(a.date));   // newest first
-      const lastN = log.slice(0, LAST_N);
+      const lastN = log.slice(0, lastNCap);
       if (lastN.length === 0) continue;
       const rs = lastN.reduce((sum, g) => sum + g.scored, 0) / lastN.length;
       const ra = lastN.reduce((sum, g) => sum + g.allowed, 0) / lastN.length;

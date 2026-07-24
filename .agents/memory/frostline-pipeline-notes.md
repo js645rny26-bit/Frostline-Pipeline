@@ -15,8 +15,8 @@ Deferred by design — two games same day same teams share an ID. No fix yet; no
 ## Operator Notes columns cleared each run by design
 DAILY_MATCHUPS col Y (Notes) and BULLPEN_USAGE_DAILY col I (Notes) are pipeline-owned and cleared on every publish. Operator durable notes belong in SLATE_INPUT cols O–W.
 
-## Schema drift rule: new board columns need one-off live header writes
-`workbookSetup.ts` only applies to new workbooks. Adding a column to SLATE_BOARD, ACTIVE_BOARD_SNAPSHOT, DAILY_MATCHUPS, etc. requires a one-off `writeRange` to the live workbook's header row (pattern: `.mts` script in artifacts/api-server using `../frostline/node_modules/.bin/tsx`).
+## Schema drift rule: new sheets AND columns need one-off live workbook scripts
+`workbookSetup.ts` only applies to new workbooks. Adding a column requires a one-off `writeRange` to the live header row; adding a whole SHEET requires a one-off `addSheet` batchUpdate + header/format writes (working template: `artifacts/api-server/create_analysis_sheets.mts` — idempotent, reads defs from workbookSchema). Symptom of forgetting: module writes fail with `Sheet "X" not found in workbook`.
 
 ## Commissioning gates (shadow + replay, 2026-07-24)
 **Shadow validation (module12s_shadowValidation.ts):**
@@ -30,18 +30,30 @@ DAILY_MATCHUPS col Y (Notes) and BULLPEN_USAGE_DAILY col I (Notes) are pipeline-
 - Endpoint: GET /pipeline/replay?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&write_sheets=true
 - 5 variants: LEGACY, L30_PARK, L10_PARK, BLEND, BLEND_PARK (all neutral weather — historical weather not stored)
 - Projection formula: simplified (offense_rate × multiplier, each side summed) — no pitcher ERA adjustment; isolates offense rate + park effect per variant cleanly
-- L30 source: current Fangraphs splits (proxy — not date-anchored); document this in any published results
-- L10 source: MLB Stats API game logs as-of each replay date (accurate)
-- Park factors: today's mlbstartingnine data (seasonal — stable for the season)
+- L30 source: MLB Stats API actual RS/G, 30-day window ending date−1, min 15 games (date-anchored, no lookahead — replaced the Fangraphs proxy after the stub discovery; replay L30 is REAL while production module09 L30 is not)
+- L10 source: MLB Stats API game logs as-of each replay date (accurate). `fetchTeamRunRates(date, {lookbackDays, lastN})` opts added for the L30 window; defaults unchanged for production callers
+- Park factors: today's mlbstartingnine page only — see "mlbstartingnine is today-only" below; replay flags coverage < 20 venues in errors and status goes partial
 - 8 metrics per variant: MAE, median AE, bias, miss4+pct, overproject%, underproject%, calibration by band
 - Writes: REPLAY_RESULTS (24 cols A–X) and REPLAY_METRICS (9 cols A–I)
 - Max date range: 30 days per call
 
 **Schema additions:** SECTION_COLORS now includes "ANALYSIS" (deep teal). New sheets: SHADOW_VALIDATION, REPLAY_RESULTS, REPLAY_METRICS.
 
+## Module05 Fangraphs is a STUB (discovered 2026-07-24 via replay gate)
+`fetchTeamSplitsWithFallback()` never fetches Fangraphs — it emits identical hardcoded splits for all 30 teams (L30 wRC+ 112 vs RHP / 105 vs LHP → constant 4.883 RS/G after conversion). The file header admits it ("FanGraphs requires auth").
+**Why it matters:** production module09's blend is 0.65 × constant + 0.35 × real L10 — the L30 leg carries ZERO team-level signal, so live "legacy" projections were effectively flat ~9.77 before weather. Detected because replay calibration put all 224 games in one band (a degenerate distribution is the tell).
+**How to apply:** any work touching module09 offense rates must treat the L30 leg as unrepaired until module05 gets a real source. Replay-proven candidate: MLB Stats API schedule-range actual RS/G (module13 now uses exactly this). Repair needs its own commissioning sequence.
+
+## mlbstartingnine is today-only; pf blocks are index-aligned
+- The `?date` query param is IGNORED — every fetch returns the current day's page. Historical park/lineup coverage from this source is impossible; early-morning pages are sparse (1–5 games) and fill in during the day.
+- Park factor blocks are matched to games by page ORDER with a dedup on identical values — two venues with identical factor rows would shift indexes and mis-assign. Latent parser risk, not yet fixed.
+
+## api-server routing trap (dev)
+Proxy path `/api` → localhost:8080 with the FULL path forwarded (no strip); health is `/api/healthz`. Probing `localhost:80/api-server/...` silently hits the frostline Vite SPA fallback and returns fake 200 HTML — always curl `localhost:8080/api/...` directly or `localhost:80/api/...`.
+
 ## Module09 projection inputs (Repair v2, 2026-07-24)
 Offensive rate now uses a blended input, not wRC+ alone:
-- `L30_WEIGHT = 0.65` × Fangraphs wRC+-derived rate + `L10_WEIGHT = 0.35` × actual L10 RS/game
+- `L30_WEIGHT = 0.65` × Fangraphs wRC+-derived rate + `L10_WEIGHT = 0.35` × actual L10 RS/game — **but see "Module05 Fangraphs is a STUB" above: the L30 leg is currently constant**
 - Fallback hierarchy: BLENDED → L30_ONLY → L10_ONLY → LEAGUE_AVG_FALLBACK
 - LEAGUE_AVG_FALLBACK always emits logger.warn — must never be silent
 - L10 data requires ≥ 5 games to be valid (MIN_L10_GAMES = 5)

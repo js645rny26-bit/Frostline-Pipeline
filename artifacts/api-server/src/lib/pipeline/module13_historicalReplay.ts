@@ -23,12 +23,20 @@
  * Absolute projected values will differ from the live pipeline's output;
  * only relative variant differences are meaningful.
  *
- * L30 data source: current Fangraphs splits (documented proxy — not
- * date-anchored snapshots). Acceptable for early-season validation;
- * note in any published results.
+ * L30 data source: MLB Stats API actual runs scored per game over the 30
+ * calendar days before each replay date (date-anchored — no lookahead, no
+ * proxy). NOTE: this intentionally differs from production module 09, whose
+ * L30 leg is wRC+-derived from module 05 — which is currently a STUB emitting
+ * identical splits for all 30 teams (see module05_fangraphs.ts header). The
+ * replay therefore measures the blend design with a REAL L30 signal; the
+ * production L30 source needs its own repair before the blend behaves the
+ * same way live.
  *
- * Park factors source: mlbstartingnine.com seasonal factors fetched at
- * replay runtime (stable for the season — not day-specific).
+ * Park factors source: mlbstartingnine.com. The site serves only the CURRENT
+ * day's page (the ?date query param is ignored), so historical venue coverage
+ * is impossible from this source. Venues absent from today's slate get a
+ * neutral 1.0 multiplier; coverage below PARK_MIN_VENUES_WARN is flagged in
+ * result errors.
  *
  * L10 data source: MLB Stats API game logs as of each replay date. Accurate.
  *
@@ -45,7 +53,6 @@
 
 import { clearRange, expandSheetColumns, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
-import { fetchTeamSplitsWithFallback } from "./module05_fangraphs.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { fetchStartingNine } from "./module04c_startingNine.js";
 import type { ParkFactors } from "./module04c_startingNine.js";
@@ -63,6 +70,13 @@ const MAX_DATE_RANGE = 30;
 // Park multiplier clamp (matches module09)
 const PARK_MIN = 0.85;
 const PARK_MAX = 1.15;
+
+// L30-actual offense window (MLB Stats API schedule-range, date-anchored)
+const L30_LOOKBACK_DAYS = 30; // calendar window before each replay date
+const L30_LAST_N        = 30; // effectively uncapped within the window (~27 games)
+const MIN_L30_GAMES     = 15; // below this, L30 treated as missing
+
+const PARK_MIN_VENUES_WARN = 20; // below this, flag partial park coverage
 
 const REPLAY_RESULTS_SHEET = "REPLAY_RESULTS";
 const REPLAY_METRICS_SHEET = "REPLAY_METRICS";
@@ -174,7 +188,7 @@ function shiftDate(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function dateRange(start: string, end: string): string[] {
+export function dateRange(start: string, end: string): string[] {
   const dates: string[] = [];
   let cur = start;
   while (cur <= end && dates.length < MAX_DATE_RANGE) {
@@ -225,7 +239,7 @@ async function fetchCompletedGames(date: string): Promise<MlbScheduleGame[]> {
 
 // ─── Compute park multiplier (same formula as module09) ───────────────────────
 
-function parkMultiplierFromFactors(pf: ParkFactors | null): {
+export function parkMultiplierFromFactors(pf: ParkFactors | null): {
   park_runs_pct: number | null;
   park_multiplier: number;
 } {
@@ -236,23 +250,22 @@ function parkMultiplierFromFactors(pf: ParkFactors | null): {
   return { park_runs_pct: pf.runs_pct, park_multiplier: mult };
 }
 
-// ─── L30 rate from Fangraphs splits ──────────────────────────────────────────
+// ─── Offense rate lookup (shared by L30 and L10 maps) ────────────────────────
 
-function l30Rate(
+export function rateFromMap(
   teamAbbr: string,
-  splitsTeams: Array<{ team: string; l30_wrc_plus: number }>,
+  rateMap: Map<string, { games: number; runs_per_game: number }>,
+  minGames: number,
 ): number | null {
-  const matching = splitsTeams.filter((s) => s.team === teamAbbr);
-  if (matching.length === 0) return null;
-  return parseFloat(
-    ((matching.reduce((a, s) => a + s.l30_wrc_plus, 0) / matching.length / 100) *
-      LEAGUE_AVG_RS).toFixed(3),
-  );
+  const entry = rateMap.get(teamAbbr);
+  return entry !== undefined && entry.games >= minGames
+    ? entry.runs_per_game
+    : null;
 }
 
 // ─── Compute 5 variant projections for one game ───────────────────────────────
 
-interface GameProjections {
+export interface GameProjections {
   projections: Record<ReplayVariantKey, number | null>;
   away_l30: number | null;
   home_l30: number | null;
@@ -264,24 +277,17 @@ interface GameProjections {
   park_multiplier: number;
 }
 
-function computeVariants(
+export function computeVariants(
   awayAbbr: string,
   homeAbbr: string,
-  splitsTeams: Array<{ team: string; l30_wrc_plus: number }>,
+  l30Map: Map<string, { games: number; runs_per_game: number }>,
   l10Map: Map<string, { games: number; runs_per_game: number }>,
   parkFactors: ParkFactors | null,
 ): GameProjections {
-  const awayL30 = l30Rate(awayAbbr, splitsTeams);
-  const homeL30 = l30Rate(homeAbbr, splitsTeams);
-
-  const awayL10Entry = l10Map.get(awayAbbr);
-  const homeL10Entry = l10Map.get(homeAbbr);
-  const awayL10 = (awayL10Entry?.games ?? 0) >= MIN_L10_GAMES
-    ? awayL10Entry!.runs_per_game
-    : null;
-  const homeL10 = (homeL10Entry?.games ?? 0) >= MIN_L10_GAMES
-    ? homeL10Entry!.runs_per_game
-    : null;
+  const awayL30 = rateFromMap(awayAbbr, l30Map, MIN_L30_GAMES);
+  const homeL30 = rateFromMap(homeAbbr, l30Map, MIN_L30_GAMES);
+  const awayL10 = rateFromMap(awayAbbr, l10Map, MIN_L10_GAMES);
+  const homeL10 = rateFromMap(homeAbbr, l10Map, MIN_L10_GAMES);
 
   // Blend (offensive rate used when both present)
   const awayBlend = awayL30 !== null && awayL10 !== null
@@ -341,7 +347,7 @@ const CALIBRATION_BANDS = [
   { min: 11, max: Infinity, label: "≥ 11" },
 ];
 
-function median(values: number[]): number | null {
+export function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const mid    = Math.floor(sorted.length / 2);
@@ -350,7 +356,7 @@ function median(values: number[]): number | null {
     : parseFloat(sorted[mid].toFixed(3));
 }
 
-function computeMetrics(
+export function computeMetrics(
   variant: ReplayVariantKey,
   rows: ReplayGameRow[],
   runTs: string,
@@ -519,40 +525,30 @@ export async function runHistoricalReplay(
     };
   }
 
-  // ── Pre-fetch stable data (current day's values, used for all dates) ──
-  logger.info("MODULE_13: Pre-fetching Fangraphs splits and park factors");
-  const [splits, startingNine] = await Promise.all([
-    fetchTeamSplitsWithFallback().catch((err: unknown) => {
-      errors.push(`Fangraphs fetch failed: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
-    }),
-    fetchStartingNine(new Date().toISOString().slice(0, 10)).catch((err: unknown) => {
-      errors.push(`StartingNine fetch failed: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
-    }),
-  ]);
-
-  if (!splits) {
-    return {
-      status: "failure",
-      replay_timestamp_utc: runTs,
-      start_date: startDate,
-      end_date: endDate,
-      dates_processed: 0,
-      total_games: 0,
-      skipped_games: 0,
-      rows: [],
-      metrics: [],
-      errors,
-    };
-  }
-
-  // Build park factors map: home_abbr → ParkFactors
+  // ── Build park factors map: home_abbr → ParkFactors ──
+  // mlbstartingnine.com serves only the CURRENT day's page (the ?date query
+  // param is ignored), so historical venue coverage is impossible from this
+  // source. Take today's game-aligned factors; venues not on today's slate
+  // get a neutral 1.0 multiplier, and low coverage is flagged in errors so
+  // partial *_PARK variants are never mistaken for fully park-adjusted runs.
   const parkFactorsMap = new Map<string, ParkFactors>();
-  for (const g of startingNine?.games ?? []) {
-    if (g.home_abbr && g.park_factors) {
-      parkFactorsMap.set(g.home_abbr, g.park_factors);
+  try {
+    const sn = await fetchStartingNine(new Date().toISOString().slice(0, 10));
+    for (const g of sn?.games ?? []) {
+      if (g.home_abbr && g.park_factors && !parkFactorsMap.has(g.home_abbr)) {
+        parkFactorsMap.set(g.home_abbr, g.park_factors);
+      }
     }
+  } catch (err: unknown) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "MODULE_13: StartingNine fetch failed — park factors neutral",
+    );
+  }
+  if (parkFactorsMap.size < PARK_MIN_VENUES_WARN) {
+    errors.push(
+      `Park factor coverage low (${parkFactorsMap.size} venues) — *_PARK variants partially neutral for uncovered venues`,
+    );
   }
   logger.info({ parkEntries: parkFactorsMap.size }, "MODULE_13: Park factors map built");
 
@@ -565,8 +561,8 @@ export async function runHistoricalReplay(
     logger.info({ date }, "MODULE_13: Processing replay date");
 
     try {
-      // Fetch completed games and L10 rates concurrently
-      const [completedGames, runRates] = await Promise.all([
+      // Fetch completed games, L10 rates, and date-anchored L30 rates concurrently
+      const [completedGames, runRates, l30Rates] = await Promise.all([
         fetchCompletedGames(date).catch((err: unknown) => {
           errors.push(`Games fetch failed for ${date}: ${err instanceof Error ? err.message : String(err)}`);
           return [] as MlbScheduleGame[];
@@ -575,9 +571,22 @@ export async function runHistoricalReplay(
           errors.push(`RunRates fetch failed for ${date}: ${err instanceof Error ? err.message : String(err)}`);
           return null;
         }),
+        fetchTeamRunRates(date, { lookbackDays: L30_LOOKBACK_DAYS, lastN: L30_LAST_N }).catch((err: unknown) => {
+          errors.push(`L30 rates fetch failed for ${date}: ${err instanceof Error ? err.message : String(err)}`);
+          return null;
+        }),
       ]);
 
+      // fetchTeamRunRates reports HTTP failures via status, not throw
+      if (runRates && runRates.status === "failure") {
+        errors.push(`L10 rates failed for ${date}: ${runRates.error ?? "unknown"}`);
+      }
+      if (l30Rates && l30Rates.status === "failure") {
+        errors.push(`L30 rates failed for ${date}: ${l30Rates.error ?? "unknown"}`);
+      }
+
       const l10Map = runRates?.rates ?? new Map();
+      const l30Map = l30Rates?.rates ?? new Map();
 
       for (const game of completedGames) {
         const awayScore = game.teams?.away?.score;
@@ -604,7 +613,7 @@ export async function runHistoricalReplay(
         const computed = computeVariants(
           awayAbbr,
           homeAbbr,
-          splits.teams,
+          l30Map,
           l10Map,
           parkFactors,
         );
