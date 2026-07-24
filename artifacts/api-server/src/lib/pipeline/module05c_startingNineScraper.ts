@@ -97,6 +97,12 @@ async function scrapeStartingNine(date: string): Promise<OddsResult> {
       under_odds:       -110,
       bookmaker:        "mlbstartingnine",
       market_available: true,
+      // mlbstartingnine is a totals-only source; spread/ML not available here
+      away_spread:      null,
+      away_spread_odds: null,
+      home_spread_odds: null,
+      away_ml:          null,
+      home_ml:          null,
     });
   }
 

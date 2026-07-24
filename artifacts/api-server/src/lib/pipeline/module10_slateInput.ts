@@ -66,7 +66,14 @@ const COL_AUTH_OVER_ODDS       = 25; // Z
 const COL_AUTH_UNDER_ODDS      = 26; // AA
 const COL_LINE_LOCKED_TS       = 27; // AB
 
-const MAX_COL_IDX = 27; // AB (was 22/W)
+// ── Market spread / moneyline columns (pipeline-maintained, never operator-set) ──
+const COL_AWAY_SPREAD      = 28; // AC: run-line point for away team (+1.5 or -1.5)
+const COL_AWAY_SPREAD_ODDS = 29; // AD: American odds for away to cover the spread
+const COL_HOME_SPREAD_ODDS = 30; // AE: American odds for home to cover the spread
+const COL_AWAY_ML          = 31; // AF: American moneyline for away outright win
+const COL_HOME_ML          = 32; // AG: American moneyline for home outright win
+
+const MAX_COL_IDX = 32; // AG
 
 function rowToObject(row: unknown[]): Record<number, unknown> {
   const obj: Record<number, unknown> = {};
@@ -98,6 +105,12 @@ function buildOperatorDefaults(gameId: string, line?: MarketLine) {
     null,                                      // Z: Authoritative_Over_Odds
     null,                                      // AA: Authoritative_Under_Odds
     null,                                      // AB: Pregame_Line_Locked_TS
+    // ── Market spread / moneyline (pipeline-maintained, always refreshed) ──
+    hasLine ? (line.away_spread ?? null) : null,    // AC: Away_Spread
+    hasLine ? (line.away_spread_odds ?? null) : null, // AD: Away_Spread_Odds
+    hasLine ? (line.home_spread_odds ?? null) : null, // AE: Home_Spread_Odds
+    hasLine ? (line.away_ml ?? null) : null,          // AF: Away_ML
+    hasLine ? (line.home_ml ?? null) : null,          // AG: Home_ML
   ];
 }
 
@@ -141,8 +154,8 @@ export async function seedSlateInput(
   };
 
   try {
-    // Read existing SLATE_INPUT (including header) — A:AB covers all 28 cols
-    const existing = await readRange(workbookId, "SLATE_INPUT!A:AB");
+    // Read existing SLATE_INPUT (including header) — A:AG covers all 33 cols (incl. spread/ML)
+    const existing = await readRange(workbookId, "SLATE_INPUT!A:AG");
     const existingRows = existing.values ?? [];
     const dataRows = existingRows.slice(1);
 
@@ -228,6 +241,15 @@ export async function seedSlateInput(
           );
         }
 
+        // Always refresh market spread/ML — pipeline-managed, never set by operator
+        if (marketLine) {
+          row[COL_AWAY_SPREAD]      = marketLine.away_spread ?? null;
+          row[COL_AWAY_SPREAD_ODDS] = marketLine.away_spread_odds ?? null;
+          row[COL_HOME_SPREAD_ODDS] = marketLine.home_spread_odds ?? null;
+          row[COL_AWAY_ML]          = marketLine.away_ml ?? null;
+          row[COL_HOME_ML]          = marketLine.home_ml ?? null;
+        }
+
         seededRows.push(rowToArray(row, MAX_COL_IDX));
         output.games_seeded.updated_games++;
         output.seed_results.push({
@@ -285,7 +307,7 @@ export async function seedSlateInput(
     if (seededRows.length > 0) {
       await writeRange(
         workbookId,
-        `SLATE_INPUT!A2:AB${1 + seededRows.length}`,
+        `SLATE_INPUT!A2:AG${1 + seededRows.length}`,
         seededRows,
       );
     }

@@ -35,6 +35,14 @@ export interface SlateBoardEntry {
   prop_market_agreement: string;
   prop_market_disagreement_reason: string;
   prop_snapshot_ts: string;
+  // ── Side (run-line) derivative signals ──
+  /** proj_run_diff + away_spread. Positive = model says away covers; negative = home covers. */
+  side_edge: number | null;
+  side_direction: "AWAY" | "HOME" | "NONE" | "NO_MARKET";
+  side_decision: "CORE" | "NO_CORE" | "NO_MARKET";
+  // ── Starter quality derivatives ──
+  away_starter_quality: number | null;
+  home_starter_quality: number | null;
 }
 
 export interface ActiveBoardEntry {
@@ -67,6 +75,8 @@ export interface Module11Result {
 // F–N = model fields (5–13), O=14: Candidate_Vehicle, P=15: Line, Q=16: Odds
 // X=23: Market_Phase, Y=24: Authoritative_Pregame_Total
 // Z=25: Authoritative_Over_Odds, AA=26: Authoritative_Under_Odds, AB=27: Pregame_Line_Locked_TS
+// AC=28: Away_Spread, AD=29: Away_Spread_Odds, AE=30: Home_Spread_Odds
+// AF=31: Away_ML, AG=32: Home_ML
 const SLATE_INPUT_COLS = {
   GAME_ID:            0,
   CANDIDATE_VEHICLE:  14,
@@ -76,6 +86,12 @@ const SLATE_INPUT_COLS = {
   AUTH_PREGAME_TOTAL: 24,   // frozen at game-time; prefer this when set
   AUTH_OVER_ODDS:     25,
   AUTH_UNDER_ODDS:    26,
+  // ── Step 5: spread and moneyline ──
+  AWAY_SPREAD:        28,   // run-line point for away team (+1.5 or -1.5)
+  AWAY_SPREAD_ODDS:   29,   // American odds for away to cover
+  HOME_SPREAD_ODDS:   30,   // American odds for home to cover
+  AWAY_ML:            31,   // American moneyline for away outright win
+  HOME_ML:            32,   // American moneyline for home outright win
 };
 
 function parseNum(v: unknown): number | null {
@@ -172,11 +188,21 @@ export async function extractOutputBoards(
 
   try {
     // ── Read SLATE_INPUT for operator-provided market lines ──
-    // Range extends to AB to cover the pregame lock fields (cols X–AB = 23–27)
-    const slateInputData = await readRange(workbookId, "SLATE_INPUT!A:AB");
+    // Range extends to AG to cover spread/ML cols (AC–AG = 28–32)
+    const slateInputData = await readRange(workbookId, "SLATE_INPUT!A:AG");
     const slateInputRows = (slateInputData.values ?? []).slice(1); // skip header row
 
-    const marketMap = new Map<string, { vehicle: string; line: number | null; odds: number | null; phase: string }>();
+    const marketMap = new Map<string, {
+      vehicle: string;
+      line: number | null;
+      odds: number | null;
+      phase: string;
+      away_spread: number | null;
+      away_spread_odds: number | null;
+      home_spread_odds: number | null;
+      away_ml: number | null;
+      home_ml: number | null;
+    }>();
     for (const row of slateInputRows) {
       const gameId = parseStr(row[SLATE_INPUT_COLS.GAME_ID]);
       if (!gameId) continue;
@@ -189,10 +215,15 @@ export async function extractOutputBoards(
       const authOverOdds = parseNum(row[SLATE_INPUT_COLS.AUTH_OVER_ODDS]);
 
       marketMap.set(gameId, {
-        vehicle: parseStr(row[SLATE_INPUT_COLS.CANDIDATE_VEHICLE]),
-        line:    authTotal ?? liveTotal,
-        odds:    authOverOdds ?? parseNum(row[SLATE_INPUT_COLS.ODDS]),
-        phase:   parseStr(row[SLATE_INPUT_COLS.MARKET_PHASE]) || "PREGAME",
+        vehicle:          parseStr(row[SLATE_INPUT_COLS.CANDIDATE_VEHICLE]),
+        line:             authTotal ?? liveTotal,
+        odds:             authOverOdds ?? parseNum(row[SLATE_INPUT_COLS.ODDS]),
+        phase:            parseStr(row[SLATE_INPUT_COLS.MARKET_PHASE]) || "PREGAME",
+        away_spread:      parseNum(row[SLATE_INPUT_COLS.AWAY_SPREAD]),
+        away_spread_odds: parseNum(row[SLATE_INPUT_COLS.AWAY_SPREAD_ODDS]),
+        home_spread_odds: parseNum(row[SLATE_INPUT_COLS.HOME_SPREAD_ODDS]),
+        away_ml:          parseNum(row[SLATE_INPUT_COLS.AWAY_ML]),
+        home_ml:          parseNum(row[SLATE_INPUT_COLS.HOME_ML]),
       });
     }
 
@@ -229,7 +260,11 @@ export async function extractOutputBoards(
     const sbRows: unknown[][] = [];
 
     for (const gs of gameSummary) {
-      const market  = marketMap.get(gs.game_id) ?? { vehicle: "", line: null, odds: null };
+      const market  = marketMap.get(gs.game_id) ?? {
+        vehicle: "", line: null, odds: null, phase: "PREGAME",
+        away_spread: null, away_spread_odds: null, home_spread_odds: null,
+        away_ml: null, home_ml: null,
+      };
       const variance = market.line !== null
         ? parseFloat((gs.projected_total_runs - market.line).toFixed(2))
         : null;
@@ -247,6 +282,28 @@ export async function extractOutputBoards(
         market.vehicle,
         gameCtx,
       );
+
+      // ── Side (run-line) derivative signal ──────────────────────────────
+      const projRunDiff  = parseFloat((gs.projected_away_runs - gs.projected_home_runs).toFixed(2));
+      const awaySpread   = market.away_spread;
+      // side_edge: positive = model projects away to cover the spread; negative = home covers
+      const sideEdge     = awaySpread !== null
+        ? parseFloat((projRunDiff + awaySpread).toFixed(2))
+        : null;
+      const sideDirection: "AWAY" | "HOME" | "NONE" | "NO_MARKET" =
+        sideEdge === null ? "NO_MARKET" :
+        sideEdge > 0      ? "AWAY"      :
+        sideEdge < 0      ? "HOME"      : "NONE";
+      const SIDE_CORE_THRESHOLD = 1.5;
+      const sideDecision: "CORE" | "NO_CORE" | "NO_MARKET" =
+        sideEdge === null ? "NO_MARKET" :
+        Math.abs(sideEdge) >= SIDE_CORE_THRESHOLD &&
+        gameCtx.awayPitcherRole !== "UNRESOLVED" &&
+        gameCtx.homePitcherRole !== "UNRESOLVED" &&
+        !!gameCtx.awayExpectedInnings &&
+        !!gameCtx.homeExpectedInnings &&
+        gameCtx.bullpenAvailable
+          ? "CORE" : "NO_CORE";
 
       // ── Shadow-mode prop comparison signals (no CORE impact) ────────────
       const EMPTY_PROPS = {
@@ -283,6 +340,11 @@ export async function extractOutputBoards(
         expected_roi:    roi,
         edge_strength:   edgeStrength,
         core_blocker:    coreBlocker,
+        side_edge:              sideEdge,
+        side_direction:         sideDirection,
+        side_decision:          sideDecision,
+        away_starter_quality:   gs.away_starter_quality ?? null,
+        home_starter_quality:   gs.home_starter_quality ?? null,
         starter_k_market_signal:         propSignals.starter_k_market_signal,
         starter_er_market_signal:        propSignals.starter_er_market_signal,
         lineup_tb_coverage_pct:          propSignals.lineup_tb_coverage_pct,
@@ -318,12 +380,33 @@ export async function extractOutputBoards(
         propSignals.prop_market_agreement,            // T: Prop_Market_Agreement
         propSignals.prop_market_disagreement_reason,  // U: Prop_Market_Disagreement_Reason
         propSignals.prop_snapshot_ts,                 // V: Prop_Snapshot_TS
+        sideEdge ?? "",                               // W: Side_Edge
+        sideDirection,                                // X: Side_Direction
+        sideDecision,                                 // Y: Side_Decision
+        gs.away_starter_quality ?? "",                // Z: Away_Starter_Quality
+        gs.home_starter_quality ?? "",                // AA: Home_Starter_Quality
       ]);
     }
 
-    await clearRange(workbookId, "SLATE_BOARD!A2:V100");
+    // ── Ensure SLATE_BOARD has 27 columns (A–AA) for step-5 derivative fields ──
+    await expandSheetColumns(workbookId, "SLATE_BOARD", 27).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not expand SLATE_BOARD columns — continuing");
+    });
+
+    // Write step-5 derivative headers (W–AA)
+    await writeRange(workbookId, "SLATE_BOARD!W1:AA1", [[
+      "Side_Edge",
+      "Side_Direction",
+      "Side_Decision",
+      "Away_Starter_Quality",
+      "Home_Starter_Quality",
+    ]]).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write step-5 headers — continuing");
+    });
+
+    await clearRange(workbookId, "SLATE_BOARD!A2:AA100");
     if (sbRows.length > 0) {
-      await writeRange(workbookId, `SLATE_BOARD!A2:V${1 + sbRows.length}`, sbRows);
+      await writeRange(workbookId, `SLATE_BOARD!A2:AA${1 + sbRows.length}`, sbRows);
     }
     logger.info(
       { rows: sbRows.length, core: output.core_count, noCore: output.no_core_count },

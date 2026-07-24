@@ -27,6 +27,13 @@ export interface MarketLine {
   under_odds: number;
   bookmaker: string;         // source bookmaker used for the line
   market_available: boolean;
+  // ── Run-line (spread) data — null when no spreads market available ──
+  away_spread: number | null;       // point for away team (+1.5 = underdog, -1.5 = favourite)
+  away_spread_odds: number | null;  // American odds for away team to cover the spread
+  home_spread_odds: number | null;  // American odds for home team to cover the spread
+  // ── Moneyline (h2h) data — null when no h2h market available ──
+  away_ml: number | null;           // American moneyline for away team to win outright
+  home_ml: number | null;           // American moneyline for home team to win outright
 }
 
 export interface OddsResult {
@@ -79,7 +86,7 @@ export async function fetchMarketOdds(date: string): Promise<OddsResult> {
   const qs = new URLSearchParams({
     apiKey,
     regions:            "us",
-    markets:            "totals",
+    markets:            "h2h,totals,spreads",
     oddsFormat:         "american",
     dateFormat:         "iso",
     commenceTimeFrom:   from,
@@ -111,7 +118,8 @@ export async function fetchMarketOdds(date: string): Promise<OddsResult> {
         title: string;
         markets: Array<{
           key: string;
-          outcomes: Array<{ name: string; point: number; price: number }>;
+          // point is present for totals/spreads but absent for h2h (moneyline)
+          outcomes: Array<{ name: string; point?: number; price: number }>;
         }>;
       }>;
     }>;
@@ -128,25 +136,59 @@ export async function fetchMarketOdds(date: string): Promise<OddsResult> {
 
       const gameId = buildGameId(date, awayAbbr, homeAbbr);
 
-      // Gather totals across all bookmakers
-      const overPoints: number[] = [];
-      const overOdds:   number[] = [];
-      const underOdds:  number[] = [];
+      // Gather totals, spreads, and moneylines across all bookmakers
+      const overPoints:      number[] = [];
+      const overOdds:        number[] = [];
+      const underOdds:       number[] = [];
+      const awaySpreadPts:   number[] = [];
+      const awaySpreadPrices: number[] = [];
+      const homeSpreadPrices: number[] = [];
+      const awayMLPrices:    number[] = [];
+      const homeMLPrices:    number[] = [];
       let topBookmaker = "";
 
       for (const bk of game.bookmakers) {
+        // ── Totals (game over/under) ──
         const totalsMarket = bk.markets.find((m) => m.key === "totals");
-        if (!totalsMarket) continue;
-        const over  = totalsMarket.outcomes.find((o) => o.name === "Over");
-        const under = totalsMarket.outcomes.find((o) => o.name === "Under");
-        if (!over || !under) continue;
-        overPoints.push(over.point);
-        overOdds.push(over.price);
-        underOdds.push(under.price);
-        if (!topBookmaker) topBookmaker = bk.title;
+        if (totalsMarket) {
+          const over  = totalsMarket.outcomes.find((o) => o.name === "Over");
+          const under = totalsMarket.outcomes.find((o) => o.name === "Under");
+          if (over && under && over.point !== undefined) {
+            overPoints.push(over.point);
+            overOdds.push(over.price);
+            underOdds.push(under.price);
+            if (!topBookmaker) topBookmaker = bk.title;
+          }
+        }
+
+        // ── Spreads (run line, typically ±1.5) ──
+        const spreadsMarket = bk.markets.find((m) => m.key === "spreads");
+        if (spreadsMarket) {
+          const awayOut = spreadsMarket.outcomes.find((o) => o.name === game.away_team);
+          const homeOut = spreadsMarket.outcomes.find((o) => o.name === game.home_team);
+          if (awayOut && homeOut && awayOut.point !== undefined) {
+            awaySpreadPts.push(awayOut.point);
+            awaySpreadPrices.push(awayOut.price);
+            homeSpreadPrices.push(homeOut.price);
+          }
+        }
+
+        // ── Moneyline (head-to-head outright) ──
+        const h2hMarket = bk.markets.find((m) => m.key === "h2h");
+        if (h2hMarket) {
+          const awayOut = h2hMarket.outcomes.find((o) => o.name === game.away_team);
+          const homeOut = h2hMarket.outcomes.find((o) => o.name === game.home_team);
+          if (awayOut && homeOut) {
+            awayMLPrices.push(awayOut.price);
+            homeMLPrices.push(homeOut.price);
+          }
+        }
       }
 
-      if (overPoints.length === 0) continue; // no totals market for this game
+      if (overPoints.length === 0) continue; // no totals market for this game — skip entirely
+
+      const avg = (arr: number[]) =>
+        arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null;
 
       const total    = consensusTotal(overPoints);
       const avgOver  = Math.round(overOdds.reduce((a, b) => a + b, 0) / overOdds.length);
@@ -161,6 +203,11 @@ export async function fetchMarketOdds(date: string): Promise<OddsResult> {
         under_odds:       avgUnder,
         bookmaker:        topBookmaker,
         market_available: true,
+        away_spread:      awaySpreadPts.length > 0 ? consensusTotal(awaySpreadPts) : null,
+        away_spread_odds: avg(awaySpreadPrices),
+        home_spread_odds: avg(homeSpreadPrices),
+        away_ml:          avg(awayMLPrices),
+        home_ml:          avg(homeMLPrices),
       });
     }
 

@@ -626,6 +626,13 @@ export interface GameSummaryRow {
   home_lineup_source: "official" | "projected" | null;
   away_lineup_xwoba_coverage: number;
   home_lineup_xwoba_coverage: number;
+  // ── Derivative signals (step 5) ──
+  /** Projected away runs minus projected home runs. Positive = away favoured. */
+  proj_run_diff: number;
+  /** Starter quality factor for the away team's starter (FIP + K-BB%). 1.0 = league average. */
+  away_starter_quality: number;
+  /** Starter quality factor for the home team's starter (FIP + K-BB%). 1.0 = league average. */
+  home_starter_quality: number;
 }
 
 export interface Module09Result {
@@ -873,6 +880,9 @@ export async function verifyRecalculation(
       home_lineup_source:            homeLineup.lineup_status,
       away_lineup_xwoba_coverage:    awayLineup.xwoba_coverage,
       home_lineup_xwoba_coverage:    homeLineup.xwoba_coverage,
+      proj_run_diff:                 parseFloat((projAway - projHome).toFixed(2)),
+      away_starter_quality:          parseFloat(awayQual.toFixed(4)),
+      home_starter_quality:          parseFloat(homeQual.toFixed(4)),
     });
 
     gsRows.push([
@@ -909,6 +919,10 @@ export async function verifyRecalculation(
       runMult.weather_multiplier,                       // AC: Weather_Multiplier
       runMult.combined_multiplier,                      // AD: Combined_Run_Multiplier
       runMult.park_source_status,                       // AE: Park_Source_Status
+      // ── Step 5 derivatives ──
+      parseFloat((projAway - projHome).toFixed(2)),     // AF: Projected_Run_Diff
+      parseFloat(awayQual.toFixed(4)),                  // AG: Away_Starter_Quality
+      parseFloat(homeQual.toFixed(4)),                  // AH: Home_Starter_Quality
     ]);
   }
 
@@ -945,17 +959,17 @@ export async function verifyRecalculation(
     logger.error({ err: msg }, "MODULE_09: GAME_INTEGRATION write failed");
   }
 
-  // ── Write GAME_SUMMARY (31 cols A–AE) ──
+  // ── Write GAME_SUMMARY (34 cols A–AH) ──
   let gsStatus: "verified" | "error" = "verified";
   const gsErrors: string[] = [];
   try {
-    await expandSheetColumns(workbookId, "GAME_SUMMARY", 31).catch((err: unknown) => {
+    await expandSheetColumns(workbookId, "GAME_SUMMARY", 34).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_09: Could not expand GAME_SUMMARY columns");
     });
     // Write updated/new headers
     await writeRange(workbookId, "GAME_SUMMARY!G1:H1", [["Away_Lineup_Factor", "Home_Lineup_Factor"]]).catch(() => {});
     await writeRange(workbookId, "GAME_SUMMARY!P1:P1", [["Combined_Run_Multiplier"]]).catch(() => {});
-    await writeRange(workbookId, "GAME_SUMMARY!S1:AE1", [[
+    await writeRange(workbookId, "GAME_SUMMARY!S1:AH1", [[
       "Away_L30_RS_Estimate",
       "Home_L30_RS_Estimate",
       "Away_L10_RS_Actual",
@@ -969,10 +983,14 @@ export async function verifyRecalculation(
       "Weather_Multiplier",
       "Combined_Run_Multiplier_Audit",   // col AD — audit copy; col P is the primary
       "Park_Source_Status",
+      // ── Step 5 derivatives ──
+      "Projected_Run_Diff",              // AF
+      "Away_Starter_Quality",            // AG
+      "Home_Starter_Quality",            // AH
     ]]).catch(() => {});
-    await clearRange(workbookId, "GAME_SUMMARY!A2:AE100");
+    await clearRange(workbookId, "GAME_SUMMARY!A2:AH100");
     if (gsRows.length > 0) {
-      await writeRange(workbookId, `GAME_SUMMARY!A2:AE${1 + gsRows.length}`, gsRows);
+      await writeRange(workbookId, `GAME_SUMMARY!A2:AH${1 + gsRows.length}`, gsRows);
     }
     logger.info({ rows: gsRows.length }, "MODULE_09: GAME_SUMMARY written");
   } catch (err: unknown) {
