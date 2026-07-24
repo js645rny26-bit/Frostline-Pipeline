@@ -55,9 +55,11 @@ DAILY_MATCHUPS col Y (Notes) and BULLPEN_USAGE_DAILY col I (Notes) are pipeline-
 ## api-server routing trap (dev)
 Proxy path `/api` → localhost:8080 with the FULL path forwarded (no strip); health is `/api/healthz`. Probing `localhost:80/api-server/...` silently hits the frostline Vite SPA fallback and returns fake 200 HTML — always curl `localhost:8080/api/...` directly or `localhost:80/api/...`.
 
-## Module09 projection inputs (Repair v2, 2026-07-24)
-Offensive rate now uses a blended input, not wRC+ alone:
-- `L30_WEIGHT = 0.65` × Fangraphs wRC+-derived rate + `L10_WEIGHT = 0.35` × actual L10 RS/game — **but see "Module05 Fangraphs is a STUB" above: the L30 leg is currently constant**
+## Module09 projection inputs — 65/35 BLEND CANONIZED (2026-07-24)
+- `L30_WEIGHT = 0.65` × MLB Stats API actual L30 RS/G (module05 repaired) + `L10_WEIGHT = 0.35` × actual L10 RS/game
+- Canonized after: 87-date (1,115-game) expanded replay Apr 25–Jul 20; two consecutive clean shadow publishes
+- Acceptance criteria all met: MAE gap 0.000, MedAE gap 0.000, bias |−0.004|, miss4+ +0.6pp
+- `module13_historicalReplay` now accepts `maxDates` option (default 30, ceiling 120); router exposes `max_dates` query param
 - Fallback hierarchy: BLENDED → L30_ONLY → L10_ONLY → LEAGUE_AVG_FALLBACK
 - LEAGUE_AVG_FALLBACK always emits logger.warn — must never be silent
 - L10 data requires ≥ 5 games to be valid (MIN_L10_GAMES = 5)

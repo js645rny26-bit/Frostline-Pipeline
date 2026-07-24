@@ -1,0 +1,59 @@
+SOURCES USED
+
+* Latest Module 05 repair report
+* 28/28 smoke result
+* July 24 shadow validation
+* July 1–20 replay, 224 games
+
+REFRESH CHECK
+
+The source defect is fixed, live production is using real differentiated L30 data, and the current 65/35 blend is mechanically sound.
+
+To reach canon + commissioned in the fewest legitimate steps, do one final compounded batch:
+
+Final commissioning batch
+
+1. Freeze the candidate
+    * Set 65% L30 / 35% L10 as the release candidate.
+    * Keep park/weather bounded exactly as currently implemented.
+    * No additional formula changes during validation.
+2. Run one expanded replay
+    * Use the maximum clean historical sample available with date-anchored MLB API data.
+    * Compare only:
+        * L30_ONLY
+        * 65_35_BLEND
+        * 65_35_BLEND_PARK
+    * Require full or clearly disclosed park coverage.
+    * Evaluate MAE, median AE, bias, 4+ misses, and projection bands.
+3. Run a second live shadow slate and issue the verdict
+    * Confirm differentiated L30 rates, no silent fallbacks, correct sheet writes, and explainable deltas.
+    * If the expanded replay shows no material degradation and the second shadow run is clean, canonize 65/35 and mark the production offense path commissioned.
+
+Acceptance rule
+
+Do not require 65/35 to beat L30-only on every metric. That would encourage overfitting.
+
+Canonize it when all are true:
+
+* MAE is within 0.10 runs of the best variant.
+* Median AE is equal or better, or within 0.10.
+* Absolute bias is no worse than 0.15 runs.
+* 4+ miss rate is within 2 percentage points of the best variant.
+* No projection band shows a severe systematic bias.
+* Two consecutive live shadow publishes complete without source or integration failure.
+
+Your current 224-game result already clears the first four numerical thresholds:
+
+Metric	L30	65/35	Difference
+MAE	3.949	3.987	+0.038
+Median AE	3.440	3.310	−0.130
+Absolute bias	0.051	0.042	Better
+Miss 4+	42.0%	42.4%	+0.4 pp
+
+So this is not an open-ended research project. The only remaining commissioning evidence should be:
+
+one expanded replay plus one additional clean shadow publish.
+
+If both clear the stated acceptance rule, the formal conclusion is:
+
+65/35 offense blend canonized. Module 05 → Module 09 production projection path commissioned.

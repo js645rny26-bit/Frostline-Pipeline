@@ -69,11 +69,12 @@ router.post("/pipeline/publish", async (req, res): Promise<void> => {
  *   end_date     — ISO date string (required), e.g. 2026-07-20
  *   write_sheets — "true" to write REPLAY_RESULTS + REPLAY_METRICS to the workbook
  *   workbook_id  — override workbook (optional)
+ *   max_dates    — integer override for the date-range cap (default 30, hard ceiling 120)
  *
- * Returns ReplayResult JSON. Max date range: 30 days.
+ * Returns ReplayResult JSON.
  */
 router.get("/pipeline/replay", async (req, res): Promise<void> => {
-  const { start_date, end_date, write_sheets, workbook_id } = req.query;
+  const { start_date, end_date, write_sheets, workbook_id, max_dates } = req.query;
 
   if (typeof start_date !== "string" || typeof end_date !== "string") {
     res.status(400).json({ error: "start_date and end_date are required query params (YYYY-MM-DD)" });
@@ -91,10 +92,13 @@ router.get("/pipeline/replay", async (req, res): Promise<void> => {
     return;
   }
 
+  const maxDatesOverride = typeof max_dates === "string" ? parseInt(max_dates, 10) : undefined;
+
   try {
     const result = await runHistoricalReplay(start_date, end_date, {
       writeSheets: write_sheets === "true",
       workbookId:  typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID,
+      maxDates:    Number.isFinite(maxDatesOverride) ? maxDatesOverride : undefined,
     });
     const statusCode = result.status === "failure" ? 500 : 200;
     res.status(statusCode).json(result);

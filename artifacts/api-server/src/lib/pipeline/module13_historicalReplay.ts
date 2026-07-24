@@ -188,10 +188,10 @@ function shiftDate(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function dateRange(start: string, end: string): string[] {
+export function dateRange(start: string, end: string, maxDates = MAX_DATE_RANGE): string[] {
   const dates: string[] = [];
   let cur = start;
-  while (cur <= end && dates.length < MAX_DATE_RANGE) {
+  while (cur <= end && dates.length < maxDates) {
     dates.push(cur);
     cur = shiftDate(cur, 1);
   }
@@ -500,16 +500,19 @@ export async function runHistoricalReplay(
   options: {
     writeSheets?: boolean;
     workbookId?: string;
+    /** Override the default 30-date cap. Hard ceiling: 120. */
+    maxDates?: number;
   } = {},
 ): Promise<ReplayResult> {
   const runTs    = new Date().toISOString();
   const wbId     = options.workbookId ?? WORKBOOK_ID;
   const write    = options.writeSheets ?? false;
+  const maxDates = Math.min(options.maxDates ?? MAX_DATE_RANGE, 120);
   const errors: string[] = [];
 
-  logger.info({ startDate, endDate, writeSheets: write }, "MODULE_13: Historical replay starting");
+  logger.info({ startDate, endDate, writeSheets: write, maxDates }, "MODULE_13: Historical replay starting");
 
-  const dates = dateRange(startDate, endDate);
+  const dates = dateRange(startDate, endDate, maxDates);
   if (dates.length === 0) {
     return {
       status: "failure",
