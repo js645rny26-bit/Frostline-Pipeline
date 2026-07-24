@@ -1,0 +1,121 @@
+SOURCES USED
+
+* Official Frostline Engine
+* Tab: SLATE_BOARD
+* Fresh board snapshot: July 24, 2026 at 1:09 PM ET
+* Workbook identity confirmed directly. Official Frostline Engine
+
+REFRESH CHECK
+
+Yes. The slate board has been updated.
+
+The biggest change is that prop-market context is now populated for nearly every game:
+
+* Starter strikeout market signals
+* Starter earned-run market signals
+* Lineup total-base coverage
+* Prop-market direction
+* Agreement or contradiction with the game-total projection
+
+The final CORE set remains unchanged.
+
+Updated Slate Board
+
+Matchup	Projection	Market	Difference	Direction	Decision	Confidence	Market agreement
+COL @ MIL	9.27	8.5	+0.77	Over	NO CORE	41%	Mixed
+KC @ DET	7.55	8.5	−0.95	Under	NO CORE	40%	Agrees
+CHC @ PIT	11.44	8.0	+3.44	Over	CORE	83%	Mixed
+ARI @ WSH	11.28	9.5	+1.78	Over	CORE	69%	Mixed
+NYY @ PHI	5.74	7.5	−1.76	Under	CORE	69%	Mixed
+ATL @ BAL	9.22	8.5	+0.72	Over	NO CORE	41%	Contradicts
+LAD @ NYM	8.85	9.0	−0.15	Under	NO CORE	44%	Mixed
+CLE @ TB	7.58	7.5	+0.08	Over	NO CORE	45%	Mixed
+SD @ MIA	10.50	9.0	+1.50	Over	NO CORE	67%	Insufficient coverage
+TOR @ BOS	8.43	9.0	−0.57	Under	NO CORE	42%	Mixed
+HOU @ CHW	8.67	9.0	−0.33	Under	NO CORE	43%	Mixed
+SEA @ TEX	7.09	7.5	−0.41	Under	NO CORE	43%	Agrees
+OAK @ MIN	10.47	9.5	+0.97	Over	NO CORE	40%	Mixed
+CIN @ STL	8.89	8.0	+0.89	Over	NO CORE	41%	Contradicts
+LAA @ SF	8.71	8.5	+0.21	Over	NO CORE	44%	Mixed
+
+Current CORE Board
+
+CHC @ PIT — Over 8.0
+
+* Projection: 11.44
+* Separation: +3.44
+* Confidence: 83%
+* Expected ROI: 17.2%
+* Edge: STRONG BUY
+
+The projection increased slightly from 11.36 to 11.44, and confidence rose from 82% to 83%.
+
+ARI @ WSH — Over 9.5
+
+* Projection: 11.28
+* Separation: +1.78
+* Confidence: 69%
+* Expected ROI: 8.9%
+* Edge: LEAN
+
+Palmquist remains correctly handled as the opener portion of a broader Washington staff-deployment thesis.
+
+NYY @ PHI — Under 7.5
+
+* Projection: 5.74
+* Separation: −1.76
+* Confidence: 69%
+* Expected ROI: 8.8%
+* Edge: LEAN
+
+Meaningful Changes
+
+Market total changes
+
+* ATL @ BAL: 9.0 → 8.5
+* TOR @ BOS: 8.5 → 9.0
+
+Those moves materially changed the measured separation:
+
+* ATL/BAL improved from +0.15 to +0.72, but still does not clear the CORE threshold.
+* TOR/BOS moved from virtually neutral to −0.57 toward the Under, but still lacks sufficient separation.
+
+Explicit market agreement
+
+The starter ER market now supports two Under directions:
+
+* KC @ DET Under
+* SEA @ TEX Under
+
+Neither is CORE because projection separation remains too small.
+
+Explicit contradictions
+
+The starter ER markets contradict two Frostline Over projections:
+
+* ATL @ BAL
+* CIN @ STL
+
+In both games, the ER markets imply Under pressure while Frostline projects Over.
+
+SD @ MIA remains the key unresolved game
+
+* Projection: 10.50
+* Market: 9.0
+* Separation: +1.50
+* Confidence: 67%
+* Edge: LEAN
+* Decision: NO CORE
+* Blocker: UNRESOLVED_STARTER
+
+It remains the strongest NO CORE by game-total projection strength.
+
+QA Flag
+
+The Lineup_TB_Coverage_Pct column contains values above 100%, including:
+
+* 111.1%
+* 116.7%
+* 122.2%
+
+That is mathematically inconsistent with a true percentage unless the field is intentionally measuring market lines per lineup slot rather than unique lineup-player coverage. The updated prop layer is populated, but this specific column needs a definition or normalization audit before we treat it as a reliable coverage gate.

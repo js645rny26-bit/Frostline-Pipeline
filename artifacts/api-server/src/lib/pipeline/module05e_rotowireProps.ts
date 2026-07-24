@@ -279,12 +279,25 @@ export function computePropComparison(
   // ── TB coverage ──────────────────────────────────────────────────────────
   const awayTeamNorm = normalizeTeam(awayTeam);
   const homeTeamNorm = normalizeTeam(homeTeam);
-  const tbForGame = propsResult.total_bases.filter(
-    (r) => r.team === awayTeamNorm || r.team === homeTeamNorm,
-  );
+
+  // Count unique players per side (deduplicate by lastName — Rotowire can post
+  // multiple rows for the same player across sub-markets or bench designations).
+  // Cap each side at 9 (one full batting-order slot per batter) so the combined
+  // denominator of 18 is respected and the result is always 0–100%.
+  const LINEUP_SIZE = 9;
+  function uniqueCappedCount(team: string): number {
+    const seen = new Set<string>();
+    for (const r of propsResult.total_bases) {
+      if (r.team === team) seen.add(r.lastName.toLowerCase());
+    }
+    return Math.min(seen.size, LINEUP_SIZE);
+  }
+
+  const awayCovered = uniqueCappedCount(awayTeamNorm);
+  const homeCovered = uniqueCappedCount(homeTeamNorm);
   const lineup_tb_coverage_pct =
     propsResult.total_bases.length > 0
-      ? parseFloat(((tbForGame.length / 18) * 100).toFixed(1))
+      ? parseFloat((((awayCovered + homeCovered) / (LINEUP_SIZE * 2)) * 100).toFixed(1))
       : null;
 
   // ── Prop market direction (from ER odds, not K) ──────────────────────────
