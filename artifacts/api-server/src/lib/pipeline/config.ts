@@ -126,7 +126,9 @@ export const VALIDATION_RULES = {
 };
 
 export function getTodayDateStr(): string {
-  return new Date().toISOString().split("T")[0];
+  // Use America/New_York (ET) so the date matches the MLB schedule calendar.
+  // UTC would roll to the next day after 20:00 ET, fetching tomorrow's games.
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }
 
 export function celsiusToFahrenheit(c: number | null): number | null {

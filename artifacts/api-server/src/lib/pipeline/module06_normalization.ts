@@ -79,7 +79,9 @@ export function normalizeSlate(
     return {
       gamePk: game.gamePk,
       legacy_game_id: game.legacy_game_id,
-      date: game.gameDateTime?.split("T")[0] ?? "",
+      // Use officialDate (ET calendar date) — not gameDateTime which is UTC and
+      // rolls to the next day for late-night West Coast first pitches.
+      date: game.officialDate ?? game.gameDateTime?.split("T")[0] ?? "",
       scheduled_utc_time: game.gameDateTime,
       venue: game.venue,
       away_team: {

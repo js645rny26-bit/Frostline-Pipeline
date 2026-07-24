@@ -203,7 +203,7 @@ function buildTeamFormRows(
   splits: FangraphsResult["teams"],
   runRates: TeamRunRatesResult | null,
 ): unknown[][] {
-  const date = new Date().toISOString().split("T")[0];
+  const date = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   // Collapse two splits per team into one row, keyed by team abbr
   const byTeam = new Map<string, { rsTotal: number; woba: number; n: number }>();
   for (const s of splits) {

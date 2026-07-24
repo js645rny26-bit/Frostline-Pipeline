@@ -35,7 +35,8 @@ export interface GameStatusData {
 export interface ScheduleGameData {
   gamePk: number;
   legacy_game_id: string;
-  gameDateTime: string | null;
+  officialDate: string | null;   // YYYY-MM-DD in ET — canonical calendar date for this game
+  gameDateTime: string | null;   // UTC ISO timestamp (first-pitch time)
   venue: VenueData;
   awayTeam: GameTeamData;
   homeTeam: GameTeamData;
@@ -69,9 +70,19 @@ function normalizeGame(raw: any): ScheduleGameData {
   const awayAbbr = awayInfo?.canonical_abbr ?? awayRaw?.team?.abbreviation ?? "UNK";
   const homeAbbr = homeInfo?.canonical_abbr ?? homeRaw?.team?.abbreviation ?? "UNK";
 
-  // MLB StatsAPI uses "gameDate" (not "gameDateTime") for the full ISO datetime
-  const gameDateTime: string | null = raw?.gameDate ?? raw?.officialDate ?? null;
-  const gameDate = gameDateTime ? gameDateTime.split("T")[0].replace(/-/g, "") : "00000000";
+  // officialDate  = YYYY-MM-DD in ET — the canonical calendar date for this game
+  // gameDate      = UTC ISO datetime (first-pitch time); for late-night West Coast
+  //                 games this ticks into the next UTC day, so must NOT be used
+  //                 for the calendar date in the game_id.
+  const officialDate: string | null = raw?.officialDate ?? null;
+  const gameDateTime: string | null = raw?.gameDate ?? null;
+
+  // Build the date component from officialDate (ET). Fall back to UTC only if
+  // officialDate is absent (should never happen for real scheduled games).
+  const gameDate = officialDate
+    ? officialDate.replace(/-/g, "")
+    : (gameDateTime ? gameDateTime.split("T")[0].replace(/-/g, "") : "00000000");
+
   const legacyGameId = `${gameDate}_${awayAbbr}_${homeAbbr}`;
 
   const awayProb = awayRaw?.probablePitcher ?? {};
@@ -80,6 +91,7 @@ function normalizeGame(raw: any): ScheduleGameData {
   return {
     gamePk: raw?.gamePk ?? 0,
     legacy_game_id: legacyGameId,
+    officialDate,
     gameDateTime,
     venue: {
       id: raw?.venue?.id ?? null,
