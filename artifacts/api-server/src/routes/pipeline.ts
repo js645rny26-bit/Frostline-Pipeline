@@ -9,6 +9,9 @@ import { fetchMlbSchedule } from "../lib/pipeline/module01_mlbStatsApi.js";
 import { getTodayDateStr } from "../lib/pipeline/config.js";
 import { runHistoricalReplay } from "../lib/pipeline/module13_historicalReplay.js";
 import { runShadowSettlement } from "../lib/pipeline/module14_shadowSettlement.js";
+import { runRegressionReport } from "../lib/pipeline/module15_regressionReport.js";
+import { runStarterAudit } from "../lib/pipeline/module16_starterAudit.js";
+import { runPostmortem } from "../lib/pipeline/module17_vehiclePostmortem.js";
 import { WORKBOOK_ID } from "../lib/sheets/client.js";
 
 const router: IRouter = Router();
@@ -138,6 +141,82 @@ router.get("/pipeline/settle", async (req, res): Promise<void> => {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * GET /pipeline/regression
+ * Compute trailing regression metrics from SHADOW_OUTCOMES.
+ * Windows: 7d, 30d, ytd, all. Alerts fire on material degradation.
+ *
+ * Query params:
+ *   write_sheets  — "true" to write REGRESSION_REPORT sheet (optional)
+ *   workbook_id   — override workbook (optional)
+ */
+router.get("/pipeline/regression", async (req, res): Promise<void> => {
+  const { write_sheets, workbook_id } = req.query;
+  try {
+    const result = await runRegressionReport({
+      writeSheets: write_sheets === "true",
+      workbookId:  typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID,
+    });
+    res.status(result.status === "failure" ? 500 : 200).json(result);
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * GET /pipeline/starter-audit
+ * Join SHADOW_HISTORY pitcher names with SHADOW_OUTCOMES errors.
+ * Returns per-pitcher MAE, bias, and directional flag.
+ *
+ * Query params:
+ *   min_games    — minimum settled games to include a pitcher (default 3)
+ *   write_sheets — "true" to write STARTER_AUDIT sheet (optional)
+ *   workbook_id  — override workbook (optional)
+ */
+router.get("/pipeline/starter-audit", async (req, res): Promise<void> => {
+  const { min_games, write_sheets, workbook_id } = req.query;
+  const minGames = min_games ? parseInt(String(min_games), 10) : 3;
+  try {
+    const result = await runStarterAudit({
+      minGames:    Number.isFinite(minGames) ? minGames : 3,
+      writeSheets: write_sheets === "true",
+      workbookId:  typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID,
+    });
+    res.status(result.status === "failure" ? 500 : 200).json(result);
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * GET /pipeline/postmortem
+ * Grade vehicle selections against settled outcomes for a given date.
+ * Separates thesis accuracy (direction correct?) from ticket result (covered?).
+ *
+ * Query params:
+ *   date         — YYYY-MM-DD (required)
+ *   write_sheets — "true" to append to VEHICLE_POSTMORTEM sheet (optional)
+ *   workbook_id  — override workbook (optional)
+ */
+router.get("/pipeline/postmortem", async (req, res): Promise<void> => {
+  const { date, write_sheets, workbook_id } = req.query;
+
+  if (!date || typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    res.status(400).json({ error: "date query param required (YYYY-MM-DD)" });
+    return;
+  }
+
+  try {
+    const result = await runPostmortem(date, {
+      writeSheets: write_sheets === "true",
+      workbookId:  typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID,
+    });
+    res.status(result.status === "failure" ? 500 : 200).json(result);
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 

@@ -27,6 +27,7 @@ import { seedSlateInput, type Module10Result } from "./module10_slateInput.js";
 import { extractOutputBoards, type Module11Result } from "./module11_outputExtraction.js";
 import { archiveRunBundle, type Module12Result } from "./module12_archival.js";
 import { runShadowValidation, type ShadowValidationResult } from "./module12s_shadowValidation.js";
+import { logVehicles, type VehicleLogResult } from "./module17_vehiclePostmortem.js";
 import { WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 
@@ -192,6 +193,8 @@ export interface PublishResult {
   module_10: Module10Result;
   module_11: Module11Result;
   module_12: Module12Result;
+  /** Module 17: Vehicle log — rows written for this publish run */
+  module_17: VehicleLogResult;
   workbook_url: string;
   errors: Array<{ module: string; error: string; timestamp: string }>;
 }
@@ -333,6 +336,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_10: { status: "failure", seeding_timestamp_utc: new Date().toISOString(), games_seeded: { new_games: 0, updated_games: 0, total_games: 0 }, rows_written: 0, seed_results: [], errors: [{ module: "10", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, no_core_count: 0, error: "Skipped: Module 08 failed" },
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
+      module_17: { status: "failure", date, publish_ts: new Date().toISOString(), rows_written: 0, rows_skipped: 0, errors: ["Skipped: Module 08 failed"] },
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
     };
@@ -383,6 +387,23 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // rotowireProps is passed for shadow-mode prop comparison signals — no CORE impact.
   const mod11 = await extractOutputBoards(mod09.game_summary_rows, workbookId, rotowireProps);
 
+  // Module 17 (phase 1): Log vehicle selections for this publish run.
+  // Non-blocking — failure does not affect CORE authorization.
+  const mod17 = await logVehicles(date, mod11.slate_board, { workbookId }).catch(
+    (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn({ err: msg }, "Full pipeline: Module 17 vehicle log threw — continuing");
+      return {
+        status: "failure" as const,
+        date,
+        publish_ts: new Date().toISOString(),
+        rows_written: 0,
+        rows_skipped: 0,
+        errors: [`Vehicle log threw: ${msg}`],
+      } satisfies VehicleLogResult;
+    },
+  );
+
   // Overall status before archival (so we can write it into the run log row)
   // mod08 "failure" case is already handled by the early return above;
   // at this point mod08.status is "success" | "partial_failure".
@@ -414,6 +435,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_10: mod10,
     module_11: mod11,
     module_12: mod12,
+    module_17: mod17,
     workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
     errors: allErrors,
   };
