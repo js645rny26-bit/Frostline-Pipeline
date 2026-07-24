@@ -1,0 +1,75 @@
+SOURCES USED
+
+* The implementation and validation report you pasted
+* The July 1–20 replay results: 224 games
+* The July 24 live shadow publish
+
+REFRESH CHECK
+
+The critical production defect is fixed.
+
+Module 05 now supplies differentiated, real MLB API L30 offense rates instead of the universal 4.883 stub. Typecheck passed, smoke testing passed 28/28, the live shadow publish succeeded, and the replay reproduced its prior results exactly because Module 13 was already using the correct historical source.
+
+Current status
+
+Commissioned
+
+* Module 05 live L30 data acquisition
+* Module 05 → Module 09 dependency path
+* Source-status and sample-size visibility
+* Module 09 blend mechanics
+* Shadow-validation infrastructure
+* Historical replay infrastructure
+
+The production offense layer is no longer partially fake.
+
+Not yet proven
+
+* 65/35 as the optimal blend weight
+* Historical park adjustment
+* Any claim that the blend materially outperforms L30-only
+
+Decision on 65/35
+
+Keep 65/35 as the provisional production setting. Do not call it canonized yet.
+
+That is preferable to immediately reverting to L30-only because:
+
+* BLEND reduced median absolute error from 3.44 to 3.31
+* Bias remained essentially neutral
+* Miss frequency was nearly identical
+* MAE worsened by only 0.038 runs
+* The blend is now using legitimate live inputs
+
+But the evidence does not establish that 65/35 is superior. It only establishes that it is a reasonable, stable candidate.
+
+The correct label is:
+
+65/35 provisional-live, calibration pending expanded sample.
+
+Park conclusion
+
+Do not judge the park layer from this replay.
+
+Only 30 of 224 games had non-neutral park coverage, concentrated across five venues. That is inadequate coverage for either approval or rejection. Park remains active as a bounded modifier, but its historical calibration is unresolved.
+
+Next compounded batch
+
+1. Accumulate live shadow results
+    * Store projected and actual totals for each slate.
+    * Continue until at least 300–500 completed games are available.
+    * Track L30-only and 65/35 simultaneously.
+2. Expand calibration variants
+    * Test 80/20, 70/30, 65/35, 60/40, and 50/50.
+    * Compare MAE, median AE, bias, 4+ misses, and band calibration.
+    * Keep all variants shadow-only except the current provisional 65/35.
+3. Repair park coverage
+    * Resolve all 30 parks consistently.
+    * Preserve park source, date, and multiplier.
+    * Rerun park calibration only after coverage is materially complete.
+
+Bottom line
+
+The offensive source repair is complete and the live projection path is credible again.
+
+65/35 stays in production provisionally. No further formula change is justified by this sample. The next task is collecting enough paired outcomes to determine whether the blend actually beats L30-only, rather than tuning it from a near-tie.
