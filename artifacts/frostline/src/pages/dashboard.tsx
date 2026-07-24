@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, AlertTriangle, Users, Cloud, Database, Upload, ExternalLink, Loader2, PlusSquare } from "lucide-react";
 
 export default function Dashboard() {
-  const [date, setDate] = useState("2026-07-22");
+  const [date, setDate] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
   const [publishResult, setPublishResult] = useState<{ status: string; workbook_url: string; bundle_name?: string; errors: unknown[] } | null>(null);
 
   const { data: summary, isLoading: isLoadingSummary } = useGetPipelineSummary(

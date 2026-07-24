@@ -8,7 +8,7 @@ import { Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 export default function SchedulePage() {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
 
   const { data: schedule, isLoading } = useGetPipelineSchedule(
     { date },
