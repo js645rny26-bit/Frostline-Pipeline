@@ -169,7 +169,7 @@ async function main(): Promise<void> {
 
   check(10, "shadow: aggregates avg 0.68 / maxAbs 1.15; write-failure keeps rows + flags error",
     near(shadow.avg_delta, 0.68, 0.001) && near(shadow.max_abs_delta, 1.15, 0.001) &&
-    shadow.status === "failure" && shadow.errors.length === 1 && shadow.rows.length === 3,
+    shadow.status === "failure" && shadow.errors.length === 2 && shadow.rows.length === 3,
     JSON.stringify({ avg: shadow.avg_delta, max: shadow.max_abs_delta, s: shadow.status, e: shadow.errors.length }));
 
   console.log("=== Module 13 — Historical Replay (18 cases) ===");

@@ -55,11 +55,27 @@ DAILY_MATCHUPS col Y (Notes) and BULLPEN_USAGE_DAILY col I (Notes) are pipeline-
 ## api-server routing trap (dev)
 Proxy path `/api` → localhost:8080 with the FULL path forwarded (no strip); health is `/api/healthz`. Probing `localhost:80/api-server/...` silently hits the frostline Vite SPA fallback and returns fake 200 HTML — always curl `localhost:8080/api/...` directly or `localhost:80/api/...`.
 
-## Module09 projection inputs — 65/35 BLEND CANONIZED (2026-07-24)
+## Module09 projection inputs — 65/35 BLEND_PARK CANONIZED (2026-07-24)
 - `L30_WEIGHT = 0.65` × MLB Stats API actual L30 RS/G (module05 repaired) + `L10_WEIGHT = 0.35` × actual L10 RS/game
-- Canonized after: 87-date (1,115-game) expanded replay Apr 25–Jul 20; two consecutive clean shadow publishes
-- Acceptance criteria all met: MAE gap 0.000, MedAE gap 0.000, bias |−0.004|, miss4+ +0.6pp
-- `module13_historicalReplay` now accepts `maxDates` option (default 30, ceiling 120); router exposes `max_dates` query param
+- Park modifier: 1 + (park_runs_pct/100), clamped [0.85, 1.15]; × weather, combined [0.85, 1.30]
+- Park source: live scrape (VENUE_FACTOR_USED) with seasonal static fallback (SEASONAL_FACTOR_USED) for all 30 venues
+- Calibration: 87-date (1,115-game) replay Apr 25–Jul 20; BLEND_PARK MAE 3.662 / MedAE 3.21 — best of all variants
+- All acceptance criteria met: MAE gap 0.000 (best), bias |+0.022|, miss4+ +0.7pp
+- `module13_historicalReplay` accepts `maxDates` option (default 30, ceiling 120); router exposes `max_dates` query param
+- `ParkSourceStatus`: "VENUE_FACTOR_USED" | "SEASONAL_FACTOR_USED" | "MISSING_PARK_DATA"
+
+## Park factors — module04d static table (2026 seasonal)
+- `module04d_parkFactors.ts`: exports `SEASONAL_PARK_FACTORS_2026` (Record<abbr, ParkFactors>) and `getSeasonalParkFactor(abbr)`
+- All 30 home venues covered; based on 2023-2025 multi-year consensus (Baseball Reference / Statcast)
+- Used by module09 (seasonal fallback when live scrape misses a game) and module13 replay (replaces today-only scrape)
+- Key quirks: OAK = Sutter Health Park Sacramento (since 2025); HOU Daikin Park = Minute Maid rename
+
+## Shadow accumulation infrastructure (2026-07-24)
+- SHADOW_HISTORY sheet: appended by module12s on every publish (deduped by game_id); never cleared
+- SHADOW_OUTCOMES sheet: appended by module14 settlement (deduped by game_id); paired projected vs actual totals
+- Settlement endpoint: `GET /api/pipeline/settle?date=YYYY-MM-DD` (defaults to yesterday)
+- Call settle daily after games complete to accumulate actual-vs-projected data in SHADOW_OUTCOMES
+- Columns: Date, Game_ID, Away, Home, Repaired_Proj, Actual_Total, Error, Abs_Error, Park_Src, Away_Src, Home_Src, Settlement_TS
 - Fallback hierarchy: BLENDED → L30_ONLY → L10_ONLY → LEAGUE_AVG_FALLBACK
 - LEAGUE_AVG_FALLBACK always emits logger.warn — must never be silent
 - L10 data requires ≥ 5 games to be valid (MIN_L10_GAMES = 5)

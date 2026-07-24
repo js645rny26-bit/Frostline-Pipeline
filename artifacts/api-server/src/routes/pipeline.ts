@@ -8,6 +8,7 @@ import { runPipeline, getPipelineSummary, runFullPipeline } from "../lib/pipelin
 import { fetchMlbSchedule } from "../lib/pipeline/module01_mlbStatsApi.js";
 import { getTodayDateStr } from "../lib/pipeline/config.js";
 import { runHistoricalReplay } from "../lib/pipeline/module13_historicalReplay.js";
+import { runShadowSettlement } from "../lib/pipeline/module14_shadowSettlement.js";
 import { WORKBOOK_ID } from "../lib/sheets/client.js";
 
 const router: IRouter = Router();
@@ -105,6 +106,38 @@ router.get("/pipeline/replay", async (req, res): Promise<void> => {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * GET /pipeline/settle
+ * Settle shadow projections for a given date by pairing them with actual
+ * MLB final scores. Appends settled rows to the SHADOW_OUTCOMES sheet.
+ *
+ * Query params:
+ *   date        — YYYY-MM-DD (optional; defaults to yesterday)
+ *   workbook_id — override workbook (optional)
+ */
+router.get("/pipeline/settle", async (req, res): Promise<void> => {
+  const { date, workbook_id } = req.query;
+
+  let settleDate: string;
+  if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    settleDate = date;
+  } else {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 1);
+    settleDate = d.toISOString().slice(0, 10);
+  }
+
+  try {
+    const result = await runShadowSettlement(settleDate, {
+      workbookId: typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID,
+    });
+    res.status(result.status === "failure" ? 500 : 200).json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
   }
 });
 

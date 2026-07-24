@@ -28,7 +28,7 @@
  * legacy and repaired. Only adj_rate differs.
  */
 
-import { clearRange, expandSheetColumns, writeRange, WORKBOOK_ID } from "../sheets/client.js";
+import { clearRange, expandSheetColumns, readRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
 
@@ -225,49 +225,73 @@ export async function runShadowValidation(
     "MODULE_12s: Shadow comparison computed",
   );
 
-  // ── Write to SHADOW_VALIDATION sheet ──
+  // ── Compute sheet rows (shared by SHADOW_VALIDATION and SHADOW_HISTORY) ──
+  const sheetRows = comparisonRows.map((r) => [
+    r.date,
+    r.game_id,
+    r.away_team,
+    r.home_team,
+    r.away_pitcher,
+    r.home_pitcher,
+    r.repaired_projected_total,
+    r.legacy_projected_total,
+    r.delta,
+    r.away_offense_source,
+    r.home_offense_source,
+    r.away_l30_rate ?? "",
+    r.home_l30_rate ?? "",
+    r.away_l10_rate ?? "",
+    r.home_l10_rate ?? "",
+    r.away_offense_rate_used,
+    r.home_offense_rate_used,
+    r.legacy_multiplier,
+    r.park_multiplier,
+    r.weather_multiplier,
+    r.repaired_multiplier,
+    r.park_source_status,
+    startTs,
+  ]);
+
+  // ── Write to SHADOW_VALIDATION sheet (latest slate, full rewrite) ──
   try {
     await expandSheetColumns(workbookId, SHADOW_SHEET, N_COLS);
     await clearRange(workbookId, `${SHADOW_SHEET}!A1:W1000`);
     await writeRange(workbookId, `${SHADOW_SHEET}!A1:W1`, [HEADER_ROW]);
-
-    const sheetRows = comparisonRows.map((r) => [
-      r.date,
-      r.game_id,
-      r.away_team,
-      r.home_team,
-      r.away_pitcher,
-      r.home_pitcher,
-      r.repaired_projected_total,
-      r.legacy_projected_total,
-      r.delta,
-      r.away_offense_source,
-      r.home_offense_source,
-      r.away_l30_rate ?? "",
-      r.home_l30_rate ?? "",
-      r.away_l10_rate ?? "",
-      r.home_l10_rate ?? "",
-      r.away_offense_rate_used,
-      r.home_offense_rate_used,
-      r.legacy_multiplier,
-      r.park_multiplier,
-      r.weather_multiplier,
-      r.repaired_multiplier,
-      r.park_source_status,
-      startTs,
-    ]);
-
-    await writeRange(
-      workbookId,
-      `${SHADOW_SHEET}!A2:W${1 + sheetRows.length}`,
-      sheetRows,
-    );
-
+    await writeRange(workbookId, `${SHADOW_SHEET}!A2:W${1 + sheetRows.length}`, sheetRows);
     logger.info({ rows: sheetRows.length }, "MODULE_12s: Shadow validation written to sheet");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     errors.push(`Sheets write failed: ${msg}`);
     logger.error({ err: msg }, "MODULE_12s: Shadow validation Sheets write failed — result still returned");
+  }
+
+  // ── Append to SHADOW_HISTORY (accumulation log, never cleared) ──
+  const HISTORY_SHEET = "SHADOW_HISTORY";
+  try {
+    const histResp   = await readRange(workbookId, `${HISTORY_SHEET}!B1:B5000`);
+    const histRows   = (histResp.values ?? []) as string[][];
+    const existingIds = new Set(histRows.slice(1).map((r) => r[0] ?? "").filter(Boolean));
+    const newRows    = sheetRows.filter((r) => !existingIds.has(String(r[1])));
+
+    if (newRows.length > 0) {
+      const currentCount = histRows.length; // includes header if present
+      const needsHeader  = currentCount === 0;
+      if (needsHeader) {
+        await expandSheetColumns(workbookId, HISTORY_SHEET, N_COLS);
+        await writeRange(workbookId, `${HISTORY_SHEET}!A1:W1`, [HEADER_ROW]);
+        await writeRange(workbookId, `${HISTORY_SHEET}!A2:W${1 + newRows.length}`, newRows);
+      } else {
+        const startRow = currentCount + 1; // append after last existing row (header at row 1 = index 0)
+        await writeRange(workbookId, `${HISTORY_SHEET}!A${startRow}:W${startRow + newRows.length - 1}`, newRows);
+      }
+      logger.info({ appended: newRows.length, skipped: sheetRows.length - newRows.length }, "MODULE_12s: Shadow history appended");
+    } else {
+      logger.info("MODULE_12s: Shadow history — all game_ids already present, nothing appended");
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`Shadow history append failed: ${msg}`);
+    logger.warn({ err: msg }, "MODULE_12s: Shadow history append failed — validation result unaffected");
   }
 
   return {

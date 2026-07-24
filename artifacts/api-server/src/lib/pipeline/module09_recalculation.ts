@@ -29,6 +29,7 @@ import { clearRange, expandSheetColumns, writeRange, WORKBOOK_ID } from "../shee
 import { logger } from "../../lib/logger.js";
 import type { NormalizationResult, NormalizedGame } from "./module06_normalization.js";
 import type { FangraphsResult } from "./module05_fangraphs.js";
+import { getSeasonalParkFactor } from "./module04d_parkFactors.js";
 import type { PitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
 import type { BullpenResult, RelieverStat } from "./module04b_bullpenUsage.js";
 import type { TeamRunRatesResult } from "./module05c_teamRunRates.js";
@@ -63,7 +64,7 @@ export type OffenseSourceStatus =
   | "L10_ONLY"
   | "LEAGUE_AVG_FALLBACK";
 
-export type ParkSourceStatus = "VENUE_FACTOR_USED" | "MISSING_PARK_DATA";
+export type ParkSourceStatus = "VENUE_FACTOR_USED" | "SEASONAL_FACTOR_USED" | "MISSING_PARK_DATA";
 
 export interface OffensiveRateResolution {
   /** Fangraphs L30 wRC+ converted to runs/9. Null when Fangraphs data is absent. */
@@ -224,6 +225,7 @@ function resolveOffensiveRate(
 function resolveRunMultiplier(
   env: NormalizedGame["environment"],
   parkFactor: ParkFactors | null,
+  parkSource?: ParkSourceStatus,
 ): RunMultiplierResolution {
   // ── Park baseline ──
   let park_runs_pct: number | null = null;
@@ -235,7 +237,7 @@ function resolveRunMultiplier(
     // Clamp park multiplier to ±15% — prevents extreme venue outliers from
     // dominating when the weather modifier is also active.
     park_multiplier   = parseFloat(Math.max(0.85, Math.min(1.15, 1 + parkFactor.runs_pct / 100)).toFixed(4));
-    park_source_status = "VENUE_FACTOR_USED";
+    park_source_status = parkSource ?? "VENUE_FACTOR_USED";
   }
 
   // ── Weather adjustment ──
@@ -354,17 +356,36 @@ export async function verifyRecalculation(
   }
 
   // ── Build park factor lookup: legacy_game_id → ParkFactors ──
-  // StartingNineGame.game_id is the legacy_game_id when resolved; null when the
-  // scraper could not match both team abbreviations to a known game.
+  // Primary:  live scrape from module04c (today's games, game_id-keyed).
+  // Fallback: static 2026 seasonal table (module04d) for games not in today's
+  //           scrape, keyed by home team abbr — covers all 30 venues.
   const parkFactorMap = new Map<string, ParkFactors>();
+  const parkSourceMap = new Map<string, ParkSourceStatus>();
+
   if (startingNineResult) {
     for (const sg of startingNineResult.games) {
       if (sg.game_id) {
         parkFactorMap.set(sg.game_id, sg.park_factors);
+        parkSourceMap.set(sg.game_id, "VENUE_FACTOR_USED");
       }
     }
-    logger.info({ mapped: parkFactorMap.size, total: startingNineResult.games.length }, "MODULE_09: Park factor map built");
   }
+
+  // Seasonal fallback: fill any game not resolved by the live scrape
+  for (const g of normalized.games) {
+    if (!parkFactorMap.has(g.legacy_game_id) && g.home_team.team_abbr) {
+      const seasonal = getSeasonalParkFactor(g.home_team.team_abbr);
+      if (seasonal) {
+        parkFactorMap.set(g.legacy_game_id, seasonal);
+        parkSourceMap.set(g.legacy_game_id, "SEASONAL_FACTOR_USED");
+      }
+    }
+  }
+
+  logger.info(
+    { live: startingNineResult?.games.length ?? 0, total: parkFactorMap.size },
+    "MODULE_09: Park factor map built (live scrape + seasonal fallback)",
+  );
 
   // Log offensive rate source coverage for the full slate
   const l10Available = teamRunRates?.status === "success" ? teamRunRates.rates.size : 0;
@@ -385,8 +406,9 @@ export async function verifyRecalculation(
 
       const offRate   = resolveOffensiveRate(team.team_abbr ?? "", splits, teamRunRates);
       const oppRate   = resolveOffensiveRate(opponent.team_abbr ?? "", splits, teamRunRates);
-      const parkData  = parkFactorMap.get(g.legacy_game_id) ?? null;
-      const runMult   = resolveRunMultiplier(g.environment, parkData);
+      const parkData   = parkFactorMap.get(g.legacy_game_id) ?? null;
+      const parkSource = parkSourceMap.get(g.legacy_game_id);
+      const runMult    = resolveRunMultiplier(g.environment, parkData, parkSource);
       const adjRate   = parseFloat((offRate.rate_used * runMult.combined_multiplier).toFixed(2));
 
       giRows.push([
@@ -429,8 +451,9 @@ export async function verifyRecalculation(
   for (const g of normalized.games) {
     const awayOff  = resolveOffensiveRate(g.away_team.team_abbr ?? "", splits, teamRunRates);
     const homeOff  = resolveOffensiveRate(g.home_team.team_abbr ?? "", splits, teamRunRates);
-    const parkData = parkFactorMap.get(g.legacy_game_id) ?? null;
-    const runMult  = resolveRunMultiplier(g.environment, parkData);
+    const parkData   = parkFactorMap.get(g.legacy_game_id) ?? null;
+    const parkSource = parkSourceMap.get(g.legacy_game_id);
+    const runMult    = resolveRunMultiplier(g.environment, parkData, parkSource);
 
     const awayAdj = awayOff.rate_used * runMult.combined_multiplier;
     const homeAdj = homeOff.rate_used * runMult.combined_multiplier;

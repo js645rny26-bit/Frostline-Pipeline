@@ -54,7 +54,7 @@
 import { clearRange, expandSheetColumns, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
-import { fetchStartingNine } from "./module04c_startingNine.js";
+import { SEASONAL_PARK_FACTORS_2026 } from "./module04d_parkFactors.js";
 import type { ParkFactors } from "./module04c_startingNine.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 
@@ -76,7 +76,7 @@ const L30_LOOKBACK_DAYS = 30; // calendar window before each replay date
 const L30_LAST_N        = 30; // effectively uncapped within the window (~27 games)
 const MIN_L30_GAMES     = 15; // below this, L30 treated as missing
 
-const PARK_MIN_VENUES_WARN = 20; // below this, flag partial park coverage
+// PARK_MIN_VENUES_WARN removed — park factors now come from static 2026 seasonal table (all 30 venues)
 
 const REPLAY_RESULTS_SHEET = "REPLAY_RESULTS";
 const REPLAY_METRICS_SHEET = "REPLAY_METRICS";
@@ -529,31 +529,13 @@ export async function runHistoricalReplay(
   }
 
   // ── Build park factors map: home_abbr → ParkFactors ──
-  // mlbstartingnine.com serves only the CURRENT day's page (the ?date query
-  // param is ignored), so historical venue coverage is impossible from this
-  // source. Take today's game-aligned factors; venues not on today's slate
-  // get a neutral 1.0 multiplier, and low coverage is flagged in errors so
-  // partial *_PARK variants are never mistaken for fully park-adjusted runs.
-  const parkFactorsMap = new Map<string, ParkFactors>();
-  try {
-    const sn = await fetchStartingNine(new Date().toISOString().slice(0, 10));
-    for (const g of sn?.games ?? []) {
-      if (g.home_abbr && g.park_factors && !parkFactorsMap.has(g.home_abbr)) {
-        parkFactorsMap.set(g.home_abbr, g.park_factors);
-      }
-    }
-  } catch (err: unknown) {
-    logger.warn(
-      { err: err instanceof Error ? err.message : String(err) },
-      "MODULE_13: StartingNine fetch failed — park factors neutral",
-    );
-  }
-  if (parkFactorsMap.size < PARK_MIN_VENUES_WARN) {
-    errors.push(
-      `Park factor coverage low (${parkFactorsMap.size} venues) — *_PARK variants partially neutral for uncovered venues`,
-    );
-  }
-  logger.info({ parkEntries: parkFactorsMap.size }, "MODULE_13: Park factors map built");
+  // Uses the static 2026 seasonal table (module04d) — all 30 MLB venues.
+  // The previous mlbstartingnine.com source was today-only and unsuitable
+  // for historical replay (it returned 5/30 venues at early-morning fetch time).
+  const parkFactorsMap = new Map<string, ParkFactors>(
+    Object.entries(SEASONAL_PARK_FACTORS_2026),
+  );
+  logger.info({ parkEntries: parkFactorsMap.size }, "MODULE_13: Park factors map built (static 2026 seasonal, all 30 venues)");
 
   // ── Process each date ──
   const allRows: ReplayGameRow[] = [];
