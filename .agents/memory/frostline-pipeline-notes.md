@@ -39,10 +39,14 @@ DAILY_MATCHUPS col Y (Notes) and BULLPEN_USAGE_DAILY col I (Notes) are pipeline-
 
 **Schema additions:** SECTION_COLORS now includes "ANALYSIS" (deep teal). New sheets: SHADOW_VALIDATION, REPLAY_RESULTS, REPLAY_METRICS.
 
-## Module05 Fangraphs is a STUB (discovered 2026-07-24 via replay gate)
-`fetchTeamSplitsWithFallback()` never fetches Fangraphs — it emits identical hardcoded splits for all 30 teams (L30 wRC+ 112 vs RHP / 105 vs LHP → constant 4.883 RS/G after conversion). The file header admits it ("FanGraphs requires auth").
-**Why it matters:** production module09's blend is 0.65 × constant + 0.35 × real L10 — the L30 leg carries ZERO team-level signal, so live "legacy" projections were effectively flat ~9.77 before weather. Detected because replay calibration put all 224 games in one band (a degenerate distribution is the tell).
-**How to apply:** any work touching module09 offense rates must treat the L30 leg as unrepaired until module05 gets a real source. Replay-proven candidate: MLB Stats API schedule-range actual RS/G (module13 now uses exactly this). Repair needs its own commissioning sequence.
+## Module05 repair (2026-07-24): real MLB Stats API L30
+`module05_fangraphs.ts` was a stub (identical hardcoded splits for all 30 teams). Now repaired:
+- Calls `fetchTeamRunRates(today, {lookbackDays:30, lastN:30})` — same MLB Stats API source as module13 replay
+- Back-calculates `l30_wrc_plus = (rs_per_game / 4.5) × 100` so module09's formula is unchanged (round-trip: `(wrc/100)×4.5 = rs_per_game`)
+- Teams with < 15 L30 finals excluded from `teams[]`; module09's `teamSplits.length > 0` gate handles fallback naturally
+- Shadow publish confirmed: 27/30 unique L30 rates, range 3.25–6.25; all 30 games BLENDED
+- `TeamSplitData` gained `games_sampled`, `l30_source_status`; `FangraphsResult` gained `l30_teams_sampled`
+- Replay metrics after repair are identical to pre-repair (module13 already used real MLB-API L30 per date — repair only affects live production module09)
 
 ## mlbstartingnine is today-only; pf blocks are index-aligned
 - The `?date` query param is IGNORED — every fetch returns the current day's page. Historical park/lineup coverage from this source is impossible; early-morning pages are sparse (1–5 games) and fill in during the day.

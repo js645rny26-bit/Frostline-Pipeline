@@ -6,7 +6,9 @@
  * Projection inputs (commissioning v2, 2026-07-24):
  *
  * Offensive rate:
- *   Primary:  Fangraphs L30 wRC+-derived run rate (team × (wRC+/100) × 4.5)
+ *   Primary:  MLB Stats API L30 actual RS/G back-calculated as wRC+-equivalent
+ *             (module05_fangraphs: l30_wrc_plus = (rs_per_game / 4.5) × 100)
+ *             Teams with < 15 L30 finals are excluded; module09 falls back per team.
  *   Modifier: Actual L10 RS/game from module05c_teamRunRates
  *   Blend:    L30_WEIGHT × L30 rate + L10_WEIGHT × L10 rate (test parameters, not canon)
  *   Fallback: League-average 4.5 runs/9; generates a logger.warn — must not be silent.
