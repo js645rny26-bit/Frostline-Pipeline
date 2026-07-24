@@ -601,7 +601,7 @@ export async function verifyRecalculation(
       "Park_Runs_Pct",
       "Park_Multiplier",
       "Weather_Multiplier",
-      "Combined_Run_Multiplier",
+      "Combined_Run_Multiplier_Audit",   // col AD — audit copy; col P is the primary
       "Park_Source_Status",
     ]]).catch(() => {});
     await clearRange(workbookId, "GAME_SUMMARY!A2:AE100");

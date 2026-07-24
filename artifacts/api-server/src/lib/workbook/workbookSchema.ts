@@ -11,7 +11,13 @@
  *      plate ump, season stats, line movement, platoon), bullpen ERA/WHIP/tier,
  *      ODDS_HISTORY sheet, RUN_LOG Schema_Version column, README sheet.
  */
-export const WORKBOOK_SCHEMA_VERSION = 2;
+/**
+ *  v3 (2026-07-24): added six ANALYSIS sheets to WORKBOOK_SCHEMA so
+ *      SCHEMA_REFERENCE documents the full commissioning stack:
+ *      SHADOW_HISTORY, SHADOW_OUTCOMES, REGRESSION_REPORT, STARTER_AUDIT,
+ *      VEHICLE_LOG, VEHICLE_POSTMORTEM.
+ */
+export const WORKBOOK_SCHEMA_VERSION = 3;
 
 export interface ColumnDef {
   name: string;
@@ -22,7 +28,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_09" | "MODULE_10" | "MODULE_11" | "FORMULA" | "OPERATOR" | "MODULE_12" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_09" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -545,6 +551,150 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Overproject_Pct",   index: 6, type: "number",  width: 120, format: "0.0", filledBy: "MODULE_12", readOnly: true, exampleValue: "55.7" },
       { name: "Underproject_Pct",  index: 7, type: "number",  width: 125, format: "0.0", filledBy: "MODULE_12", readOnly: true, exampleValue: "44.3" },
       { name: "Replay_Run_TS",     index: 8, type: "string",  width: 200, filledBy: "MODULE_12", readOnly: true, exampleValue: "2026-07-24T18:00:00.000Z" },
+    ],
+  },
+
+  // ── Live accumulation + monitoring sheets (created by one-off scripts) ────────
+
+  {
+    name: "SHADOW_HISTORY",
+    description: "Append-only accumulation of every shadow-validation row. Same columns as SHADOW_VALIDATION. Written by module12s after every publish; never cleared.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date",                        index: 0,  type: "string",  width: 90,  filledBy: "MODULE_09", readOnly: true, exampleValue: "2026-07-24" },
+      { name: "Game_ID",                     index: 1,  type: "string",  width: 160, filledBy: "MODULE_09", readOnly: true, exampleValue: "2026-07-24_NYY@BOS" },
+      { name: "Away_Team",                   index: 2,  type: "string",  width: 80,  filledBy: "MODULE_09", readOnly: true, exampleValue: "NYY" },
+      { name: "Home_Team",                   index: 3,  type: "string",  width: 80,  filledBy: "MODULE_09", readOnly: true, exampleValue: "BOS" },
+      { name: "Away_Pitcher",                index: 4,  type: "string",  width: 140, filledBy: "MODULE_09", readOnly: true, exampleValue: "Gerrit Cole" },
+      { name: "Home_Pitcher",                index: 5,  type: "string",  width: 140, filledBy: "MODULE_09", readOnly: true, exampleValue: "Brayan Bello" },
+      { name: "Repaired_Projected_Total",    index: 6,  type: "number",  width: 175, format: "0.00", filledBy: "MODULE_09", readOnly: true, exampleValue: "8.45" },
+      { name: "Legacy_Projected_Total",      index: 7,  type: "number",  width: 170, format: "0.00", filledBy: "MODULE_09", readOnly: true, exampleValue: "7.82" },
+      { name: "Delta_Repaired_Minus_Legacy", index: 8,  type: "number",  width: 195, format: "0.00", filledBy: "MODULE_09", readOnly: true, exampleValue: "0.63" },
+      { name: "Away_Offense_Source",         index: 9,  type: "string",  width: 160, filledBy: "MODULE_09", readOnly: true, exampleValue: "BLENDED" },
+      { name: "Home_Offense_Source",         index: 10, type: "string",  width: 160, filledBy: "MODULE_09", readOnly: true, exampleValue: "L30_ONLY" },
+      { name: "Away_L30_Rate",               index: 11, type: "number",  width: 120, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "4.680" },
+      { name: "Home_L30_Rate",               index: 12, type: "number",  width: 120, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "4.320" },
+      { name: "Away_L10_Rate",               index: 13, type: "number",  width: 120, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "5.100" },
+      { name: "Home_L10_Rate",               index: 14, type: "number",  width: 120, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "" },
+      { name: "Away_Offense_Rate_Used",      index: 15, type: "number",  width: 165, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "4.877" },
+      { name: "Home_Offense_Rate_Used",      index: 16, type: "number",  width: 165, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "4.320" },
+      { name: "Legacy_Multiplier",           index: 17, type: "number",  width: 145, format: "0.0000", filledBy: "MODULE_09", readOnly: true, exampleValue: "1.0050" },
+      { name: "Park_Multiplier",             index: 18, type: "number",  width: 130, format: "0.0000", filledBy: "MODULE_09", readOnly: true, exampleValue: "1.0800" },
+      { name: "Weather_Multiplier",          index: 19, type: "number",  width: 140, format: "0.0000", filledBy: "MODULE_09", readOnly: true, exampleValue: "1.0050" },
+      { name: "Repaired_Multiplier",         index: 20, type: "number",  width: 150, format: "0.0000", filledBy: "MODULE_09", readOnly: true, exampleValue: "1.0854" },
+      { name: "Park_Source_Status",          index: 21, type: "string",  width: 175, filledBy: "MODULE_09", readOnly: true, exampleValue: "VENUE_FACTOR_USED" },
+      { name: "Snapshot_TS",                 index: 22, type: "string",  width: 200, filledBy: "MODULE_09", readOnly: true, exampleValue: "2026-07-24T10:00:00.000Z" },
+    ],
+  },
+
+  {
+    name: "SHADOW_OUTCOMES",
+    description: "Append-only settlement log. One row per game, written by module14 after games go Final. Idempotent — game_ids already present are skipped.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date",                     index: 0,  type: "string", width: 90,  filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-07-24" },
+      { name: "Game_ID",                  index: 1,  type: "string", width: 160, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-07-24_NYY@BOS" },
+      { name: "Away_Team",                index: 2,  type: "string", width: 80,  filledBy: "MODULE_14", readOnly: true, exampleValue: "NYY" },
+      { name: "Home_Team",                index: 3,  type: "string", width: 80,  filledBy: "MODULE_14", readOnly: true, exampleValue: "BOS" },
+      { name: "Repaired_Projected_Total", index: 4,  type: "number", width: 175, format: "0.00", filledBy: "MODULE_14", readOnly: true, description: "Projection from SHADOW_HISTORY (repaired model)", exampleValue: "8.45" },
+      { name: "Actual_Total",             index: 5,  type: "number", width: 100, format: "0",    filledBy: "MODULE_14", readOnly: true, exampleValue: "7" },
+      { name: "Error",                    index: 6,  type: "number", width: 90,  format: "0.00", filledBy: "MODULE_14", readOnly: true, description: "Projected − Actual. Positive = overprojection.", exampleValue: "1.45" },
+      { name: "Abs_Error",                index: 7,  type: "number", width: 90,  format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "1.45" },
+      { name: "Park_Source_Status",       index: 8,  type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, exampleValue: "VENUE_FACTOR_USED" },
+      { name: "Away_Offense_Source",      index: 9,  type: "string", width: 160, filledBy: "MODULE_14", readOnly: true, exampleValue: "BLENDED" },
+      { name: "Home_Offense_Source",      index: 10, type: "string", width: 160, filledBy: "MODULE_14", readOnly: true, exampleValue: "L30_ONLY" },
+      { name: "Settlement_TS",            index: 11, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-07-25T02:00:00.000Z" },
+    ],
+  },
+
+  {
+    name: "REGRESSION_REPORT",
+    description: "Per-window performance summary computed from SHADOW_OUTCOMES. Overwritten on each run. Written by module15.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Window",       index: 0,  type: "string", width: 80,  filledBy: "MODULE_15", readOnly: true, description: "7d | 30d | ytd | all", exampleValue: "30d" },
+      { name: "N_Games",      index: 1,  type: "number", width: 80,  format: "0",     filledBy: "MODULE_15", readOnly: true, exampleValue: "87" },
+      { name: "MAE",          index: 2,  type: "number", width: 80,  format: "0.000", filledBy: "MODULE_15", readOnly: true, exampleValue: "3.662" },
+      { name: "Median_AE",    index: 3,  type: "number", width: 90,  format: "0.000", filledBy: "MODULE_15", readOnly: true, exampleValue: "3.210" },
+      { name: "Bias",         index: 4,  type: "number", width: 80,  format: "0.000", filledBy: "MODULE_15", readOnly: true, description: "Mean(proj − actual). Positive = systematic overprojection.", exampleValue: "0.022" },
+      { name: "Over_Pct",     index: 5,  type: "number", width: 90,  format: "0.0",   filledBy: "MODULE_15", readOnly: true, exampleValue: "51.7" },
+      { name: "Under_Pct",    index: 6,  type: "number", width: 90,  format: "0.0",   filledBy: "MODULE_15", readOnly: true, exampleValue: "48.3" },
+      { name: "Miss_4Plus_Pct", index: 7, type: "number", width: 110, format: "0.0",  filledBy: "MODULE_15", readOnly: true, description: "% of games where |error| ≥ 4 runs", exampleValue: "38.2" },
+      { name: "MAE_Alert",    index: 8,  type: "string", width: 90,  filledBy: "MODULE_15", readOnly: true, description: "YES when MAE > 4.2", exampleValue: "NO" },
+      { name: "Bias_Alert",   index: 9,  type: "string", width: 90,  filledBy: "MODULE_15", readOnly: true, description: "YES when |bias| > 0.20", exampleValue: "NO" },
+      { name: "Miss_Alert",   index: 10, type: "string", width: 90,  filledBy: "MODULE_15", readOnly: true, description: "YES when miss_4plus > 45%", exampleValue: "NO" },
+      { name: "Report_TS",    index: 11, type: "string", width: 200, filledBy: "MODULE_15", readOnly: true, exampleValue: "2026-07-25T08:00:00.000Z" },
+    ],
+  },
+
+  {
+    name: "STARTER_AUDIT",
+    description: "Per-pitcher projection accuracy from settled outcomes. Overwritten on each run. Written by module16.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Pitcher",         index: 0, type: "string", width: 160, filledBy: "MODULE_16", readOnly: true, exampleValue: "Gerrit Cole" },
+      { name: "N_Games",         index: 1, type: "number", width: 80,  format: "0",     filledBy: "MODULE_16", readOnly: true, exampleValue: "12" },
+      { name: "MAE",             index: 2, type: "number", width: 80,  format: "0.000", filledBy: "MODULE_16", readOnly: true, exampleValue: "3.420" },
+      { name: "Bias",            index: 3, type: "number", width: 80,  format: "0.000", filledBy: "MODULE_16", readOnly: true, description: "Positive = systematically overprojected when this starter pitches.", exampleValue: "-0.120" },
+      { name: "Over_Pct",        index: 4, type: "number", width: 90,  format: "0.0",   filledBy: "MODULE_16", readOnly: true, exampleValue: "41.7" },
+      { name: "Under_Pct",       index: 5, type: "number", width: 90,  format: "0.0",   filledBy: "MODULE_16", readOnly: true, exampleValue: "58.3" },
+      { name: "Miss_4Plus_Pct",  index: 6, type: "number", width: 110, format: "0.0",   filledBy: "MODULE_16", readOnly: true, exampleValue: "33.3" },
+      { name: "Bias_Direction",  index: 7, type: "string", width: 120, filledBy: "MODULE_16", readOnly: true, description: "OVER | UNDER | NEUTRAL. Flagged when |bias| > 0.5.", exampleValue: "NEUTRAL" },
+      { name: "First_Date",      index: 8, type: "string", width: 100, filledBy: "MODULE_16", readOnly: true, exampleValue: "2026-04-25" },
+      { name: "Last_Date",       index: 9, type: "string", width: 100, filledBy: "MODULE_16", readOnly: true, exampleValue: "2026-07-24" },
+    ],
+  },
+
+  {
+    name: "VEHICLE_LOG",
+    description: "Append-only per-game vehicle decision log. Written by module17 (phase 1) after every publish. Idempotent by (date, game_id).",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date",           index: 0,  type: "string", width: 90,  filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-24" },
+      { name: "Game_ID",        index: 1,  type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-24_NYY@BOS" },
+      { name: "Away_Team",      index: 2,  type: "string", width: 80,  filledBy: "MODULE_17", readOnly: true, exampleValue: "NYY" },
+      { name: "Home_Team",      index: 3,  type: "string", width: 80,  filledBy: "MODULE_17", readOnly: true, exampleValue: "BOS" },
+      { name: "Vehicle_Type",   index: 4,  type: "string", width: 130, filledBy: "MODULE_17", readOnly: true, exampleValue: "GAME_TOTAL" },
+      { name: "Market_Line",    index: 5,  type: "number", width: 90,  format: "0.0",  filledBy: "MODULE_17", readOnly: true, exampleValue: "8.5" },
+      { name: "Direction",      index: 6,  type: "string", width: 90,  filledBy: "MODULE_17", readOnly: true, description: "OVER | UNDER | NONE", exampleValue: "UNDER" },
+      { name: "Projected_Total",index: 7,  type: "number", width: 130, format: "0.00", filledBy: "MODULE_17", readOnly: true, exampleValue: "6.88" },
+      { name: "Variance",       index: 8,  type: "number", width: 90,  format: "0.00", filledBy: "MODULE_17", readOnly: true, description: "Projected − Market. Negative = UNDER edge.", exampleValue: "-1.62" },
+      { name: "Final_Decision", index: 9,  type: "string", width: 100, filledBy: "MODULE_17", readOnly: true, description: "CORE | NO_CORE | PENDING", exampleValue: "NO_CORE" },
+      { name: "Core_Blocker",   index: 10, type: "string", width: 220, filledBy: "MODULE_17", readOnly: true, exampleValue: "INSUFFICIENT_PROJECTION_SEPARATION" },
+      { name: "Edge_Strength",  index: 11, type: "string", width: 120, filledBy: "MODULE_17", readOnly: true, exampleValue: "LEAN" },
+      { name: "Confidence",     index: 12, type: "number", width: 90,  format: "0.00", filledBy: "MODULE_17", readOnly: true, exampleValue: "0.35" },
+      { name: "Publish_TS",     index: 13, type: "string", width: 200, filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-24T13:42:11.000Z" },
+    ],
+  },
+
+  {
+    name: "VEHICLE_POSTMORTEM",
+    description: "Per-game postmortem grading. Written by module17 (phase 2) after settlement. Idempotent by (date, game_id). Grades thesis accuracy and ticket result separately.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date",               index: 0,  type: "string", width: 90,  filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-24" },
+      { name: "Game_ID",            index: 1,  type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-24_NYY@BOS" },
+      { name: "Away_Team",          index: 2,  type: "string", width: 80,  filledBy: "MODULE_17", readOnly: true, exampleValue: "NYY" },
+      { name: "Home_Team",          index: 3,  type: "string", width: 80,  filledBy: "MODULE_17", readOnly: true, exampleValue: "BOS" },
+      { name: "Vehicle_Type",       index: 4,  type: "string", width: 130, filledBy: "MODULE_17", readOnly: true, exampleValue: "GAME_TOTAL" },
+      { name: "Market_Line",        index: 5,  type: "number", width: 90,  format: "0.0",  filledBy: "MODULE_17", readOnly: true, exampleValue: "8.5" },
+      { name: "Direction",          index: 6,  type: "string", width: 90,  filledBy: "MODULE_17", readOnly: true, exampleValue: "UNDER" },
+      { name: "Projected_Total",    index: 7,  type: "number", width: 130, format: "0.00", filledBy: "MODULE_17", readOnly: true, exampleValue: "6.88" },
+      { name: "Actual_Total",       index: 8,  type: "number", width: 100, format: "0",    filledBy: "MODULE_17", readOnly: true, exampleValue: "7" },
+      { name: "Error",              index: 9,  type: "number", width: 90,  format: "0.00", filledBy: "MODULE_17", readOnly: true, description: "Projected − Actual", exampleValue: "-0.12" },
+      { name: "Final_Decision",     index: 10, type: "string", width: 100, filledBy: "MODULE_17", readOnly: true, exampleValue: "NO_CORE" },
+      { name: "Core_Blocker",       index: 11, type: "string", width: 220, filledBy: "MODULE_17", readOnly: true, exampleValue: "INSUFFICIENT_PROJECTION_SEPARATION" },
+      { name: "Thesis_Correct",     index: 12, type: "string", width: 110, filledBy: "MODULE_17", readOnly: true, description: "YES | NO | PUSH — was the projected direction correct vs actual vs market line?", exampleValue: "YES" },
+      { name: "Ticket_Result",      index: 13, type: "string", width: 110, filledBy: "MODULE_17", readOnly: true, description: "COVERED | MISSED | PUSH | NO_BET — graded only for CORE bets.", exampleValue: "NO_BET" },
+      { name: "Away_Offense_Source",index: 14, type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "BLENDED" },
+      { name: "Home_Offense_Source",index: 15, type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "L30_ONLY" },
+      { name: "Graded_TS",          index: 16, type: "string", width: 200, filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-25T08:30:00.000Z" },
     ],
   },
 

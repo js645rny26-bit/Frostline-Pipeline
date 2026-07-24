@@ -375,6 +375,22 @@ export async function writeGoogleSheetsFeed(
   const statsMap = pitcherSeasonStats?.stats ?? new Map<number, PitcherSeasonStats>();
 
   // 1. DAILY_MATCHUPS — 47 cols A–AU, starts row 2
+  // Write v2 extension headers (Z–AU, indices 25–46) on every publish so
+  // they remain correct regardless of when the workbook was first created.
+  await writeRange(workbookId, "DAILY_MATCHUPS!Z1:AU1", [[
+    "Away_Last_Outing_Date", "Away_Last_IP", "Away_Last_Pitches",
+    "Away_Days_Rest", "Away_Stress_Flag",
+    "Home_Last_Outing_Date", "Home_Last_IP", "Home_Last_Pitches",
+    "Home_Days_Rest", "Home_Stress_Flag",
+    "Plate_Umpire",
+    "Away_ERA", "Away_FIP", "Away_K_Pct",
+    "Home_ERA", "Home_FIP", "Home_K_Pct",
+    "Total_Open", "Total_Current", "Total_Move",
+    "Away_Platoon_Adv", "Home_Platoon_Adv",
+  ]]).catch((err: unknown) => {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_08: Could not write DAILY_MATCHUPS Z–AU headers — continuing");
+  });
+
   const outingsMap = starterOutings?.outings ?? new Map();
   const dmRows = buildDailyMatchupsRows(
     normalized.games,

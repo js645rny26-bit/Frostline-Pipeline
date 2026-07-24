@@ -201,6 +201,17 @@ export async function extractOutputBoards(
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not expand SLATE_BOARD columns — continuing");
     });
 
+    // Write full SLATE_BOARD header row — A–O (indices 0–14) every publish so
+    // headers stay in sync with the current schema even when column names change.
+    await writeRange(workbookId, "SLATE_BOARD!A1:O1", [[
+      "Date", "Game_ID", "Away_Team", "Home_Team",
+      "Vehicle_Type", "Projected_Value", "Market_Line",
+      "Variance_from_Projection", "Direction", "Decision",
+      "Confidence", "Expected_ROI", "Edge_Strength", "CORE_Blocker", "Notes",
+    ]]).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write SLATE_BOARD A–O headers — continuing");
+    });
+
     // Write prop signal headers on row 1, columns P–V (indices 15–21)
     await writeRange(workbookId, "SLATE_BOARD!P1:V1", [[
       "Starter_K_Market_Signal",

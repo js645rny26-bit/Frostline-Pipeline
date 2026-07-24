@@ -12,7 +12,8 @@ import { runShadowSettlement } from "../lib/pipeline/module14_shadowSettlement.j
 import { runRegressionReport } from "../lib/pipeline/module15_regressionReport.js";
 import { runStarterAudit } from "../lib/pipeline/module16_starterAudit.js";
 import { runPostmortem } from "../lib/pipeline/module17_vehiclePostmortem.js";
-import { WORKBOOK_ID } from "../lib/sheets/client.js";
+import { WORKBOOK_ID, writeRange, clearRange, expandSheetColumns } from "../lib/sheets/client.js";
+import { WORKBOOK_SCHEMA, generateSchemaReferenceRows, WORKBOOK_SCHEMA_VERSION } from "../lib/workbook/workbookSchema.js";
 
 const router: IRouter = Router();
 
@@ -218,6 +219,80 @@ router.get("/pipeline/postmortem", async (req, res): Promise<void> => {
   } catch (err: unknown) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
+});
+
+/**
+ * GET /pipeline/repair-headers
+ * Re-writes row 1 for every sheet in WORKBOOK_SCHEMA and refreshes
+ * SCHEMA_REFERENCE with the current column definitions.
+ *
+ * Run this once after any schema version change or when the auditor
+ * finds unnamed / stale header rows in the live workbook.
+ *
+ * Query params:
+ *   workbook_id — override workbook (optional)
+ */
+router.get("/pipeline/repair-headers", async (req, res): Promise<void> => {
+  const { workbook_id } = req.query;
+  const wbId = typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID;
+  const repaired: string[] = [];
+  const errors: string[] = [];
+
+  // ── Re-write row 1 for every schema-defined sheet ──────────────────────────
+  for (const sheet of WORKBOOK_SCHEMA) {
+    if (sheet.columns.length === 0) continue;
+
+    // Build a sparse row array long enough to hold all named columns.
+    const maxIndex = Math.max(...sheet.columns.map((c) => c.index));
+    const headerRow: string[] = Array(maxIndex + 1).fill("");
+    for (const col of sheet.columns) {
+      headerRow[col.index] = col.name;
+    }
+
+    // Convert column index to A1 column letter(s)
+    function colLetter(n: number): string {
+      let s = "";
+      let i = n + 1;
+      while (i > 0) {
+        const r = (i - 1) % 26;
+        s = String.fromCharCode(65 + r) + s;
+        i = Math.floor((i - 1) / 26);
+      }
+      return s;
+    }
+    const lastCol = colLetter(maxIndex);
+    const range = `${sheet.name}!A1:${lastCol}1`;
+
+    try {
+      await expandSheetColumns(wbId, sheet.name, maxIndex + 1);
+      await writeRange(wbId, range, [headerRow]);
+      repaired.push(sheet.name);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${sheet.name}: ${msg}`);
+    }
+  }
+
+  // ── Refresh SCHEMA_REFERENCE content ────────────────────────────────────────
+  let schemaRefRows = 0;
+  try {
+    const schemaRows = generateSchemaReferenceRows();
+    await clearRange(wbId, "SCHEMA_REFERENCE!A2:J5000");
+    await writeRange(wbId, "SCHEMA_REFERENCE!A2", schemaRows);
+    schemaRefRows = schemaRows.length;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`SCHEMA_REFERENCE: ${msg}`);
+  }
+
+  res.status(errors.length > 0 ? 207 : 200).json({
+    status:               errors.length === 0 ? "success" : "partial",
+    schema_version:       WORKBOOK_SCHEMA_VERSION,
+    sheets_repaired:      repaired.length,
+    schema_ref_rows:      schemaRefRows,
+    repaired_sheets:      repaired,
+    errors,
+  });
 });
 
 export default router;
