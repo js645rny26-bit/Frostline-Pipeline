@@ -1,0 +1,68 @@
+SOURCES USED
+
+* Your implementation and test summary.
+* Existing Frostline commissioning doctrine.
+
+REFRESH CHECK
+
+I have not independently inspected the code, workbook writes, or test output, so I’m treating this as an implementation report, not a personally verified commission result.
+
+That said, the package is correctly scoped and the sequence is disciplined.
+
+Current status
+
+Structural repair: reported complete
+Dependency audit: reported complete
+Smoke testing: reported 40/40 pass
+Historical replay: not yet complete
+Live shadow validation: not yet complete
+Production deployment: not authorized yet
+
+The strongest part of this repair is not merely the 65/35 blend. It is the new observability:
+
+* the source used is explicit
+* sparse data is handled deliberately
+* fallback cannot remain silent
+* park and weather are separately auditable
+* the fake lineup-strength number is gone
+* provisional parameters are labeled provisional
+
+That directly repairs the false-confidence problem. A projection can now explain what it actually knew.
+
+Next commissioning gate
+
+Run shadow validation first, preserving the existing authorization output while logging both:
+
+Current production projection
+Repaired projection
+Difference
+Offensive sources used
+Park multiplier
+Weather multiplier
+Fallback warnings
+Final score
+
+Then run historical replay comparing at minimum:
+
+Variant	Purpose
+Legacy model	Baseline
+L30 only	Stable offensive form
+L10 only	Recent scoring responsiveness
+65/35 blend	Current candidate
+Blend + park	Venue contribution
+Blend + park + weather	Full repaired candidate
+
+Primary metrics:
+
+* MAE
+* median absolute error
+* bias
+* 4+ run miss frequency
+* overprojection frequency
+* underprojection frequency
+* directional accuracy against the closing total
+* calibration by projection band
+
+Do not canonize 65/35 merely because the code and smoke tests pass. Smoke tests establish correct execution. Replay and shadow validation establish model value.
+
+This repair has advanced from Designed to Smoke-Tested. It has not yet reached Commissioned Live.
