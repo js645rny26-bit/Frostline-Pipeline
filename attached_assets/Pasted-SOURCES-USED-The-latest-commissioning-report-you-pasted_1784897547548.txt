@@ -1,0 +1,86 @@
+SOURCES USED
+
+* The latest commissioning report you pasted
+* The established Frostline commissioning doctrine
+
+REFRESH CHECK
+
+After the completed-game settlement and duplicate-skip check pass, the shadow accumulation loop is commissioned.
+
+Then the next work is not more architecture repair. It becomes operational validation and model improvement.
+
+What comes next
+
+1. Let the system accumulate outcomes
+
+Run settlement daily after games finalize.
+
+The goal is to build enough paired rows to measure:
+
+* projection error
+* directional bias
+* band performance
+* park/weather behavior
+* fallback frequency
+* game-type failure patterns
+
+Nothing needs to be rebuilt during this phase unless the data exposes a real defect.
+
+2. Add automated regression reporting
+
+Once enough rows accumulate, the engine should summarize:
+
+* trailing 7-day performance
+* trailing 30-day performance
+* season-to-date performance
+* current vs historical baseline
+* alerts for material degradation
+
+This should be one reporting layer, not a new projection module.
+
+3. Audit the remaining projection components
+
+The offense and park path will be commissioned. The next logical audits are:
+
+* starter projection quality
+* expected innings and leash
+* bullpen run contribution
+* weather modifier calibration
+* team identity and confirmed-lineup effects
+
+Each should be tested against outcomes without changing everything at once.
+
+4. Connect projection truth to vehicle selection
+
+The major remaining engine-level question is not just:
+
+How close was the projected total?
+
+It is:
+
+Did the chosen betting vehicle capture the scripts the projection identified?
+
+That means logging and grading:
+
+* game truth
+* ranked vehicles
+* selected vehicle
+* blocker
+* final label
+* market price
+* actual game script
+* ticket result separately from thesis accuracy
+
+This is where Frostline becomes a betting engine rather than only a run-projection engine.
+
+Fastest clean roadmap
+
+1. Close the settlement lifecycle.
+2. Accumulate outcomes automatically.
+3. Add regression monitoring.
+4. Audit starter, bullpen, weather, and lineup layers.
+5. Connect projections to vehicle-selection and postmortem grading.
+
+So after the next settlement check, the infrastructure phase is essentially finished.
+
+The project then moves into live validation, calibration, and decision-engine commissioning.
