@@ -37,8 +37,27 @@ import type { StartingNineResult, ParkFactors } from "./module04c_startingNine.j
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/** 2026 MLB league-average ERA used to normalise pitcher quality. */
+/** 2026 MLB league-average ERA / FIP used to normalise pitcher quality. */
 const LEAGUE_AVG_ERA = 4.20;
+
+/**
+ * League-average K-BB% (strikeout rate minus walk rate).
+ * 2024–2026 MLB average is approximately 14.8 percentage points.
+ */
+const LEAGUE_AVG_K_BB_PCT = 0.148;
+
+/**
+ * Weight applied to K-BB% deviation from league average when adjusting the
+ * FIP-based quality factor.
+ *
+ * Interpretation: each 10-point K-BB% advantage over league average reduces
+ * the projected run allowance by (0.10 × K_BB_BLEND_WEIGHT) multiplicatively.
+ *
+ * Set conservatively at 0.70. Do not raise above 1.0 without replay validation —
+ * over-weighting K-BB% can over-suppress run projections for strikeout pitchers
+ * whose batted-ball profile is merely average.
+ */
+const K_BB_BLEND_WEIGHT = 0.70;
 
 /** League-average run rate (runs per 9 innings) used as the last-resort fallback. */
 const LEAGUE_AVG_RS = 4.5;
@@ -95,17 +114,59 @@ function clampERA(era: number): number {
 }
 
 /**
- * Starter quality multiplier: how many runs per inning does this pitcher
- * allow relative to a league-average pitcher?
- *   ERA 2.06 (elite) → 0.49   ERA 4.20 (avg) → 1.00   ERA 5.70 (rough) → 1.36
+ * Composite starter quality multiplier: how many runs per inning does this
+ * pitcher allow relative to a league-average pitcher?
+ *
+ * Two-component model:
+ *
+ * 1. FIP-based baseline — FIP removes defence/luck noise from ERA and is a
+ *    better predictor of future run allowance. Falls back to ERA when FIP is
+ *    unavailable (e.g. very few innings pitched so far this season).
+ *
+ *    fipFactor = clamp(FIP ?? ERA, 2.0, 7.0) / 4.20
+ *
+ * 2. K-BB% deviation adjustment — K-BB% (strikeout rate minus walk rate) is
+ *    one of the strongest single-season indicators of true pitching skill. An
+ *    elite K-BB% pitcher generates more outs per batter faced and creates less
+ *    traffic, both of which suppress runs beyond what FIP captures for small
+ *    samples.
+ *
+ *    kBBAdj = (pitcher_K_BB_pct − LEAGUE_AVG_K_BB_PCT) × K_BB_BLEND_WEIGHT
+ *    composite = fipFactor × (1 − kBBAdj)
+ *
+ * Final result clamped to [0.40, 1.80]:
+ *   0.40 ≈ elite (e.g. FIP 2.0, K-BB% 28%) → ~0.75 runs/9 below league avg
+ *   1.00 = league average
+ *   1.80 ≈ very poor (e.g. FIP 7.0, K-BB% 0%) → significant run-scoring boost
+ *
+ * When k_pct or bb_pct is absent (e.g. opener with <20 BF), the factor falls
+ * back to FIP-only to avoid noisy small-sample K-BB% distorting the model.
  */
 function starterQualityFactor(
   pitcherId: number | null,
   statsMap: Map<number, PitcherSeasonStats>,
 ): number {
   if (!pitcherId) return 1.0;
-  const era = statsMap.get(pitcherId)?.era ?? LEAGUE_AVG_ERA;
-  return clampERA(era) / LEAGUE_AVG_ERA;
+  const stats = statsMap.get(pitcherId);
+  if (!stats) return 1.0;
+
+  // Component 1: FIP-based baseline (prefer FIP; fall back to ERA)
+  const fipOrEra = stats.fip ?? stats.era ?? LEAGUE_AVG_ERA;
+  const fipFactor = clampERA(fipOrEra) / LEAGUE_AVG_ERA;
+
+  // Component 2: K-BB% adjustment (only when both rates are available)
+  const kPct = stats.k_pct;
+  const bbPct = stats.bb_pct;
+  if (kPct === null || bbPct === null) {
+    // Insufficient data for K-BB% — use FIP-only
+    return Math.max(0.40, Math.min(1.80, fipFactor));
+  }
+
+  const kBBPct   = kPct - bbPct;
+  const kBBAdj   = (kBBPct - LEAGUE_AVG_K_BB_PCT) * K_BB_BLEND_WEIGHT;
+  const composite = fipFactor * (1 - kBBAdj);
+
+  return Math.max(0.40, Math.min(1.80, parseFloat(composite.toFixed(4))));
 }
 
 /**

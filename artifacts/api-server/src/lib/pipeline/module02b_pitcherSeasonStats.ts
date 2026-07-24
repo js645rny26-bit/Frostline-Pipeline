@@ -23,6 +23,7 @@ export interface PitcherSeasonStats {
   era: number | null;
   fip: number | null;
   k_pct: number | null;       // 0–1, strikeOuts / battersFaced
+  bb_pct: number | null;      // 0–1, baseOnBalls / battersFaced
   whip: number | null;
   hr_per_9: number | null;
   innings_pitched: string | null;
@@ -87,9 +88,14 @@ function parsePerson(p: Person): PitcherSeasonStats | null {
   }
 
   const so = num(season.strikeOuts);
+  const bb = num(season.baseOnBalls);
   const bf = num(season.battersFaced);
+
   const kPct = so !== null && bf !== null && bf > 0
     ? parseFloat((so / bf).toFixed(3))
+    : null;
+  const bbPct = bb !== null && bf !== null && bf > 0
+    ? parseFloat((bb / bf).toFixed(3))
     : null;
 
   const fipRaw = num(saber.fip);
@@ -101,6 +107,7 @@ function parsePerson(p: Person): PitcherSeasonStats | null {
     era:             num(season.era),
     fip:             fipRaw !== null ? parseFloat(fipRaw.toFixed(2)) : null,
     k_pct:           kPct,
+    bb_pct:          bbPct,
     whip:            num(season.whip),
     hr_per_9:        num(season.homeRunsPer9),
     innings_pitched: season.inningsPitched != null ? String(season.inningsPitched) : null,

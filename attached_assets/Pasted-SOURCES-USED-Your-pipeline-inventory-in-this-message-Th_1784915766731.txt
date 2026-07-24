@@ -1,0 +1,151 @@
+SOURCES USED
+
+* Your pipeline inventory in this message
+* The live Frostline board and integration rows we already inspected
+
+REFRESH CHECK
+
+This clarifies the architecture, and it changes the diagnosis slightly:
+
+Jared Jones’ statistics are available to the pipeline. The failure is not missing pitcher data. The failure is that those pitcher metrics are not visibly exerting enough influence on the team run projection.
+
+The batter-level gap is real, but it is not the primary reason Chicago was projected for 5.48 runs against Jones.
+
+What needs to be added first
+
+1. Starter-to-opponent scoring adjustment
+
+Module02 and module02b already possess:
+
+* ERA
+* WHIP
+* FIP/xFIP
+* K%
+* BB%
+* Hard-hit rate
+* Season workload data
+
+Those inputs need to produce an explicit opponent run-rate modifier, such as:
+
+Confirmed lineup baseline × starter suppression/detonation factor × expected starter innings
+
+Jones should materially reduce Chicago’s expected scoring during his projected six-inning window.
+
+Right now, the workbook appears to carry:
+
+* His name
+* His role
+* Expected pitches
+* Expected innings
+
+But the resulting Chicago projection still looks predominantly team-rate driven.
+
+That is the immediate defect.
+
+Batter integration should then add three layers
+
+2. Confirmed-lineup-weighted offensive quality
+
+Do not simply replace team rates with nine-player averages. Use confirmed players to adjust the existing team baseline.
+
+A practical first-pass calculation:
+
+* Batters 1–4: highest weight
+* Batters 5–7: moderate weight
+* Batters 8–9: lower weight
+* Account for expected plate appearances
+* Compare confirmed lineup quality with the team’s normal lineup quality
+
+This answers:
+
+Is today’s actual lineup stronger or weaker than the team-level baseline?
+
+Recommended batter inputs from MLB Stats API:
+
+* OBP
+* SLG
+* OPS
+* K%
+* BB%
+* Platoon side
+* Recent availability and games played
+
+Then later enrich with Statcast:
+
+* xwOBA
+* Barrel rate
+* Hard-hit rate
+* Average exit velocity
+
+3. Handedness matchup against the opposing starter
+
+This is essential, but it should not rely only on batter handedness.
+
+You need:
+
+* Batter performance versus RHP/LHP
+* Starter performance versus LHB/RHB
+* Confirmed lineup handedness distribution
+* Switch-hitter treatment
+* Expected plate appearances before bullpen entry
+
+That produces a matchup adjustment rather than a generic lineup adjustment.
+
+For example:
+
+Six Cubs hitters bat from Jones’ weaker side
+
+would matter differently from:
+
+Six Cubs hitters bat from the side Jones suppresses best.
+
+4. Starter survival and current-form modifier
+
+Season metrics should establish the baseline, but the engine also needs a bounded recent-form layer:
+
+* Last 3–5 starts
+* Pitch count
+* Innings
+* Batters faced
+* K-BB%
+* Walks and traffic
+* Hard contact
+* Whiffs
+* Velocity
+* Expected innings and leash
+
+This should not overreact to three starts, but Jones’ recent run of dominant traffic suppression should reduce the probability of Chicago reaching five-plus runs.
+
+Correct implementation order
+
+I would not start with FanGraphs batter scraping.
+
+The clean commissioning order is:
+
+1. Verify pitcher metrics actually feed projected opponent runs
+2. Add confirmed-lineup-weighted MLB Stats API batting
+3. Add batter/starter handedness interactions
+4. Add Statcast contact and damage metrics
+5. Compare game total, team total, side and starter derivatives
+6. Replay historically before allowing the new layer to alter CORE decisions
+
+The exact answer to the pipeline’s question
+
+The first player-integration addition should be:
+
+Confirmed-lineup-weighted offensive output, adjusted for the opposing starter’s handedness splits and expected innings.
+
+But that must sit on top of a repaired pitcher-impact calculation.
+
+Otherwise the pipeline will merely add batter detail while continuing to underweight the most important fact in CHC–PIT:
+
+Jared Jones is expected to control roughly two-thirds of Chicago’s offensive opportunities.
+
+Bottom line
+
+The current gap is actually two separate issues:
+
+* Existing pitcher data is insufficiently integrated into run projection
+* Individual batter data does not yet refine the team baseline
+
+For the Jones problem, repair the first one before building the second. The board should not be allowed to call an Over a Strong Buy while projecting 5.48 Cubs runs unless it can show exactly how Jones’ FIP, WHIP, K-BB profile, hard-contact suppression and six-inning expectation were applied.
