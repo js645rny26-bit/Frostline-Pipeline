@@ -325,12 +325,16 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   }
 
   // Module 09: Compute + write GAME_INTEGRATION and GAME_SUMMARY
+  // teamRunRates (L10 actual RS) and startingNineResult (park factors) are
+  // now consumed by the projection formula — not display-only.
   const mod09 = await verifyRecalculation(
     normalized as Parameters<typeof verifyRecalculation>[0],
     splits,
     workbookId,
     pitcherSeasonStats?.stats ?? new Map(),
     bullpenResult,
+    teamRunRates,
+    startingNineResult,
   );
   if (mod09.status === "error") {
     logger.warn({ status: mod09.status }, "Full pipeline: Module 09 computation error — continuing");

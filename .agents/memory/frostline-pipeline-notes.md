@@ -18,6 +18,31 @@ DAILY_MATCHUPS col Y (Notes) and BULLPEN_USAGE_DAILY col I (Notes) are pipeline-
 ## Schema drift rule: new board columns need one-off live header writes
 `workbookSetup.ts` only applies to new workbooks. Adding a column to SLATE_BOARD, ACTIVE_BOARD_SNAPSHOT, DAILY_MATCHUPS, etc. requires a one-off `writeRange` to the live workbook's header row (pattern: `.mts` script in artifacts/api-server using `../frostline/node_modules/.bin/tsx`).
 
+## Module09 projection inputs (Repair v2, 2026-07-24)
+Offensive rate now uses a blended input, not wRC+ alone:
+- `L30_WEIGHT = 0.65` × Fangraphs wRC+-derived rate + `L10_WEIGHT = 0.35` × actual L10 RS/game
+- Fallback hierarchy: BLENDED → L30_ONLY → L10_ONLY → LEAGUE_AVG_FALLBACK
+- LEAGUE_AVG_FALLBACK always emits logger.warn — must never be silent
+- L10 data requires ≥ 5 games to be valid (MIN_L10_GAMES = 5)
+- Both L30_WEIGHT and L10_WEIGHT are provisional test parameters — calibrate via replay before canonising
+- `teamRunRates` and `startingNineResult` are now passed to `verifyRecalculation` (were display-only before)
+
+Run multiplier is now park × weather (not weather-only):
+- Park baseline: `1 + (runs_pct / 100)`, clamped [0.85, 1.15]
+- Weather modifier: temp/wind/rain deviation, clamped [0.90, 1.15]
+- Combined: park × weather, clamped [0.85, 1.30]
+- Park factor from module04c is seasonal venue factor — not weather-adjusted, so multiplying is not double-counting
+- Missing park data → park_multiplier = 1.0 (neutral fallback, no warning needed since expected sometimes)
+
+Lineup_Strength stub removed:
+- Column M in GAME_INTEGRATION and cols G/H in GAME_SUMMARY now write null
+- Header renamed to Lineup_Strength_Status / Away_Lineup_Strength_Status
+- Per-player model approved for development but not commissioned
+
+Audit columns added to sheets:
+- GAME_INTEGRATION: 20→27 cols (A–AA), new cols U–AA: L30_RS_Estimate, L10_RS_Actual, Offense_Source_Status, Park_Runs_Pct, Park_Multiplier, Weather_Multiplier, Park_Source_Status
+- GAME_SUMMARY: 18→31 cols (A–AE), new cols S–AE: 8 offense audit + 5 park/weather audit
+
 ## SLATE_BOARD / ACTIVE_BOARD_SNAPSHOT sign convention (schema v2+)
 - **Variance_from_Projection = Model − Market** (positive = OVER edge, negative = UNDER edge)
 - **Direction** column (OVER | UNDER | NONE) is explicit in both output sheets

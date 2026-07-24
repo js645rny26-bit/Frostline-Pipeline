@@ -1,0 +1,226 @@
+SOURCES USED
+
+* Your direct code diagnostic of GAME_INTEGRATION, module09, verifyRecalculation, module05c_teamRunRates, module04c_startingNine, and computeRunMultiplier.
+* The July 23 postmortem only as the failure case being explained.
+
+REFRESH CHECK
+
+This changes the diagnosis materially.
+
+The issue is not simply “lineup strength equals 100.” The displayed 100.0 is a dead stub. The actual projection defect is that richer offensive and park inputs already exist upstream but are not consumed by the projection module.
+
+What I am commissioning
+
+Repair 1: Team run-rate integration
+
+Commission this now.
+
+Route TeamRunRatesResult into module09 and remove the silent league-average behavior as the unobservable default.
+
+But I would not immediately replace L30 wRC+ entirely with L10 runs scored. Raw 10-game scoring is more current, but also more volatile and schedule-dependent. The first commissioned version should use a transparent blend or explicit hierarchy, not swap one single-window dependency for another.
+
+Recommended structure:
+
+Primary offensive baseline:
+- valid L30 wRC+-derived run rate
+Current-form adjustment:
+- actual L10 RS/game
+Fallback:
+- clearly flagged league-average value
+
+The exact weighting should be tested rather than assumed. A reasonable initial test candidate is:
+
+Offensive Rate = 65% L30 translated rate + 35% L10 actual RS/game
+
+That weighting is a test parameter, not canon yet.
+
+Required output fields:
+
+* Away_L30_RS_Estimate
+* Home_L30_RS_Estimate
+* Away_L10_RS_Actual
+* Home_L10_RS_Actual
+* Away_Offense_Rate_Used
+* Home_Offense_Rate_Used
+* Away_Offense_Source_Status
+* Home_Offense_Source_Status
+
+Source status should make failure visible:
+
+* BLENDED
+* L30_ONLY
+* L10_ONLY
+* LEAGUE_AVG_FALLBACK
+* MISSING
+
+A fallback must generate a warning. It cannot remain silent.
+
+⸻
+
+Repair 2: Venue park-factor integration
+
+Commission this now.
+
+Route startingNineResult.park_factors.runs_pct into computeRunMultiplier.
+
+This is cleaner than the offensive repair because the field is already:
+
+* venue-specific
+* game-matched
+* normalized
+* directly expressed as a run modifier
+
+However, I would not automatically discard weather.
+
+Correct hierarchy:
+
+Venue baseline = park runs_pct
+Game-day modifier = weather
+
+Park and weather represent different things:
+
+* park factor describes the venue’s structural scoring environment
+* temperature, wind, roof state, and precipitation describe that day’s deviation from baseline
+
+So the formula should be conceptually:
+
+Run Multiplier =
+Park Baseline Multiplier
+× Weather Adjustment
+
+Not:
+
+Park factor instead of weather
+
+Required audit outputs:
+
+* Park_Runs_Pct
+* Park_Multiplier
+* Weather_Multiplier
+* Combined_Run_Multiplier
+* Park_Source_Status
+
+The model must avoid double-counting if the supplied park factor already incorporates a live-weather adjustment. Based on your description, it appears to be a venue factor, but that assumption needs confirmation in the source contract.
+
+⸻
+
+Repair 3: Real lineup-quality scoring
+
+Approve for development, not commissioning yet.
+
+You correctly identified this as a separate build.
+
+The current lineup object supports:
+
+* batting order
+* player name
+* handedness
+* position
+
+It does not support an actual lineup-strength calculation without a batter-stat join.
+
+That means the displayed Lineup_Strength = 100 should not survive as though it is meaningful.
+
+Until the player cross-reference exists, do one of two things:
+
+Lineup_Strength = NULL
+Lineup_Strength_Status = NOT_IMPLEMENTED
+
+or
+
+Lineup_Strength = 100
+Lineup_Strength_Status = NEUTRAL_STUB_NOT_APPLIED
+
+The first is better. A null with an explicit status is harder to mistake for a legitimate modeled value.
+
+Commissioning package
+
+I am commissioning one contained projection-input repair package consisting of:
+
+1. team run-rate input reaching module09
+2. explicit and observable fallback handling
+3. park factor reaching computeRunMultiplier
+4. preservation of weather as a separate modifier
+5. removal or explicit nullification of the fake lineup-strength display
+6. added audit columns showing exactly which inputs were used
+
+I am not commissioning:
+
+* a new per-player lineup model
+* prop-market confirmation
+* a new composite score
+* any change to CORE thresholds
+* any change to vehicle selection
+* a blind replacement of L30 with L10
+
+Required tests before deployment
+
+Structural audit
+
+Confirm:
+
+* runner.ts passes both new objects correctly
+* interfaces are typed rather than passed as loose objects
+* no downstream sheet column shifts occur
+* schema documentation is updated with the new fields
+
+Dependency audit
+
+Verify every field has:
+
+* one authoritative producer
+* one intended consumer
+* a visible missing-data state
+* no dead duplicate field
+
+Smoke tests
+
+At minimum:
+
+1. both L30 and L10 present
+2. L30 missing, L10 present
+3. L10 missing, L30 present
+4. both missing
+5. park factor present
+6. park factor missing
+7. neutral park
+8. extreme positive park
+9. extreme negative park
+10. roof/weather interaction
+11. lineup object present but no player-stat join
+12. stale or malformed Fangraphs response
+
+Historical replay
+
+Replay enough games to compare:
+
+* old projection error
+* L10-only error
+* L30-only error
+* blended-rate error
+* park-only addition
+* park-plus-weather addition
+
+Evaluate:
+
+* MAE
+* median absolute error
+* overprojection rate
+* underprojection rate
+* extreme misses of 4+ runs
+* directional total accuracy
+* calibration by projected run band
+
+TB–TOR should be included as a forensic case, but it cannot determine the weighting by itself.
+
+Live shadow validation
+
+Run the repaired projection alongside the current production result without allowing it to alter final authorization until the replay and shadow outputs are stable.
+
+Exact commissioning verdict
+
+Commission now: upstream run-rate wiring, park-factor wiring, fallback visibility, and removal of the misleading lineup-strength stub.
+
+Develop next: player-level lineup quality.
+
+Do not yet canonize: the exact L30/L10 blend weight. That must be selected through replay rather than intuition.

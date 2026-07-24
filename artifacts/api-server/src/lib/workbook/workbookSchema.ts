@@ -22,7 +22,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_10" | "MODULE_11" | "FORMULA" | "OPERATOR" | "MODULE_12" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_09" | "MODULE_10" | "MODULE_11" | "FORMULA" | "OPERATOR" | "MODULE_12" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -226,14 +226,23 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Expected_Innings", index: 9, type: "number", width: 110, format: "0.0", readOnly: true, filledBy: "FORMULA", exampleValue: "5.5" },
       { name: "Opp_Pitcher", index: 10, type: "string", width: 120, readOnly: true, filledBy: "FORMULA", exampleValue: "Gerrit Cole" },
       { name: "Opp_Pitcher_Role", index: 11, type: "string", width: 100, readOnly: true, filledBy: "FORMULA", exampleValue: "CONVENTIONAL_STARTER" },
-      { name: "Lineup_Strength", index: 12, type: "number", width: 110, format: "0.000", readOnly: true, filledBy: "FORMULA", description: "VLOOKUP to TODAY_LINEUPS avg wRC+", exampleValue: "112.500" },
-      { name: "Recent_RS_per_9", index: 13, type: "number", width: 120, format: "0.00", readOnly: true, filledBy: "FORMULA", description: "From TEAM_FORM_INPUT", exampleValue: "4.68" },
-      { name: "Recent_RA_per_9", index: 14, type: "number", width: 120, format: "0.00", readOnly: true, filledBy: "FORMULA", exampleValue: "3.42" },
+      { name: "Lineup_Strength_Status", index: 12, type: "string", width: 170, readOnly: true, filledBy: "MODULE_09", description: "NULL / NOT_IMPLEMENTED — no per-player batting cross-reference exists yet. Stub value 100.0 removed. Per-player lineup model approved for future development.", exampleValue: "" },
+      { name: "Offense_Rate_Used", index: 13, type: "number", width: 140, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Blended offensive rate fed into the projection formula. = L30_WEIGHT × L30_RS_Estimate + L10_WEIGHT × L10_RS_Actual when both present; see Offense_Source_Status for fallback hierarchy.", exampleValue: "4.512" },
+      { name: "Opp_Offense_Rate_Used", index: 14, type: "number", width: 155, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Opponent team's blended offensive rate.", exampleValue: "4.320" },
       { name: "Temperature_F", index: 15, type: "number", width: 100, format: "0", readOnly: true, filledBy: "FORMULA", exampleValue: "78" },
       { name: "Wind_MPH", index: 16, type: "number", width: 90, format: "0.0", readOnly: true, filledBy: "FORMULA", exampleValue: "12.5" },
-      { name: "Run_Multiplier", index: 17, type: "number", width: 110, format: "0.000", readOnly: true, filledBy: "FORMULA", exampleValue: "1.035" },
-      { name: "Adjusted_Scoring_Rate", index: 18, type: "number", width: 140, format: "0.00", readOnly: true, filledBy: "FORMULA", description: "Recent_RS_per_9 * Run_Multiplier", exampleValue: "4.84" },
+      { name: "Combined_Run_Multiplier", index: 17, type: "number", width: 175, format: "0.0000", readOnly: true, filledBy: "MODULE_09", description: "Park_Multiplier × Weather_Multiplier, clamped [0.85, 1.30]. Replaces the weather-only Run_Multiplier. See Park_Multiplier and Weather_Multiplier audit columns for decomposition.", exampleValue: "1.0420" },
+      { name: "Adjusted_Scoring_Rate", index: 18, type: "number", width: 155, format: "0.00", readOnly: true, filledBy: "MODULE_09", description: "Offense_Rate_Used × Combined_Run_Multiplier", exampleValue: "4.70" },
       { name: "Notes", index: 19, type: "string", width: 200, filledBy: "OPERATOR", exampleValue: "" },
+      // ── Offensive rate audit (Repair 1) — cols U–W, indices 20–22 ──
+      { name: "L30_RS_Estimate", index: 20, type: "number", width: 130, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Fangraphs L30 wRC+ converted to runs/9: (wRC+/100) × 4.5. Null when Fangraphs data absent for this team.", exampleValue: "4.365" },
+      { name: "L10_RS_Actual", index: 21, type: "number", width: 130, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Actual runs scored per game over the last 10 completed games (module05c). Null when fewer than 5 games available.", exampleValue: "4.900" },
+      { name: "Offense_Source_Status", index: 22, type: "string", width: 180, readOnly: true, filledBy: "MODULE_09", description: "BLENDED (65% L30 + 35% L10) | L30_ONLY | L10_ONLY | LEAGUE_AVG_FALLBACK. LEAGUE_AVG_FALLBACK always generates a pipeline warning.", exampleValue: "BLENDED" },
+      // ── Park / weather multiplier audit (Repair 2) — cols X–AA, indices 23–26 ──
+      { name: "Park_Runs_Pct", index: 23, type: "number", width: 120, format: "0.0", readOnly: true, filledBy: "MODULE_09", description: "Raw runs_pct from module04c (mlbstartingnine.com park factors). Signed integer % relative to league average. Null when park data absent.", exampleValue: "8" },
+      { name: "Park_Multiplier", index: 24, type: "number", width: 130, format: "0.0000", readOnly: true, filledBy: "MODULE_09", description: "1 + (Park_Runs_Pct / 100), clamped [0.85, 1.15]. Seasonal venue baseline. 1.0 when park data absent.", exampleValue: "1.0800" },
+      { name: "Weather_Multiplier", index: 25, type: "number", width: 140, format: "0.0000", readOnly: true, filledBy: "MODULE_09", description: "Temperature/wind/rain deviation factor, clamped [0.90, 1.15]. Represents that day's deviation from the park baseline.", exampleValue: "0.9800" },
+      { name: "Park_Source_Status", index: 26, type: "string", width: 175, readOnly: true, filledBy: "MODULE_09", description: "VENUE_FACTOR_USED | MISSING_PARK_DATA", exampleValue: "VENUE_FACTOR_USED" },
     ],
   },
 
@@ -249,18 +258,33 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Home_Team", index: 3, type: "string", width: 70, readOnly: true, filledBy: "FORMULA", exampleValue: "NYY" },
       { name: "Away_Pitcher", index: 4, type: "string", width: 120, readOnly: true, filledBy: "FORMULA", exampleValue: "Brayan Bello" },
       { name: "Home_Pitcher", index: 5, type: "string", width: 120, readOnly: true, filledBy: "FORMULA", exampleValue: "Gerrit Cole" },
-      { name: "Away_Lineup_Strength", index: 6, type: "number", width: 130, format: "0.000", readOnly: true, filledBy: "FORMULA", exampleValue: "108.200" },
-      { name: "Home_Lineup_Strength", index: 7, type: "number", width: 130, format: "0.000", readOnly: true, filledBy: "FORMULA", exampleValue: "112.500" },
-      { name: "Away_Adjusted_Scoring_Rate", index: 8, type: "number", width: 150, format: "0.00", readOnly: true, filledBy: "FORMULA", exampleValue: "4.56" },
-      { name: "Home_Adjusted_Scoring_Rate", index: 9, type: "number", width: 150, format: "0.00", readOnly: true, filledBy: "FORMULA", exampleValue: "4.84" },
-      { name: "Projected_Away_Runs", index: 10, type: "number", width: 130, format: "0.00", readOnly: true, filledBy: "FORMULA", description: "Away_Adjusted_Scoring_Rate * Away_Expected_Innings / 9", exampleValue: "2.79" },
-      { name: "Projected_Home_Runs", index: 11, type: "number", width: 130, format: "0.00", readOnly: true, filledBy: "FORMULA", exampleValue: "3.23" },
-      { name: "Projected_Total_Runs", index: 12, type: "number", width: 130, format: "0.00", readOnly: true, filledBy: "FORMULA", description: "Projected_Away_Runs + Projected_Home_Runs", exampleValue: "6.02" },
-      { name: "Temperature_F", index: 13, type: "number", width: 100, format: "0", readOnly: true, filledBy: "FORMULA", exampleValue: "78" },
-      { name: "Wind_MPH", index: 14, type: "number", width: 90, format: "0.0", readOnly: true, filledBy: "FORMULA", exampleValue: "12.5" },
-      { name: "Run_Multiplier", index: 15, type: "number", width: 110, format: "0.000", readOnly: true, filledBy: "FORMULA", exampleValue: "1.035" },
-      { name: "Stadium", index: 16, type: "string", width: 140, readOnly: true, filledBy: "FORMULA", exampleValue: "Yankee Stadium" },
+      { name: "Away_Lineup_Strength_Status", index: 6, type: "string", width: 190, readOnly: true, filledBy: "MODULE_09", description: "NOT_IMPLEMENTED — no per-player batting cross-reference. Stub 100.0 removed. Per-player model approved for future development.", exampleValue: "" },
+      { name: "Home_Lineup_Strength_Status", index: 7, type: "string", width: 190, readOnly: true, filledBy: "MODULE_09", description: "NOT_IMPLEMENTED — no per-player batting cross-reference. Stub 100.0 removed. Per-player model approved for future development.", exampleValue: "" },
+      { name: "Away_Adjusted_Scoring_Rate", index: 8, type: "number", width: 175, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Away team's blended offense rate × Combined_Run_Multiplier. Fed into Projected_Away_Runs.", exampleValue: "4.512" },
+      { name: "Home_Adjusted_Scoring_Rate", index: 9, type: "number", width: 175, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Home team's blended offense rate × Combined_Run_Multiplier. Fed into Projected_Home_Runs.", exampleValue: "4.730" },
+      { name: "Projected_Away_Runs", index: 10, type: "number", width: 130, format: "0.00", readOnly: true, filledBy: "MODULE_09", description: "Away_Adjusted_Scoring_Rate × (home_starter_IP/9) × starter_qual + bullpen component", exampleValue: "2.79" },
+      { name: "Projected_Home_Runs", index: 11, type: "number", width: 130, format: "0.00", readOnly: true, filledBy: "MODULE_09", exampleValue: "3.23" },
+      { name: "Projected_Total_Runs", index: 12, type: "number", width: 155, format: "0.00", readOnly: true, filledBy: "MODULE_09", description: "Projected_Away_Runs + Projected_Home_Runs", exampleValue: "6.02" },
+      { name: "Temperature_F", index: 13, type: "number", width: 100, format: "0", readOnly: true, filledBy: "MODULE_09", exampleValue: "78" },
+      { name: "Wind_MPH", index: 14, type: "number", width: 90, format: "0.0", readOnly: true, filledBy: "MODULE_09", exampleValue: "12.5" },
+      { name: "Combined_Run_Multiplier", index: 15, type: "number", width: 175, format: "0.0000", readOnly: true, filledBy: "MODULE_09", description: "Park_Multiplier × Weather_Multiplier. See audit cols AA–AE for decomposition.", exampleValue: "1.0420" },
+      { name: "Stadium", index: 16, type: "string", width: 140, readOnly: true, filledBy: "MODULE_09", exampleValue: "Yankee Stadium" },
       { name: "Notes", index: 17, type: "string", width: 200, filledBy: "OPERATOR", exampleValue: "" },
+      // ── Offensive rate audit (Repair 1) — cols S–Z, indices 18–25 ──
+      { name: "Away_L30_RS_Estimate", index: 18, type: "number", width: 155, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Away team Fangraphs L30 wRC+ → runs/9. Null when data absent.", exampleValue: "4.365" },
+      { name: "Home_L30_RS_Estimate", index: 19, type: "number", width: 155, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Home team Fangraphs L30 wRC+ → runs/9. Null when data absent.", exampleValue: "4.725" },
+      { name: "Away_L10_RS_Actual", index: 20, type: "number", width: 140, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Away team actual RS/game, last 10 completed games. Null when < 5 games.", exampleValue: "4.900" },
+      { name: "Home_L10_RS_Actual", index: 21, type: "number", width: 140, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Home team actual RS/game, last 10 completed games. Null when < 5 games.", exampleValue: "5.100" },
+      { name: "Away_Offense_Rate_Used", index: 22, type: "number", width: 160, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Blended rate used in Away projection formula (before × run multiplier).", exampleValue: "4.552" },
+      { name: "Home_Offense_Rate_Used", index: 23, type: "number", width: 160, format: "0.000", readOnly: true, filledBy: "MODULE_09", description: "Blended rate used in Home projection formula (before × run multiplier).", exampleValue: "4.812" },
+      { name: "Away_Offense_Source_Status", index: 24, type: "string", width: 195, readOnly: true, filledBy: "MODULE_09", description: "BLENDED | L30_ONLY | L10_ONLY | LEAGUE_AVG_FALLBACK. FALLBACK generates a pipeline warning.", exampleValue: "BLENDED" },
+      { name: "Home_Offense_Source_Status", index: 25, type: "string", width: 195, readOnly: true, filledBy: "MODULE_09", description: "BLENDED | L30_ONLY | L10_ONLY | LEAGUE_AVG_FALLBACK. FALLBACK generates a pipeline warning.", exampleValue: "BLENDED" },
+      // ── Park / weather multiplier audit (Repair 2) — cols AA–AE, indices 26–30 ──
+      { name: "Park_Runs_Pct", index: 26, type: "number", width: 120, format: "0.0", readOnly: true, filledBy: "MODULE_09", description: "Raw park runs_pct from module04c (signed % vs league avg). Null when absent.", exampleValue: "8" },
+      { name: "Park_Multiplier", index: 27, type: "number", width: 130, format: "0.0000", readOnly: true, filledBy: "MODULE_09", description: "1 + (Park_Runs_Pct/100), clamped [0.85, 1.15]. Venue structural factor.", exampleValue: "1.0800" },
+      { name: "Weather_Multiplier", index: 28, type: "number", width: 145, format: "0.0000", readOnly: true, filledBy: "MODULE_09", description: "Temp/wind/rain day-specific deviation, clamped [0.90, 1.15].", exampleValue: "0.9800" },
+      { name: "Combined_Run_Multiplier_Audit", index: 29, type: "number", width: 210, format: "0.0000", readOnly: true, filledBy: "MODULE_09", description: "Park_Multiplier × Weather_Multiplier. Same value as column P — audit copy for traceability.", exampleValue: "1.0584" },
+      { name: "Park_Source_Status", index: 30, type: "string", width: 180, readOnly: true, filledBy: "MODULE_09", description: "VENUE_FACTOR_USED | MISSING_PARK_DATA", exampleValue: "VENUE_FACTOR_USED" },
     ],
   },
 
