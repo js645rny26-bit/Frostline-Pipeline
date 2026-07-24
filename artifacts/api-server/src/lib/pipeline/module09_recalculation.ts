@@ -33,7 +33,9 @@ import { getSeasonalParkFactor } from "./module04d_parkFactors.js";
 import type { PitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
 import type { BullpenResult, RelieverStat } from "./module04b_bullpenUsage.js";
 import type { TeamRunRatesResult } from "./module05c_teamRunRates.js";
-import type { StartingNineResult, ParkFactors } from "./module04c_startingNine.js";
+import type { StartingNineResult, StartingNineGame, ParkFactors, LineupPlayer } from "./module04c_startingNine.js";
+import type { BatterSeasonStats } from "./module02c_batterSeasonStats.js";
+import { MIN_BATTER_PA } from "./module02c_batterSeasonStats.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -61,6 +63,39 @@ const K_BB_BLEND_WEIGHT = 0.70;
 
 /** League-average run rate (runs per 9 innings) used as the last-resort fallback. */
 const LEAGUE_AVG_RS = 4.5;
+
+/**
+ * 2024–2026 MLB league-average OPS (on-base plus slugging).
+ * Baseline when computing the lineup quality multiplier.
+ */
+const LEAGUE_AVG_OPS = 0.730;
+
+/**
+ * Batting-order position weights (index 0 = slot 1, index 8 = slot 9).
+ * Represents relative run-contribution importance; top-of-order and cleanup
+ * positions carry more weight. Sum = 9.00 (equivalent to 9 equal slots).
+ */
+const BATTING_ORDER_WEIGHTS = [1.15, 1.10, 1.20, 1.20, 1.05, 1.00, 0.90, 0.80, 0.60];
+
+/**
+ * Blend weight controlling how strongly lineup OPS deviation from league
+ * average shifts the team's projected offensive rate.
+ *
+ * A lineup 10% better than average (OPS .803 vs .730) shifts the rate by
+ * 10% × LINEUP_BLEND_WEIGHT = 4.0%.  Intentionally conservative because:
+ *   (1) Team L30/L10 rates already partially capture lineup quality.
+ *   (2) Per-player season OPS has high game-to-game variance.
+ *   (3) Lineup and team rate are correlated — full application would double-count.
+ * Do not raise above 0.60 without historical replay validation.
+ */
+const LINEUP_BLEND_WEIGHT = 0.40;
+
+/**
+ * Minimum fraction of lineup slots (0–1) that must resolve to batter stats
+ * (PA ≥ MIN_BATTER_PA) before the lineup factor is applied.
+ * Below this threshold the factor falls back to 1.0 (no adjustment).
+ */
+const MIN_LINEUP_COVERAGE = 0.60;  // ≥ 6 of 9 slots required
 
 /**
  * Blend weights for the offensive rate formula.
@@ -111,6 +146,91 @@ export interface RunMultiplierResolution {
 
 function clampERA(era: number): number {
   return Math.max(2.0, Math.min(7.0, era));
+}
+
+/** Normalise player name for fuzzy matching against roster data (strips diacritics). */
+function normalizeNameForMatch(name: string): string {
+  return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+}
+
+export interface LineupStrengthResolution {
+  /** Multiplier applied to team offensive rate. 1.0 = league-average or fallback. */
+  factor: number;
+  /** Batting-order-weighted lineup OPS. Null when coverage is insufficient. */
+  weighted_ops: number | null;
+  /** Fraction of the 9 lineup slots with valid batter stats (PA ≥ MIN_BATTER_PA). */
+  coverage: number;
+  /** FULL = all 9 resolved; PARTIAL = ≥ MIN_LINEUP_COVERAGE; FALLBACK = too sparse; NO_LINEUP = no lineup data. */
+  status: "FULL" | "PARTIAL" | "FALLBACK" | "NO_LINEUP";
+  /** Lineup source confidence; projected lineups receive a reduced blend weight. */
+  lineup_status: "official" | "projected" | null;
+}
+
+/**
+ * Computes a batting-order-weighted OPS multiplier for a lineup.
+ *
+ * Formula:
+ *   weightedOPS  = Σ(player_ops × slot_weight) / Σ(slot_weight)
+ *   rawDev       = (weightedOPS / LEAGUE_AVG_OPS) - 1
+ *   effectiveWt  = LINEUP_BLEND_WEIGHT × (1.0 if official, 0.60 if projected)
+ *   factor       = clamp(1 + rawDev × effectiveWt, 0.82, 1.18)
+ *
+ * Slots without valid stats (player unknown or PA < MIN_BATTER_PA) contribute
+ * league-average OPS to preserve the count but not inflate coverage.
+ */
+function computeLineupStrength(
+  lineup: LineupPlayer[],
+  nameToIdMap: Map<string, number>,
+  batterStatsMap: Map<number, BatterSeasonStats>,
+  lineupStatus: "official" | "projected",
+): LineupStrengthResolution {
+  if (lineup.length === 0) {
+    return { factor: 1.0, weighted_ops: null, coverage: 0, status: "NO_LINEUP", lineup_status: null };
+  }
+
+  let weightedOpsSum = 0;
+  let totalWeight = 0;
+  let coveredSlots = 0;
+  const totalSlots = Math.min(lineup.length, 9);
+
+  for (let i = 0; i < totalSlots; i++) {
+    const player = lineup[i]!;
+    // Use slot's batting_order position (1-based) to pick weight; fall back to index position.
+    const slotIdx = Math.max(0, Math.min(8, (player.batting_order > 0 ? player.batting_order : i + 1) - 1));
+    const weight = BATTING_ORDER_WEIGHTS[slotIdx] ?? 1.0;
+
+    const playerId = nameToIdMap.get(normalizeNameForMatch(player.name));
+    const stats    = playerId !== undefined ? batterStatsMap.get(playerId) : undefined;
+
+    const ops = stats?.ops ?? null;
+    const pa  = stats?.plate_appearances ?? null;
+    const hasValidStats = ops !== null && pa !== null && pa >= MIN_BATTER_PA;
+
+    weightedOpsSum += (hasValidStats ? ops! : LEAGUE_AVG_OPS) * weight;
+    if (hasValidStats) coveredSlots++;
+    totalWeight += weight;
+  }
+
+  const coverage    = totalSlots > 0 ? coveredSlots / totalSlots : 0;
+  const weightedOps = totalWeight > 0 ? parseFloat((weightedOpsSum / totalWeight).toFixed(3)) : null;
+
+  if (coverage < MIN_LINEUP_COVERAGE || weightedOps === null) {
+    return {
+      factor: 1.0,
+      weighted_ops: weightedOps,
+      coverage,
+      status: "FALLBACK",
+      lineup_status: lineupStatus,
+    };
+  }
+
+  const rawDev       = (weightedOps / LEAGUE_AVG_OPS) - 1;
+  const effectiveWt  = lineupStatus === "official" ? LINEUP_BLEND_WEIGHT : LINEUP_BLEND_WEIGHT * 0.60;
+  const rawFactor    = 1 + rawDev * effectiveWt;
+  const factor       = parseFloat(Math.max(0.82, Math.min(1.18, rawFactor)).toFixed(4));
+  const status       = coverage >= 1.0 ? "FULL" : "PARTIAL";
+
+  return { factor, weighted_ops: weightedOps, coverage, status, lineup_status: lineupStatus };
 }
 
 /**
@@ -375,6 +495,17 @@ export interface GameSummaryRow {
   weather_multiplier: number;
   combined_run_multiplier: number;
   park_source_status: ParkSourceStatus;
+  // ── Lineup strength (Step 2 commissioning) ──
+  away_lineup_factor: number;
+  home_lineup_factor: number;
+  away_lineup_weighted_ops: number | null;
+  home_lineup_weighted_ops: number | null;
+  away_lineup_coverage: number;
+  home_lineup_coverage: number;
+  away_lineup_status: LineupStrengthResolution["status"];
+  home_lineup_status: LineupStrengthResolution["status"];
+  away_lineup_source: "official" | "projected" | null;
+  home_lineup_source: "official" | "projected" | null;
 }
 
 export interface Module09Result {
@@ -399,6 +530,8 @@ export async function verifyRecalculation(
   bullpenResult: BullpenResult | null = null,
   teamRunRates: TeamRunRatesResult | null = null,
   startingNineResult: StartingNineResult | null = null,
+  batterStatsMap: Map<number, BatterSeasonStats> = new Map(),
+  lineupNameToIdMap: Map<string, number> = new Map(),
 ): Promise<Module09Result> {
   const startTime = Date.now();
   logger.info({ games: normalized.games.length }, "MODULE_09: Computing GAME_INTEGRATION + GAME_SUMMARY");
@@ -423,11 +556,13 @@ export async function verifyRecalculation(
   const parkFactorMap = new Map<string, ParkFactors>();
   const parkSourceMap = new Map<string, ParkSourceStatus>();
 
+  const lineupMap = new Map<string, StartingNineGame>();
   if (startingNineResult) {
     for (const sg of startingNineResult.games) {
       if (sg.game_id) {
         parkFactorMap.set(sg.game_id, sg.park_factors);
         parkSourceMap.set(sg.game_id, "VENUE_FACTOR_USED");
+        lineupMap.set(sg.game_id, sg);
       }
     }
   }
@@ -472,6 +607,12 @@ export async function verifyRecalculation(
       const runMult    = resolveRunMultiplier(g.environment, parkData, parkSource);
       const adjRate   = parseFloat((offRate.rate_used * runMult.combined_multiplier).toFixed(2));
 
+      // Lineup strength for the batting team (away team bats against home pitcher)
+      const bSg      = lineupMap.get(g.legacy_game_id) ?? null;
+      const bLineup  = side === "away" ? bSg?.away_lineup ?? [] : bSg?.home_lineup ?? [];
+      const bLStatus = bSg?.lineup_status ?? "projected";
+      const giLineup = computeLineupStrength(bLineup, lineupNameToIdMap, batterStatsMap, bLStatus);
+
       giRows.push([
         g.date,                                    // A: Date
         g.legacy_game_id,                          // B: Game_ID
@@ -485,7 +626,7 @@ export async function verifyRecalculation(
         pitcher.expected_innings ?? "",            // J: Expected_Innings
         oppPitch.name ?? "",                       // K: Opp_Pitcher
         oppPitch.role ?? "UNRESOLVED",             // L: Opp_Pitcher_Role
-        null,                                      // M: Lineup_Strength — NOT_IMPLEMENTED (no player cross-ref)
+        giLineup.factor,                           // M: Lineup_Factor (weighted OPS multiplier vs league avg)
         offRate.rate_used,                         // N: Offense_Rate_Used (blended L30/L10)
         oppRate.rate_used,                         // O: Opp_Offense_Rate_Used
         g.environment.temperature_f ?? "",         // P: Temperature_F
@@ -519,6 +660,27 @@ export async function verifyRecalculation(
     const awayAdj = awayOff.rate_used * runMult.combined_multiplier;
     const homeAdj = homeOff.rate_used * runMult.combined_multiplier;
 
+    // ── Lineup strength (Step 2 commissioning) ──
+    // Away team bats against the HOME pitcher → apply away lineup factor.
+    // Home team bats against the AWAY pitcher → apply home lineup factor.
+    const sg = lineupMap.get(g.legacy_game_id) ?? null;
+    const awayLineup = computeLineupStrength(
+      sg?.away_lineup ?? [],
+      lineupNameToIdMap,
+      batterStatsMap,
+      sg?.lineup_status ?? "projected",
+    );
+    const homeLineup = computeLineupStrength(
+      sg?.home_lineup ?? [],
+      lineupNameToIdMap,
+      batterStatsMap,
+      sg?.lineup_status ?? "projected",
+    );
+
+    // Apply lineup factor to the park/weather-adjusted team rates before the pitcher model.
+    const awayAdjFinal = parseFloat((awayAdj * awayLineup.factor).toFixed(3));
+    const homeAdjFinal = parseFloat((homeAdj * homeLineup.factor).toFixed(3));
+
     // Away team bats against HOME pitcher; home team bats against AWAY pitcher.
     // Two-component model: starter innings + bullpen innings.
     const homePitchExp    = g.home_pitcher.expected_innings ?? 5.5;
@@ -528,8 +690,8 @@ export async function verifyRecalculation(
     const homeBullpenQual = (teamBullpenERAMap.get(g.home_team.team_abbr ?? "") ?? LEAGUE_AVG_ERA) / LEAGUE_AVG_ERA;
     const awayBullpenQual = (teamBullpenERAMap.get(g.away_team.team_abbr ?? "") ?? LEAGUE_AVG_ERA) / LEAGUE_AVG_ERA;
 
-    const projAway  = parseFloat((awayAdj * (homePitchExp / 9) * homeQual + awayAdj * ((9 - homePitchExp) / 9) * homeBullpenQual).toFixed(2));
-    const projHome  = parseFloat((homeAdj * (awayPitchExp / 9) * awayQual + homeAdj * ((9 - awayPitchExp) / 9) * awayBullpenQual).toFixed(2));
+    const projAway  = parseFloat((awayAdjFinal * (homePitchExp / 9) * homeQual + awayAdjFinal * ((9 - homePitchExp) / 9) * homeBullpenQual).toFixed(2));
+    const projHome  = parseFloat((homeAdjFinal * (awayPitchExp / 9) * awayQual + homeAdjFinal * ((9 - awayPitchExp) / 9) * awayBullpenQual).toFixed(2));
     const projTotal = parseFloat((projAway + projHome).toFixed(2));
 
     const bullpenCoverage = teamBullpenERAMap.has(g.home_team.team_abbr ?? "") &&
@@ -568,6 +730,17 @@ export async function verifyRecalculation(
       weather_multiplier:    runMult.weather_multiplier,
       combined_run_multiplier: runMult.combined_multiplier,
       park_source_status:    runMult.park_source_status,
+      // Lineup strength audit
+      away_lineup_factor:       awayLineup.factor,
+      home_lineup_factor:       homeLineup.factor,
+      away_lineup_weighted_ops: awayLineup.weighted_ops,
+      home_lineup_weighted_ops: homeLineup.weighted_ops,
+      away_lineup_coverage:     awayLineup.coverage,
+      home_lineup_coverage:     homeLineup.coverage,
+      away_lineup_status:       awayLineup.status,
+      home_lineup_status:       homeLineup.status,
+      away_lineup_source:       awayLineup.lineup_status,
+      home_lineup_source:       homeLineup.lineup_status,
     });
 
     gsRows.push([
@@ -577,10 +750,10 @@ export async function verifyRecalculation(
       g.home_team.team_abbr ?? "",                      // D: Home_Team
       g.away_pitcher.name ?? "",                        // E: Away_Pitcher
       g.home_pitcher.name ?? "",                        // F: Home_Pitcher
-      null,                                             // G: Away_Lineup_Strength — NOT_IMPLEMENTED
-      null,                                             // H: Home_Lineup_Strength — NOT_IMPLEMENTED
-      parseFloat(awayAdj.toFixed(2)),                   // I: Away_Adjusted_Scoring_Rate
-      parseFloat(homeAdj.toFixed(2)),                   // J: Home_Adjusted_Scoring_Rate
+      awayLineup.factor,                                // G: Away_Lineup_Factor (weighted OPS multiplier)
+      homeLineup.factor,                                // H: Home_Lineup_Factor (weighted OPS multiplier)
+      parseFloat(awayAdjFinal.toFixed(2)),              // I: Away_Adjusted_Scoring_Rate (post-lineup)
+      parseFloat(homeAdjFinal.toFixed(2)),              // J: Home_Adjusted_Scoring_Rate (post-lineup)
       projAway,                                         // K: Projected_Away_Runs
       projHome,                                         // L: Projected_Home_Runs
       projTotal,                                        // M: Projected_Total_Runs
@@ -615,7 +788,7 @@ export async function verifyRecalculation(
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_09: Could not expand GAME_INTEGRATION columns");
     });
     // Write updated headers (cols that changed label or are new)
-    await writeRange(workbookId, "GAME_INTEGRATION!M1:M1", [["Lineup_Strength_Status"]]).catch(() => {});
+    await writeRange(workbookId, "GAME_INTEGRATION!M1:M1", [["Lineup_Factor"]]).catch(() => {});
     await writeRange(workbookId, "GAME_INTEGRATION!N1:N1", [["Offense_Rate_Used"]]).catch(() => {});
     await writeRange(workbookId, "GAME_INTEGRATION!O1:O1", [["Opp_Offense_Rate_Used"]]).catch(() => {});
     await writeRange(workbookId, "GAME_INTEGRATION!R1:R1", [["Combined_Run_Multiplier"]]).catch(() => {});
@@ -648,7 +821,7 @@ export async function verifyRecalculation(
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_09: Could not expand GAME_SUMMARY columns");
     });
     // Write updated/new headers
-    await writeRange(workbookId, "GAME_SUMMARY!G1:H1", [["Away_Lineup_Strength_Status", "Home_Lineup_Strength_Status"]]).catch(() => {});
+    await writeRange(workbookId, "GAME_SUMMARY!G1:H1", [["Away_Lineup_Factor", "Home_Lineup_Factor"]]).catch(() => {});
     await writeRange(workbookId, "GAME_SUMMARY!P1:P1", [["Combined_Run_Multiplier"]]).catch(() => {});
     await writeRange(workbookId, "GAME_SUMMARY!S1:AE1", [[
       "Away_L30_RS_Estimate",

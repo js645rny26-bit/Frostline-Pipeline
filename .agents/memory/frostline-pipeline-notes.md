@@ -91,10 +91,14 @@ Run multiplier is now park × weather (not weather-only):
 - Park factor from module04c is seasonal venue factor — not weather-adjusted, so multiplying is not double-counting
 - Missing park data → park_multiplier = 1.0 (neutral fallback, no warning needed since expected sometimes)
 
-Lineup_Strength stub removed:
-- Column M in GAME_INTEGRATION and cols G/H in GAME_SUMMARY now write null
-- Header renamed to Lineup_Strength_Status / Away_Lineup_Strength_Status
-- Per-player model approved for development but not commissioned
+Lineup factor live (commissioning step 2, 2026-07-24):
+- **module02c_batterSeasonStats.ts**: fetchTeamRosters (name→id map, 774 players, 30 teams) + fetchBatterSeasonStats (batched /people hitting stats — OBP, SLG, OPS, K%, BB%, PA). Same chunked pattern as module02b.
+- Name matching uses Unicode NFD normalisation (`normalizeForMatch`) — handles "Jesús" ↔ "Jesus".
+- **computeLineupStrength** in module09: batting-order-weighted OPS (weights [1.15,1.10,1.20,1.20,1.05,1.00,0.90,0.80,0.60], sum=9.0) vs LEAGUE_AVG_OPS=0.730; LINEUP_BLEND_WEIGHT=0.40; projected lineups get 0.60× blend weight; clamped [0.82, 1.18]; needs ≥ 60% slot coverage (MIN_LINEUP_COVERAGE) or falls back to 1.0.
+- Applied multiplicatively to awayAdj/homeAdj BEFORE the pitcher model.
+- GAME_SUMMARY G/H renamed Away_Lineup_Factor / Home_Lineup_Factor; GAME_INTEGRATION M renamed Lineup_Factor.
+- runner.ts: fetchTeamRosters added to main Promise.all; batter stats fetched in parallel with pitcher stats; 256 batter IDs resolved across 15 games in first live run.
+- Blend weight 0.40 is conservative pending replay validation — do not raise above 0.60 without replay.
 
 Audit columns added to sheets:
 - GAME_INTEGRATION: 20→27 cols (A–AA), new cols U–AA: L30_RS_Estimate, L10_RS_Actual, Offense_Source_Status, Park_Runs_Pct, Park_Multiplier, Weather_Multiplier, Park_Source_Status

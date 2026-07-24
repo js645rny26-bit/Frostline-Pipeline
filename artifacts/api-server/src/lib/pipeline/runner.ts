@@ -14,6 +14,7 @@ import { fetchStartingNine, buildStartingNineMap } from "./module04c_startingNin
 import { fetchStarterPrevOutings } from "./module04d_starterPrevOuting.js";
 import { fetchPlateUmpires } from "./module04e_umpires.js";
 import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
+import { fetchTeamRosters, fetchBatterSeasonStats, normalizeForMatch } from "./module02c_batterSeasonStats.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { trackLineMovement } from "./module05d_oddsHistory.js";
 import { fetchMarketOddsWithFallback, buildOddsMap } from "./module05c_startingNineScraper.js";
@@ -222,7 +223,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // Fetch schedule manifest for pitcher IDs (needed by module04d)
   const manifest = await fetchMlbSchedule(date).catch(() => null);
 
-  const [bullpenResult, startingNineResult, starterOutings, umpireResult, teamRunRates, oddsResult, rotowireProps] = await Promise.all([
+  const [bullpenResult, startingNineResult, starterOutings, umpireResult, teamRunRates, oddsResult, rotowireProps, rosterNameMap] = await Promise.all([
     fetchBullpenUsage(date, slateTeamIds).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: bullpen fetch threw — skipping");
       return null;
@@ -251,6 +252,10 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     fetchRotowireProps().catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: Rotowire props fetch threw — skipping (shadow mode)");
       return null as RotowirePropsResult | null;
+    }),
+    fetchTeamRosters(slateTeamIds, date.slice(0, 4)).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: team roster fetch threw — returning empty map");
+      return new Map<string, number>();
     }),
   ]);
 
@@ -292,10 +297,34 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       if (r.player_id) statIds.push(r.player_id);
     }
   }
-  const pitcherSeasonStats = await fetchPitcherSeasonStats(statIds, date.slice(0, 4)).catch((err: unknown) => {
-    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: pitcher season stats threw — skipping");
-    return null;
-  });
+
+  // Module 02c: resolve lineup batter IDs from roster map, then fetch season hitting stats.
+  // Runs concurrently with module 02b — independent requests to the MLB API.
+  const batterIdSet = new Set<number>();
+  if (startingNineResult) {
+    const nameMap = rosterNameMap ?? new Map<string, number>();
+    for (const sg of startingNineResult.games) {
+      for (const player of [...(sg.away_lineup ?? []), ...(sg.home_lineup ?? [])]) {
+        const id = nameMap.get(normalizeForMatch(player.name));
+        if (id) batterIdSet.add(id);
+      }
+    }
+  }
+  logger.info(
+    { batterIds: batterIdSet.size, lineupGames: startingNineResult?.games_matched ?? 0 },
+    "Full pipeline: batter IDs resolved from lineup roster map",
+  );
+
+  const [pitcherSeasonStats, batterSeasonStats] = await Promise.all([
+    fetchPitcherSeasonStats(statIds, date.slice(0, 4)).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: pitcher season stats threw — skipping");
+      return null;
+    }),
+    fetchBatterSeasonStats([...batterIdSet], date.slice(0, 4)).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: batter season stats threw — skipping");
+      return null;
+    }),
+  ]);
 
   // Module 08: Write feeds to Google Sheets
   const mod08 = await writeGoogleSheetsFeed(
@@ -353,6 +382,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     bullpenResult,
     teamRunRates,
     startingNineResult,
+    batterSeasonStats?.stats ?? new Map(),
+    rosterNameMap ?? new Map(),
   );
   if (mod09.status === "error") {
     logger.warn({ status: mod09.status }, "Full pipeline: Module 09 computation error — continuing");
