@@ -18,6 +18,27 @@ DAILY_MATCHUPS col Y (Notes) and BULLPEN_USAGE_DAILY col I (Notes) are pipeline-
 ## Schema drift rule: new board columns need one-off live header writes
 `workbookSetup.ts` only applies to new workbooks. Adding a column to SLATE_BOARD, ACTIVE_BOARD_SNAPSHOT, DAILY_MATCHUPS, etc. requires a one-off `writeRange` to the live workbook's header row (pattern: `.mts` script in artifacts/api-server using `../frostline/node_modules/.bin/tsx`).
 
+## Commissioning gates (shadow + replay, 2026-07-24)
+**Shadow validation (module12s_shadowValidation.ts):**
+- Runs after every full-pipeline publish (mod09 → mod12s → mod10 → mod11)
+- Writes to SHADOW_VALIDATION sheet (23 cols A–W); never touches CORE authorization
+- Reconstructs legacy projection from GameSummaryRow audit columns — no re-fetching
+- Method: ratio-scaling (legacy_runs ≈ repaired_runs × legacy_adj / repaired_adj). Valid because pitching/IP/bullpen components are identical between legacy and repaired.
+- Result exposed in PublishResult as `module_09_shadow`
+
+**Historical replay (module13_historicalReplay.ts):**
+- Endpoint: GET /pipeline/replay?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&write_sheets=true
+- 5 variants: LEGACY, L30_PARK, L10_PARK, BLEND, BLEND_PARK (all neutral weather — historical weather not stored)
+- Projection formula: simplified (offense_rate × multiplier, each side summed) — no pitcher ERA adjustment; isolates offense rate + park effect per variant cleanly
+- L30 source: current Fangraphs splits (proxy — not date-anchored); document this in any published results
+- L10 source: MLB Stats API game logs as-of each replay date (accurate)
+- Park factors: today's mlbstartingnine data (seasonal — stable for the season)
+- 8 metrics per variant: MAE, median AE, bias, miss4+pct, overproject%, underproject%, calibration by band
+- Writes: REPLAY_RESULTS (24 cols A–X) and REPLAY_METRICS (9 cols A–I)
+- Max date range: 30 days per call
+
+**Schema additions:** SECTION_COLORS now includes "ANALYSIS" (deep teal). New sheets: SHADOW_VALIDATION, REPLAY_RESULTS, REPLAY_METRICS.
+
 ## Module09 projection inputs (Repair v2, 2026-07-24)
 Offensive rate now uses a blended input, not wRC+ alone:
 - `L30_WEIGHT = 0.65` × Fangraphs wRC+-derived rate + `L10_WEIGHT = 0.35` × actual L10 RS/game

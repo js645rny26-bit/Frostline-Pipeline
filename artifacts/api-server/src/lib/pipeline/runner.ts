@@ -26,6 +26,7 @@ import { verifyRecalculation, type Module09Result } from "./module09_recalculati
 import { seedSlateInput, type Module10Result } from "./module10_slateInput.js";
 import { extractOutputBoards, type Module11Result } from "./module11_outputExtraction.js";
 import { archiveRunBundle, type Module12Result } from "./module12_archival.js";
+import { runShadowValidation, type ShadowValidationResult } from "./module12s_shadowValidation.js";
 import { WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 
@@ -187,6 +188,7 @@ export interface PublishResult {
   validation_status: string;
   module_08: Module08Result;
   module_09: Module09Result;
+  module_09_shadow: ShadowValidationResult;
   module_10: Module10Result;
   module_11: Module11Result;
   module_12: Module12Result;
@@ -306,6 +308,17 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     teamRunRates,
     lineMovement,
   );
+  const shadowSkipped: ShadowValidationResult = {
+    status: "failure",
+    shadow_timestamp_utc: new Date().toISOString(),
+    games_compared: 0,
+    avg_delta: null,
+    max_abs_delta: null,
+    fallback_count: 0,
+    rows: [],
+    errors: ["Skipped: upstream module failed"],
+  };
+
   if (mod08.status === "failure") {
     logger.error("Full pipeline: Module 08 failed — aborting Sheets workflow");
     return {
@@ -316,6 +329,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       validation_status: slate.validation.status,
       module_08: mod08,
       module_09: { status: "error", verification_timestamp_utc: new Date().toISOString(), checks: { game_integration: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, game_summary: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, consistency_check: { status: "inconsistent", read_1_timestamp: "", read_2_timestamp: "", diff_seconds: 0 } }, recalculation_time_ms: 0, game_summary_rows: [] },
+      module_09_shadow: shadowSkipped,
       module_10: { status: "failure", seeding_timestamp_utc: new Date().toISOString(), games_seeded: { new_games: 0, updated_games: 0, total_games: 0 }, rows_written: 0, seed_results: [], errors: [{ module: "10", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, no_core_count: 0, error: "Skipped: Module 08 failed" },
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
@@ -338,6 +352,25 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   );
   if (mod09.status === "error") {
     logger.warn({ status: mod09.status }, "Full pipeline: Module 09 computation error — continuing");
+  }
+
+  // Module 12s: Shadow validation — compare repaired vs legacy projection per game.
+  // Runs after every full publish; does not affect CORE authorization.
+  const mod12s = await runShadowValidation(mod09.game_summary_rows, workbookId).catch(
+    (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err: msg }, "Full pipeline: Module 12s shadow validation threw — continuing");
+      return {
+        ...shadowSkipped,
+        errors: [`Shadow threw: ${msg}`],
+      } satisfies ShadowValidationResult;
+    },
+  );
+  if (mod12s.fallback_count > 0) {
+    logger.warn(
+      { fallback_count: mod12s.fallback_count },
+      "Full pipeline: Module 12s — LEAGUE_AVG_FALLBACK games detected in shadow comparison",
+    );
   }
 
   // Module 10: Seed SLATE_INPUT (odds fetched earlier, reused here)
@@ -377,6 +410,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     validation_status: slate.validation.status,
     module_08: mod08,
     module_09: mod09,
+    module_09_shadow: mod12s,
     module_10: mod10,
     module_11: mod11,
     module_12: mod12,

@@ -29,7 +29,7 @@ export interface ColumnDef {
 export interface SheetDef {
   name: string;
   description: string;
-  section: "INPUT" | "COMPUTATION" | "OUTPUT" | "REFERENCE" | "META";
+  section: "INPUT" | "COMPUTATION" | "OUTPUT" | "REFERENCE" | "META" | "ANALYSIS";
   columns: ColumnDef[];
   frozenRows?: number;
 }
@@ -41,6 +41,7 @@ export const SECTION_COLORS: Record<SheetDef["section"], { red: number; green: n
   OUTPUT:      { red: 0.10, green: 0.20, blue: 0.14 }, // deep green
   REFERENCE:   { red: 0.18, green: 0.14, blue: 0.10 }, // deep amber
   META:        { red: 0.12, green: 0.12, blue: 0.12 }, // dark grey
+  ANALYSIS:    { red: 0.10, green: 0.18, blue: 0.22 }, // deep teal — shadow/replay sheets
 };
 
 export const WORKBOOK_SCHEMA: SheetDef[] = [
@@ -459,6 +460,91 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "M11_SlateBoardRows", index: 27, type: "number", width: 130, format: "0", filledBy: "MODULE_12", exampleValue: "17" },
       { name: "Errors", index: 28, type: "string", width: 300, filledBy: "MODULE_12", exampleValue: "[]" },
       { name: "Schema_Version", index: 29, type: "number", width: 110, format: "0", filledBy: "MODULE_12", description: "WORKBOOK_SCHEMA_VERSION that produced this row", exampleValue: "2" },
+    ],
+  },
+
+  // ── Shadow validation / historical replay ────────────────────────────────────
+
+  {
+    name: "SHADOW_VALIDATION",
+    description: "Per-game comparison of repaired projection vs legacy (pre-repair) projection. Written by module12s after every full-pipeline publish. Shadow mode only — does not affect CORE authorization.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date",                       index: 0,  type: "string",  width: 90,  filledBy: "MODULE_09", readOnly: true, exampleValue: "2026-07-24" },
+      { name: "Game_ID",                    index: 1,  type: "string",  width: 160, filledBy: "MODULE_09", readOnly: true, exampleValue: "2026-07-24_NYY@BOS" },
+      { name: "Away_Team",                  index: 2,  type: "string",  width: 80,  filledBy: "MODULE_09", readOnly: true, exampleValue: "NYY" },
+      { name: "Home_Team",                  index: 3,  type: "string",  width: 80,  filledBy: "MODULE_09", readOnly: true, exampleValue: "BOS" },
+      { name: "Away_Pitcher",               index: 4,  type: "string",  width: 140, filledBy: "MODULE_09", readOnly: true, exampleValue: "Gerrit Cole" },
+      { name: "Home_Pitcher",               index: 5,  type: "string",  width: 140, filledBy: "MODULE_09", readOnly: true, exampleValue: "Brayan Bello" },
+      { name: "Repaired_Projected_Total",   index: 6,  type: "number",  width: 175, format: "0.00", filledBy: "MODULE_09", readOnly: true, description: "mod09 repaired model (65%L30+35%L10 offense, park × weather multiplier)", exampleValue: "8.45" },
+      { name: "Legacy_Projected_Total",     index: 7,  type: "number",  width: 170, format: "0.00", filledBy: "MODULE_09", readOnly: true, description: "Reconstructed pre-repair model (L30-only offense, weather-only multiplier). Derived via ratio-scaling from repaired projections using audit columns.", exampleValue: "7.82" },
+      { name: "Delta_Repaired_Minus_Legacy",index: 8,  type: "number",  width: 195, format: "0.00", filledBy: "MODULE_09", readOnly: true, description: "Repaired − Legacy. Positive = repaired projects higher.", exampleValue: "0.63" },
+      { name: "Away_Offense_Source",        index: 9,  type: "string",  width: 160, filledBy: "MODULE_09", readOnly: true, exampleValue: "BLENDED" },
+      { name: "Home_Offense_Source",        index: 10, type: "string",  width: 160, filledBy: "MODULE_09", readOnly: true, exampleValue: "L30_ONLY" },
+      { name: "Away_L30_Rate",              index: 11, type: "number",  width: 120, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "4.680" },
+      { name: "Home_L30_Rate",              index: 12, type: "number",  width: 120, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "4.320" },
+      { name: "Away_L10_Rate",              index: 13, type: "number",  width: 120, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "5.100" },
+      { name: "Home_L10_Rate",              index: 14, type: "number",  width: 120, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "" },
+      { name: "Away_Offense_Rate_Used",     index: 15, type: "number",  width: 165, format: "0.000", filledBy: "MODULE_09", readOnly: true, description: "Blended rate used in repaired model", exampleValue: "4.877" },
+      { name: "Home_Offense_Rate_Used",     index: 16, type: "number",  width: 165, format: "0.000", filledBy: "MODULE_09", readOnly: true, exampleValue: "4.320" },
+      { name: "Legacy_Multiplier",          index: 17, type: "number",  width: 145, format: "0.0000", filledBy: "MODULE_09", readOnly: true, description: "Weather-only multiplier. Park treated as 1.0 in legacy model.", exampleValue: "1.0050" },
+      { name: "Park_Multiplier",            index: 18, type: "number",  width: 130, format: "0.0000", filledBy: "MODULE_09", readOnly: true, exampleValue: "1.0800" },
+      { name: "Weather_Multiplier",         index: 19, type: "number",  width: 140, format: "0.0000", filledBy: "MODULE_09", readOnly: true, exampleValue: "1.0050" },
+      { name: "Repaired_Multiplier",        index: 20, type: "number",  width: 150, format: "0.0000", filledBy: "MODULE_09", readOnly: true, description: "Park × weather (combined) used in repaired model", exampleValue: "1.0854" },
+      { name: "Park_Source_Status",         index: 21, type: "string",  width: 175, filledBy: "MODULE_09", readOnly: true, exampleValue: "VENUE_FACTOR_USED" },
+      { name: "Snapshot_TS",                index: 22, type: "string",  width: 200, filledBy: "MODULE_09", readOnly: true, exampleValue: "2026-07-24T10:00:00.000Z" },
+    ],
+  },
+
+  {
+    name: "REPLAY_RESULTS",
+    description: "Per-game historical replay rows written by module13. One row per completed game. Appended on each replay run (cleared first).",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Replay_Date",          index: 0,  type: "string",  width: 90,  filledBy: "MODULE_12", readOnly: true, exampleValue: "2026-07-20" },
+      { name: "Game_ID",              index: 1,  type: "string",  width: 160, filledBy: "MODULE_12", readOnly: true, exampleValue: "2026-07-20_NYY@BOS" },
+      { name: "Away_Team",            index: 2,  type: "string",  width: 80,  filledBy: "MODULE_12", readOnly: true, exampleValue: "NYY" },
+      { name: "Home_Team",            index: 3,  type: "string",  width: 80,  filledBy: "MODULE_12", readOnly: true, exampleValue: "BOS" },
+      { name: "Actual_Total",         index: 4,  type: "number",  width: 100, format: "0", filledBy: "MODULE_12", readOnly: true, exampleValue: "7" },
+      { name: "Legacy_Projected",     index: 5,  type: "number",  width: 140, format: "0.00", filledBy: "MODULE_12", readOnly: true, description: "L30-only offense, park=1.0, weather=1.0", exampleValue: "8.32" },
+      { name: "L30_Park_Projected",   index: 6,  type: "number",  width: 150, format: "0.00", filledBy: "MODULE_12", readOnly: true, description: "L30-only offense + park factor", exampleValue: "8.98" },
+      { name: "L10_Park_Projected",   index: 7,  type: "number",  width: 150, format: "0.00", filledBy: "MODULE_12", readOnly: true, description: "L10-actual offense + park factor", exampleValue: "9.14" },
+      { name: "Blend_Projected",      index: 8,  type: "number",  width: 140, format: "0.00", filledBy: "MODULE_12", readOnly: true, description: "65%L30+35%L10 offense, park=1.0", exampleValue: "8.55" },
+      { name: "Blend_Park_Projected", index: 9,  type: "number",  width: 160, format: "0.00", filledBy: "MODULE_12", readOnly: true, description: "65%L30+35%L10 offense + park factor — current repaired candidate", exampleValue: "9.23" },
+      { name: "Legacy_Error",         index: 10, type: "number",  width: 120, format: "0.00", filledBy: "MODULE_12", readOnly: true, description: "Projected − Actual. Positive = overprojection.", exampleValue: "1.32" },
+      { name: "L30_Park_Error",       index: 11, type: "number",  width: 125, format: "0.00", filledBy: "MODULE_12", readOnly: true, exampleValue: "1.98" },
+      { name: "L10_Park_Error",       index: 12, type: "number",  width: 125, format: "0.00", filledBy: "MODULE_12", readOnly: true, exampleValue: "2.14" },
+      { name: "Blend_Error",          index: 13, type: "number",  width: 120, format: "0.00", filledBy: "MODULE_12", readOnly: true, exampleValue: "1.55" },
+      { name: "Blend_Park_Error",     index: 14, type: "number",  width: 140, format: "0.00", filledBy: "MODULE_12", readOnly: true, exampleValue: "2.23" },
+      { name: "Away_L30_Rate",        index: 15, type: "number",  width: 115, format: "0.000", filledBy: "MODULE_12", readOnly: true, exampleValue: "4.680" },
+      { name: "Home_L30_Rate",        index: 16, type: "number",  width: 115, format: "0.000", filledBy: "MODULE_12", readOnly: true, exampleValue: "4.320" },
+      { name: "Away_L10_Rate",        index: 17, type: "number",  width: 115, format: "0.000", filledBy: "MODULE_12", readOnly: true, exampleValue: "5.100" },
+      { name: "Home_L10_Rate",        index: 18, type: "number",  width: 115, format: "0.000", filledBy: "MODULE_12", readOnly: true, exampleValue: "" },
+      { name: "Away_Offense_Source",  index: 19, type: "string",  width: 155, filledBy: "MODULE_12", readOnly: true, exampleValue: "BLENDED" },
+      { name: "Home_Offense_Source",  index: 20, type: "string",  width: 155, filledBy: "MODULE_12", readOnly: true, exampleValue: "L30_ONLY" },
+      { name: "Park_Runs_Pct",        index: 21, type: "number",  width: 110, format: "0.0", filledBy: "MODULE_12", readOnly: true, exampleValue: "8" },
+      { name: "Park_Multiplier",      index: 22, type: "number",  width: 125, format: "0.0000", filledBy: "MODULE_12", readOnly: true, exampleValue: "1.0800" },
+      { name: "Replay_Run_TS",        index: 23, type: "string",  width: 200, filledBy: "MODULE_12", readOnly: true, exampleValue: "2026-07-24T18:00:00.000Z" },
+    ],
+  },
+
+  {
+    name: "REPLAY_METRICS",
+    description: "Per-variant aggregate metrics from the most recent historical replay run. One row per variant (5 rows). Cleared and rewritten on each replay.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Variant",           index: 0, type: "string",  width: 140, filledBy: "MODULE_12", readOnly: true, description: "LEGACY | L30_PARK | L10_PARK | BLEND | BLEND_PARK", exampleValue: "BLEND_PARK" },
+      { name: "Games_Count",       index: 1, type: "number",  width: 100, format: "0",    filledBy: "MODULE_12", readOnly: true, exampleValue: "280" },
+      { name: "MAE",               index: 2, type: "number",  width: 80,  format: "0.000", filledBy: "MODULE_12", readOnly: true, description: "Mean absolute error (projected − actual)", exampleValue: "2.140" },
+      { name: "Median_AE",         index: 3, type: "number",  width: 90,  format: "0.000", filledBy: "MODULE_12", readOnly: true, exampleValue: "1.720" },
+      { name: "Bias",              index: 4, type: "number",  width: 80,  format: "0.000", filledBy: "MODULE_12", readOnly: true, description: "Mean(projected − actual). Positive = systematic overprojection.", exampleValue: "0.340" },
+      { name: "Miss_4Plus_Pct",    index: 5, type: "number",  width: 115, format: "0.0", filledBy: "MODULE_12", readOnly: true, description: "% of games where |error| ≥ 4 runs", exampleValue: "18.2" },
+      { name: "Overproject_Pct",   index: 6, type: "number",  width: 120, format: "0.0", filledBy: "MODULE_12", readOnly: true, exampleValue: "55.7" },
+      { name: "Underproject_Pct",  index: 7, type: "number",  width: 125, format: "0.0", filledBy: "MODULE_12", readOnly: true, exampleValue: "44.3" },
+      { name: "Replay_Run_TS",     index: 8, type: "string",  width: 200, filledBy: "MODULE_12", readOnly: true, exampleValue: "2026-07-24T18:00:00.000Z" },
     ],
   },
 
