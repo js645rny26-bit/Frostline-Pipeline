@@ -33,22 +33,14 @@ export default function Dashboard() {
   const createWb = useCreateWorkbook();
 
   const CANONICAL_WORKBOOK_ID = "1MWsGQYR13tFjwd-L4lMweGShKJkrOsSNJaHzdjiMNHs";
-  const LS_KEY = "frostline_active_workbook_id";
 
-  const [activeWorkbookId, setActiveWorkbookIdState] = useState<string>(
-    () => localStorage.getItem(LS_KEY) ?? CANONICAL_WORKBOOK_ID,
-  );
-  const [createResult, setCreateResult] = useState<{ workbook_url: string; workbook_name: string; errors: unknown[] } | null>(null);
-
-  function setActiveWorkbookId(id: string) {
-    setActiveWorkbookIdState(id);
-    localStorage.setItem(LS_KEY, id);
-  }
-
+  // Clear any stale localStorage override from older sessions where "New Workbook"
+  // incorrectly redirected the publish target away from the canonical workbook.
   useEffect(() => {
-    const stored = localStorage.getItem(LS_KEY);
-    if (stored) setActiveWorkbookIdState(stored);
+    localStorage.removeItem("frostline_active_workbook_id");
   }, []);
+
+  const [createResult, setCreateResult] = useState<{ workbook_url: string; workbook_name: string; errors: unknown[] } | null>(null);
 
   const isLoading = isLoadingSummary || isLoadingSlate;
 
@@ -58,7 +50,6 @@ export default function Dashboard() {
       { params: { date } },
       {
         onSuccess: (result) => {
-          setActiveWorkbookId(result.workbook_id);
           setCreateResult({
             workbook_url: result.workbook_url,
             workbook_name: result.workbook_name,
@@ -75,7 +66,7 @@ export default function Dashboard() {
   function handlePublish() {
     setPublishResult(null);
     publish.mutate(
-      { params: { date, workbook_id: activeWorkbookId } },
+      { params: { date, workbook_id: CANONICAL_WORKBOOK_ID } },
       {
         onSuccess: (result) => {
           setPublishResult({
