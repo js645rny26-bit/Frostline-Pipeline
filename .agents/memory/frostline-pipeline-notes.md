@@ -59,8 +59,10 @@ Proxy path `/api` → localhost:8080 with the FULL path forwarded (no strip); he
 - `L30_WEIGHT = 0.65` × MLB Stats API actual L30 RS/G (module05 repaired) + `L10_WEIGHT = 0.35` × actual L10 RS/game
 - Park modifier: 1 + (park_runs_pct/100), clamped [0.85, 1.15]; × weather, combined [0.85, 1.30]
 - Park source: live scrape (VENUE_FACTOR_USED) with seasonal static fallback (SEASONAL_FACTOR_USED) for all 30 venues
-- Calibration: 87-date (1,115-game) replay Apr 25–Jul 20; BLEND_PARK MAE 3.662 / MedAE 3.21 — best of all variants
-- All acceptance criteria met: MAE gap 0.000 (best), bias |+0.022|, miss4+ +0.7pp
+- Calibration: 87-date (1,115-game) replay Apr 25–Jul 20; BLEND_PARK MAE 3.662 / MedAE 3.21
+- L30_PARK narrowly beats BLEND_PARK (MAE 3.661 vs 3.662; MedAE 3.190 vs 3.210) — difference of 0.001 MAE
+- Correct characterisation: BLEND_PARK is **effectively tied with the best variant** and clears all acceptance thresholds; NOT "best on every metric"
+- All acceptance criteria met: bias |+0.022|, miss4+ within bounds — canonisation stands
 - `module13_historicalReplay` accepts `maxDates` option (default 30, ceiling 120); router exposes `max_dates` query param
 - `ParkSourceStatus`: "VENUE_FACTOR_USED" | "SEASONAL_FACTOR_USED" | "MISSING_PARK_DATA"
 

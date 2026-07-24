@@ -1,0 +1,97 @@
+😆 Yes, this is the correct workbook. The earlier inspection was of the wrong operational sheet.
+
+SOURCES USED
+
+* The linked workbook FROSTLINE_Pipeline_2026-07-22
+* Direct range reads from:
+    * SHADOW_HISTORY
+    * SHADOW_OUTCOMES
+    * REPLAY_METRICS
+    * VEHICLE_LOG
+
+REFRESH CHECK
+
+This workbook was modified July 24, 2026 and matches the workbook ID used by the recent pipeline work. FROSTLINE_Pipeline_2026-07-22
+
+Corrected inspection verdict
+
+The newly reported commissioning infrastructure is present.
+
+Verified sheets and contents
+
+SHADOW_HISTORY
+
+* Header structure is intact.
+* 15 rows were written.
+* Real differentiated L30 and L10 rates are present.
+* All offense sources are BLENDED.
+* July 24 games use VENUE_FACTOR_USED.
+* July 25 advance games use SEASONAL_FACTOR_USED.
+* Repaired and legacy totals, deltas, multipliers, and timestamps are all populated.
+
+This confirms the complete publish-to-history path is landing correctly.
+
+REPLAY_METRICS
+
+The expanded replay is present with 1,115 games:
+
+Variant	MAE	Median AE	Bias	Miss 4+
+LEGACY	3.685	3.230	−0.016	38.5%
+L30_PARK	3.661	3.190	+0.011	37.8%
+BLEND	3.685	3.230	−0.004	39.1%
+BLEND_PARK	3.662	3.210	+0.022	39.2%
+
+One clarification: L30_PARK narrowly beats BLEND_PARK, rather than BLEND_PARK being best on every primary metric.
+
+The difference is tiny:
+
+* MAE difference: 0.001
+* Median AE difference: 0.020
+* Bias remains acceptable for both
+
+This does not invalidate the 65/35 canonization under the previously established acceptance rule, but the exact reporting should say:
+
+BLEND_PARK is effectively tied with the best variant and clears all acceptance thresholds.
+
+VEHICLE_LOG
+
+* 15/15 game rows exist.
+* Market line, direction, projected total, variance, decision, blocker, strength, and confidence align correctly.
+* The two July 24 CORE rows are:
+    * CHC–PIT Over 8
+    * ARI–WSN Over 9.5
+* The remaining priced games carry explicit blockers.
+* July 25 advance games correctly show PENDING / NO_MARKET_LINE.
+
+The schema is aligned and readable. The header-shift problem I reported in the other workbook does not apply here.
+
+SHADOW_OUTCOMES
+
+The sheet exists with the correct settlement schema, but currently contains only its header row.
+
+That is expected until completed games are settled.
+
+Updated commissioning board
+
+Component	Status
+Real L30 production source	Verified
+65/35 blend	Verified
+Park/weather integration	Verified
+Shadow history append	Verified
+Expanded replay	Verified
+Vehicle logging	Verified
+Outcome settlement	Awaiting completed-game rows
+Regression report	Awaiting outcomes
+Starter audit	Awaiting outcomes
+Vehicle postmortem	Awaiting outcomes
+
+Actual remaining gate
+
+The only substantive remaining validation is the completed-game lifecycle:
+
+1. Settle July 24 after all relevant games are final.
+2. Verify rows appear in SHADOW_OUTCOMES.
+3. Verify regression, starter-audit, and vehicle-postmortem outputs.
+4. Run settlement again and confirm duplicate prevention.
+
+So yes: this workbook materially changes the conclusion. The recent infrastructure was written to the correct place and is visibly present. Only the outcome-dependent half is waiting for finalized games.
