@@ -1,0 +1,180 @@
+SOURCES USED
+
+* Your July 23, 2026 Statcast and box-score dump for all five MLB games.
+* The inspected SLATE_BOARD outputs previously verified from The FROSTLINE Pipeline.
+* No outside data added.
+
+REFRESH CHECK
+
+All five games are final. The dump includes complete scoring, starter lines, bullpen sequencing, contact quality, barrels, strikeouts, and extra-inning context.
+
+Immediate slate shape
+
+Game	Final	Runs	Actual identity
+SD @ ATL	ATL 6–5	11	Loud, concentrated power
+MIN @ CLE	MIN 3–1, 12 innings	4	Extreme suppression
+TB @ TOR	TOR 3–1	4	Suppression
+AZ @ STL	AZ 10–6	16	Traffic and bullpen detonation
+KC @ DET	DET 4–3	7	Early suppression, late bullpen scoring
+
+Slate mean: 8.4 runs
+Slate median: 7 runs
+Shape: two clearly loud games, three suppressed or moderate games.
+
+⸻
+
+Verified engine decisions
+
+From the board inspection, I can definitively grade two displayed CORE outputs.
+
+TB @ TOR — Over 8.5
+
+Engine projection: 10.01
+Final: 4
+Projection error: –6.01 runs
+Ticket: Loss
+Game-truth grade: Major miss
+
+This was not a narrow conversion failure. The projected environment itself was wrong.
+
+What happened
+
+* Shane Bieber: 7 IP, 3 H, 1 R, 0 BB
+* Toronto bullpen: 2 perfect innings
+* Tampa Bay: 3 hits, 1 run
+* Toronto produced only 7 hits and 3 runs
+* Combined xBA was modest:
+    * Tampa Bay: .209
+    * Toronto: .170
+* Neither lineup generated a home run.
+* Toronto’s 20% hard-hit rate did not support a projected five-run-plus offensive environment.
+
+The Rays were not merely unlucky. They created almost no traffic, no walks, and little sustained damage. Toronto did enough to win but never approached an over-driving script.
+
+Likely system failure
+
+This directly exposes the previously identified lineup-strength placeholder problem.
+
+If both lineup strengths were fixed at 100, the engine could not properly distinguish:
+
+* Tampa’s actual lineup quality and depth
+* Toronto’s offensive conversion limitations
+* missing or weakened lineup pieces
+* the difference between isolated batter quality and full-lineup run production
+
+A projection of 10.01 required multiple offensive paths. The actual lineups did not possess them.
+
+⸻
+
+KC @ DET — Under 8.5
+
+Engine projection: 6.20
+Final: 7
+Projection error: +0.80 runs
+Ticket: Win
+Game-truth grade: Good
+
+This projection captured the game well despite late bullpen stress.
+
+What happened
+
+The starting phase was strongly suppressive:
+
+* Randy Dobnak: 5 IP, 0 R
+* Troy Melton: 5 IP, 2 R
+* Score after five innings: 0–0
+* Score after six: 2–0 Kansas City
+
+The later scoring came through bullpen deterioration:
+
+* John Schreiber: 3 ER
+* Steven Cruz: 1 ER
+* Detroit’s bullpen allowed one additional Kansas City run
+
+The model’s 6.20 projection landed inside the game’s actual scoring neighborhood. The under survived even though the least stable portion of the script, the bullpens, produced five runs from the sixth inning onward.
+
+⸻
+
+The other three games
+
+I do not have their exact SLATE_BOARD projection, direction, and recommendation values in the current visible record, so I will not invent grades.
+
+Their outcome anatomy is still clear.
+
+SD @ ATL — 11 runs
+
+This was a power-concentration game, not broad sustained traffic.
+
+* Atlanta hit four home runs
+* San Diego hit one home run
+* Atlanta scored six runs despite only nine hits
+* Griffin Canning allowed three home runs and five runs
+* Chris Sale simultaneously generated 23 whiffs and 11 strikeouts
+* Atlanta’s bullpen allowed the late Padres rally
+
+Important lesson: a dominant starter performance did not suppress the full-game total because the opposing starter detonated and the bullpen extended the scoring.
+
+MIN @ CLE — 4 runs in 12 innings
+
+This was the slate’s cleanest suppression game.
+
+* Gavin Williams: 7 IP, 2 H, 0 R, 11 K
+* Taj Bradley: 7 IP, 2 H, 1 R
+* Regulation ended 1–1
+* The teams combined for only nine hits across 12 innings
+* Minnesota had a 20% hard-hit rate
+* Cleveland had zero barrels
+
+The final score slightly exaggerates the offensive output because two Minnesota runs came in the 12th inning. The nine-inning baseball truth was even more suppressive than the 3–1 final suggests.
+
+AZ @ STL — 16 runs
+
+This was a genuine traffic-plus-bullpen detonation game.
+
+Arizona:
+
+* 16 hits
+* 10 runs
+* scored five in the eighth
+* received production throughout the order
+
+St. Louis:
+
+* 13 hits
+* six runs
+* scored four in the ninth
+* had a 43.2% hard-hit rate
+
+The decisive failure layer was the Cardinals bullpen:
+
+* Justin Bruihl: 2 ER
+* Matt Svanson: 3 ER
+* Gordon Graceffo: 1 ER
+
+Arizona’s Ryan Thompson also allowed four ninth-inning runs. This game validated the importance of distinguishing starter scoring from full-game bullpen continuation.
+
+⸻
+
+Early commissioning read
+
+The available evidence does not say the engine was randomly wrong across all five games.
+
+It says:
+
+* KC–DET: projection and vehicle were structurally sound.
+* TB–TOR: the underlying game environment was badly overstated.
+* The slate contained both real detonation and real suppression, meaning the challenge was classification, not a universally distorted run environment.
+
+The sharpest confirmed defect remains:
+
+The engine is attempting differentiated game projections while its visible lineup-strength layer is not differentiated.
+
+That can produce false precision, particularly in totals. A projection such as 10.01 appears highly specific, but its offensive foundation may still be materially generic.
+
+Current postmortem status
+
+One verified good read.
+One verified major miss.
+Three games require their original board rows before formal engine grading.
+
+Ticket grading and game-truth grading should remain separate. KC–DET won and was accurately projected. TB–TOR lost because the projection itself was wrong, not because a correct thesis encountered ordinary variance.
