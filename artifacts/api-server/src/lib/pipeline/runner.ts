@@ -15,6 +15,7 @@ import { fetchStarterPrevOutings } from "./module04d_starterPrevOuting.js";
 import { fetchPlateUmpires } from "./module04e_umpires.js";
 import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
 import { fetchTeamRosters, fetchBatterSeasonStats, normalizeForMatch } from "./module02c_batterSeasonStats.js";
+import { fetchStatcastBatterLeaderboard } from "./module02d_statcastBatters.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { trackLineMovement } from "./module05d_oddsHistory.js";
 import { fetchMarketOddsWithFallback, buildOddsMap } from "./module05c_startingNineScraper.js";
@@ -315,13 +316,17 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     "Full pipeline: batter IDs resolved from lineup roster map",
   );
 
-  const [pitcherSeasonStats, batterSeasonStats] = await Promise.all([
+  const [pitcherSeasonStats, batterSeasonStats, statcastBatterStats] = await Promise.all([
     fetchPitcherSeasonStats(statIds, date.slice(0, 4)).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: pitcher season stats threw — skipping");
       return null;
     }),
     fetchBatterSeasonStats([...batterIdSet], date.slice(0, 4)).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: batter season stats threw — skipping");
+      return null;
+    }),
+    fetchStatcastBatterLeaderboard(date.slice(0, 4)).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: Statcast batter leaderboard threw — degrading to OPS-only");
       return null;
     }),
   ]);
@@ -384,6 +389,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     startingNineResult,
     batterSeasonStats?.stats ?? new Map(),
     rosterNameMap ?? new Map(),
+    statcastBatterStats?.stats ?? new Map(),
   );
   if (mod09.status === "error") {
     logger.warn({ status: mod09.status }, "Full pipeline: Module 09 computation error — continuing");

@@ -99,6 +99,7 @@ Lineup factor live (commissioning step 2, 2026-07-24):
 - GAME_SUMMARY G/H renamed Away_Lineup_Factor / Home_Lineup_Factor; GAME_INTEGRATION M renamed Lineup_Factor.
 - runner.ts: fetchTeamRosters added to main Promise.all; batter stats fetched in parallel with pitcher stats; 256 batter IDs resolved across 15 games in first live run.
 - Blend weight 0.40 is conservative pending replay validation — do not raise above 0.60 without replay.
+- **Platoon matchup (commissioning step 3, 2026-07-24)**: `getPlatoonOpsAdj(batterHand, pitcherHand)` in module09 adds per-slot OPS delta before weighted avg. PLATOON_OPS_ADJ=0.012 (40% of historical ~30pt split). S bats get ×0.30 bonus. Both hands must be known or adj=0. `pitcherHand` sourced from `pitcherStatsMap.get(pitcher.player_id)?.hand`. Floor at .400 OPS to prevent edge cases. Adds `platoon_advantaged` / `platoon_resolved` to LineupStrengthResolution. Step 3 produces ±0.01 total run adjustments at current constants — correct at this commissioning stage.
 
 Audit columns added to sheets:
 - GAME_INTEGRATION: 20→27 cols (A–AA), new cols U–AA: L30_RS_Estimate, L10_RS_Actual, Offense_Source_Status, Park_Runs_Pct, Park_Multiplier, Weather_Multiplier, Park_Source_Status

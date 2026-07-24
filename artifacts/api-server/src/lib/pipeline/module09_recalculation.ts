@@ -36,6 +36,8 @@ import type { TeamRunRatesResult } from "./module05c_teamRunRates.js";
 import type { StartingNineResult, StartingNineGame, ParkFactors, LineupPlayer } from "./module04c_startingNine.js";
 import type { BatterSeasonStats } from "./module02c_batterSeasonStats.js";
 import { MIN_BATTER_PA } from "./module02c_batterSeasonStats.js";
+import type { StatcastBatterStats } from "./module02d_statcastBatters.js";
+import { MIN_STATCAST_PA } from "./module02d_statcastBatters.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -98,6 +100,43 @@ const LINEUP_BLEND_WEIGHT = 0.40;
 const MIN_LINEUP_COVERAGE = 0.60;  // ≥ 6 of 9 slots required
 
 /**
+ * OPS adjustment applied per lineup slot based on platoon handedness matchup.
+ *
+ * Historical MLB platoon splits average ~25–30 OPS points. PLATOON_OPS_ADJ = 0.012
+ * applies ~40% of the historical full split as a conservative first-pass estimate.
+ * Individual season OPS already partially captures platoon tendencies through the
+ * mix of RHP/LHP the batter faced during the season; applying the full split would
+ * double-count.
+ *
+ * Switch hitters always bat from the favorable side and receive 30% of this
+ * adjustment (their season OPS is computed from the advantaged hand by definition,
+ * so over-crediting the platoon edge is the primary risk).
+ *
+ * Do not raise above 0.020 (two-thirds of historical split) without replay validation.
+ */
+const PLATOON_OPS_ADJ = 0.012;
+
+/**
+ * 2024–2026 MLB league-average xwOBA (expected weighted on-base average).
+ * Baseline when normalising per-batter Statcast contact quality to a lineup factor.
+ */
+const LEAGUE_AVG_XWOBA = 0.315;
+
+/**
+ * Weight given to the xwOBA quality signal vs OPS when computing a batter's
+ * effective-OPS contribution to the lineup factor.
+ *
+ * Effective quality blending formula:
+ *   blended = (ops / LEAGUE_AVG_OPS) × (1 − W) + (xwoba / LEAGUE_AVG_XWOBA) × W
+ *   effective_ops = LEAGUE_AVG_OPS × blended
+ *
+ * Set conservatively at 0.25: xwOBA and OPS are strongly correlated, so higher
+ * weights produce diminishing returns while increasing variance. Raise toward 0.40
+ * after replay confirms xwOBA outperforms OPS for forward-looking projection accuracy.
+ */
+const STATCAST_BLEND_WEIGHT = 0.25;
+
+/**
  * Blend weights for the offensive rate formula.
  * L30_WEIGHT + L10_WEIGHT = 1.0
  *
@@ -156,7 +195,7 @@ function normalizeNameForMatch(name: string): string {
 export interface LineupStrengthResolution {
   /** Multiplier applied to team offensive rate. 1.0 = league-average or fallback. */
   factor: number;
-  /** Batting-order-weighted lineup OPS. Null when coverage is insufficient. */
+  /** Batting-order-weighted lineup OPS (post platoon adjustment). Null when coverage is insufficient. */
   weighted_ops: number | null;
   /** Fraction of the 9 lineup slots with valid batter stats (PA ≥ MIN_BATTER_PA). */
   coverage: number;
@@ -164,73 +203,152 @@ export interface LineupStrengthResolution {
   status: "FULL" | "PARTIAL" | "FALLBACK" | "NO_LINEUP";
   /** Lineup source confidence; projected lineups receive a reduced blend weight. */
   lineup_status: "official" | "projected" | null;
+  /** Slots where the batter has a platoon advantage vs the opposing starter. */
+  platoon_advantaged: number;
+  /** Slots where both batter and pitcher handedness were known for comparison. */
+  platoon_resolved: number;
+  /** Fraction of lineup slots where xwOBA was available and used in the quality blend. */
+  xwoba_coverage: number;
 }
 
 /**
- * Computes a batting-order-weighted OPS multiplier for a lineup.
+ * Per-slot OPS adjustment for the platoon matchup between a batter and the opposing starter.
  *
- * Formula:
- *   weightedOPS  = Σ(player_ops × slot_weight) / Σ(slot_weight)
- *   rawDev       = (weightedOPS / LEAGUE_AVG_OPS) - 1
- *   effectiveWt  = LINEUP_BLEND_WEIGHT × (1.0 if official, 0.60 if projected)
- *   factor       = clamp(1 + rawDev × effectiveWt, 0.82, 1.18)
+ * Favorable matchup  (L vs RHP, R vs LHP):  +PLATOON_OPS_ADJ
+ * Unfavorable matchup (L vs LHP, R vs RHP): -PLATOON_OPS_ADJ
+ * Switch hitters (S):                        +PLATOON_OPS_ADJ × 0.30
+ *   (Switch hitters always bat from the favorable side by construction, but their season OPS
+ *    is already computed from the optimal hand, so a smaller bonus avoids double-counting.)
  *
- * Slots without valid stats (player unknown or PA < MIN_BATTER_PA) contribute
- * league-average OPS to preserve the count but not inflate coverage.
+ * Returns 0 when either handedness is unknown — no spurious adjustment.
+ */
+function getPlatoonOpsAdj(batterHand: string, pitcherHand: string | null): number {
+  if (!pitcherHand || !batterHand) return 0;
+  const bat = batterHand.toUpperCase();
+  const pit = pitcherHand.toUpperCase();
+  if (bat === "S")                                           return PLATOON_OPS_ADJ * 0.30;
+  if ((bat === "L" && pit === "R") || (bat === "R" && pit === "L")) return +PLATOON_OPS_ADJ;
+  if ((bat === "L" && pit === "L") || (bat === "R" && pit === "R")) return -PLATOON_OPS_ADJ;
+  return 0;
+}
+
+/**
+ * Computes a batting-order-weighted OPS multiplier for a lineup, incorporating
+ * the platoon matchup between each batter and the opposing starter, and blending
+ * Statcast xwOBA contact quality into each batter's effective OPS contribution.
+ *
+ * Per-slot effective OPS formula:
+ *   1. If both OPS and xwOBA available:
+ *        blended_ratio = (ops / LEAGUE_AVG_OPS) × (1 − STATCAST_BLEND_WEIGHT)
+ *                      + (xwoba / LEAGUE_AVG_XWOBA) × STATCAST_BLEND_WEIGHT
+ *        baseOps = LEAGUE_AVG_OPS × blended_ratio
+ *   2. Otherwise: baseOps = ops (or LEAGUE_AVG_OPS for unresolved slots)
+ *   effectiveOPS = max(0.400, baseOps + getPlatoonOpsAdj(batter_hand, pitcher_hand))
+ *
+ *   weightedOPS = Σ(effectiveOPS × slot_weight) / Σ(slot_weight)
+ *   rawDev      = (weightedOPS / LEAGUE_AVG_OPS) - 1
+ *   effectiveWt = LINEUP_BLEND_WEIGHT × (1.0 if official, 0.60 if projected)
+ *   factor      = clamp(1 + rawDev × effectiveWt, 0.82, 1.18)
+ *
+ * Slots without valid stats contribute league-average OPS (with platoon adj) to
+ * preserve count without inflating coverage. Adjustments for unknown values → 0.
+ *
+ * @param pitcherHand      Throwing hand of the OPPOSING starter ("L" | "R" | null).
+ *                         Away lineup → pass home pitcher hand; home lineup → pass away pitcher hand.
+ * @param statcastBatterMap Per-batter Statcast leaderboard data from module02d.
  */
 function computeLineupStrength(
   lineup: LineupPlayer[],
   nameToIdMap: Map<string, number>,
   batterStatsMap: Map<number, BatterSeasonStats>,
   lineupStatus: "official" | "projected",
+  pitcherHand: string | null = null,
+  statcastBatterMap: Map<number, StatcastBatterStats> = new Map(),
 ): LineupStrengthResolution {
-  if (lineup.length === 0) {
-    return { factor: 1.0, weighted_ops: null, coverage: 0, status: "NO_LINEUP", lineup_status: null };
-  }
+  const noData = {
+    factor: 1.0, weighted_ops: null, coverage: 0, status: "NO_LINEUP" as const,
+    lineup_status: null, platoon_advantaged: 0, platoon_resolved: 0, xwoba_coverage: 0,
+  };
+  if (lineup.length === 0) return noData;
 
   let weightedOpsSum = 0;
-  let totalWeight = 0;
-  let coveredSlots = 0;
-  const totalSlots = Math.min(lineup.length, 9);
+  let totalWeight    = 0;
+  let coveredSlots   = 0;
+  let platoonAdv     = 0;
+  let platoonRes     = 0;
+  let xwobaCovered   = 0;
+  const totalSlots   = Math.min(lineup.length, 9);
 
   for (let i = 0; i < totalSlots; i++) {
-    const player = lineup[i]!;
-    // Use slot's batting_order position (1-based) to pick weight; fall back to index position.
+    const player  = lineup[i]!;
     const slotIdx = Math.max(0, Math.min(8, (player.batting_order > 0 ? player.batting_order : i + 1) - 1));
-    const weight = BATTING_ORDER_WEIGHTS[slotIdx] ?? 1.0;
+    const weight  = BATTING_ORDER_WEIGHTS[slotIdx] ?? 1.0;
 
     const playerId = nameToIdMap.get(normalizeNameForMatch(player.name));
     const stats    = playerId !== undefined ? batterStatsMap.get(playerId) : undefined;
+    const statcast = playerId !== undefined ? statcastBatterMap.get(playerId) : undefined;
 
-    const ops = stats?.ops ?? null;
-    const pa  = stats?.plate_appearances ?? null;
+    const ops           = stats?.ops ?? null;
+    const pa            = stats?.plate_appearances ?? null;
     const hasValidStats = ops !== null && pa !== null && pa >= MIN_BATTER_PA;
 
-    weightedOpsSum += (hasValidStats ? ops! : LEAGUE_AVG_OPS) * weight;
+    // Statcast xwOBA blending — only when PA meets threshold
+    const xwoba    = statcast?.xwoba ?? null;
+    const xwobaOk  = xwoba !== null && (statcast?.pa ?? 0) >= MIN_STATCAST_PA;
+
+    // Platoon adjustment (step 3)
+    const batHand    = player.handedness || (stats?.bat_hand ?? "");
+    const platoonAdj = getPlatoonOpsAdj(batHand, pitcherHand);
+
+    // Track platoon matchup metadata
+    if (batHand && pitcherHand) {
+      platoonRes++;
+      const bat = batHand.toUpperCase();
+      const pit = pitcherHand.toUpperCase();
+      if (bat === "S" || (bat === "L" && pit === "R") || (bat === "R" && pit === "L")) platoonAdv++;
+    }
+
+    // Compute base OPS, blending xwOBA when available (step 4)
+    let baseOps: number;
+    if (hasValidStats && xwobaOk) {
+      const qOps    = ops! / LEAGUE_AVG_OPS;
+      const qXwoba  = xwoba! / LEAGUE_AVG_XWOBA;
+      const blended = qOps * (1 - STATCAST_BLEND_WEIGHT) + qXwoba * STATCAST_BLEND_WEIGHT;
+      baseOps = LEAGUE_AVG_OPS * blended;
+      xwobaCovered++;
+    } else {
+      baseOps = hasValidStats ? ops! : LEAGUE_AVG_OPS;
+    }
+
+    const effOps = Math.max(0.400, baseOps + platoonAdj);
+
+    weightedOpsSum += effOps * weight;
     if (hasValidStats) coveredSlots++;
     totalWeight += weight;
   }
 
-  const coverage    = totalSlots > 0 ? coveredSlots / totalSlots : 0;
-  const weightedOps = totalWeight > 0 ? parseFloat((weightedOpsSum / totalWeight).toFixed(3)) : null;
+  const coverage      = totalSlots > 0 ? coveredSlots / totalSlots : 0;
+  const weightedOps   = totalWeight > 0 ? parseFloat((weightedOpsSum / totalWeight).toFixed(3)) : null;
+  const xwoba_coverage = totalSlots > 0 ? parseFloat((xwobaCovered / totalSlots).toFixed(2)) : 0;
 
   if (coverage < MIN_LINEUP_COVERAGE || weightedOps === null) {
     return {
-      factor: 1.0,
-      weighted_ops: weightedOps,
-      coverage,
-      status: "FALLBACK",
-      lineup_status: lineupStatus,
+      factor: 1.0, weighted_ops: weightedOps, coverage, status: "FALLBACK",
+      lineup_status: lineupStatus, platoon_advantaged: platoonAdv, platoon_resolved: platoonRes,
+      xwoba_coverage,
     };
   }
 
-  const rawDev       = (weightedOps / LEAGUE_AVG_OPS) - 1;
-  const effectiveWt  = lineupStatus === "official" ? LINEUP_BLEND_WEIGHT : LINEUP_BLEND_WEIGHT * 0.60;
-  const rawFactor    = 1 + rawDev * effectiveWt;
-  const factor       = parseFloat(Math.max(0.82, Math.min(1.18, rawFactor)).toFixed(4));
-  const status       = coverage >= 1.0 ? "FULL" : "PARTIAL";
+  const rawDev    = (weightedOps / LEAGUE_AVG_OPS) - 1;
+  const effWt     = lineupStatus === "official" ? LINEUP_BLEND_WEIGHT : LINEUP_BLEND_WEIGHT * 0.60;
+  const rawFactor = 1 + rawDev * effWt;
+  const factor    = parseFloat(Math.max(0.82, Math.min(1.18, rawFactor)).toFixed(4));
+  const status    = coverage >= 1.0 ? "FULL" : "PARTIAL";
 
-  return { factor, weighted_ops: weightedOps, coverage, status, lineup_status: lineupStatus };
+  return {
+    factor, weighted_ops: weightedOps, coverage, status, lineup_status: lineupStatus,
+    platoon_advantaged: platoonAdv, platoon_resolved: platoonRes, xwoba_coverage,
+  };
 }
 
 /**
@@ -506,6 +624,8 @@ export interface GameSummaryRow {
   home_lineup_status: LineupStrengthResolution["status"];
   away_lineup_source: "official" | "projected" | null;
   home_lineup_source: "official" | "projected" | null;
+  away_lineup_xwoba_coverage: number;
+  home_lineup_xwoba_coverage: number;
 }
 
 export interface Module09Result {
@@ -532,6 +652,7 @@ export async function verifyRecalculation(
   startingNineResult: StartingNineResult | null = null,
   batterStatsMap: Map<number, BatterSeasonStats> = new Map(),
   lineupNameToIdMap: Map<string, number> = new Map(),
+  statcastBatterMap: Map<number, StatcastBatterStats> = new Map(),
 ): Promise<Module09Result> {
   const startTime = Date.now();
   logger.info({ games: normalized.games.length }, "MODULE_09: Computing GAME_INTEGRATION + GAME_SUMMARY");
@@ -611,7 +732,9 @@ export async function verifyRecalculation(
       const bSg      = lineupMap.get(g.legacy_game_id) ?? null;
       const bLineup  = side === "away" ? bSg?.away_lineup ?? [] : bSg?.home_lineup ?? [];
       const bLStatus = bSg?.lineup_status ?? "projected";
-      const giLineup = computeLineupStrength(bLineup, lineupNameToIdMap, batterStatsMap, bLStatus);
+      // The batting team faces the opposing pitcher; look up that pitcher's throwing hand.
+      const bOppPitHand = pitcherStatsMap.get((oppPitch.player_id ?? 0) as number)?.hand ?? null;
+      const giLineup = computeLineupStrength(bLineup, lineupNameToIdMap, batterStatsMap, bLStatus, bOppPitHand, statcastBatterMap);
 
       giRows.push([
         g.date,                                    // A: Date
@@ -664,17 +787,24 @@ export async function verifyRecalculation(
     // Away team bats against the HOME pitcher → apply away lineup factor.
     // Home team bats against the AWAY pitcher → apply home lineup factor.
     const sg = lineupMap.get(g.legacy_game_id) ?? null;
+    // Away batters face the home starter; home batters face the away starter.
+    const homePitHand = pitcherStatsMap.get(g.home_pitcher.player_id ?? 0)?.hand ?? null;
+    const awayPitHand = pitcherStatsMap.get(g.away_pitcher.player_id ?? 0)?.hand ?? null;
     const awayLineup = computeLineupStrength(
       sg?.away_lineup ?? [],
       lineupNameToIdMap,
       batterStatsMap,
       sg?.lineup_status ?? "projected",
+      homePitHand,        // away lineup bats against the home starter
+      statcastBatterMap,
     );
     const homeLineup = computeLineupStrength(
       sg?.home_lineup ?? [],
       lineupNameToIdMap,
       batterStatsMap,
       sg?.lineup_status ?? "projected",
+      awayPitHand,        // home lineup bats against the away starter
+      statcastBatterMap,
     );
 
     // Apply lineup factor to the park/weather-adjusted team rates before the pitcher model.
@@ -739,8 +869,10 @@ export async function verifyRecalculation(
       home_lineup_coverage:     homeLineup.coverage,
       away_lineup_status:       awayLineup.status,
       home_lineup_status:       homeLineup.status,
-      away_lineup_source:       awayLineup.lineup_status,
-      home_lineup_source:       homeLineup.lineup_status,
+      away_lineup_source:            awayLineup.lineup_status,
+      home_lineup_source:            homeLineup.lineup_status,
+      away_lineup_xwoba_coverage:    awayLineup.xwoba_coverage,
+      home_lineup_xwoba_coverage:    homeLineup.xwoba_coverage,
     });
 
     gsRows.push([
