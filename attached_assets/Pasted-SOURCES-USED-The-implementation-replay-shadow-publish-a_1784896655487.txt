@@ -1,0 +1,93 @@
+SOURCES USED
+
+* The implementation, replay, shadow-publish, and settlement report you pasted
+* Frostline commissioning sequence
+
+REFRESH CHECK
+
+I have not independently inspected the code or workbook. This verdict is based on the reported tests and read-backs.
+
+Current status
+
+Park layer: canonized and commissioned
+
+The repaired park layer now clears the required gates:
+
+* 28/28 smoke tests
+* clean typecheck
+* expanded 1,115-game replay
+* successful live shadow publish
+* 15/15 live games assigned a valid park source
+* zero fallbacks and zero pipeline errors
+* improved MAE and median error with controlled bias
+
+The production canon is now:
+
+65% L30 offense
+35% L10 offense
+× bounded park multiplier
+× bounded weather multiplier
+
+BLEND_PARK improved the principal replay metrics:
+
+Metric	Blend	Blend + Park
+MAE	3.685	3.662
+Median AE	3.23	3.21
+Bias	−0.004	+0.022
+4+ miss rate	39.1%	39.2%
+
+The ≥11 projection band remains a monitoring flag, not a commissioning blocker. Its 54-game sample is too small to justify removing an otherwise validated modifier.
+
+Shadow accumulation infrastructure: deployed, not fully commissioned
+
+These pieces are built and mechanically validated:
+
+* SHADOW_HISTORY
+* SHADOW_OUTCOMES
+* deduplicated publish appends
+* idempotent settlement endpoint
+* Module 14 pairing logic
+* first history rows written
+
+However, the settlement run produced zero settled games because the games were not final. Therefore, the complete history-to-outcome lifecycle has not yet been proven with an actual completed game.
+
+One final compact validation remains:
+
+1. Run settlement after the July 24 games are final.
+2. Confirm projected rows pair with actual totals.
+3. Confirm outcome rows write correctly.
+4. Run settlement again and verify duplicate rows are skipped.
+
+Once that succeeds, the shadow accumulation and settlement path is commissioned.
+
+One reporting inconsistency to clarify
+
+The coverage statement says:
+
+* 965/1,115 received non-neutral park coverage
+* the remaining 14% used static seasonal factors and were also non-neutral
+
+Those statements imply effectively full park-factor coverage, not 86.5%. The metric likely distinguishes dynamically resolved venue rows from static-table rows. The reporting labels should separate:
+
+Dynamic venue coverage
+Static seasonal coverage
+Missing park coverage
+
+The live result already showed the desired final state:
+
+* 11 VENUE_FACTOR_USED
+* 4 SEASONAL_FACTOR_USED
+* 0 MISSING_PARK_DATA
+
+Commissioning board
+
+Component	Status
+Module 05 L30 source	Commissioned
+Module 09 65/35 blend	Canonized and commissioned
+Park multiplier	Canonized and commissioned
+Weather multiplier	Active bounded modifier
+Shadow history append	Deployed and smoke-tested
+Outcome settlement	Awaiting one completed-game lifecycle
+Long-term regression monitoring	Operational once settlement clears
+
+The projection stack is commissioned. Only the new outcome-accumulation loop needs one real settlement and idempotency check to close.

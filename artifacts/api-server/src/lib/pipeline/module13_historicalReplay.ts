@@ -92,6 +92,7 @@ const RESULTS_HEADER: string[] = [
   "Away_L10_Rate",    "Home_L10_Rate",
   "Away_Offense_Source", "Home_Offense_Source",
   "Park_Runs_Pct",    "Park_Multiplier",
+  "Park_Source_Status",
   "Replay_Run_TS",
 ];
 
@@ -143,6 +144,8 @@ export interface ReplayGameRow {
   home_offense_source: string;
   park_runs_pct: number | null;
   park_multiplier: number;
+  /** Source of the park factor used for this game's row */
+  park_source_status: "SEASONAL_FACTOR_USED" | "MISSING_PARK_DATA";
 }
 
 export interface CalibrationBand {
@@ -167,6 +170,12 @@ export interface VariantMetrics {
   calibration: CalibrationBand[];
 }
 
+export interface ParkSourceCounts {
+  venue_factor_used: number;
+  seasonal_factor_used: number;
+  missing_park_data: number;
+}
+
 export interface ReplayResult {
   status: "success" | "partial" | "failure";
   replay_timestamp_utc: string;
@@ -175,6 +184,8 @@ export interface ReplayResult {
   dates_processed: number;
   total_games: number;
   skipped_games: number;
+  /** Park factor source breakdown across all game rows */
+  park_source_counts: ParkSourceCounts;
   rows: ReplayGameRow[];
   metrics: VariantMetrics[];
   errors: string[];
@@ -423,8 +434,8 @@ async function writeResultsSheet(
   workbookId: string,
 ): Promise<void> {
   await expandSheetColumns(workbookId, REPLAY_RESULTS_SHEET, RESULTS_HEADER.length);
-  await clearRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:X5000`);
-  await writeRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:X1`, [RESULTS_HEADER]);
+  await clearRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:Y5000`);
+  await writeRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:Y1`, [RESULTS_HEADER]);
 
   const sheetRows = rows.map((r) => [
     r.replay_date,
@@ -450,13 +461,14 @@ async function writeResultsSheet(
     r.home_offense_source,
     r.park_runs_pct ?? "",
     r.park_multiplier,
+    r.park_source_status,
     runTs,
   ]);
 
   if (sheetRows.length > 0) {
     await writeRange(
       workbookId,
-      `${REPLAY_RESULTS_SHEET}!A2:X${1 + sheetRows.length}`,
+      `${REPLAY_RESULTS_SHEET}!A2:Y${1 + sheetRows.length}`,
       sheetRows,
     );
   }
@@ -522,6 +534,7 @@ export async function runHistoricalReplay(
       dates_processed: 0,
       total_games: 0,
       skipped_games: 0,
+      park_source_counts: { venue_factor_used: 0, seasonal_factor_used: 0, missing_park_data: 0 },
       rows: [],
       metrics: [],
       errors: ["No dates in range (check start/end order and MAX_DATE_RANGE cap)"],
@@ -591,9 +604,12 @@ export async function runHistoricalReplay(
           continue;
         }
 
-        const actualTotal = awayScore + homeScore;
-        const gameId      = `${date}_${awayAbbr}@${homeAbbr}`;
-        const parkFactors = parkFactorsMap.get(homeAbbr) ?? null;
+        const actualTotal      = awayScore + homeScore;
+        const gameId           = `${date}_${awayAbbr}@${homeAbbr}`;
+        const parkFactors      = parkFactorsMap.get(homeAbbr) ?? null;
+        const parkSourceStatus = parkFactors !== null
+          ? "SEASONAL_FACTOR_USED" as const
+          : "MISSING_PARK_DATA" as const;
 
         const computed = computeVariants(
           awayAbbr,
@@ -628,6 +644,7 @@ export async function runHistoricalReplay(
           home_offense_source:  computed.home_offense_source,
           park_runs_pct:        computed.park_runs_pct,
           park_multiplier:      computed.park_multiplier,
+          park_source_status:   parkSourceStatus,
         });
       }
 
@@ -666,6 +683,19 @@ export async function runHistoricalReplay(
     }
   }
 
+  // ── Aggregate park source counts across all rows ──
+  const parkSourceCounts: ParkSourceCounts = {
+    venue_factor_used:    0,
+    seasonal_factor_used: 0,
+    missing_park_data:    0,
+  };
+  for (const r of allRows) {
+    if      (r.park_source_status === "SEASONAL_FACTOR_USED") parkSourceCounts.seasonal_factor_used++;
+    else if (r.park_source_status === "MISSING_PARK_DATA")    parkSourceCounts.missing_park_data++;
+    // VENUE_FACTOR_USED is not emitted by the replay path (live-scrape only runs in module09)
+    else                                                       parkSourceCounts.venue_factor_used++;
+  }
+
   const status =
     allRows.length === 0         ? "failure"  :
     errors.length > 0            ? "partial"  : "success";
@@ -678,6 +708,7 @@ export async function runHistoricalReplay(
     dates_processed:      datesProcessed,
     total_games:          allRows.length,
     skipped_games:        totalSkipped,
+    park_source_counts:   parkSourceCounts,
     rows:                 allRows,
     metrics,
     errors,
