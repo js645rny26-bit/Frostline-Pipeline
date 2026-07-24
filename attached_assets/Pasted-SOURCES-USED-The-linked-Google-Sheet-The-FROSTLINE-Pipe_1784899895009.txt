@@ -1,0 +1,251 @@
+SOURCES USED
+
+* The linked Google Sheet, The FROSTLINE Pipeline
+* Direct workbook export and sheet-by-sheet structural inspection
+
+REFRESH CHECK
+
+The workbook I inspected was last modified July 24, 2026 at 1:19 PM UTC and contains the July 24 publish plus four July 25 advance games. The FROSTLINE Pipeline
+
+Inspection verdict
+
+The workbook is functioning as a populated pipeline output, but it is not the fully current commissioned workbook described in the recent Replit reports.
+
+Present and populated
+
+The export contains 14 sheets:
+
+* DAILY_MATCHUPS
+* TODAY_LINEUPS
+* TEAM_FORM_INPUT
+* BULLPEN_USAGE_DAILY
+* RUN_ENVIRONMENT
+* GAME_INTEGRATION
+* GAME_SUMMARY
+* PLAYER_INTEGRATION
+* SLATE_INPUT
+* SLATE_BOARD
+* ACTIVE_BOARD_SNAPSHOT
+* SCHEMA_REFERENCE
+* RUN_LOG
+* ODDS_HISTORY
+
+The July 24 run appears in RUN_LOG as:
+
+* pipeline status: success
+* validation: PASS
+* 15 games
+* 28 of 30 pitchers resolved
+* 15 weather-live games
+* 30 integration rows
+* 15 summary rows
+* 2 CORE
+* 9 NO CORE
+* no recorded errors
+
+The other four games were July 25 advance rows without market lines, so they remained pending.
+
+What is working correctly
+
+Real offensive blend is visible
+
+GAME_INTEGRATION contains:
+
+* L30_RS_Estimate
+* L10_RS_Actual
+* Offense_Rate_Used
+* Offense_Source_Status
+
+The rows show differentiated team rates and BLENDED status. This confirms the old universal L30 stub is not present in this workbook.
+
+Park and weather integration is visible
+
+The production rows contain:
+
+* Park_Runs_Pct
+* Park_Multiplier
+* Weather_Multiplier
+* Combined_Run_Multiplier
+* Park_Source_Status
+
+July 24 games use VENUE_FACTOR_USED; the four July 25 games use SEASONAL_FACTOR_USED. No inspected game showed MISSING_PARK_DATA.
+
+Projection output is populated
+
+GAME_SUMMARY has projected team runs and game totals for all 15 rows. Examples include:
+
+* COL–MIL: 9.54
+* CHC–PIT: 11.36
+* ARI–WSN: 11.29
+* NYY–PHI: 6.88
+* TOR–BOS: 8.46
+
+The visible source export also shows the underlying matchup, pitcher, weather, and market data present for the July 24 slate. The FROSTLINE Pipeline
+
+Important structural defects
+
+1. The new commissioning sheets are absent
+
+I found no sheets or workbook references for:
+
+* SHADOW_VALIDATION
+* REPLAY_RESULTS
+* REPLAY_METRICS
+* SHADOW_HISTORY
+* SHADOW_OUTCOMES
+* REGRESSION_REPORT
+* STARTER_AUDIT
+* VEHICLE_LOG
+* VEHICLE_POSTMORTEM
+
+That means this linked workbook does not currently contain the recently reported Modules 12s–17 outputs.
+
+Most likely explanations:
+
+* Replit is writing those sheets to a different workbook ID.
+* The linked sheet is an older operational workbook.
+* The latest changes were made after this export’s modification time but never published here.
+
+This is the biggest finding.
+
+2. SLATE_BOARD is header-shifted
+
+The row values do not align semantically with the headers.
+
+For example, a CHC–PIT row appears as:
+
+Header	Stored value
+Decision	OVER
+Confidence	CORE
+Expected_ROI	0.82
+Recommendation	0.168
+Notes	STRONG_BUY
+Unnamed next column	blocker/null
+
+So the actual row contract appears to be closer to:
+
+Direction
+Final_Decision
+Confidence
+Expected_ROI
+Recommendation
+Core_Blocker
+
+but the displayed headers are offset or outdated.
+
+This is not merely cosmetic. Any downstream reader relying on header names could interpret:
+
+* CORE as confidence
+* confidence as ROI
+* ROI as recommendation
+* recommendation as notes
+
+That needs a schema repair.
+
+3. DAILY_MATCHUPS contains undeclared appended columns
+
+The defined headers end at Notes, but the sheet continues through column AU with many columns exported as:
+
+* Unnamed: 25
+* Unnamed: 26
+* …
+* Unnamed: 46
+
+Those unnamed fields contain meaningful data such as:
+
+* prior-start date
+* innings
+* pitch count
+* days rest
+* outing classification
+* pitcher metrics
+* market values
+
+The data exists, but the header row was not expanded when those fields were appended.
+
+This creates two risks:
+
+1. Consumers cannot safely map the fields.
+2. Later schema expansion can overwrite or misalign them.
+
+4. Duplicate header in GAME_SUMMARY
+
+Combined_Run_Multiplier appears twice:
+
+* once in the earlier context block
+* again near the park/weather audit fields
+
+The values match, so this is not currently corrupting projections, but duplicate headers are unsafe for JSON conversion, CSV import, dataframe processing, and lookup-by-column-name logic.
+
+One should be renamed or removed, likely:
+
+Environment_Run_Multiplier
+
+and
+
+Combined_Run_Multiplier
+
+or keep only the final audit field.
+
+5. The schema reference is behind production
+
+SCHEMA_REFERENCE documents the older core sheets, but it does not appear to include the newly added shadow, replay, regression, starter-audit, or vehicle-postmortem structures.
+
+Even before those missing sheets are resolved, the live schema has drifted beyond its declared documentation.
+
+6. The workbook is output-driven, not formula-driven
+
+I found no worksheet formulas in the inspected engine ranges. The data is being computed by the external TypeScript pipeline and written as values.
+
+That is acceptable architecture, but it means:
+
+The workbook itself is not the calculation engine; it is the pipeline’s operational datastore and presentation surface.
+
+Therefore, workbook inspection alone cannot prove the implementation logic. It can verify that outputs, schemas, and joins landed correctly.
+
+Formula and cell-integrity check
+
+I found no visible Excel error values such as:
+
+* #REF!
+* #DIV/0!
+* #VALUE!
+* #NAME?
+* #N/A
+
+So there is no obvious cell-level corruption.
+
+Commissioning conclusion
+
+Verified in this workbook
+
+* Module 05 real L30 inputs
+* Module 09 65/35 blend outputs
+* park and weather modifier output
+* GAME_SUMMARY projections
+* July 24 slate-board publication
+* run logging
+
+Not verified in this workbook
+
+* replay sheets and metrics
+* shadow validation history
+* settlement outcomes
+* regression reporting
+* starter audit
+* vehicle logging
+* vehicle postmortem
+
+Exact next repair batch
+
+1. Confirm the workbook ID used by Replit equals
+    1G5lDb3z_VGS5K0ZA_URuEwEbStjT4bxd7QAR4_rLu84.
+2. Publish or migrate the nine missing commissioning sheets into this authoritative workbook.
+3. Repair the three schema defects together:
+    * name DAILY_MATCHUPS columns Z:AU
+    * realign SLATE_BOARD headers
+    * remove or rename the duplicate Combined_Run_Multiplier
+4. Update SCHEMA_REFERENCE to include all production sheets and columns.
+5. Run one publish and inspect the workbook again.
+
+Bottom line: the projection path is visibly working, but this linked workbook is not yet the complete authoritative representation of the commissioned pipeline. The missing Modules 12s–17 sheets and the SLATE_BOARD header drift must be resolved before I would call the workbook itself fully commissioned.
