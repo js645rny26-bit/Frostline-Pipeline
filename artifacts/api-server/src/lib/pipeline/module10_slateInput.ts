@@ -73,7 +73,13 @@ const COL_HOME_SPREAD_ODDS = 30; // AE: American odds for home to cover the spre
 const COL_AWAY_ML          = 31; // AF: American moneyline for away outright win
 const COL_HOME_ML          = 32; // AG: American moneyline for home outright win
 
-const MAX_COL_IDX = 32; // AG
+// ── Board-lock status (pipeline-maintained, written by module10; finalized by module11) ──
+// PRE_LOCK  = board has not yet locked for this game (current time < lock cutoff)
+// LOCKED_IN  = game was already CORE when the board locked; stable but still downgradable
+// LOCKED_OUT = game was NOT CORE when the board locked; blocked from future promotion
+const COL_BOARD_LOCK_STATUS = 33; // AH
+
+const MAX_COL_IDX = 33; // AH
 
 function rowToObject(row: unknown[]): Record<number, unknown> {
   const obj: Record<number, unknown> = {};
@@ -111,6 +117,8 @@ function buildOperatorDefaults(gameId: string, line?: MarketLine) {
     hasLine ? (line.home_spread_odds ?? null) : null, // AE: Home_Spread_Odds
     hasLine ? (line.away_ml ?? null) : null,          // AF: Away_ML
     hasLine ? (line.home_ml ?? null) : null,          // AG: Home_ML
+    // ── Board lock status (AH) — seeded PRE_LOCK; finalized to LOCKED_IN/OUT by module11 ──
+    "PRE_LOCK",                                       // AH: Board_Lock_Status
   ];
 }
 
@@ -250,6 +258,13 @@ export async function seedSlateInput(
           row[COL_HOME_ML]          = marketLine.home_ml ?? null;
         }
 
+        // Board_Lock_Status (AH) — seed PRE_LOCK only when blank.
+        // Module11 finalises to LOCKED_IN or LOCKED_OUT; those values must not
+        // be overwritten here so the lock persists across pipeline refreshes.
+        if (isBlank(row[COL_BOARD_LOCK_STATUS])) {
+          row[COL_BOARD_LOCK_STATUS] = "PRE_LOCK";
+        }
+
         seededRows.push(rowToArray(row, MAX_COL_IDX));
         output.games_seeded.updated_games++;
         output.seed_results.push({
@@ -307,7 +322,7 @@ export async function seedSlateInput(
     if (seededRows.length > 0) {
       await writeRange(
         workbookId,
-        `SLATE_INPUT!A2:AG${1 + seededRows.length}`,
+        `SLATE_INPUT!A2:AH${1 + seededRows.length}`,
         seededRows,
       );
     }

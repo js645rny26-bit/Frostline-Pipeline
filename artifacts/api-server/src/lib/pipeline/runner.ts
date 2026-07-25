@@ -422,7 +422,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
 
   // Module 11: Compute + write SLATE_BOARD and ACTIVE_BOARD_SNAPSHOT
   // rotowireProps is passed for shadow-mode prop comparison signals — no CORE impact.
-  const mod11 = await extractOutputBoards(mod09.game_summary_rows, workbookId, rotowireProps);
+  const mod11 = await extractOutputBoards(mod09.game_summary_rows, workbookId, rotowireProps, normalized.games);
 
   // Module 17 (phase 1): Log vehicle selections for this publish run.
   // Non-blocking — failure does not affect CORE authorization.

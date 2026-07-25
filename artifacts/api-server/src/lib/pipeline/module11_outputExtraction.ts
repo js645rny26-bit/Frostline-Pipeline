@@ -9,6 +9,8 @@ import { readRange, clearRange, writeRange, expandSheetColumns, WORKBOOK_ID } fr
 import { logger } from "../../lib/logger.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
 import { computePropComparison, type RotowirePropsResult } from "./module05e_rotowireProps.js";
+import { BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH } from "./config.js";
+import type { NormalizedGame } from "./module06_normalization.js";
 
 export interface SlateBoardEntry {
   legacy_game_id: string;
@@ -27,6 +29,8 @@ export interface SlateBoardEntry {
   edge_strength: string;
   /** Named reason a game did not authorize. Empty string for CORE or PENDING. */
   core_blocker: string;
+  /** Board-lock state for this game. PRE_LOCK = before cutoff; LOCKED_IN = was CORE at lock; LOCKED_OUT = was not CORE at lock. */
+  lock_status: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT";
   // ── Shadow-mode prop comparison fields (no CORE impact) ──
   starter_k_market_signal: string;
   starter_er_market_signal: string;
@@ -96,22 +100,24 @@ export interface Module11Result {
 // X=23: Market_Phase, Y=24: Authoritative_Pregame_Total
 // Z=25: Authoritative_Over_Odds, AA=26: Authoritative_Under_Odds, AB=27: Pregame_Line_Locked_TS
 // AC=28: Away_Spread, AD=29: Away_Spread_Odds, AE=30: Home_Spread_Odds
-// AF=31: Away_ML, AG=32: Home_ML
+// AF=31: Away_ML, AG=32: Home_ML, AH=33: Board_Lock_Status
 const SLATE_INPUT_COLS = {
-  GAME_ID:            0,
-  CANDIDATE_VEHICLE:  14,
-  LINE:               15,   // live market line (may shift during day)
-  ODDS:               16,
-  MARKET_PHASE:       23,
-  AUTH_PREGAME_TOTAL: 24,   // frozen at game-time; prefer this when set
-  AUTH_OVER_ODDS:     25,
-  AUTH_UNDER_ODDS:    26,
+  GAME_ID:             0,
+  CANDIDATE_VEHICLE:   14,
+  LINE:                15,   // live market line (may shift during day)
+  ODDS:                16,
+  MARKET_PHASE:        23,
+  AUTH_PREGAME_TOTAL:  24,   // frozen at game-time; prefer this when set
+  AUTH_OVER_ODDS:      25,
+  AUTH_UNDER_ODDS:     26,
   // ── Step 5: spread and moneyline ──
-  AWAY_SPREAD:        28,   // run-line point for away team (+1.5 or -1.5)
-  AWAY_SPREAD_ODDS:   29,   // American odds for away to cover
-  HOME_SPREAD_ODDS:   30,   // American odds for home to cover
-  AWAY_ML:            31,   // American moneyline for away outright win
-  HOME_ML:            32,   // American moneyline for home outright win
+  AWAY_SPREAD:         28,   // run-line point for away team (+1.5 or -1.5)
+  AWAY_SPREAD_ODDS:    29,   // American odds for away to cover
+  HOME_SPREAD_ODDS:    30,   // American odds for home to cover
+  AWAY_ML:             31,   // American moneyline for away outright win
+  HOME_ML:             32,   // American moneyline for home outright win
+  // ── Board lock (finalized by module11; persists across refreshes) ──
+  BOARD_LOCK_STATUS:   33,   // PRE_LOCK | LOCKED_IN | LOCKED_OUT
 };
 
 function parseNum(v: unknown): number | null {
@@ -305,10 +311,98 @@ function computeDecision(
   return { decision: "CORE", direction, edgeStrength, coreBlocker: "", confidence, roi };
 }
 
+// ── BOARD_LOCK_STATE column indices (0-based) ─────────────────────────────────
+// A=0: Date, B=1: Game_ID, C=2: Scheduled_First_Pitch, D=3: Lock_Cutoff_TS
+// E=4: Lock_Status, F=5: Pre_Lock_Decision, G=6: Locked_TS
+// H=7: Late_Change_Reason (operator), I=8: Late_Change_Source (operator)
+// J=9: Late_Change_TS (operator), K=10: Late_Promotion_Authorized (operator)
+// L=11: Last_Updated_TS
+const BLS_COLS = {
+  DATE:                      0,
+  GAME_ID:                   1,
+  SCHEDULED_FIRST_PITCH:     2,
+  LOCK_CUTOFF_TS:            3,
+  LOCK_STATUS:               4,
+  PRE_LOCK_DECISION:         5,
+  LOCKED_TS:                 6,
+  LATE_CHANGE_REASON:        7,
+  LATE_CHANGE_SOURCE:        8,
+  LATE_CHANGE_TS:            9,
+  LATE_PROMOTION_AUTHORIZED: 10,
+  LAST_UPDATED_TS:           11,
+} as const;
+
+/** Authoritative board-lock record for one game, stored in BOARD_LOCK_STATE sheet. */
+interface BLSRecord {
+  date: string;
+  game_id: string;
+  scheduled_first_pitch: string;  // ISO UTC
+  lock_cutoff_ts: string;          // ISO UTC
+  /** PRE_LOCK | LOCKED_IN | LOCKED_OUT */
+  lock_status: string;
+  /** CORE | NO_CORE | PENDING — decision at the moment the board locked for this game. */
+  pre_lock_decision: string;
+  /** ISO UTC; set once on first lock transition; blank while PRE_LOCK. */
+  locked_ts: string;
+  // ── Operator-editable late-change fields ──────────────────────────────────────
+  /** Named baseball reason for a post-lock CORE exception (e.g. "Starter scratch - Cole out"). */
+  late_change_reason: string;
+  /** Source of the update (e.g. "beat reporter", "team announcement"). */
+  late_change_source: string;
+  /** ISO UTC timestamp of the late change. */
+  late_change_ts: string;
+  /**
+   * Must be explicitly set to TRUE by the operator alongside Late_Change_Reason.
+   * When true AND Late_Change_Reason is non-blank, a LOCKED_OUT game may be promoted.
+   * Odds movement, line movement, or recalculation never satisfy this check.
+   */
+  late_promotion_authorized: boolean;
+  last_updated_ts: string;
+}
+
+function parseBLSRow(row: unknown[]): BLSRecord {
+  return {
+    date:                      parseStr(row[BLS_COLS.DATE]),
+    game_id:                   parseStr(row[BLS_COLS.GAME_ID]),
+    scheduled_first_pitch:     parseStr(row[BLS_COLS.SCHEDULED_FIRST_PITCH]),
+    lock_cutoff_ts:            parseStr(row[BLS_COLS.LOCK_CUTOFF_TS]),
+    lock_status:               parseStr(row[BLS_COLS.LOCK_STATUS]) || "PRE_LOCK",
+    pre_lock_decision:         parseStr(row[BLS_COLS.PRE_LOCK_DECISION]),
+    locked_ts:                 parseStr(row[BLS_COLS.LOCKED_TS]),
+    late_change_reason:        parseStr(row[BLS_COLS.LATE_CHANGE_REASON]),
+    late_change_source:        parseStr(row[BLS_COLS.LATE_CHANGE_SOURCE]),
+    late_change_ts:            parseStr(row[BLS_COLS.LATE_CHANGE_TS]),
+    late_promotion_authorized: String(row[BLS_COLS.LATE_PROMOTION_AUTHORIZED] ?? "").toUpperCase() === "TRUE",
+    last_updated_ts:           parseStr(row[BLS_COLS.LAST_UPDATED_TS]),
+  };
+}
+
+/**
+ * Build a per-game board-lock cutoff map.
+ * Each game locks BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH hours before its own
+ * scheduled first pitch.  A 1:05 PM game does not lock a 9:40 PM game.
+ * Games with no scheduled_utc_time are excluded — they will never lock.
+ */
+function buildGameLockCutoffs(normalizedGames?: NormalizedGame[]): Map<string, Date> {
+  const cutoffs = new Map<string, Date>();
+  if (!normalizedGames) return cutoffs;
+  for (const g of normalizedGames) {
+    if (!g.scheduled_utc_time) continue;
+    const t = new Date(g.scheduled_utc_time).getTime();
+    if (isNaN(t)) continue;
+    cutoffs.set(
+      g.legacy_game_id,
+      new Date(t - BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH * 60 * 60 * 1000),
+    );
+  }
+  return cutoffs;
+}
+
 export async function extractOutputBoards(
   gameSummary: GameSummaryRow[],
   workbookId = WORKBOOK_ID,
   propsResult: RotowirePropsResult | null = null,
+  normalizedGames?: NormalizedGame[],
 ): Promise<Module11Result> {
   logger.info({ games: gameSummary.length }, "MODULE_11: Computing SLATE_BOARD + ACTIVE_BOARD_SNAPSHOT");
 
@@ -322,10 +416,33 @@ export async function extractOutputBoards(
   };
 
   try {
-    // ── Read SLATE_INPUT for operator-provided market lines ──
-    // Range extends to AG to cover spread/ML cols (AC–AG = 28–32)
-    const slateInputData = await readRange(workbookId, "SLATE_INPUT!A:AG");
-    const slateInputRows = (slateInputData.values ?? []).slice(1); // skip header row
+    const nowMs = Date.now();
+
+    // ── Per-game lock cutoffs (each game locks independently) ─────────────────
+    const gameLockCutoffs = buildGameLockCutoffs(normalizedGames);
+
+    // ── Read SLATE_INPUT and BOARD_LOCK_STATE concurrently ──
+    const [slateInputData, blsData] = await Promise.all([
+      readRange(workbookId, "SLATE_INPUT!A:AH"),
+      readRange(workbookId, "BOARD_LOCK_STATE!A:L"),
+    ]);
+    const slateInputRows = (slateInputData.values ?? []).slice(1);
+
+    // Ordered list of game IDs as they appear in SLATE_INPUT (for AH mirror write-back)
+    const slateInputGameIds = slateInputRows.map((r) => parseStr(r[SLATE_INPUT_COLS.GAME_ID]));
+
+    // ── Parse BOARD_LOCK_STATE — authoritative lock records ──
+    const blsAllRows = blsData.values ?? [];
+    const blsDataRows: unknown[][] = blsAllRows.slice(1).map((r) => [...(r as unknown[])]);
+    const blsIndexByGameId = new Map<string, number>(); // gameId → index in blsDataRows
+    const blsParsedMap    = new Map<string, BLSRecord>();
+    blsDataRows.forEach((row, i) => {
+      const gid = parseStr(row[BLS_COLS.GAME_ID]);
+      if (gid) {
+        blsIndexByGameId.set(gid, i);
+        blsParsedMap.set(gid, parseBLSRow(row));
+      }
+    });
 
     const marketMap = new Map<string, {
       vehicle: string;
@@ -345,8 +462,8 @@ export async function extractOutputBoards(
       // Prefer Authoritative_Pregame_Total (frozen at game-time) over the live
       // Line (which may have moved after the operator's board-final publish).
       // Falls back to Line when Auth is not yet set (PREGAME phase).
-      const authTotal = parseNum(row[SLATE_INPUT_COLS.AUTH_PREGAME_TOTAL]);
-      const liveTotal = parseNum(row[SLATE_INPUT_COLS.LINE]);
+      const authTotal    = parseNum(row[SLATE_INPUT_COLS.AUTH_PREGAME_TOTAL]);
+      const liveTotal    = parseNum(row[SLATE_INPUT_COLS.LINE]);
       const authOverOdds = parseNum(row[SLATE_INPUT_COLS.AUTH_OVER_ODDS]);
 
       marketMap.set(gameId, {
@@ -361,6 +478,12 @@ export async function extractOutputBoards(
         home_ml:          parseNum(row[SLATE_INPUT_COLS.HOME_ML]),
       });
     }
+
+    // Collects lock-status for SLATE_INPUT!AH mirror write-back.
+    const lockStatusUpdates = new Map<string, string>();
+    // Collects BOARD_LOCK_STATE row updates (index → updated row).
+    const blsRowUpdates = new Map<number, unknown[]>();
+    const blsNewRows: unknown[][] = [];
 
     // ── Ensure SLATE_BOARD has at least 33 columns (A–AG) for all output fields ──
     await expandSheetColumns(workbookId, "SLATE_BOARD", 33).catch((err: unknown) => {
@@ -418,12 +541,100 @@ export async function extractOutputBoards(
         gameCtx,
       );
 
+      // ── Board-lock gate (per-game, keyed by this game's own first pitch) ──────
+      // Each game locks BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH hours before its own
+      // scheduled first pitch.  A 1:05 PM game does not lock a 9:40 PM game.
+      // A LOCKED_OUT game can be promoted only when the operator documents a named
+      // baseball reason (Late_Change_Reason) and sets Late_Promotion_Authorized=TRUE
+      // in BOARD_LOCK_STATE.  Odds/line movement never satisfies this check.
+      let decision = rawDecision;
+      let coreBlocker = rawCoreBlocker;
+
+      const gameLockCutoff       = gameLockCutoffs.get(gs.game_id) ?? null;
+      const gameLocked           = gameLockCutoff !== null && nowMs >= gameLockCutoff.getTime();
+      const existingBLS          = blsParsedMap.get(gs.game_id);
+      const persistedLockStatus  = existingBLS?.lock_status ?? "PRE_LOCK";
+      const lateReasonPresent    = (existingBLS?.late_change_reason?.trim() ?? "") !== "";
+      const latePromotionAuth    = existingBLS?.late_promotion_authorized === true && lateReasonPresent;
+      let lockStatus: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT";
+      let isFirstLock = false;
+      let preLockDecision = existingBLS?.pre_lock_decision ?? "";
+
+      if (!gameLocked) {
+        // Before this game's own cutoff — no restriction.
+        lockStatus = "PRE_LOCK";
+      } else if (persistedLockStatus === "LOCKED_OUT") {
+        if (latePromotionAuth) {
+          // Named baseball exception: operator supplied a reason and authorized.
+          // Let rawDecision stand; survival gate and other gates still apply.
+          lockStatus = "LOCKED_IN";
+          logger.info(
+            { game: gs.game_id, reason: existingBLS!.late_change_reason, source: existingBLS!.late_change_source },
+            "MODULE_11: LOCKED_OUT overridden — named baseball exception authorized",
+          );
+        } else {
+          // No exception — block promotion.
+          decision    = "NO_CORE";
+          coreBlocker = "BOARD_LOCKED_POST_CUTOFF";
+          lockStatus  = "LOCKED_OUT";
+          logger.info({ game: gs.game_id }, "MODULE_11: CORE blocked — LOCKED_OUT, no exception");
+        }
+      } else if (persistedLockStatus === "LOCKED_IN") {
+        // Was CORE at lock; let all remaining gates run (still downgradable).
+        lockStatus = "LOCKED_IN";
+      } else {
+        // First publish at or after this game's cutoff — snapshot the current status.
+        isFirstLock     = true;
+        preLockDecision = rawDecision;
+        if (rawDecision === "CORE") {
+          lockStatus = "LOCKED_IN";
+          logger.info({ game: gs.game_id, cutoff: gameLockCutoff?.toISOString() }, "MODULE_11: Board lock fired — LOCKED_IN");
+        } else {
+          lockStatus = "LOCKED_OUT";
+          logger.info({ game: gs.game_id, cutoff: gameLockCutoff?.toISOString(), rawDecision, rawCoreBlocker }, "MODULE_11: Board lock fired — LOCKED_OUT");
+        }
+      }
+
+      // Mirror to SLATE_INPUT!AH.
+      lockStatusUpdates.set(gs.game_id, lockStatus);
+
+      // ── Stage BOARD_LOCK_STATE update for this game ──────────────────────────
+      {
+        const nowIso        = new Date(nowMs).toISOString();
+        const cutoffIso     = gameLockCutoff?.toISOString() ?? "";
+        const normalizedGame = normalizedGames?.find((g) => g.legacy_game_id === gs.game_id);
+        const scheduledFP   = normalizedGame?.scheduled_utc_time ?? "";
+        const lockedTs      = isFirstLock ? nowIso : (existingBLS?.locked_ts ?? "");
+
+        const newBLSRow: unknown[] = [
+          gs.date,                                                   // A: Date
+          gs.game_id,                                                // B: Game_ID
+          scheduledFP,                                               // C: Scheduled_First_Pitch
+          cutoffIso,                                                 // D: Lock_Cutoff_TS
+          lockStatus,                                                // E: Lock_Status
+          preLockDecision,                                           // F: Pre_Lock_Decision
+          lockedTs,                                                  // G: Locked_TS
+          existingBLS?.late_change_reason  ?? "",                    // H: Late_Change_Reason (operator-preserved)
+          existingBLS?.late_change_source  ?? "",                    // I: Late_Change_Source (operator-preserved)
+          existingBLS?.late_change_ts      ?? "",                    // J: Late_Change_TS (operator-preserved)
+          existingBLS?.late_promotion_authorized ? true : false,    // K: Late_Promotion_Authorized (operator-preserved)
+          nowIso,                                                    // L: Last_Updated_TS
+        ];
+
+        if (blsIndexByGameId.has(gs.game_id)) {
+          blsRowUpdates.set(blsIndexByGameId.get(gs.game_id)!, newBLSRow);
+        } else {
+          blsNewRows.push(newBLSRow);
+          // Register in the index so a second occurrence of the same game_id (doubleheader)
+          // doesn't create a second append entry — the second occurrence will update the first.
+          blsIndexByGameId.set(gs.game_id, blsDataRows.length + blsNewRows.length - 1);
+        }
+      }
+
       // ── Over survival gate ────────────────────────────────────────────────────
       // Every Over CORE candidate must pass a two-part component-decomposed stress
       // test before authorization. Park and weather cannot manufacture the thesis —
       // the Over must survive on baseball grounds alone.
-      let decision = rawDecision;
-      let coreBlocker = rawCoreBlocker;
 
       // Initialise all survival audit fields (populated for all OVERs with a line)
       let survivalBaseballOnly: number | null = null;
@@ -536,6 +747,7 @@ export async function extractOutputBoards(
         expected_roi:    roi,
         edge_strength:   edgeStrength,
         core_blocker:    coreBlocker,
+        lock_status:     lockStatus,
         side_edge:              sideEdge,
         side_direction:         sideDirection,
         side_decision:          sideDecision,
@@ -593,16 +805,17 @@ export async function extractOutputBoards(
         survivalFloorEdge ?? "",                      // AE: Survival_Floor_Edge
         survivalCheck,                                // AF: Survival_Check (PASS | FAIL | N_A)
         survivalFailureReason,                        // AG: Survival_Failure_Reason
+        lockStatus,                                   // AH: Lock_Status (PRE_LOCK | LOCKED_IN | LOCKED_OUT)
       ]);
     }
 
-    // ── Ensure SLATE_BOARD has 33 columns (A–AG) for step-5 + survival gate fields ──
-    await expandSheetColumns(workbookId, "SLATE_BOARD", 33).catch((err: unknown) => {
+    // ── Ensure SLATE_BOARD has 34 columns (A–AH) for lock_status field ──
+    await expandSheetColumns(workbookId, "SLATE_BOARD", 34).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not expand SLATE_BOARD columns — continuing");
     });
 
-    // Write step-5 derivative + survival gate headers (W–AG)
-    await writeRange(workbookId, "SLATE_BOARD!W1:AG1", [[
+    // Write step-5 derivative + survival gate + lock status headers (W–AH)
+    await writeRange(workbookId, "SLATE_BOARD!W1:AH1", [[
       "Side_Edge",
       "Side_Direction",
       "Side_Decision",
@@ -614,18 +827,71 @@ export async function extractOutputBoards(
       "Survival_Floor_Edge",
       "Survival_Check",
       "Survival_Failure_Reason",
+      "Lock_Status",
     ]]).catch((err: unknown) => {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write step-5/survival headers — continuing");
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write step-5/survival/lock headers — continuing");
     });
 
-    await clearRange(workbookId, "SLATE_BOARD!A2:AG100");
+    await clearRange(workbookId, "SLATE_BOARD!A2:AH100");
     if (sbRows.length > 0) {
-      await writeRange(workbookId, `SLATE_BOARD!A2:AG${1 + sbRows.length}`, sbRows);
+      await writeRange(workbookId, `SLATE_BOARD!A2:AH${1 + sbRows.length}`, sbRows);
     }
     logger.info(
       { rows: sbRows.length, core: output.core_count, noCore: output.no_core_count },
       "MODULE_11: SLATE_BOARD written",
     );
+
+    // ── Write BOARD_LOCK_STATE header (written every publish so it stays in sync) ──
+    await writeRange(workbookId, "BOARD_LOCK_STATE!A1:L1", [[
+      "Date", "Game_ID", "Scheduled_First_Pitch", "Lock_Cutoff_TS",
+      "Lock_Status", "Pre_Lock_Decision", "Locked_TS",
+      "Late_Change_Reason", "Late_Change_Source", "Late_Change_TS",
+      "Late_Promotion_Authorized", "Last_Updated_TS",
+    ]]).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write BOARD_LOCK_STATE headers — continuing");
+    });
+
+    // ── Write BOARD_LOCK_STATE — authoritative per-game lock records ──────────
+    // Apply in-place updates then append new rows; old-day rows stay untouched.
+    {
+      for (const [rowIdx, updatedRow] of blsRowUpdates) {
+        blsDataRows[rowIdx] = updatedRow;
+      }
+      const allBLSRows = [...blsDataRows, ...blsNewRows];
+      if (allBLSRows.length > 0) {
+        await writeRange(
+          workbookId,
+          `BOARD_LOCK_STATE!A2:L${1 + allBLSRows.length}`,
+          allBLSRows,
+        ).catch((err: unknown) => {
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err) },
+            "MODULE_11: Could not write BOARD_LOCK_STATE — continuing",
+          );
+        });
+        logger.info(
+          { updated: blsRowUpdates.size, appended: blsNewRows.length },
+          "MODULE_11: BOARD_LOCK_STATE written",
+        );
+      }
+    }
+
+    // ── Mirror Board_Lock_Status to SLATE_INPUT!AH (convenience copy) ────────
+    if (lockStatusUpdates.size > 0) {
+      const ahValues = slateInputGameIds.map((id) => [lockStatusUpdates.get(id) ?? "PRE_LOCK"]);
+      if (ahValues.length > 0) {
+        await writeRange(
+          workbookId,
+          `SLATE_INPUT!AH2:AH${1 + ahValues.length}`,
+          ahValues,
+        ).catch((err: unknown) => {
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err) },
+            "MODULE_11: Could not mirror Board_Lock_Status to SLATE_INPUT!AH — continuing",
+          );
+        });
+      }
+    }
 
     // ── Compute ACTIVE_BOARD_SNAPSHOT — CORE games only, 16 cols A–P ──
     const abRows: unknown[][] = [];

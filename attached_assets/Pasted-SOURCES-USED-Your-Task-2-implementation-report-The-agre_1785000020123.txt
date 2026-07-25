@@ -1,0 +1,113 @@
+SOURCES USED
+
+* Your Task 2 implementation report
+* The agreed board-lock specification from the July 24 postmortem
+
+REFRESH CHECK
+
+I have not inspected the source files or a newly published workbook. A clean TypeScript compile verifies syntax and types only.
+
+Task 2 is not complete
+
+Two central requirements were not implemented as specified.
+
+1. The lock is still global, not per-game
+
+Reported implementation:
+
+Computes the cutoff from the slate’s earliest scheduled_utc_time
+
+Required implementation:
+
+Each game’s lock time = that game’s first pitch − 120 minutes
+
+Using the earliest game locks the entire slate together. On a split slate, a 1:05 PM game could lock a 9:40 PM game before its lineup, roof, weather, and bullpen information are known.
+
+The lock calculation must be keyed by Game_ID:
+
+const gameLockTime =
+  new Date(game.scheduled_utc_time).getTime()
+  - BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH * 60 * 60 * 1000;
+
+Each game should independently transition from:
+
+* PRE_LOCK
+* to LOCKED_IN
+* or LOCKED_OUT
+
+2. The named baseball-reason exception is missing
+
+The specification allowed a locked-out game to be promoted only when a substantive new baseball input is documented and explicitly authorized.
+
+Required fields:
+
+* Late_Change_Reason
+* Late_Change_Source
+* Late_Change_TS
+* Late_Promotion_Authorized
+
+The current implementation appears to block every post-lock promotion. That is safer than unrestricted promotion, but it is not the agreed design.
+
+Examples that may justify a controlled exception:
+
+* starter scratch
+* corrected starter identity
+* confirmed opener/bulk deployment
+* materially changed confirmed lineup
+* roof status change
+* newly unavailable high-leverage bullpen arms
+
+Odds movement, line movement, rounding changes, or ordinary recalculation must never qualify.
+
+Persistence design
+
+Writing the status to SLATE_INPUT!AH does not violate the protected operator-owned O–W range, so it is technically safer than placing it inside those columns.
+
+However, the agreed design specified a dedicated BOARD_LOCK_STATE sheet because lock state is system governance state, not slate input.
+
+A dedicated table should contain one authoritative row per date and game:
+
+Field	Purpose
+Date	Slate date
+Game_ID	Stable game key
+Scheduled_First_Pitch	Time used for locking
+Lock_Cutoff_TS	Per-game cutoff
+Lock_Status	PRE_LOCK / LOCKED_IN / LOCKED_OUT
+Pre_Lock_Decision	Decision at lock
+Locked_TS	When lock was stamped
+Late_Change_Reason	Named baseball update
+Late_Change_Source	Source of update
+Late_Change_TS	Update time
+Late_Promotion_Authorized	Explicit exception
+Last_Updated_TS	Audit timestamp
+
+Using AH can remain as a visible mirror, but it should not be the sole authoritative state store.
+
+Additional edge cases requiring tests
+
+Before this passes:
+
+* A 1:05 PM game locks independently from a 9:40 PM game.
+* A postponed game receives a recalculated lock time.
+* A rescheduled first pitch does not inherit an obsolete lock.
+* Doubleheader games remain distinct by Game_ID.
+* A pipeline first run after the cutoff does not falsely claim a prior CORE existed unless a pre-lock snapshot was actually preserved.
+* LOCKED_OUT survives restarts and repeated publishes.
+* LOCKED_IN can be downgraded.
+* A locked-out game cannot promote from an odds or projection update.
+* A locked-out game can promote only with all late-change fields populated and authorization true.
+* The audit records the prior and new decisions.
+
+Status
+
+Requirement	Status
+Configurable two-hour window	Implemented
+Persistent status	Partially implemented
+Locked-out promotion prevention	Implemented
+Locked-in downgrade permission	Implemented
+Per-game locking	Not implemented
+Named baseball-reason exception	Not implemented
+Dedicated lock-state store	Not implemented
+Commissioning smoke tests	Not reported
+
+The current patch is a useful global emergency freeze, but it is not the commissioned per-game board lock.

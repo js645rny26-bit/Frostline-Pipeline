@@ -125,6 +125,14 @@ export const VALIDATION_RULES = {
   ],
 };
 
+/**
+ * Hours before the earliest first pitch of the slate at which the board locks.
+ * After the lock cutoff, no new CORE authorizations are issued for games that
+ * were not already CORE at the moment the lock fired.  Existing CORE picks may
+ * still be downgraded if a disqualifying signal arrives (starter scratch, etc.).
+ */
+export const BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH = 2.0;
+
 export function getTodayDateStr(): string {
   // Use America/New_York (ET) so the date matches the MLB schedule calendar.
   // UTC would roll to the next day after 20:00 ET, fetching tomorrow's games.

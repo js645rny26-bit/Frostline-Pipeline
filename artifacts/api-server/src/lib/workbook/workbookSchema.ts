@@ -18,8 +18,16 @@
  *      VEHICLE_LOG, VEHICLE_POSTMORTEM.
  *  v4 (2026-07-25): SLATE_BOARD AB column — Survival_Floor (Over stress-test floor).
  *      Park × weather combined multiplier capped at +1.5-run addition in MODULE_09.
+ *  v5 (2026-07-25): Board-lock gate — BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH constant;
+ *      SLATE_INPUT AH = Board_Lock_Status (PRE_LOCK | LOCKED_IN | LOCKED_OUT);
+ *      SLATE_BOARD AH = Lock_Status. After the lock cutoff (default 2 h before first pitch)
+ *      games not already CORE cannot be promoted by later numerical refreshes.
+ *  v6 (2026-07-25): Per-game board lock — each game locks independently before its own
+ *      first pitch.  BOARD_LOCK_STATE sheet added as authoritative governance store
+ *      (12 cols A–L) with operator Late_Change_Reason / Late_Promotion_Authorized fields
+ *      enabling controlled post-lock CORE exceptions for named baseball reasons only.
  */
-export const WORKBOOK_SCHEMA_VERSION = 4;
+export const WORKBOOK_SCHEMA_VERSION = 6;
 
 export interface ColumnDef {
   name: string;
@@ -349,6 +357,22 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Authoritative_Over_Odds", index: 25, type: "number", width: 170, readOnly: true, filledBy: "MODULE_10", description: "Over odds frozen at the same instant as Authoritative_Pregame_Total.", exampleValue: "-110" },
       { name: "Authoritative_Under_Odds", index: 26, type: "number", width: 175, readOnly: true, filledBy: "MODULE_10", description: "Under odds frozen at pregame lock time. Defaults to -110 when source does not publish separately.", exampleValue: "-110" },
       { name: "Pregame_Line_Locked_TS", index: 27, type: "string", width: 185, readOnly: true, filledBy: "MODULE_10", description: "ISO 8601 UTC timestamp when the pregame line was frozen. Null until lock occurs.", exampleValue: "2026-07-23T17:05:12.000Z" },
+      // ── Board-lock status (AH = 33) — pipeline-maintained, finalized by module11 ──
+      {
+        name: "Board_Lock_Status",
+        index: 33,
+        type: "string",
+        width: 140,
+        readOnly: true,
+        filledBy: "MODULE_11",
+        description:
+          "PRE_LOCK = board has not yet locked for this game (current time < cutoff). "
+          + "LOCKED_IN = game was already CORE when the board locked; stable but still downgradable by disqualifying signals. "
+          + "LOCKED_OUT = game was NOT CORE when the board locked; blocked from promotion by any later numerical refresh. "
+          + "Lock cutoff = earliest first pitch − BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH (default 2.0 h). "
+          + "Seeded PRE_LOCK by module10; finalized by module11 on the first publish at or after the cutoff.",
+        exampleValue: "LOCKED_OUT",
+      },
     ],
   },
 
@@ -467,6 +491,21 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
           + "Empty for PASS or N_A.",
         exampleValue: "ENVIRONMENT_DEPENDENT_OVER",
       },
+      // ── Board-lock status (AH = 33) ──
+      {
+        name: "Lock_Status",
+        index: 33,
+        type: "string",
+        width: 130,
+        readOnly: true,
+        filledBy: "MODULE_11",
+        description:
+          "PRE_LOCK = before the lock cutoff (board open). "
+          + "LOCKED_IN = game was already CORE when the board locked; operator can see it is stable. "
+          + "LOCKED_OUT = game was NOT CORE at lock time; blocked from future CORE promotion. "
+          + "Operator-visible signal: use this to distinguish stable picks from newly locked-out candidates.",
+        exampleValue: "LOCKED_OUT",
+      },
     ],
   },
 
@@ -492,6 +531,107 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Placed_At", index: 13, type: "date", width: 130, format: "mm/dd/yyyy hh:mm:ss", filledBy: "OPERATOR", exampleValue: "" },
       { name: "Result", index: 14, type: "currency", width: 100, format: "+$#,##0", filledBy: "OPERATOR", exampleValue: "" },
       { name: "Notes", index: 15, type: "string", width: 200, filledBy: "OPERATOR", exampleValue: "" },
+    ],
+  },
+
+  // ─── BOARD_LOCK_STATE — authoritative per-game board-lock governance ────────
+  {
+    name: "BOARD_LOCK_STATE",
+    description:
+      "Authoritative per-game board-lock governance. "
+      + "One row per game per slate day. "
+      + "Module 11 writes pipeline fields (A–G, L); operator edits H–K to grant a named baseball exception.",
+    section: "OUTPUT",
+    frozenRows: 1,
+    columns: [
+      {
+        name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy",
+        readOnly: true, filledBy: "MODULE_11", exampleValue: "07/25/2026",
+      },
+      {
+        name: "Game_ID", index: 1, type: "string", width: 170,
+        readOnly: true, filledBy: "MODULE_11", exampleValue: "2026/07/25-NYY-BOS",
+      },
+      {
+        name: "Scheduled_First_Pitch", index: 2, type: "string", width: 185,
+        readOnly: true, filledBy: "MODULE_11",
+        description: "ISO 8601 UTC scheduled game time from MLB Stats API. Used to compute Lock_Cutoff_TS.",
+        exampleValue: "2026-07-25T18:07:00Z",
+      },
+      {
+        name: "Lock_Cutoff_TS", index: 3, type: "string", width: 185,
+        readOnly: true, filledBy: "MODULE_11",
+        description:
+          "ISO 8601 UTC timestamp at which this game's board lock fires. "
+          + "= Scheduled_First_Pitch − BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH (default 2.0 h). "
+          + "Blank when Scheduled_First_Pitch is unavailable.",
+        exampleValue: "2026-07-25T16:07:00Z",
+      },
+      {
+        name: "Lock_Status", index: 4, type: "string", width: 130,
+        readOnly: true, filledBy: "MODULE_11",
+        description:
+          "PRE_LOCK = current time < Lock_Cutoff_TS; game is open for new CORE decisions. "
+          + "LOCKED_IN = game was already CORE at lock time; stable but still downgradable. "
+          + "LOCKED_OUT = game was NOT CORE at lock; blocked from future promotion "
+          + "unless Late_Promotion_Authorized = TRUE and Late_Change_Reason is non-blank.",
+        exampleValue: "LOCKED_OUT",
+      },
+      {
+        name: "Pre_Lock_Decision", index: 5, type: "string", width: 150,
+        readOnly: true, filledBy: "MODULE_11",
+        description:
+          "The game's CORE/NO_CORE/PENDING decision at the moment the board lock first fired. "
+          + "Set once on the first publish at or after Lock_Cutoff_TS; never overwritten afterwards.",
+        exampleValue: "NO_CORE",
+      },
+      {
+        name: "Locked_TS", index: 6, type: "string", width: 185,
+        readOnly: true, filledBy: "MODULE_11",
+        description: "ISO 8601 UTC timestamp of the first publish at or after Lock_Cutoff_TS. Blank while PRE_LOCK.",
+        exampleValue: "2026-07-25T16:09:43.000Z",
+      },
+      // ── Operator late-change fields (H–K) — must be filled to grant an exception ──
+      {
+        name: "Late_Change_Reason", index: 7, type: "string", width: 280,
+        filledBy: "OPERATOR",
+        description:
+          "Named baseball reason for a post-lock CORE exception. "
+          + "Must describe a substantive new baseball input: starter scratch, confirmed opener/bulk, "
+          + "corrected starter identity, materially changed confirmed lineup, roof status change, or "
+          + "unavailable high-leverage bullpen arms. "
+          + "Odds movement, line movement, rounding, or ordinary recalculation do NOT qualify. "
+          + "Must be non-blank for Late_Promotion_Authorized to have effect.",
+        exampleValue: "Starter scratch — Cole replaced by Cortes (unofficial)",
+      },
+      {
+        name: "Late_Change_Source", index: 8, type: "string", width: 200,
+        filledBy: "OPERATOR",
+        description: "Source of the late change (e.g. 'beat reporter @JonHeyman', 'team announcement', 'roster transaction wire').",
+        exampleValue: "team announcement",
+      },
+      {
+        name: "Late_Change_TS", index: 9, type: "string", width: 185,
+        filledBy: "OPERATOR",
+        description: "ISO 8601 UTC timestamp when the late change was recorded by the operator.",
+        exampleValue: "2026-07-25T18:42:00Z",
+      },
+      {
+        name: "Late_Promotion_Authorized", index: 10, type: "string", width: 185,
+        filledBy: "OPERATOR",
+        description:
+          "Set to TRUE to authorize a post-lock CORE promotion for this game. "
+          + "Effective only when Late_Change_Reason is also non-blank. "
+          + "When TRUE + reason present: LOCKED_OUT is overridden and rawDecision is used; "
+          + "all other gates (survival, eligibility) still apply.",
+        exampleValue: "FALSE",
+      },
+      {
+        name: "Last_Updated_TS", index: 11, type: "string", width: 185,
+        readOnly: true, filledBy: "MODULE_11",
+        description: "ISO 8601 UTC timestamp of the most recent module11 write to this row.",
+        exampleValue: "2026-07-25T18:11:02.000Z",
+      },
     ],
   },
 
