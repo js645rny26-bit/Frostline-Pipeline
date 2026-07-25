@@ -1,0 +1,84 @@
+SOURCES USED
+
+* Your Task 10 implementation report
+* The frozen monotonicity specification
+* The latest full inspection of the canonical workbook, where MONOTONICITY was not yet deployed
+
+REFRESH CHECK
+
+I have not inspected the revised source code or republished workbook directly. The last verified live master had no MONOTONICITY tab, so the expected initial state after this deployment is CORE disabled pending calibration.
+
+Task 10 assessment
+
+The fail-closed architecture is correct, and the operator visibility is useful. Three governance defects need one consolidated correction before this is complete.
+
+1. A verdict cannot be trusted without freshness and version binding
+
+Reading only the OVERALL VERDICT row allows an old PASS to authorize CORE after the model, thresholds, schema, or prediction logic changes.
+
+CORE should be enabled only when all are true:
+
+Overall verdict = PASS
+Report timestamp is present
+Report schema/model version matches the current pipeline version
+The report was generated from the canonical prediction-history definition
+
+Any missing or mismatched field must return a disabled state such as:
+
+CORE_DISABLED_MONOTONICITY_STALE
+
+This is blocking. Otherwise a historical PASS could silently authorize a materially different engine.
+
+2. The sentinel override is currently too persistent
+
+This condition is insufficient:
+
+Game_ID = MONOTONICITY_GATE_OVERRIDE
+Late_Promotion_Authorized = TRUE
+Late_Change_Reason is nonblank
+
+Without slate-date and timestamp validation, one override row could bypass the gate indefinitely.
+
+The override must require:
+
+* Date matches the active slate date
+* authorization is TRUE
+* reason is nonblank
+* source or authorizer is nonblank
+* timestamp is valid
+* automatic expiry after that slate
+
+The sentinel must also be explicitly excluded from:
+
+* Locked In / Locked Out / Pre-Lock counts
+* per-game loops
+* historical vehicle joins
+* board reconstruction
+* ordinary BOARD_LOCK_STATE deduplication
+
+A dedicated control-state sheet would be cleaner, but moving it is not necessary for this correction if the sentinel is strictly isolated.
+
+3. The blocker must report the actual condition
+
+A missing verdict should not produce:
+
+CORE_DISABLED_MONOTONICITY_FAIL
+
+Use distinct states:
+
+FAIL
+→ CORE_DISABLED_MONOTONICITY_FAIL
+INSUFFICIENT_SAMPLE
+→ CORE_DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE
+Missing sheet, row, or verdict
+→ CORE_DISABLED_MONOTONICITY_NOT_COMPUTED
+Stale or version-mismatched report
+→ CORE_DISABLED_MONOTONICITY_STALE
+
+The API and UI should surface the same normalized reason rather than independently interpreting raw sheet values.
+
+Acceptance status
+
+Core design accepted. Task 10 remains conditionally incomplete pending one targeted governance correction.
+
+No additional feature work, endpoint expansion, follow-up-task generation, or model recalibration belongs in that pass.

@@ -5,7 +5,7 @@ import { useGetPipelineSlate, getGetPipelineSlateQueryKey } from "@workspace/api
 import { GameCard } from "@/components/game-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle, CheckCircle2, Info, XCircle, Lock, LockOpen, Timer } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, XCircle, Lock, LockOpen, Timer, ShieldOff, ShieldAlert } from "lucide-react";
 import { useBoardStatus, buildBoardStatusMap } from "@/hooks/use-board-status";
 
 export default function SlatePage() {
@@ -50,6 +50,45 @@ export default function SlatePage() {
             <DatePicker date={date} onDateChange={setDate} />
           </div>
         </div>
+
+        {/* ── CORE Authorization Status Banner ── */}
+        {boardStatus && boardStatus.core_auth_status !== "ENABLED" && (() => {
+          const status = boardStatus.core_auth_status;
+          const title =
+            status === "DISABLED_MONOTONICITY_FAIL"
+              ? "CORE Authorization Disabled — Monotonicity FAIL"
+              : status === "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE"
+              ? "CORE Authorization Disabled — Insufficient Sample"
+              : status === "DISABLED_MONOTONICITY_STALE"
+              ? "CORE Authorization Disabled — Stale Report"
+              : "CORE Authorization Disabled — Verdict Not Yet Computed";
+          const body =
+            status === "DISABLED_MONOTONICITY_FAIL"
+              ? "The edge-tier monotonicity analysis failed: higher edge tiers do not reliably outperform lower ones. All CORE picks are blocked this session. Run /pipeline/regression?write_sheets=true to recheck, or add a MONOTONICITY_GATE_OVERRIDE sentinel row in BOARD_LOCK_STATE to override."
+              : status === "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE"
+              ? "The monotonicity report does not yet have enough data per tier (< 75 qualifying games in at least one bucket). Accumulate more history and re-run /pipeline/regression?write_sheets=true. All CORE picks are blocked until the sample is sufficient."
+              : status === "DISABLED_MONOTONICITY_STALE"
+              ? "The most recent monotonicity report is older than 24 hours (or has no timestamp). Re-run /pipeline/regression?write_sheets=true to refresh it. All CORE picks are blocked until a fresh verdict is available."
+              : "The monotonicity verdict has not been computed yet. Run /pipeline/regression?write_sheets=true to produce it. All CORE picks are blocked until the verdict is available.";
+          return (
+            <div className="flex items-start gap-3 px-4 py-3 rounded-md border border-destructive/40 bg-destructive/10 text-destructive text-sm">
+              <ShieldOff className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-semibold">{title}</p>
+                <p className="text-destructive/80">{body}</p>
+              </div>
+            </div>
+          );
+        })()}
+
+        {boardStatus?.monotonicity_override_active && (
+          <div className="flex items-center gap-3 px-4 py-3 rounded-md border border-warning/40 bg-warning/10 text-warning text-sm">
+            <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+            <span>
+              <strong>Monotonicity gate overridden</strong> — operator exception active for today's slate. CORE authorization enabled despite verdict.
+            </span>
+          </div>
+        )}
 
         {/* ── Board Lock Status Banner ── */}
         {showApproachingBanner && boardStatus?.next_upcoming_cutoff_ts && (

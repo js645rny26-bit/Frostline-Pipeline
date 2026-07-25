@@ -399,14 +399,90 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
     typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID;
 
   try {
-    const [blsData, sbData] = await Promise.all([
+    const [blsData, sbData, monoData] = await Promise.all([
       readRange(wbId, "BOARD_LOCK_STATE!A:L").catch(() => ({
         values: [] as unknown[][],
       })),
       readRange(wbId, "SLATE_BOARD!A:AH").catch(() => ({
         values: [] as unknown[][],
       })),
+      readRange(wbId, "MONOTONICITY!A:O").catch(() => ({
+        values: [] as unknown[][],
+      })),
     ]);
+
+    // ── Read MONOTONICITY overall verdict + Report_TS ──
+    const MONOTONICITY_STALE_HOURS = 24;
+    let monotonicityVerdict: "PASS" | "FAIL" | "INSUFFICIENT_SAMPLE" | null = null;
+    let monotonicityReportTs: string | null = null;
+    for (const row of ((monoData.values ?? []) as string[][])) {
+      if (
+        String(row[0] ?? "").trim().toUpperCase() === "OVERALL" &&
+        String(row[1] ?? "").trim().toUpperCase() === "VERDICT"
+      ) {
+        const v = String(row[2] ?? "").trim().toUpperCase();
+        monotonicityReportTs = String(row[14] ?? "").trim() || null; // col O = Report_TS
+        if (v === "PASS" || v === "FAIL" || v === "INSUFFICIENT_SAMPLE") {
+          monotonicityVerdict = v as "PASS" | "FAIL" | "INSUFFICIENT_SAMPLE";
+        }
+        break;
+      }
+    }
+
+    // Staleness: Report_TS absent, unparseable, or > 24 h old → STALE.
+    const isMonotonicityStale = (() => {
+      if (!monotonicityReportTs) return true;
+      const ts = new Date(monotonicityReportTs).getTime();
+      if (isNaN(ts)) return true;
+      return (Date.now() - ts) / (1000 * 60 * 60) > MONOTONICITY_STALE_HOURS;
+    })();
+
+    // ── Check BOARD_LOCK_STATE for operator monotonicity override sentinel ──
+    // Validity requirements: authorized=TRUE, reason non-blank, source non-blank,
+    // timestamp parseable, and Date matches the active slate date (auto-expires).
+    const MONOTONICITY_GATE_OVERRIDE_ID = "MONOTONICITY_GATE_OVERRIDE";
+    let monotonicityOverrideActive = false;
+    const blsAllRowsForMono = ((blsData.values ?? []) as unknown[][]).slice(1);
+    for (const row of blsAllRowsForMono) {
+      if (String(row[1] ?? "").trim() === MONOTONICITY_GATE_OVERRIDE_ID) {
+        const overrideDate  = String(row[0] ?? "").trim();
+        const reason        = String(row[7] ?? "").trim();
+        const source        = String(row[8] ?? "").trim();
+        const changeTsStr   = String(row[9] ?? "").trim();
+        const authorized    = String(row[10] ?? "").trim().toUpperCase() === "TRUE";
+        const tsValid       = changeTsStr !== "" && !isNaN(new Date(changeTsStr).getTime());
+        if (
+          authorized &&
+          reason !== "" &&
+          source !== "" &&
+          tsValid &&
+          overrideDate === date   // auto-expires: must match the active slate date
+        ) {
+          monotonicityOverrideActive = true;
+        }
+        break;
+      }
+    }
+
+    // Determine core_auth_status from verdict, freshness, and override
+    type CoreAuthStatus =
+      | "ENABLED"
+      | "DISABLED_MONOTONICITY_FAIL"
+      | "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE"
+      | "DISABLED_MONOTONICITY_NOT_COMPUTED"
+      | "DISABLED_MONOTONICITY_STALE";
+    let coreAuthStatus: CoreAuthStatus;
+    if (monotonicityOverrideActive) {
+      coreAuthStatus = "ENABLED";
+    } else if (monotonicityVerdict === "PASS") {
+      coreAuthStatus = isMonotonicityStale ? "DISABLED_MONOTONICITY_STALE" : "ENABLED";
+    } else if (monotonicityVerdict === "FAIL") {
+      coreAuthStatus = "DISABLED_MONOTONICITY_FAIL";
+    } else if (monotonicityVerdict === "INSUFFICIENT_SAMPLE") {
+      coreAuthStatus = "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE";
+    } else {
+      coreAuthStatus = "DISABLED_MONOTONICITY_NOT_COMPUTED";
+    }
 
     // BOARD_LOCK_STATE cols (0-based): A=Date, B=Game_ID, C=Scheduled_First_Pitch,
     // D=Lock_Cutoff_TS, E=Lock_Status, F=Pre_Lock_Decision, G=Locked_TS
@@ -457,7 +533,9 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
 
     for (const row of blsForDate) {
       const gameId = String(row[1] ?? "").trim();
-      if (!gameId) continue;
+      // Explicitly skip the monotonicity override sentinel — it is a control-state
+      // row, not a real game, and must never appear in counts or the games array.
+      if (!gameId || gameId === MONOTONICITY_GATE_OVERRIDE_ID) continue;
       const lockCutoffTs = String(row[3] ?? "").trim();
       const rawStatus = String(row[4] ?? "").trim();
       // Pass through all known statuses; unrecognised values default to PRE_LOCK.
@@ -511,6 +589,8 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
         pre_lock:               preLockCount,
         lock_time_unavailable:  lockTimeUnavailableCount,
         lock_data_unavailable:  lockDataUnavailableCount,
+        core_auth_status:       coreAuthStatus,
+        monotonicity_verdict:   monotonicityVerdict,
       },
       "BOARD_STATUS: read complete",
     );
@@ -526,6 +606,16 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
       pre_lock_count:               preLockCount,
       lock_time_unavailable_count:  lockTimeUnavailableCount,
       lock_data_unavailable_count:  lockDataUnavailableCount,
+      /**
+       * ENABLED                   — monotonicity PASS; CORE picks authorized normally.
+       * DISABLED_MONOTONICITY_FAIL — verdict is FAIL; all CORE blocked.
+       * DISABLED_NOT_YET_COMPUTED  — no verdict yet; CORE blocked until regression runs.
+       */
+      core_auth_status:             coreAuthStatus,
+      /** Raw OVERALL verdict from the MONOTONICITY sheet. Null when sheet absent. */
+      monotonicity_verdict:         monotonicityVerdict,
+      /** True when the operator sentinel row in BOARD_LOCK_STATE bypasses the gate. */
+      monotonicity_override_active: monotonicityOverrideActive,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

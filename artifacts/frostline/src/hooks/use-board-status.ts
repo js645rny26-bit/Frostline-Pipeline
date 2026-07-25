@@ -32,6 +32,23 @@ export interface BoardStatusResult {
   lock_time_unavailable_count: number;
   /** Entire slate has ≥ 50 % games with no time — all new CORE promotions blocked. */
   lock_data_unavailable_count: number;
+  /**
+   * ENABLED                                   — verdict is PASS and report is fresh; CORE authorized normally.
+   * DISABLED_MONOTONICITY_FAIL                — verdict is FAIL; all CORE picks blocked.
+   * DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE — sample too small; CORE blocked until more history.
+   * DISABLED_MONOTONICITY_NOT_COMPUTED        — no OVERALL VERDICT row in sheet yet.
+   * DISABLED_MONOTONICITY_STALE               — Report_TS absent or > 24 h old; re-run regression.
+   */
+  core_auth_status:
+    | "ENABLED"
+    | "DISABLED_MONOTONICITY_FAIL"
+    | "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE"
+    | "DISABLED_MONOTONICITY_NOT_COMPUTED"
+    | "DISABLED_MONOTONICITY_STALE";
+  /** Raw OVERALL verdict from the MONOTONICITY sheet. Null when sheet absent. */
+  monotonicity_verdict: "PASS" | "FAIL" | "INSUFFICIENT_SAMPLE" | null;
+  /** True when the operator sentinel row in BOARD_LOCK_STATE passes all validity checks. */
+  monotonicity_override_active: boolean;
 }
 
 async function fetchBoardStatus(date: string): Promise<BoardStatusResult> {

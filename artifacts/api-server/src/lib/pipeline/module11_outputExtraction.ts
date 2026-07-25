@@ -98,7 +98,90 @@ export interface Module11Result {
   active_board_snapshot: ActiveBoardEntry[];
   core_count: number;
   no_core_count: number;
+  /**
+   * ENABLED                                   — verdict is PASS and report is fresh; CORE proceeds normally.
+   * DISABLED_MONOTONICITY_FAIL                — verdict is FAIL; all CORE picks blocked this publish.
+   * DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE — verdict is INSUFFICIENT_SAMPLE; CORE blocked until more data.
+   * DISABLED_MONOTONICITY_NOT_COMPUTED        — no OVERALL VERDICT row in the sheet yet.
+   * DISABLED_MONOTONICITY_STALE               — verdict present but Report_TS is absent or > 24 h old.
+   */
+  core_auth_status:
+    | "ENABLED"
+    | "DISABLED_MONOTONICITY_FAIL"
+    | "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE"
+    | "DISABLED_MONOTONICITY_NOT_COMPUTED"
+    | "DISABLED_MONOTONICITY_STALE";
+  /** Raw value from the MONOTONICITY sheet's OVERALL VERDICT row. Null if sheet absent/unreadable. */
+  monotonicity_verdict: "PASS" | "FAIL" | "INSUFFICIENT_SAMPLE" | null;
+  /**
+   * True when the operator sentinel row in BOARD_LOCK_STATE (Game_ID = "MONOTONICITY_GATE_OVERRIDE")
+   * passes all validity checks: authorized=TRUE, reason non-blank, source non-blank, timestamp
+   * parseable, and Date matches the active slate date (auto-expires after that slate).
+   */
+  monotonicity_override_active: boolean;
   error?: string;
+}
+
+// ── MONOTONICITY sheet column indices (0-based) ───────────────────────────────
+// A=Direction, B=Analysis_Type, C=Tier (= verdict for SUMMARY/VERDICT rows)
+// O=Report_TS (index 14)
+const MONO_DIRECTION       = 0;
+const MONO_ANALYSIS_TYPE   = 1;
+const MONO_TIER            = 2;
+const MONO_REPORT_TS       = 14;
+
+/** Sentinel Game_ID written by the operator into BOARD_LOCK_STATE to bypass the monotonicity gate. */
+const MONOTONICITY_GATE_OVERRIDE_ID = "MONOTONICITY_GATE_OVERRIDE";
+
+/** A verdict older than this many hours is treated as stale and blocks CORE. */
+const MONOTONICITY_STALE_HOURS = 24;
+
+interface MonotonicityVerdictInfo {
+  verdict: "PASS" | "FAIL" | "INSUFFICIENT_SAMPLE" | null;
+  /** ISO UTC timestamp from the OVERALL VERDICT row's Report_TS column. Null if absent. */
+  reportTs: string | null;
+}
+
+/**
+ * Read the OVERALL VERDICT row from the MONOTONICITY sheet.
+ * Returns { verdict: null, reportTs: null } if the sheet is absent, unreadable,
+ * or has no OVERALL VERDICT row yet.
+ */
+async function readMonotonicityVerdict(wbId: string): Promise<MonotonicityVerdictInfo> {
+  try {
+    const resp = await readRange(wbId, "MONOTONICITY!A:O");
+    const rows = (resp.values ?? []) as string[][];
+    for (const row of rows) {
+      if (
+        parseStr(row[MONO_DIRECTION]).toUpperCase()     === "OVERALL" &&
+        parseStr(row[MONO_ANALYSIS_TYPE]).toUpperCase() === "VERDICT"
+      ) {
+        const v        = parseStr(row[MONO_TIER]).toUpperCase();
+        const reportTs = parseStr(row[MONO_REPORT_TS]) || null;
+        if (v === "PASS" || v === "FAIL" || v === "INSUFFICIENT_SAMPLE") {
+          return { verdict: v as "PASS" | "FAIL" | "INSUFFICIENT_SAMPLE", reportTs };
+        }
+        // Row found but verdict cell blank — treat as not computed.
+        return { verdict: null, reportTs };
+      }
+    }
+    return { verdict: null, reportTs: null };
+  } catch {
+    return { verdict: null, reportTs: null };
+  }
+}
+
+/**
+ * Returns true when the Report_TS is absent, unparseable, or older than
+ * MONOTONICITY_STALE_HOURS.  A stale report blocks CORE even when the
+ * verdict is PASS — the model, thresholds, or prediction logic may have
+ * changed since the report was generated.
+ */
+function isMonotonicityReportStale(reportTs: string | null): boolean {
+  if (!reportTs) return true;
+  const ts = new Date(reportTs).getTime();
+  if (isNaN(ts)) return true;
+  return (Date.now() - ts) / (1000 * 60 * 60) > MONOTONICITY_STALE_HOURS;
 }
 
 // SLATE_INPUT column indices (0-based):
@@ -488,6 +571,9 @@ export async function extractOutputBoards(
     active_board_snapshot: [],
     core_count: 0,
     no_core_count: 0,
+    core_auth_status: "ENABLED",
+    monotonicity_verdict: null,
+    monotonicity_override_active: false,
   };
 
   try {
@@ -497,12 +583,12 @@ export async function extractOutputBoards(
     const gameLockCutoffResult = buildGameLockCutoffs(normalizedGames);
     const { cutoffs: gameLockCutoffs, missingGameIds: lockTimeMissingIds, lockDataStatus } = gameLockCutoffResult;
 
-    // ── Read SLATE_INPUT and BOARD_LOCK_STATE concurrently ──
-    // BOARD_LOCK_STATE may not exist on first publish after the schema update — treat
-    // a 400 / INVALID_ARGUMENT (sheet missing) as an empty result so we can create it.
-    const [slateInputData, blsData] = await Promise.all([
+    // ── Read SLATE_INPUT, BOARD_LOCK_STATE, and MONOTONICITY concurrently ──
+    // BOARD_LOCK_STATE / MONOTONICITY may not exist yet — treat errors as empty.
+    const [slateInputData, blsData, verdictInfo] = await Promise.all([
       readRange(workbookId, "SLATE_INPUT!A:AH"),
       readRange(workbookId, "BOARD_LOCK_STATE!A:L").catch(() => ({ values: [] as unknown[][] })),
+      readMonotonicityVerdict(workbookId),
     ]);
     const slateInputRows = (slateInputData.values ?? []).slice(1);
 
@@ -521,6 +607,81 @@ export async function extractOutputBoards(
         blsParsedMap.set(gid, parseBLSRow(row));
       }
     });
+
+    // ── Monotonicity gate — determine CORE authorization status ──────────────────
+    // The gate reads the OVERALL VERDICT row from the MONOTONICITY sheet (written by
+    // module 15).  CORE is enabled only when the verdict is PASS *and* the report is
+    // fresh (Report_TS present and < 24 h old).
+    //
+    // Operator override: a BOARD_LOCK_STATE sentinel row with Game_ID =
+    // "MONOTONICITY_GATE_OVERRIDE" bypasses the gate when ALL of the following are true:
+    //   • Late_Promotion_Authorized = TRUE
+    //   • Late_Change_Reason is non-blank (named reason)
+    //   • Late_Change_Source is non-blank (named authorizer)
+    //   • Late_Change_TS is present and parseable
+    //   • Date column matches the active slate date (auto-expires after that slate)
+    // Module 11 reads this row but never writes it (operator-managed).
+    const slateDate = gameSummary[0]?.date ?? "";
+    const monotonicityOverrideBLS = blsParsedMap.get(MONOTONICITY_GATE_OVERRIDE_ID);
+    const monotonicityOverrideActive = (() => {
+      const rec = monotonicityOverrideBLS;
+      if (!rec) return false;
+      if (!rec.late_promotion_authorized) return false;
+      if (!rec.late_change_reason.trim()) return false;
+      if (!rec.late_change_source.trim()) return false;   // authorizer required
+      if (!rec.late_change_ts.trim()) return false;        // timestamp required
+      // Date must match the active slate date (auto-expiry after that slate)
+      if (slateDate && rec.date.trim() !== slateDate) return false;
+      // Timestamp must be parseable
+      if (isNaN(new Date(rec.late_change_ts).getTime())) return false;
+      return true;
+    })();
+
+    const { verdict: monotonicityVerdict, reportTs: monotonicityReportTs } = verdictInfo;
+
+    let coreAuthStatus: Module11Result["core_auth_status"];
+    if (monotonicityOverrideActive) {
+      coreAuthStatus = "ENABLED";
+      logger.warn(
+        { reason: monotonicityOverrideBLS!.late_change_reason, source: monotonicityOverrideBLS!.late_change_source, date: monotonicityOverrideBLS!.date },
+        "MODULE_11: Monotonicity gate OVERRIDDEN by operator — CORE authorization enabled despite verdict",
+      );
+    } else if (monotonicityVerdict === "PASS") {
+      if (isMonotonicityReportStale(monotonicityReportTs)) {
+        coreAuthStatus = "DISABLED_MONOTONICITY_STALE";
+        logger.warn(
+          { reportTs: monotonicityReportTs },
+          "MODULE_11: CORE authorization DISABLED — monotonicity report is stale (> 24 h); re-run /pipeline/regression?write_sheets=true",
+        );
+      } else {
+        coreAuthStatus = "ENABLED";
+      }
+    } else if (monotonicityVerdict === "FAIL") {
+      coreAuthStatus = "DISABLED_MONOTONICITY_FAIL";
+      logger.warn(
+        { verdict: monotonicityVerdict, reportTs: monotonicityReportTs },
+        "MODULE_11: CORE authorization DISABLED — monotonicity verdict is FAIL",
+      );
+    } else if (monotonicityVerdict === "INSUFFICIENT_SAMPLE") {
+      coreAuthStatus = "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE";
+      logger.warn(
+        { verdict: monotonicityVerdict, reportTs: monotonicityReportTs },
+        "MODULE_11: CORE authorization DISABLED — monotonicity sample too small; accumulate more history",
+      );
+    } else {
+      // null — sheet absent, row missing, or verdict cell blank
+      coreAuthStatus = "DISABLED_MONOTONICITY_NOT_COMPUTED";
+      logger.warn(
+        { verdict: monotonicityVerdict },
+        "MODULE_11: CORE authorization DISABLED — no monotonicity verdict computed; run /pipeline/regression?write_sheets=true",
+      );
+    }
+
+    output.monotonicity_verdict         = monotonicityVerdict;
+    output.core_auth_status             = coreAuthStatus;
+    output.monotonicity_override_active = monotonicityOverrideActive;
+
+    const coreAuthEnabled = coreAuthStatus === "ENABLED";
 
     const marketMap = new Map<string, {
       vehicle: string;
@@ -633,6 +794,15 @@ export async function extractOutputBoards(
       // LOCK_DATA_UNAVAILABLE and all new CORE promotions are suppressed.
       let decision = rawDecision;
       let coreBlocker = rawCoreBlocker;
+
+      // ── Monotonicity gate (slate-wide) ────────────────────────────────────────
+      // Blocks any new CORE authorization when the edge formula is uncalibrated.
+      // The survival gate and other per-game downgrade paths still run below.
+      // The blocker string mirrors core_auth_status so callers see the exact reason.
+      if (!coreAuthEnabled && decision === "CORE") {
+        decision    = "NO_CORE";
+        coreBlocker = coreAuthStatus; // e.g. DISABLED_MONOTONICITY_FAIL | _STALE | _NOT_COMPUTED | _INSUFFICIENT_SAMPLE
+      }
 
       const gameLockCutoff       = gameLockCutoffs.get(gs.game_id) ?? null;
       const gameLocked           = gameLockCutoff !== null && nowMs >= gameLockCutoff.getTime();
