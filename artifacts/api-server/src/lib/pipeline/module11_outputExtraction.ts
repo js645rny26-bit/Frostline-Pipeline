@@ -908,15 +908,78 @@ export async function extractOutputBoards(
         coreBlocker = coreAuthStatus; // e.g. DISABLED_MONOTONICITY_FAIL | _STALE | _NOT_COMPUTED | _INSUFFICIENT_SAMPLE
       }
 
-      const gameLockCutoff       = gameLockCutoffs.get(gs.game_id) ?? null;
-      const gameLocked           = gameLockCutoff !== null && nowMs >= gameLockCutoff.getTime();
-      const existingBLS          = blsParsedMap.get(gs.game_id);
-      const persistedLockStatus  = existingBLS?.lock_status ?? "PRE_LOCK";
-      const lateReasonPresent    = (existingBLS?.late_change_reason?.trim() ?? "") !== "";
-      const latePromotionAuth    = existingBLS?.late_promotion_authorized === true && lateReasonPresent;
+      const gameLockCutoff  = gameLockCutoffs.get(gs.game_id) ?? null;
+      const gameLocked      = gameLockCutoff !== null && nowMs >= gameLockCutoff.getTime();
+      const existingBLS     = blsParsedMap.get(gs.game_id);
+
+      // Hoist normalized-game lookup so it is available for both reschedule
+      // detection below and BLS staging at the end of this block.
+      const normalizedGame     = normalizedGames?.find((g) => g.legacy_game_id === gs.game_id);
+      const currentScheduledFP = normalizedGame?.scheduled_utc_time ?? "";
+      const storedScheduledFP  = existingBLS?.scheduled_first_pitch ?? "";
+
+      // ── Reschedule / postpone detection (#15, #20) ──────────────────────────
+      // When the recorded Scheduled_First_Pitch in BOARD_LOCK_STATE differs from
+      // the game's current scheduled_utc_time, the stored lock cutoff was computed
+      // from a stale time.  Any persisted lock status is unreliable and must be
+      // discarded so we replay the lock under the new cutoff.
+      //
+      // Three cases:
+      //   • Game is now postponed (was timed, now has no time):
+      //       handled by the lockTimeMissingIds branch — we warn and clear the
+      //       pre_lock_decision because the lineup / matchup will change.
+      //   • Game rescheduled to a later time (new cutoff not yet reached):
+      //       treat as PRE_LOCK; discard old pre_lock_decision (it reflects a
+      //       different decision state).
+      //   • Game rescheduled to an earlier time (new cutoff already past):
+      //       treat as first-lock-fired-late → LOCKED_OUT /
+      //       preLockDecision = "UNKNOWN_RESCHEDULED".
+      //
+      // Operator late_change fields are preserved in all cases so any previously
+      // issued exception remains visible in the UI.
+      //
+      // A "reschedule" requires:
+      //   • an existing BLS record (we have a prior time on record), AND
+      //   • the stored FP was non-blank (a real timestamp, not an empty placeholder), AND
+      //   • the stored FP differs from the current FP, AND
+      //   • the game still has a current FP (postpones are handled separately).
+      const isRescheduled =
+        existingBLS !== undefined &&
+        storedScheduledFP !== "" &&
+        storedScheduledFP !== currentScheduledFP &&
+        !lockTimeMissingIds.has(gs.game_id);
+
+      // effectiveBLS: the BLS record used for state-machine decisions.
+      // For rescheduled games, we clear lock_status / pre_lock_decision / locked_ts
+      // so the state machine replays the lock under the new cutoff.
+      // For all other games, effectiveBLS === existingBLS.
+      const effectiveBLS = isRescheduled
+        ? {
+            ...existingBLS!,
+            lock_status:       "PRE_LOCK" as const,
+            pre_lock_decision: "",   // stale — will be re-captured at new lock
+            locked_ts:         "",   // reset — new lock event will set this
+          }
+        : existingBLS;
+
+      if (isRescheduled) {
+        logger.warn(
+          {
+            game:       gs.game_id,
+            storedFP:   storedScheduledFP,
+            currentFP:  currentScheduledFP,
+            storedStatus: existingBLS!.lock_status,
+          },
+          "MODULE_11: Game first-pitch time changed — discarding stale lock state and replaying under new cutoff",
+        );
+      }
+
+      const persistedLockStatus = effectiveBLS?.lock_status ?? "PRE_LOCK";
+      const lateReasonPresent   = (effectiveBLS?.late_change_reason?.trim() ?? "") !== "";
+      const latePromotionAuth   = effectiveBLS?.late_promotion_authorized === true && lateReasonPresent;
       let lockStatus: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT" | "LOCK_TIME_UNAVAILABLE" | "LOCK_DATA_UNAVAILABLE";
       let isFirstLock = false;
-      let preLockDecision = existingBLS?.pre_lock_decision ?? "";
+      let preLockDecision = effectiveBLS?.pre_lock_decision ?? "";
 
       if (lockDataStatus === "UNAVAILABLE") {
         // ≥ 50 % of slate games have no scheduled time — entire slate lock suppressed.
@@ -931,6 +994,20 @@ export async function extractOutputBoards(
         // This specific game has no scheduled time — cannot establish a lock window.
         // Block new CORE promotion; downgrade gates still apply after this block.
         lockStatus = "LOCK_TIME_UNAVAILABLE";
+        // If the game previously had a time and was locked, this is a postponement.
+        // The pre_lock_decision is stale — lineup / pitching will change when the
+        // game is rescheduled, so we must not carry the old decision forward.
+        if (existingBLS && storedScheduledFP !== "" && existingBLS.lock_status !== "PRE_LOCK") {
+          preLockDecision = "";   // cleared — game postponed after lock (#20)
+          logger.warn(
+            {
+              game:         gs.game_id,
+              previousFP:   storedScheduledFP,
+              previousStatus: existingBLS.lock_status,
+            },
+            "MODULE_11: Game was locked but now has no scheduled time (postponed) — clearing pre_lock_decision",
+          );
+        }
         if (decision === "CORE") {
           decision    = "NO_CORE";
           coreBlocker = "LOCK_TIME_UNAVAILABLE";
@@ -945,7 +1022,7 @@ export async function extractOutputBoards(
           // Let rawDecision stand; survival gate and other gates still apply.
           lockStatus = "LOCKED_IN";
           logger.info(
-            { game: gs.game_id, reason: existingBLS!.late_change_reason, source: existingBLS!.late_change_source },
+            { game: gs.game_id, reason: effectiveBLS!.late_change_reason, source: effectiveBLS!.late_change_source },
             "MODULE_11: LOCKED_OUT overridden — named baseball exception authorized",
           );
         } else {
@@ -959,7 +1036,8 @@ export async function extractOutputBoards(
         // Was CORE at lock; let all remaining gates run (still downgradable).
         lockStatus = "LOCKED_IN";
       } else {
-        // First publish at or after this game's cutoff.
+        // First publish at or after this game's cutoff (covers first-ever lock
+        // AND the replayed-lock path after a reschedule).
         // If the first lock fires significantly after the cutoff there is no valid
         // pre-cutoff decision snapshot — default LOCKED_OUT rather than retroactively
         // stamping the current (post-cutoff) decision as "pre-lock."
@@ -967,23 +1045,31 @@ export async function extractOutputBoards(
         const msLate = nowMs - (gameLockCutoff?.getTime() ?? nowMs);
         if (msLate > BOARD_LOCK_LATE_GRACE_MS) {
           lockStatus      = "LOCKED_OUT";
-          preLockDecision = "UNKNOWN_LATE_FIRST_RUN";
+          // Distinguish a plain late first-run from a rescheduled-to-earlier case.
+          preLockDecision = isRescheduled ? "UNKNOWN_RESCHEDULED" : "UNKNOWN_LATE_FIRST_RUN";
           logger.warn(
             {
-              game: gs.game_id,
-              cutoff: gameLockCutoff?.toISOString(),
-              minutesLate: Math.round(msLate / 60000),
+              game:         gs.game_id,
+              cutoff:       gameLockCutoff?.toISOString(),
+              minutesLate:  Math.round(msLate / 60000),
+              rescheduled:  isRescheduled,
             },
             "MODULE_11: Board lock fired late — no valid pre-cutoff snapshot, defaulting LOCKED_OUT",
           );
         } else if (rawDecision === "CORE") {
           preLockDecision = rawDecision;
           lockStatus      = "LOCKED_IN";
-          logger.info({ game: gs.game_id, cutoff: gameLockCutoff?.toISOString() }, "MODULE_11: Board lock fired — LOCKED_IN");
+          logger.info(
+            { game: gs.game_id, cutoff: gameLockCutoff?.toISOString(), rescheduled: isRescheduled },
+            "MODULE_11: Board lock fired — LOCKED_IN",
+          );
         } else {
           preLockDecision = rawDecision;
           lockStatus      = "LOCKED_OUT";
-          logger.info({ game: gs.game_id, cutoff: gameLockCutoff?.toISOString(), rawDecision, rawCoreBlocker }, "MODULE_11: Board lock fired — LOCKED_OUT");
+          logger.info(
+            { game: gs.game_id, cutoff: gameLockCutoff?.toISOString(), rawDecision, rawCoreBlocker, rescheduled: isRescheduled },
+            "MODULE_11: Board lock fired — LOCKED_OUT",
+          );
         }
       }
 
@@ -992,11 +1078,13 @@ export async function extractOutputBoards(
 
       // ── Stage BOARD_LOCK_STATE update for this game ──────────────────────────
       {
-        const nowIso        = new Date(nowMs).toISOString();
-        const cutoffIso     = gameLockCutoff?.toISOString() ?? "";
-        const normalizedGame = normalizedGames?.find((g) => g.legacy_game_id === gs.game_id);
-        const scheduledFP   = normalizedGame?.scheduled_utc_time ?? "";
-        const lockedTs      = isFirstLock ? nowIso : (existingBLS?.locked_ts ?? "");
+        const nowIso    = new Date(nowMs).toISOString();
+        const cutoffIso = gameLockCutoff?.toISOString() ?? "";
+        const scheduledFP = currentScheduledFP; // already resolved above
+        // lockedTs: set once on first lock; preserved across subsequent reruns.
+        // On a reschedule the locked_ts was cleared in effectiveBLS, so isFirstLock
+        // will re-stamp it correctly when the new lock fires.
+        const lockedTs = isFirstLock ? nowIso : (effectiveBLS?.locked_ts ?? "");
 
         const newBLSRow: unknown[] = [
           gs.date,                                                   // A: Date
@@ -1006,10 +1094,10 @@ export async function extractOutputBoards(
           lockStatus,                                                // E: Lock_Status
           preLockDecision,                                           // F: Pre_Lock_Decision
           lockedTs,                                                  // G: Locked_TS
-          existingBLS?.late_change_reason  ?? "",                    // H: Late_Change_Reason (operator-preserved)
-          existingBLS?.late_change_source  ?? "",                    // I: Late_Change_Source (operator-preserved)
-          existingBLS?.late_change_ts      ?? "",                    // J: Late_Change_TS (operator-preserved)
-          existingBLS?.late_promotion_authorized ? true : false,    // K: Late_Promotion_Authorized (operator-preserved)
+          effectiveBLS?.late_change_reason  ?? "",                   // H: Late_Change_Reason (operator-preserved)
+          effectiveBLS?.late_change_source  ?? "",                   // I: Late_Change_Source (operator-preserved)
+          effectiveBLS?.late_change_ts      ?? "",                   // J: Late_Change_TS (operator-preserved)
+          effectiveBLS?.late_promotion_authorized ? true : false,   // K: Late_Promotion_Authorized (operator-preserved)
           nowIso,                                                    // L: Last_Updated_TS
         ];
 

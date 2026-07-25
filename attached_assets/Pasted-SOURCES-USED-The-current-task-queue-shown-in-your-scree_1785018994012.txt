@@ -1,0 +1,68 @@
+SOURCES USED
+
+* The current task queue shown in your screenshot
+* The completed Task #14 report
+* The remaining Pass A integrity findings
+
+REFRESH CHECK
+
+No new workbook run or code inspection was performed. This is an implementation-order decision.
+
+Yes, implement the remaining blockers directly as the main agent.
+
+Do not run all three as one blended change, though. Use two bounded passes.
+
+Pass A1: Lock integrity
+
+Implement #15 and #20 together because they modify the same state machine:
+
+* Prevent replay from using an earlier stale decision after a mid-day status change
+* Invalidate or recalculate lock state when a postponed game receives a new scheduled first pitch
+* Preserve the canonical pre-cutoff decision
+* Never reuse a lock whose cutoff was calculated from an obsolete start time
+* Keep post-lock downgrade behavior intact
+* Require explicit authorization for any promotion after the recalculated cutoff
+
+Required tests:
+
+1. NO_CORE → CORE before cutoff, replay retains final valid pre-cutoff state
+2. CORE → NO_CORE after cutoff, current decision downgrades without rewriting cutoff history
+3. Game postponed before lock
+4. Game postponed after lock
+5. Game rescheduled to a later time, cutoff recalculates
+6. Game rescheduled to an earlier time already beyond cutoff, fails closed
+7. Repeated rerun is idempotent
+
+Compile once and run only the lock-related suites plus one end-to-end board publication test.
+
+Pass A2: Schema reconciliation
+
+Then implement #19 separately.
+
+This pass should change structure and documentation only, not decision logic:
+
+* Align SLATE_INPUT headers with actual column meanings
+* Align SCHEMA_REFERENCE with every live sheet
+* Update README to the current schema version
+* Remove duplicate or obsolete header definitions
+* Update any readers that depend on positional columns
+* Preserve historical data without silently reinterpreting old rows
+* Confirm BOARD_LOCK_STATE, SLATE_BOARD, and SLATE_INPUT expose the same normalized lock statuses
+
+Required verification:
+
+Declared header
+= written value
+= reader expectation
+
+for every live column touched.
+
+Important boundary
+
+Do not reimplement or expand #14. It is already complete and accepted. The component-sum production guard described earlier is not part of this remaining cleanup unless it already exists in the task agent’s submitted change. Do not create another hidden scope expansion around it.
+
+Execution decision
+
+Proceed directly with #15 and #20 first. Then complete #19 as a separate schema migration. Do not route them through task agents.
+
+After those two passes, run one consolidated commissioning verification and stop generating follow-up tasks.
