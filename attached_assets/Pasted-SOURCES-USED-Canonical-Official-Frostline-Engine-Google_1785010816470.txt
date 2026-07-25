@@ -1,0 +1,477 @@
+SOURCES USED
+
+* Canonical Official Frostline Engine Google Sheet
+* All 26 live tabs and their populated ranges
+* Latest RUN_LOG, current July 25 slate outputs, July 24 settlements, replay artifacts, schema reference, and lock-state records
+
+REFRESH CHECK
+
+I inspected a fresh workbook snapshot after the 2026-07-25 19:57:05 UTC publish.
+
+* Latest pipeline run: success
+* Schema reported by RUN_LOG: v8
+* Current slate: 15 games
+* Pitchers resolved: 30/30
+* Lineups: 270 rows
+* Team form: 30 teams
+* Bullpen records: 267
+* Run environments: 15/15
+* Current board: 4 CORE / 11 NO CORE
+
+No workbook edits were made.
+
+Commissioning verdict
+
+NO CORE — RESEARCH-ONLY
+
+The daily pipeline is functioning and the survival gate is visibly active, but the master is not commissioned for operational CORE authorization.
+
+Commissioning stage	Result
+Structural audit	FAIL
+Dependency audit	FAIL
+Survival-gate smoke test	PARTIAL PASS
+Board-lock smoke test	FAIL
+Historical replay	FAIL / non-equivalent replay
+Monotonicity validation	NOT DEPLOYED
+Live shadow validation	FAIL
+Comparative vehicle validation	NOT IMPLEMENTED
+Operational authorization	RESEARCH-ONLY
+
+What is working correctly
+
+The master is not universally broken. Several important pieces are live and coherent.
+
+Daily data spine
+
+The current slate joins cleanly across:
+
+* DAILY_MATCHUPS
+* RUN_ENVIRONMENT
+* GAME_INTEGRATION
+* GAME_SUMMARY
+* SLATE_BOARD
+* BOARD_LOCK_STATE
+* SHADOW_VALIDATION
+
+Each current game has:
+
+* two integration rows
+* eighteen lineup rows
+* one summary row
+* one decision row
+* one lock-state row
+
+Weather is marked LIVE_WX for all 15 games, every venue uses VENUE_FACTOR_USED, and all 30 pitchers are resolved.
+
+Current survival-gate arithmetic
+
+For every Over row inspected:
+
+Projected Total
+= Baseball-Only Projection
++ Environment Run Adjustment
+
+and:
+
+Survival Floor Edge
+= Survival Floor
+− Market Line
+
+Both identities reconcile exactly at the published precision.
+
+The current board has nine Over directions:
+
+* two survival passes
+* seven survival failures
+
+Both Over CORE rows pass the gate:
+
+* ARI–WSN Over
+* COL–MIL Over
+
+Every Over that fails the survival check is NO CORE. The environment-dependent OAK–MIN Over is properly identified and blocked.
+
+Per-game lock timestamps
+
+The workbook now calculates distinct cutoffs for each game:
+
+Game lock time = scheduled first pitch − 120 minutes
+
+BOARD_LOCK_STATE exists, has the intended twelve fields, and its status mirrors correctly into SLATE_INPUT!AH.
+
+Blocking findings
+
+1. The historical decision record is not authoritative
+
+This is the most serious defect.
+
+VEHICLE_LOG retains the first occurrence of each game rather than the final pre-lock or final operational decision.
+
+On July 24:
+
+* Final RUN_LOG: 7 CORE
+* VEHICLE_LOG: only 2 CORE
+
+The five late CORE additions are absent as CORE decisions in the historical vehicle record. Therefore, the log cannot reconstruct the card that was actually issued.
+
+It is worse for four July 25 games:
+
+* 20260725_SEA_TEX
+* 20260725_OAK_MIN
+* 20260725_CIN_STL
+* 20260725_LAA_SFG
+
+Those game IDs appear in VEHICLE_LOG with:
+
+* Date = July 24
+* Direction = NONE
+* Decision = PENDING
+* no market line
+
+Those invalid earlier rows precede the legitimate July 25 rows. Any analysis that “keeps the first row per game_id” will select the corrupted PENDING row and discard the valid decision.
+
+This directly invalidates the planned monotonicity join.
+
+Required behavior
+
+The canonical historical row must be explicitly defined as one of:
+
+* final pre-lock decision, preferred
+* first CORE decision, if studying promotion behavior
+* final board decision before first pitch
+
+It cannot be “first row ever written.”
+
+Every historical row must also pass:
+
+Date encoded in Game_ID = row Date
+
+before entering replay, monotonicity, or postmortem analysis.
+
+⸻
+
+2. The board lock does not fail safely when the first run occurs after cutoff
+
+The per-game cutoff calculation is correct. The state transition is not yet governance-safe.
+
+For the five early games, the first successful lock publish occurred well after cutoff:
+
+Game	Lock delay	Time remaining before first pitch
+KCR–DET	285 minutes late	Game already finished
+ARI–WSN	110 minutes late	10 minutes
+LAA–SFG	110 minutes late	10 minutes
+TOR–BOS	105 minutes late	15 minutes
+SD–MIA	105 minutes late	15 minutes
+
+ARI–WSN and TOR–BOS were stamped LOCKED_IN approximately ten to fifteen minutes before first pitch, even though their intended lock time was two hours earlier.
+
+Their Pre_Lock_Decision is therefore not proven to be the decision that existed at the cutoff. It is simply the decision present on the first successful post-cutoff publish.
+
+This defeats the principal purpose of the lock.
+
+Required behavior
+
+When no preserved pre-cutoff snapshot exists, the first run after cutoff must do one of two things:
+
+1. Recover a valid decision timestamped at or before cutoff, or
+2. Default to LOCKED_OUT and require the named baseball-reason exception.
+
+It must not retroactively declare a current decision “pre-lock.”
+
+⸻
+
+3. Pipeline status can report success when the decision module fails
+
+The first schema-v8 run at 19:47:53 UTC shows:
+
+* Pipeline_Status = success
+* Validation_Status = PASS
+* M11_Status = failure
+* M11_SlateBoardRows = 0
+* Errors = []
+
+A pipeline run that fails to produce the decision board cannot be called successful.
+
+The subsequent runs recovered, but this is an observability and operator-trust defect. A failed authorization layer must force:
+
+Pipeline_Status = failure or partial_success
+Validation_Status = FAIL
+
+and write a named error.
+
+⸻
+
+4. SLATE_INPUT has not been migrated to its declared schema
+
+The header and data are materially misaligned.
+
+Example from the first current row:
+
+Column	Header	Actual value
+A	Date	20260725_KCR_DET
+B	Game_ID	July 25 date serial
+C	Away_Team	KCR @ DET
+D	Home_Team	Game/Side
+E	Away_Pitcher	Casey Mize, the home pitcher
+F	Home_Pitcher	TBD
+G	Candidate_Vehicle	0
+
+Columns O–W contain the usable operator/runtime fields, but their headers are blank. Two stale July 23 rows also remain beneath the current slate.
+
+SLATE_INPUT!AH correctly mirrors lock status, but the sheet as a whole does not satisfy its schema contract. It is neither a dependable human interface nor a safe generic source for header-based readers.
+
+This likely contributed to the cross-date vehicle-log contamination.
+
+⸻
+
+5. The workbook contains mixed schema generations
+
+The master reports schema v8, but several sheets do not match SCHEMA_REFERENCE.
+
+Concrete mismatches
+
+* README still says schema version 2
+* GAME_INTEGRATION contains numeric Lineup_Factor, while the schema declares Lineup_Strength_Status
+* GAME_SUMMARY contains numeric lineup factors and three additional fields absent from its schema
+* REPLAY_RESULTS contains 29 columns while its schema documents 24
+* REPLAY_RESULTS!X is labeled Replay_Run_TS, but its values are park-source strings such as SEASONAL_FACTOR_USED
+* REPLAY_RESULTS has another Replay_Run_TS at the final column
+* MONOTONICITY is defined in SCHEMA_REFERENCE but does not exist as a live tab
+
+The schema reference is therefore not currently authoritative.
+
+⸻
+
+6. The survival replay is diagnostic, not a valid replay of the live gate
+
+SURVIVAL_GATE_REPLAY is deployed, but it does not reproduce the current component gate exactly.
+
+It calculates:
+
+Baseball-only projection
+= projected total ÷ combined multiplier
+
+and then uses an approximate floor multiplier of 0.781, based on a default 5.5-inning starter split.
+
+The live gate uses distinct starter and bullpen components with separate penalties. Opener/bulk games can have materially different component weights.
+
+The replay also has:
+
+* only one settled slate
+* nineteen rows rather than fifteen
+* four July 25 PENDING rows incorrectly dated July 24
+* first-publish decisions rather than the final July 24 board
+* only two July 24 rows labeled as original CORE, although the final board had seven
+
+It is useful for exploratory diagnostics. It is not sufficient for historical validation or constant authorization.
+
+⸻
+
+7. Monotonicity has not been deployed or run
+
+The MONOTONICITY tab is absent.
+
+Also:
+
+* REGRESSION_REPORT is header-only
+* STARTER_AUDIT is header-only
+* VEHICLE_POSTMORTEM is header-only
+
+So the workbook does not currently contain:
+
+* separate Over and Under monotonicity results
+* fixed-tier results
+* quintile results
+* adequate-sample verdicts
+* starter-specific error calibration
+* final vehicle grading
+
+Even if the code exists in Replit, it is not deployed and verified in the master.
+
+More importantly, the current VEHICLE_LOG defects would invalidate the report until canonical decision capture is repaired.
+
+⸻
+
+8. Historical replay does not support the current model as superior
+
+The latest historical replay remains dated July 24 at 19:03 UTC, before the newest gate and lock deployment.
+
+Variant	MAE	Median AE	Miss by 4+
+L30 + Park	3.696	3.245	38.5%
+Blend + Park	3.702	3.125	38.5%
+Blend + Park + Pitcher	3.716	3.235	41.0%
+
+The pitcher-integrated variant does not outperform the simpler variants on MAE or large-miss rate.
+
+The July 24 live shadow results are worse:
+
+* MAE: 4.485
+* Median absolute error: 4.50
+* Bias: +1.329 runs
+* Miss by four or more: 60%
+
+One slate is not enough to recalibrate constants, but it is enough to say live-shadow validation has not passed.
+
+⸻
+
+9. Comparative vehicle selection is still absent
+
+Every row on SLATE_BOARD is:
+
+Vehicle_Type = GAME_TOTAL
+
+For all fifteen games:
+
+Side_Direction = NO_MARKET
+Side_Decision = NO_MARKET
+
+There are no evaluated:
+
+* team totals
+* F5 totals or sides
+* run lines
+* starter outs
+* earned runs
+* hits allowed
+* other starter derivatives
+
+The workbook therefore cannot perform the required:
+
+Audit all major vehicles and select the one that captures the most common scripts.
+
+It remains a game-total projection and authorization engine, not the complete Frostline vehicle-selection engine.
+
+⸻
+
+10. Player, handedness, and conversion layers are not commissioned
+
+Player spine
+
+PLAYER_INTEGRATION is header-only.
+
+Across all 270 current lineup rows:
+
+* Player_ID: 270 missing
+* vs_LHP_wRC_plus: 270 missing
+* vs_RHP_wRC_plus: 270 missing
+* Last_30_Days_wRC_plus: 270 missing
+
+Lineup factors do vary, so some internal name-based player calculation is occurring, but the join cannot be audited from the workbook.
+
+Lineup semantics
+
+* 252 rows are marked official
+* CHC–PIT’s 18 rows remain projected
+* 18 of 30 team lineups have duplicate or missing position labels
+* Injury_Status contains values such as L | ACTIVE and R | ACTIVE, combining handedness with injury state rather than matching its declared schema
+
+Team offense model
+
+The live projection visibly uses:
+
+* L30 estimated runs
+* L10 actual runs
+* a blended offense rate
+* a small lineup factor
+
+It does not expose the commissioned:
+
+* Season versus pitcher hand
+* L30 versus pitcher hand
+* L14 versus pitcher hand
+
+team-offense layer.
+
+Conversion model
+
+traffic_conversion_runs and hr_xbh_damage_runs are not exposed in the workbook and are reportedly still stubs. The current gate is therefore a starter/bullpen stress gate, not a commissioned traffic/damage/conversion model.
+
+⸻
+
+11. Market provenance is not yet operational-book quality
+
+Current totals are seeded from mlbstartingnine, and current odds are uniformly recorded at -110.
+
+That is adequate for research projection comparison, but the executable Hard Rock line may differ. A half-run difference changes vehicle truth, not merely stake size.
+
+For five early games, the first July 25 odds snapshot also arrived after the intended lock cutoff. KCR–DET’s first snapshot arrived after the game had ended.
+
+The workbook must distinguish:
+
+* research consensus line
+* actual operator book line
+* timestamp at which that executable line was available
+
+before issuing an operational market-dependent CORE.
+
+Architecture coverage
+
+Frostline layer	Live status
+Price-blind run projection	Present
+Starter role and expected innings	Present
+Bullpen input/state	Present and populated
+Park/weather separation	Present
+Over survival gate	Present, phase one
+Per-game board lock	Present, unsafe late-first-run behavior
+Dynamic team identity	Not explicit
+Season/L30/L14 handedness splits	Not present in auditable output
+Traffic/damage/conversion	Stub/incomplete
+Script and failure-mode capture	Not present
+Comparative vehicle truth	Not present
+Vehicle selection	Game total only
+Historical final-decision record	Invalid
+Monotonicity calibration	Not deployed
+Outcome/postmortem grading	Not populated
+Live shadow commission	Failed
+
+Current slate status
+
+The current four published CORE rows are:
+
+* ARI–WSN Over 9.5
+* TOR–BOS Under 8.5
+* COL–MIL Over 8.5
+* LAD–NYM Under 9
+
+They are mechanically present in the board, but they are research outputs, not commissioned authorizations.
+
+The ARI and Toronto rows were retroactively stamped LOCKED_IN only ten to fifteen minutes before first pitch. That is not valid evidence that they survived the intended two-hour lock.
+
+Consolidated repair order
+
+To avoid more expensive specification churn, the next work should be frozen into two bounded passes.
+
+Pass A: Integrity and governance
+
+One implementation pass should address:
+
+1. Canonical vehicle snapshot policy
+2. Date-versus-Game-ID validation
+3. Late-first-run lock default
+4. Pipeline failure propagation when module 11 fails
+5. One-time SLATE_INPUT schema migration
+6. Schema/header reconciliation across all live tabs
+
+No model constants should change in this pass.
+
+Pass B: Validation outputs
+
+Only after Pass A succeeds:
+
+1. Republish a clean slate
+2. Populate VEHICLE_POSTMORTEM
+3. Populate REGRESSION_REPORT
+4. Populate STARTER_AUDIT
+5. Create and run MONOTONICITY
+6. Replay the exact live component gate using the canonical snapshot
+7. Run a true live-shadow period
+
+The player/split/conversion and comparative-vehicle layers remain a separate model-completion phase after the integrity layer is trustworthy.
+
+Bottom line
+
+The workbook has progressed from a disconnected prototype into a functioning daily projection pipeline. The current survival calculations are internally coherent, daily inputs are substantially complete, and the per-game lock infrastructure exists.
+
+But the historical record, lock provenance, schema contract, replay equivalence, calibration outputs, and vehicle-selection architecture are not commissioned.
+
+Authoritative status: NO CORE — research-only.
