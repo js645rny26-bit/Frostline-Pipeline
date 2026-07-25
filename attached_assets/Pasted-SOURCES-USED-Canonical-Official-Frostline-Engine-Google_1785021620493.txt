@@ -1,0 +1,141 @@
+SOURCES USED
+
+* Canonical Official Frostline Engine Google Sheet
+* Fresh XLSX export of the live master
+* Direct inspection of all 26 tabs, headers, schema rows, current board, lock state, run history, settlement, and replay data
+* Your implementation reports for code-only changes
+
+REFRESH CHECK
+
+The canonical workbook was freshly inspected, not inferred from the agent’s summary. Its latest recorded modification is 2026-07-25 23:01:27 UTC. Official Frostline Engine
+
+I could not inspect the Replit source repository or execute its tests directly. Code-only claims such as the rescheduling branch and the new module 19 cross-check remain report-based.
+
+Commissioning verdict
+
+NO CORE — RESEARCH-ONLY
+
+The freeze is appropriate, and the current fail-closed state is safe. However, the agent’s statement that all three integrity blockers are complete is not supported by the live canonical workbook.
+
+Audit results
+
+Audit	Result	Fresh finding
+Current pipeline publish	PASS	Latest run completed 15 games, M11 succeeded, and wrote 15 board rows
+Current board consistency	PASS	15 unique Game IDs align across SLATE_INPUT, SLATE_BOARD, GAME_SUMMARY, and BOARD_LOCK_STATE
+Current CORE authorization	PASS, safely disabled	0 CORE / 15 NO CORE; no monotonicity override is active
+Structural/schema audit	FAIL	Live headers still disagree with SCHEMA_REFERENCE
+Board-lock historical integrity	FAIL	Lock records do not consistently represent the last valid pre-cutoff board
+Historical replay integrity	FAIL	Cross-date contamination and duplicate game records remain
+Monotonicity/calibration	FAIL	MONOTONICITY does not exist; regression and postmortem tabs remain empty
+Live shadow validation	FAIL	Current 15-game sample remains materially inaccurate
+Postponement/reschedule branch	NOT INDEPENDENTLY VERIFIED	No live rescheduled-game fixture exists in the workbook
+
+Blocking findings
+
+1. Task #19 is not complete in the live master
+
+The workbook contains 484 schema-reference rows, but those rows do not describe the workbook accurately.
+
+Four sheets have direct row-one versus schema conflicts:
+
+* SLATE_INPUT: 34 live columns, only 20 documented. 28 positions are missing or contradictory.
+* GAME_SUMMARY: 34 live columns, 31 documented.
+    * Live: Away_Lineup_Factor, Home_Lineup_Factor
+    * Schema: Away_Lineup_Strength_Status, Home_Lineup_Strength_Status
+    * Projected_Run_Diff, Away_Starter_Quality, and Home_Starter_Quality are undocumented.
+* GAME_INTEGRATION:
+    * Live: Lineup_Factor
+    * Schema: Lineup_Strength_Status
+* REPLAY_RESULTS: 29 live columns, 24 documented, with a duplicated Replay_Run_TS header.
+
+There is also a version contradiction:
+
+README schema version: 2
+Latest RUN_LOG schema version: 8
+README last updated: 2026-07-23
+
+So the live schema repair did not reach a truthful canonical state.
+
+2. The board-lock record is not yet authoritative cutoff truth
+
+The successful M11 runs occurred at:
+
+19:55 UTC
+19:57 UTC
+20:30 UTC
+22:41 UTC
+...
+
+But:
+
+* ARI–WSN locked at 18:05 UTC and is recorded LOCKED_IN / CORE.
+* TOR–BOS locked at 18:10 UTC and is recorded LOCKED_IN / CORE.
+
+There was no successful M11 board before either cutoff. Those two LOCKED_IN records therefore cannot be proven as the decisions at cutoff.
+
+The opposite defect appears later:
+
+* CHC–PIT and seven subsequent games had a successful board at 20:30 UTC, before their respective cutoffs.
+* They were later recorded as UNKNOWN_LATE_FIRST_RUN.
+
+That means the lock writer failed to preserve a valid pre-cutoff state that actually existed.
+
+Task #15 may correctly prefer BOARD_LOCK_STATE over an approximation after lock, but that hierarchy is only safe when BOARD_LOCK_STATE itself is correct. Right now it can make flawed lock records more authoritative.
+
+3. Historical replay still contains contaminated keys
+
+Fresh inspection found:
+
+* 4 VEHICLE_LOG rows dated July 24 whose Game IDs encode July 25.
+* The same 4 cross-date rows propagated into SURVIVAL_GATE_REPLAY.
+* REPLAY_RESULTS contains 8 duplicate Date + Game_ID keys.
+* One duplicated CHC–NYM game has two different actual totals, 13 and 15.
+* REPLAY_RESULTS contains two columns named Replay_Run_TS.
+
+Therefore the 356-game replay metrics are not yet commissioning-grade. They may be directionally useful, but their denominators are not canonically clean.
+
+4. Calibration is still absent
+
+The workbook defines a MONOTONICITY schema, but the actual tab does not exist.
+
+These tabs contain headers only:
+
+* REGRESSION_REPORT
+* STARTER_AUDIT
+* VEHICLE_POSTMORTEM
+
+The good part is that the monotonicity gate fails closed. The current strong candidates are downgraded with DISABLED_MONOTONICITY_NOT_COMPUTED, producing zero authorized CORE plays.
+
+The latest settled shadow sample remains weak:
+
+N:             15 games
+MAE:           4.485 runs
+Median error:  4.50 runs
+Bias:          +1.329 runs
+Miss ≥4 runs:  60.0%
+
+That does not support live authorization.
+
+What genuinely passed
+
+The current operational board is internally coherent:
+
+* 15 games and 15 unique Game IDs
+* Matching lock statuses across SLATE_INPUT, SLATE_BOARD, and BOARD_LOCK_STATE
+* Latest M11 publication succeeded
+* Survival-gate outputs are populated
+* Monotonicity absence blocks CORE rather than silently permitting it
+* No active override sentinel
+* No evidence of ordinary post-lock numerical promotion on the current board
+
+So this is not another catastrophic rebuild. The system is safely frozen and cannot falsely authorize CORE in its present state.
+
+Exact status
+
+Code freeze: appropriate.
+
+Commissioning freeze: not cleared.
+
+Operational designation: NO CORE — RESEARCH-ONLY.
+
+No more UI work belongs ahead of this. The remaining problem is not a sprawling task queue; it is one bounded integrity pass covering schema truth, historical key cleanup, and cutoff-state reconstruction, followed by the already-required commissioning replay.

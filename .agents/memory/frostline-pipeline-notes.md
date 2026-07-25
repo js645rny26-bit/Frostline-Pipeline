@@ -22,6 +22,20 @@ description: Non-obvious decisions, traps, and structural facts about the Frostl
 - REPLAY_RESULTS: schema had 24 cols; module13 writes 31. Schema updated to match.
 - `/api/pipeline/repair-headers` rewrites all row-1 headers from WORKBOOK_SCHEMA and refreshes SCHEMA_REFERENCE — run this after any schema version change.
 
+## Google Sheets date format trap in repair endpoints
+- Sheets returns Date cells as "MM/DD/YYYY" (FORMATTED_VALUE) even when written as "2026-07-25".
+- Any code that reads a date cell and compares it to a "YYYY-MM-DD" string must normalize both sides first.
+- `normDate()` pattern: detect "YYYY-MM-DD" prefix OR "MM/DD/YYYY" → always return "YYYY-MM-DD".
+- Failure mode: format mismatch causes ALL rows to appear cross-date and be deleted. Always verify
+  removal counts look proportionate before trusting a data-repair result.
+
+## repair-data endpoint — idempotent safety
+- `GET /api/pipeline/repair-data` handles BOARD_LOCK_STATE invalidation, VEHICLE_LOG cross-date removal,
+  and REPLAY_RESULTS deduplication. Safe to re-run.
+- VEHICLE_LOG rows deleted by repair are recreated by the next `/api/pipeline/publish` run (module17 UPSERT).
+- BLS invalidation only fires when lock_status=LOCKED_IN AND locked_ts > lock_cutoff_ts + 30 min
+  AND pre_lock_decision is not already "UNKNOWN_*". Already-fixed rows are skipped.
+
 ## Lock state machine (module11) — reschedule / postpone handling
 - When `storedScheduledFP ≠ currentScheduledFP` (reschedule detected): effectiveBLS is produced with lock_status/pre_lock_decision/locked_ts cleared; state machine replays the lock under the new cutoff. Operator late_change fields preserved.
 - When a game had a first pitch time but now has none (postponed): lock status becomes LOCK_TIME_UNAVAILABLE and pre_lock_decision is cleared (lineup/pitching will change).

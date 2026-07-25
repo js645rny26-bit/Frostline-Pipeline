@@ -340,43 +340,61 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   // ─── OUTPUT SECTION ─────────────────────────────────────────────────────────
   {
     name: "SLATE_INPUT",
-    description: "Operator input: Vehicle, Line, Odds, Notes. Module 10 seeds with new games.",
+    description: "Pipeline seed + operator override surface. Module 10 writes all 34 columns A–AH each publish; operator edits columns O–W only.",
     section: "OUTPUT",
     frozenRows: 1,
     columns: [
-      { name: "Date", index: 0, type: "date", width: 100, format: "mm/dd/yyyy", readOnly: true, filledBy: "MODULE_10", exampleValue: "07/22/2026" },
-      { name: "Game_ID", index: 1, type: "string", width: 80, readOnly: true, filledBy: "MODULE_10", exampleValue: "2026/07/22-NYY-BOS" },
-      { name: "Away_Team", index: 2, type: "string", width: 70, readOnly: true, filledBy: "MODULE_10", exampleValue: "BOS" },
-      { name: "Home_Team", index: 3, type: "string", width: 70, readOnly: true, filledBy: "MODULE_10", exampleValue: "NYY" },
-      { name: "Away_Pitcher", index: 4, type: "string", width: 120, readOnly: true, filledBy: "MODULE_10", exampleValue: "Brayan Bello" },
-      { name: "Home_Pitcher", index: 5, type: "string", width: 120, readOnly: true, filledBy: "MODULE_10", exampleValue: "Gerrit Cole" },
-      { name: "Candidate_Vehicle", index: 6, type: "string", width: 200, filledBy: "OPERATOR", description: "GAME_TOTAL, SPREAD, O3.5, U8.5, etc.", exampleValue: "GAME_TOTAL" },
-      { name: "Line", index: 7, type: "number", width: 100, format: "0.0", filledBy: "OPERATOR", description: "8.5, -115, etc.", exampleValue: "8.5" },
-      { name: "Implied_Probability", index: 8, type: "percent", width: 130, format: "0.0%", readOnly: true, filledBy: "FORMULA", description: "Formula from Line", exampleValue: "0.521" },
-      { name: "Odds_Decimal", index: 9, type: "number", width: 110, format: "0.000", filledBy: "OPERATOR", description: "1.909, 2.105, etc.", exampleValue: "1.909" },
-      { name: "Your_Confidence", index: 10, type: "percent", width: 130, format: "0%", filledBy: "OPERATOR", exampleValue: "0.60" },
-      { name: "Projected_Value", index: 11, type: "percent", width: 120, format: "0.00%", readOnly: true, filledBy: "FORMULA", description: "Your_Confidence - Implied_Probability", exampleValue: "0.079" },
-      { name: "Model_Confidence", index: 12, type: "percent", width: 130, format: "0%", readOnly: true, filledBy: "FORMULA", description: "From SLATE_BOARD", exampleValue: "0.68" },
-      { name: "Notes", index: 13, type: "string", width: 200, filledBy: "OPERATOR", exampleValue: "" },
+      // ── Game identity (A–E, indices 0–4) ──────────────────────────────────────
+      { name: "Game_ID",          index: 0,  type: "string", width: 160, readOnly: true,  filledBy: "MODULE_10", description: "Canonical game identifier. Format: YYYY/MM/DD-AWAY-HOME.", exampleValue: "2026/07/22-NYY-BOS" },
+      { name: "Date",             index: 1,  type: "string", width: 100, readOnly: true,  filledBy: "MODULE_10", description: "Game date in YYYY-MM-DD format.", exampleValue: "2026-07-22" },
+      { name: "Matchup",          index: 2,  type: "string", width: 120, readOnly: true,  filledBy: "MODULE_10", description: "AWAY @ HOME abbreviation pair.", exampleValue: "NYY @ BOS" },
+      { name: "Target",           index: 3,  type: "string", width: 90,  readOnly: true,  filledBy: "MODULE_10", description: "Betting vehicle target. GAME_TOTAL for totals.", exampleValue: "GAME_TOTAL" },
+      { name: "Opposing_Starter", index: 4,  type: "string", width: 140, readOnly: true,  filledBy: "MODULE_10", description: "Confirmed or probable opposing starting pitcher name.", exampleValue: "Gerrit Cole" },
+      // ── Model signals (F–N, indices 5–13) — pipeline-maintained, never operator-set ──
+      { name: "Truth_Family",      index: 5,  type: "string", width: 130, readOnly: true, filledBy: "MODULE_10", exampleValue: "RUNS_OVER" },
+      { name: "Event_Score",       index: 6,  type: "number", width: 100, format: "0.00", readOnly: true, filledBy: "MODULE_10", exampleValue: "0.00" },
+      { name: "Run_Conversion",    index: 7,  type: "number", width: 120, format: "0.00", readOnly: true, filledBy: "MODULE_10", exampleValue: "0.00" },
+      { name: "Early_Conversion",  index: 8,  type: "number", width: 130, format: "0.00", readOnly: true, filledBy: "MODULE_10", exampleValue: "0.00" },
+      { name: "Contact_Quality",   index: 9,  type: "string", width: 120, readOnly: true, filledBy: "MODULE_10", exampleValue: "unknown" },
+      { name: "Truth_Score",       index: 10, type: "number", width: 100, format: "0.00", readOnly: true, filledBy: "MODULE_10", exampleValue: "0.00" },
+      { name: "Vehicle_Score",     index: 11, type: "number", width: 110, format: "0.00", readOnly: true, filledBy: "MODULE_10", exampleValue: "0.00" },
+      { name: "Confirmation_Gate", index: 12, type: "string", width: 140, readOnly: true, filledBy: "MODULE_10", exampleValue: "false" },
+      { name: "Execution_Status",  index: 13, type: "string", width: 140, readOnly: true, filledBy: "MODULE_10", exampleValue: "pending" },
+      // ── Operator fields (O–W, indices 14–22) — never overwritten by pipeline after seeding ──
+      { name: "Candidate_Vehicle",    index: 14, type: "string", width: 180, filledBy: "OPERATOR", description: "GAME_TOTAL, SPREAD, O3.5, U8.5, etc. Seeded by pipeline; operator may override.", exampleValue: "GAME_TOTAL" },
+      { name: "Line",                 index: 15, type: "number", width: 80,  format: "0.0", filledBy: "OPERATOR", description: "O/U total from the operator's chosen book.", exampleValue: "8.5" },
+      { name: "Odds",                 index: 16, type: "number", width: 80,  filledBy: "OPERATOR", description: "American odds for the Over side.", exampleValue: "-110" },
+      { name: "Market_Available",     index: 17, type: "string", width: 130, filledBy: "OPERATOR", description: "TRUE when a tradeable line was found.", exampleValue: "TRUE" },
+      { name: "Kill_Flag",            index: 18, type: "string", width: 90,  filledBy: "OPERATOR", description: "TRUE to suppress this game from authorization.", exampleValue: "FALSE" },
+      { name: "Notes",                index: 19, type: "string", width: 220, filledBy: "OPERATOR", exampleValue: "" },
+      { name: "Owner",                index: 20, type: "string", width: 90,  filledBy: "OPERATOR", description: "Pending until the operator claims the row.", exampleValue: "Pending" },
+      { name: "Manual_Kill_Override", index: 21, type: "string", width: 160, filledBy: "OPERATOR", description: "Operator-set TRUE to permanently exclude this game.", exampleValue: "FALSE" },
+      { name: "Model_Freeze_Reason",  index: 22, type: "string", width: 190, filledBy: "OPERATOR", description: "Reason string when the model decision is frozen against the pipeline default.", exampleValue: "" },
       // ── Pregame lock fields (X–AB, indices 23–27) — pipeline-maintained ──
-      { name: "Market_Phase", index: 23, type: "string", width: 110, readOnly: true, filledBy: "MODULE_10", description: "PREGAME | LIVE | FINAL — derived from MLB Stats API abstractGameState each publish.", exampleValue: "PREGAME" },
+      { name: "Market_Phase",                index: 23, type: "string", width: 110, readOnly: true, filledBy: "MODULE_10", description: "PREGAME | LIVE | FINAL — derived from MLB Stats API abstractGameState each publish.", exampleValue: "PREGAME" },
       { name: "Authoritative_Pregame_Total", index: 24, type: "number", width: 190, format: "0.0", readOnly: true, filledBy: "MODULE_10", description: "Line frozen at the moment Market_Phase first becomes LIVE or FINAL. Never overwritten after that. Module 11 prefers this over the live Line.", exampleValue: "8.5" },
-      { name: "Authoritative_Over_Odds", index: 25, type: "number", width: 170, readOnly: true, filledBy: "MODULE_10", description: "Over odds frozen at the same instant as Authoritative_Pregame_Total.", exampleValue: "-110" },
-      { name: "Authoritative_Under_Odds", index: 26, type: "number", width: 175, readOnly: true, filledBy: "MODULE_10", description: "Under odds frozen at pregame lock time. Defaults to -110 when source does not publish separately.", exampleValue: "-110" },
-      { name: "Pregame_Line_Locked_TS", index: 27, type: "string", width: 185, readOnly: true, filledBy: "MODULE_10", description: "ISO 8601 UTC timestamp when the pregame line was frozen. Null until lock occurs.", exampleValue: "2026-07-23T17:05:12.000Z" },
+      { name: "Authoritative_Over_Odds",     index: 25, type: "number", width: 170, readOnly: true, filledBy: "MODULE_10", description: "Over odds frozen at the same instant as Authoritative_Pregame_Total.", exampleValue: "-110" },
+      { name: "Authoritative_Under_Odds",    index: 26, type: "number", width: 175, readOnly: true, filledBy: "MODULE_10", description: "Under odds frozen at pregame lock time. Defaults to -110 when source does not publish separately.", exampleValue: "-110" },
+      { name: "Pregame_Line_Locked_TS",      index: 27, type: "string", width: 185, readOnly: true, filledBy: "MODULE_10", description: "ISO 8601 UTC timestamp when the pregame line was frozen. Null until lock occurs.", exampleValue: "2026-07-23T17:05:12.000Z" },
+      // ── Market spread / moneyline (AC–AG, indices 28–32) — pipeline-maintained ──
+      { name: "Away_Spread",      index: 28, type: "number", width: 110, format: "0.0", readOnly: true, filledBy: "MODULE_10", description: "Run-line point spread for the away team (+1.5 or -1.5).", exampleValue: "1.5" },
+      { name: "Away_Spread_Odds", index: 29, type: "number", width: 130, readOnly: true, filledBy: "MODULE_10", description: "American odds for away team to cover the run line.", exampleValue: "-175" },
+      { name: "Home_Spread_Odds", index: 30, type: "number", width: 130, readOnly: true, filledBy: "MODULE_10", description: "American odds for home team to cover the run line.", exampleValue: "+150" },
+      { name: "Away_ML",          index: 31, type: "number", width: 100, readOnly: true, filledBy: "MODULE_10", description: "American moneyline for away team outright win.", exampleValue: "-130" },
+      { name: "Home_ML",          index: 32, type: "number", width: 100, readOnly: true, filledBy: "MODULE_10", description: "American moneyline for home team outright win.", exampleValue: "+110" },
       // ── Board-lock status (AH = 33) — pipeline-maintained, finalized by module11 ──
       {
         name: "Board_Lock_Status",
         index: 33,
         type: "string",
-        width: 140,
+        width: 150,
         readOnly: true,
         filledBy: "MODULE_11",
         description:
           "PRE_LOCK = board has not yet locked for this game (current time < cutoff). "
-          + "LOCKED_IN = game was already CORE when the board locked; stable but still downgradable by disqualifying signals. "
-          + "LOCKED_OUT = game was NOT CORE when the board locked; blocked from promotion by any later numerical refresh. "
-          + "Lock cutoff = earliest first pitch − BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH (default 2.0 h). "
+          + "LOCKED_IN = game was CORE when the board locked; stable but still downgradable. "
+          + "LOCKED_OUT = game was NOT CORE when the board locked; blocked from any future promotion. "
+          + "Lock cutoff = first pitch − BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH. "
           + "Seeded PRE_LOCK by module10; finalized by module11 on the first publish at or after the cutoff.",
         exampleValue: "LOCKED_OUT",
       },
