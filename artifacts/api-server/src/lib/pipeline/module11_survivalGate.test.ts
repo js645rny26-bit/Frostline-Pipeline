@@ -655,3 +655,210 @@ describe("COMPONENT_DATA_UNAVAILABLE — survival gate blocks when components ar
     assert.notEqual(decision, "PENDING", "game has a market line; must not be PENDING");
   });
 });
+
+// ─── §6: Non-zero traffic and HR/XBH components ───────────────────────────────
+//
+// module09 currently sets traffic_conversion_runs = 0 and hr_xbh_damage_runs = 0
+// as reserved stubs (see module09_recalculation.ts ~lines 1014–1015).  When those
+// components are eventually populated with real values the survival floor will
+// shift, potentially changing game outcomes.  These tests pin the expected formula
+// behaviour with non-zero inputs so a future stub replacement will surface any
+// formula regression immediately.
+//
+// Full survival floor formula:
+//   floor = starter × 0.80 + bullpen × 0.75 + traffic × 0.70 + HR_XBH × 0.90
+//
+// Penalty constants (authoritative source: module11_outputExtraction.ts):
+//   SURVIVAL_STARTER_PENALTY  = 0.80   (starters pitch better than modelled)
+//   SURVIVAL_BULLPEN_PENALTY  = 0.75   (bullpen continuation rate suppressed)
+//   SURVIVAL_TRAFFIC_PENALTY  = 0.70   (baserunner-to-run conversion poor)
+//   SURVIVAL_HR_XBH_PENALTY   = 0.90   (extra-base / HR damage muted)
+
+describe("Non-zero traffic and HR/XBH components — formula regression guard", () => {
+  // ── §6.1: PASS driven by traffic + HR/XBH components ─────────────────────
+  //
+  // Setup: starter=4.0, bullpen=3.5, traffic=2.5, hr_xbh=1.5, line=8.5
+  //
+  // Baseball edge:
+  //   baseball_only = 4.0 + 3.5 + 2.5 + 1.5 = 11.5
+  //   edge = 11.5 − 8.5 = 3.0 ≥ 1.25 ✓
+  //
+  // Survival floor (full formula):
+  //   4.0 × 0.80 = 3.200
+  //   3.5 × 0.75 = 2.625
+  //   2.5 × 0.70 = 1.750
+  //   1.5 × 0.90 = 1.350
+  //              ─────────
+  //   floor      = 8.925   floor edge = 8.925 − 8.5 = +0.425 ≥ 0.25 ✓ → PASS
+  //
+  // Without traffic + HR (current stub state):
+  //   floor = 3.200 + 2.625 = 5.825   floor edge = −2.675 → FAIL
+  //
+  // Conclusion: traffic and HR/XBH are the deciding factor; removing them
+  // flips this game from PASS to FAIL.  If the formula or penalties change
+  // this test will immediately detect it.
+  it("PASS: traffic + HR/XBH components are the deciding factor (stub-zero would FAIL)", () => {
+    const result = overSurvivalCheck(
+      4.0,   // starterAttackRuns
+      3.5,   // bullpenContinuationRuns
+      2.5,   // trafficConversionRuns  ← non-zero (future real value)
+      1.5,   // hrXbhDamageRuns        ← non-zero (future real value)
+      11.5,  // baseballOnlyProjection (starter+bullpen+traffic+hr_xbh)
+      0.3,   // environmentRunAdjustment
+      8.5,   // marketLine
+    );
+
+    // Verify the outcome
+    assert.equal(result.survival_check, "PASS",
+      "gate must PASS when traffic + HR components push floor above threshold");
+    assert.equal(result.survival_failure_reason, "",
+      "failure reason must be empty for a PASS");
+
+    // Pin the exact floor arithmetic so any formula or constant change is visible
+    assert.equal(
+      result.survival_floor, 8.93,
+      "floor must be 4.0×0.80 + 3.5×0.75 + 2.5×0.70 + 1.5×0.90 = 8.925 → rounded to 8.93",
+    );
+    assert.ok(
+      result.survival_floor_edge >= 0.25,
+      `floor edge ${result.survival_floor_edge} must be ≥ 0.25 (threshold)`,
+    );
+
+    // Confirm that zeroing traffic + HR flips this exact game to FAIL
+    const stubResult = overSurvivalCheck(
+      4.0, 3.5,
+      0, 0,   // current stub values
+      11.5, 0.3, 8.5,
+    );
+    assert.equal(
+      stubResult.survival_check, "FAIL",
+      "zeroing traffic + HR (stub state) must flip this game to FAIL — " +
+      "confirms those components are the deciding factor",
+    );
+  });
+
+  // ── §6.2: FAIL — traffic + HR contribute but cannot overcome a high line ──
+  //
+  // Setup: starter=5.0, bullpen=4.0, traffic=1.5, hr_xbh=1.0, line=10.0
+  //
+  // Baseball edge:
+  //   baseball_only = 5.0 + 4.0 + 1.5 + 1.0 = 11.5
+  //   edge = 11.5 − 10.0 = 1.5 ≥ 1.25 ✓ (first gate passes)
+  //
+  // Survival floor (full formula):
+  //   5.0 × 0.80 = 4.000
+  //   4.0 × 0.75 = 3.000
+  //   1.5 × 0.70 = 1.050
+  //   1.0 × 0.90 = 0.900
+  //              ─────────
+  //   floor      = 8.950   floor edge = 8.950 − 10.0 = −1.05 < 0.25 → FAIL
+  //                                     reason = SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD
+  //
+  // Without traffic + HR:
+  //   floor = 4.000 + 3.000 = 7.000   floor edge = −3.0 → also FAIL (but worse)
+  //
+  // Conclusion: real traffic + HR components improve the floor (+1.95 runs) but
+  // cannot overcome a high market line.  The formula correctly applies each
+  // penalty even when values are non-zero.
+  it("FAIL: traffic + HR contribute to floor but cannot overcome a high market line", () => {
+    const result = overSurvivalCheck(
+      5.0,   // starterAttackRuns
+      4.0,   // bullpenContinuationRuns
+      1.5,   // trafficConversionRuns  ← non-zero
+      1.0,   // hrXbhDamageRuns        ← non-zero
+      11.5,  // baseballOnlyProjection
+      0.0,   // environmentRunAdjustment
+      10.0,  // marketLine — high enough that even the improved floor fails
+    );
+
+    assert.equal(result.survival_check, "FAIL",
+      "gate must FAIL when floor cannot clear the high market line even with traffic + HR");
+    assert.equal(result.survival_failure_reason, "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD",
+      "failure reason must be SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD (baseball edge clears; floor does not)");
+
+    // Pin the exact floor so a future formula change is detected
+    assert.equal(
+      result.survival_floor, 8.95,
+      "floor must be 5.0×0.80 + 4.0×0.75 + 1.5×0.70 + 1.0×0.90 = 8.95",
+    );
+    assert.ok(
+      result.survival_floor_edge < 0.25,
+      `floor edge ${result.survival_floor_edge} must be < 0.25 for FAIL`,
+    );
+
+    // Confirm the stub state also fails (but with a lower floor) — regression guard
+    const stubResult = overSurvivalCheck(
+      5.0, 4.0, 0, 0,   // current stub values
+      11.5, 0.0, 10.0,
+    );
+    assert.equal(stubResult.survival_check, "FAIL", "stub-zero state must also FAIL at this line");
+    assert.ok(
+      (stubResult.survival_floor ?? 0) < result.survival_floor,
+      "stub-zero floor must be lower than the non-zero floor (confirms components add value)",
+    );
+  });
+
+  // ── §6.3: PASS — HR/XBH component alone is the deciding factor ────────────
+  //
+  // Setup: starter=5.5, bullpen=4.5, traffic=0, hr_xbh=0.7, line=8.0
+  //        (traffic=0 isolates the HR component contribution)
+  //
+  // Baseball edge:
+  //   baseball_only = 5.5 + 4.5 + 0 + 0.7 = 10.7
+  //   edge = 10.7 − 8.0 = 2.7 ≥ 1.25 ✓
+  //
+  // Survival floor:
+  //   5.5 × 0.80 = 4.400
+  //   4.5 × 0.75 = 3.375
+  //   0.0 × 0.70 = 0.000
+  //   0.7 × 0.90 = 0.630
+  //              ─────────
+  //   floor      = 8.405   floor edge = 8.405 − 8.0 = +0.405 ≥ 0.25 ✓ → PASS
+  //
+  // Without HR/XBH (current stub state, traffic already 0):
+  //   floor = 4.400 + 3.375 = 7.775   floor edge = −0.225 → FAIL
+  //
+  // Conclusion: the HR/XBH component alone (0.7 runs × 0.90 = 0.63) flips this
+  // game from FAIL to PASS.  This test isolates the SURVIVAL_HR_XBH_PENALTY = 0.90
+  // constant; if the penalty is changed or the component is accidentally zeroed
+  // this test will break.
+  it("PASS: HR/XBH component alone flips a borderline game from FAIL to PASS", () => {
+    const result = overSurvivalCheck(
+      5.5,   // starterAttackRuns
+      4.5,   // bullpenContinuationRuns
+      0,     // trafficConversionRuns — kept at 0 to isolate HR component
+      0.7,   // hrXbhDamageRuns       ← non-zero (future real value)
+      10.7,  // baseballOnlyProjection (starter+bullpen+hr_xbh)
+      0.0,   // environmentRunAdjustment
+      8.0,   // marketLine
+    );
+
+    assert.equal(result.survival_check, "PASS",
+      "gate must PASS when HR/XBH component pushes floor above threshold");
+    assert.equal(result.survival_failure_reason, "");
+    assert.equal(
+      result.survival_floor, 8.41,
+      "floor must be 5.5×0.80 + 4.5×0.75 + 0×0.70 + 0.7×0.90 = 8.405 → rounded to 8.41",
+    );
+    assert.ok(
+      result.survival_floor_edge >= 0.25,
+      `floor edge ${result.survival_floor_edge} must be ≥ 0.25`,
+    );
+
+    // Confirm that zeroing HR/XBH (stub state) flips this game to FAIL
+    const stubResult = overSurvivalCheck(
+      5.5, 4.5,
+      0, 0,   // current stub values — HR also 0
+      10.7, 0.0, 8.0,
+    );
+    assert.equal(
+      stubResult.survival_check, "FAIL",
+      "zeroing HR/XBH (stub state) must flip this game to FAIL — " +
+      "confirms SURVIVAL_HR_XBH_PENALTY = 0.90 constant is load-bearing",
+    );
+    assert.equal(
+      stubResult.survival_failure_reason, "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD",
+      "stub state fails on floor edge, not baseball edge — isolates the HR component",
+    );
+  });
+});
