@@ -941,12 +941,23 @@ export async function extractOutputBoards(
       // A "reschedule" requires:
       //   • an existing BLS record (we have a prior time on record), AND
       //   • the stored FP was non-blank (a real timestamp, not an empty placeholder), AND
-      //   • the stored FP differs from the current FP, AND
+      //   • the stored FP differs from the current FP by more than 30 minutes, AND
       //   • the game still has a current FP (postpones are handled separately).
+      //
+      // Minor gate-time adjustments (< 30 min) must not invalidate a lock.
+      // A shift of ≥ 30 minutes moves the lock cutoff by at least the full
+      // late-grace window and is treated as a material reschedule that requires
+      // replaying the lock under the new cutoff.
+      // Invalid / missing timestamps produce a shift of 0 (fail closed → no reset).
+      const storedFPMs  = storedScheduledFP  ? new Date(storedScheduledFP).getTime()  : NaN;
+      const currentFPMs = currentScheduledFP ? new Date(currentScheduledFP).getTime() : NaN;
+      const fpShiftMs   = !isNaN(storedFPMs) && !isNaN(currentFPMs)
+        ? Math.abs(currentFPMs - storedFPMs)
+        : 0;
       const isRescheduled =
         existingBLS !== undefined &&
         storedScheduledFP !== "" &&
-        storedScheduledFP !== currentScheduledFP &&
+        fpShiftMs >= BOARD_LOCK_LATE_GRACE_MS &&
         !lockTimeMissingIds.has(gs.game_id);
 
       // effectiveBLS: the BLS record used for state-machine decisions.
@@ -965,12 +976,13 @@ export async function extractOutputBoards(
       if (isRescheduled) {
         logger.warn(
           {
-            game:       gs.game_id,
-            storedFP:   storedScheduledFP,
-            currentFP:  currentScheduledFP,
+            game:         gs.game_id,
+            storedFP:     storedScheduledFP,
+            currentFP:    currentScheduledFP,
+            shiftMinutes: Math.round(fpShiftMs / 60000),
             storedStatus: existingBLS!.lock_status,
           },
-          "MODULE_11: Game first-pitch time changed — discarding stale lock state and replaying under new cutoff",
+          "MODULE_11: Game first-pitch time changed by > 30 min — discarding stale lock state and replaying under new cutoff",
         );
       }
 
