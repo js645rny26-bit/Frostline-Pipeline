@@ -65,6 +65,17 @@ const VL_VARIANCE  = 8;
 const VL_DECISION  = 9;
 const VL_BLOCKER   = 10;
 
+// ─── BOARD_LOCK_STATE column indices (0-based) ────────────────────────────────
+// A=0: Date, B=1: Game_ID, C=2: Scheduled_First_Pitch, D=3: Lock_Cutoff_TS
+// E=4: Lock_Status, F=5: Pre_Lock_Decision, G=6: Locked_TS
+// H=7: Late_Change_Reason, I=8: Late_Change_Source, J=9: Late_Change_TS
+// K=10: Late_Promotion_Authorized, L=11: Last_Updated_TS
+const BLS_DATE              = 0;
+const BLS_GAME_ID           = 1;
+const BLS_LOCK_STATUS       = 4;
+const BLS_PRE_LOCK_DECISION = 5;
+const BLS_LOCKED_TS         = 6;
+
 // ─── Output sheet ─────────────────────────────────────────────────────────────
 const REPLAY_SHEET  = "BOARD_LOCK_REPLAY";
 const REPLAY_HEADER = [
@@ -81,6 +92,7 @@ const REPLAY_HEADER = [
   "Lock_Status_At_Query_Time",
   "Query_Time_UTC",
   "Lock_Fires_At_Next_Run",
+  "Data_Source",
   "Notes",
 ];
 
@@ -115,6 +127,13 @@ export interface BoardLockReplayRow {
    * have locked on the very next pipeline run after query_time.  Informational.
    */
   lock_fires_at_next_run: boolean;
+  /**
+   * Whether this row's lock_status_at_query_time comes from an authoritative
+   * source or from the VEHICLE_LOG approximation:
+   *   BOARD_LOCK_STATE  — authoritative; decision recorded at lock-firing time
+   *   VEHICLE_LOG_APPROX — approximation; final VEHICLE_LOG entry used as proxy
+   */
+  data_source: "BOARD_LOCK_STATE" | "VEHICLE_LOG_APPROX";
   notes: string;
 }
 
@@ -127,6 +146,13 @@ export interface BoardLockReplayResult {
   locked_out_count: number;
   pre_lock_count: number;
   lock_time_unavailable_count: number;
+  /**
+   * Number of games where the BOARD_LOCK_STATE authoritative lock status
+   * differs from the VEHICLE_LOG reconstruction.  Non-zero means a game's
+   * decision changed between the lock-firing run and the final recorded run.
+   * Only counted for games whose lock has fired at query_time.
+   */
+  approximation_conflicts: number;
   /** Games LOCKED_IN (were CORE when their lock fired). */
   locked_in: BoardLockReplayRow[];
   /** Games LOCKED_OUT (were NOT CORE when their lock fired). */
@@ -183,14 +209,50 @@ export async function runBoardLockReplay(
 
   logger.info({ date, queryTimeUtc: options.queryTimeUtc }, "MODULE_19: Board lock replay starting");
 
-  // ── Read VEHICLE_LOG ──────────────────────────────────────────────────────
-  const vlResp = await readRange(wbId, "VEHICLE_LOG!A1:N10000").catch((e: unknown) => {
-    errors.push(`VEHICLE_LOG: ${e instanceof Error ? e.message : String(e)}`);
-    return null;
-  });
+  // ── Read VEHICLE_LOG and BOARD_LOCK_STATE concurrently ───────────────────
+  const [vlResp, blsResp] = await Promise.all([
+    readRange(wbId, "VEHICLE_LOG!A1:N10000").catch((e: unknown) => {
+      errors.push(`VEHICLE_LOG: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }),
+    readRange(wbId, "BOARD_LOCK_STATE!A1:L10000").catch(() => null),
+  ]);
 
   if (!vlResp) {
     return buildFailure(date, replayTs, errors);
+  }
+
+  // ── Parse BOARD_LOCK_STATE — authoritative lock records for this date ──────
+  // Maps game_id → { lock_status, pre_lock_decision, locked_ts } for games on
+  // the requested date whose lock has fired (lock_status != PRE_LOCK).
+  interface BlsEntry {
+    lock_status: string;       // LOCKED_IN | LOCKED_OUT (PRE_LOCK rows are skipped)
+    pre_lock_decision: string; // CORE | NO_CORE | PENDING — at lock-firing time
+    locked_ts: string;
+  }
+  const blsMap = new Map<string, BlsEntry>();
+  if (blsResp) {
+    const blsRows = (blsResp.values ?? []).slice(1) as unknown[][];
+    for (const row of blsRows) {
+      const rowDate   = parseStr(row[BLS_DATE]);
+      if (rowDate !== date) continue;
+      const gameId    = parseStr(row[BLS_GAME_ID]);
+      if (!gameId) continue;
+      const lockStatus = parseStr(row[BLS_LOCK_STATUS]);
+      // Only record finalized rows — PRE_LOCK rows have no authoritative decision yet.
+      if (lockStatus !== "LOCKED_IN" && lockStatus !== "LOCKED_OUT") continue;
+      blsMap.set(gameId, {
+        lock_status:        lockStatus,
+        pre_lock_decision:  parseStr(row[BLS_PRE_LOCK_DECISION]),
+        locked_ts:          parseStr(row[BLS_LOCKED_TS]),
+      });
+    }
+    logger.info(
+      { date, bls_finalized_games: blsMap.size },
+      "MODULE_19: BOARD_LOCK_STATE loaded",
+    );
+  } else {
+    logger.info({ date }, "MODULE_19: BOARD_LOCK_STATE unavailable — using VEHICLE_LOG approximation for all games");
   }
 
   // Deduplicate: keep latest row per game_id on the requested date (last row wins).
@@ -276,7 +338,7 @@ export async function runBoardLockReplay(
       lockStatus = "LOCK_TIME_UNAVAILABLE";
       notes = "No scheduled_utc_time — buildGameLockCutoffs skips this game; lock never fires";
     } else if (queryTimeMs >= cutoffMs) {
-      // Lock has fired by query_time.
+      // Lock has fired by query_time — reconstruct from VEHICLE_LOG.
       if (vl.decision === "CORE") {
         lockStatus = "LOCKED_IN";
         notes = "CORE at lock cutoff → stable; still downgradable by disqualifying signals";
@@ -291,6 +353,39 @@ export async function runBoardLockReplay(
       const msUntilCutoff = cutoffMs - queryTimeMs;
       const minUntil = Math.round(msUntilCutoff / 60000);
       notes = `Lock cutoff in ${minUntil} min (${cutoffEt} ET)`;
+    }
+
+    // ── Cross-check against BOARD_LOCK_STATE (authoritative) ─────────────────
+    // Only meaningful when the lock has actually fired at query_time (i.e.,
+    // lockStatus is LOCKED_IN or LOCKED_OUT from the VEHICLE_LOG reconstruction).
+    // PRE_LOCK and LOCK_TIME_UNAVAILABLE rows are left untouched — a finalized
+    // BLS record cannot be applied to a pre-lock query without leaking "future"
+    // information into an earlier query-time replay.
+    const blsRecord = blsMap.get(gameId);
+    let dataSource: "BOARD_LOCK_STATE" | "VEHICLE_LOG_APPROX" = "VEHICLE_LOG_APPROX";
+
+    const lockHasFiredAtQueryTime =
+      lockStatus === "LOCKED_IN" || lockStatus === "LOCKED_OUT";
+
+    if (blsRecord && lockHasFiredAtQueryTime) {
+      dataSource = "BOARD_LOCK_STATE";
+      const authStatus = blsRecord.lock_status as BoardLockStatus;
+
+      if (authStatus !== lockStatus) {
+        // Decision changed between the lock-firing run and the final run captured
+        // in VEHICLE_LOG.  The authoritative BLS status overrides the approximation.
+        const conflictNote =
+          `APPROXIMATION_CONFLICT: VEHICLE_LOG reconstruction=${lockStatus}, ` +
+          `BOARD_LOCK_STATE authoritative=${authStatus} ` +
+          `(pre_lock_decision=${blsRecord.pre_lock_decision}, locked_ts=${blsRecord.locked_ts})`;
+        notes = notes ? `${notes}; ${conflictNote}` : conflictNote;
+        // Override to the authoritative value.
+        lockStatus = authStatus;
+      } else {
+        // Reconstruction matches — note the authoritative confirmation.
+        const confirmNote = `Confirmed by BOARD_LOCK_STATE (pre_lock_decision=${blsRecord.pre_lock_decision})`;
+        notes = notes ? `${notes}; ${confirmNote}` : confirmNote;
+      }
     }
 
     // Check whether the lock would fire on the very next pipeline run after query_time.
@@ -314,6 +409,7 @@ export async function runBoardLockReplay(
       lock_status_at_query_time: lockStatus,
       query_time_utc:            queryTimeIso,
       lock_fires_at_next_run:    lockFiresAtNextRun,
+      data_source:               dataSource,
       notes,
     });
   }
@@ -329,19 +425,34 @@ export async function runBoardLockReplay(
     return a.lock_cutoff_utc.localeCompare(b.lock_cutoff_utc);
   });
 
-  const locked_in          = rows.filter((r) => r.lock_status_at_query_time === "LOCKED_IN");
-  const locked_out         = rows.filter((r) => r.lock_status_at_query_time === "LOCKED_OUT");
-  const pre_lock           = rows.filter((r) => r.lock_status_at_query_time === "PRE_LOCK");
-  const lock_time_unavailable  = rows.filter((r) => r.lock_status_at_query_time === "LOCK_TIME_UNAVAILABLE");
+  const locked_in             = rows.filter((r) => r.lock_status_at_query_time === "LOCKED_IN");
+  const locked_out            = rows.filter((r) => r.lock_status_at_query_time === "LOCKED_OUT");
+  const pre_lock              = rows.filter((r) => r.lock_status_at_query_time === "PRE_LOCK");
+  const lock_time_unavailable = rows.filter((r) => r.lock_status_at_query_time === "LOCK_TIME_UNAVAILABLE");
+
+  // Count games where the BOARD_LOCK_STATE authoritative status conflicted with
+  // the VEHICLE_LOG reconstruction (notes contain the APPROXIMATION_CONFLICT marker).
+  const approximation_conflicts = rows.filter(
+    (r) => r.data_source === "BOARD_LOCK_STATE" && r.notes.includes("APPROXIMATION_CONFLICT"),
+  ).length;
 
   logger.info(
     {
       date, query_time: queryTimeIso,
       locked_in: locked_in.length, locked_out: locked_out.length,
       pre_lock: pre_lock.length, lock_time_unavailable: lock_time_unavailable.length,
+      bls_authoritative: rows.filter((r) => r.data_source === "BOARD_LOCK_STATE").length,
+      approximation_conflicts,
     },
     "MODULE_19: Board lock replay complete",
   );
+
+  if (approximation_conflicts > 0) {
+    logger.warn(
+      { approximation_conflicts, date },
+      "MODULE_19: APPROXIMATION_CONFLICT — VEHICLE_LOG reconstruction disagreed with BOARD_LOCK_STATE; game decisions changed between lock-firing run and final run",
+    );
+  }
 
   // ── Write BOARD_LOCK_REPLAY sheet ─────────────────────────────────────────
   if (options.writeSheets) {
@@ -366,6 +477,7 @@ export async function runBoardLockReplay(
           r.lock_status_at_query_time,
           r.query_time_utc,
           r.lock_fires_at_next_run ? "TRUE" : "FALSE",
+          r.data_source,
           r.notes,
         ]);
       }
@@ -383,14 +495,15 @@ export async function runBoardLockReplay(
   }
 
   return {
-    status:                 errors.length === 0 ? "success" : "partial",
+    status:                      errors.length === 0 ? "success" : "partial",
     date,
-    query_time_utc:         queryTimeIso,
-    replay_ts:              replayTs,
-    locked_in_count:        locked_in.length,
-    locked_out_count:       locked_out.length,
-    pre_lock_count:         pre_lock.length,
+    query_time_utc:              queryTimeIso,
+    replay_ts:                   replayTs,
+    locked_in_count:             locked_in.length,
+    locked_out_count:            locked_out.length,
+    pre_lock_count:              pre_lock.length,
     lock_time_unavailable_count: lock_time_unavailable.length,
+    approximation_conflicts,
     locked_in,
     locked_out,
     pre_lock,
@@ -410,17 +523,18 @@ function buildFailure(
   return {
     status: "failure",
     date,
-    query_time_utc: "",
-    replay_ts: replayTs,
-    locked_in_count: 0,
-    locked_out_count: 0,
-    pre_lock_count: 0,
+    query_time_utc:              "",
+    replay_ts:                   replayTs,
+    locked_in_count:             0,
+    locked_out_count:            0,
+    pre_lock_count:              0,
     lock_time_unavailable_count: 0,
-    locked_in: [],
-    locked_out: [],
-    pre_lock: [],
-    lock_time_unavailable: [],
-    rows: [],
+    approximation_conflicts:     0,
+    locked_in:                   [],
+    locked_out:                  [],
+    pre_lock:                    [],
+    lock_time_unavailable:       [],
+    rows:                        [],
     errors,
   };
 }
