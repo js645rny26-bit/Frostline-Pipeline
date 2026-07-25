@@ -1,0 +1,252 @@
+SOURCES USED
+
+* Your full July 24 Statcast and box-score dump
+* The final 6:02 PM EDT SLATE_BOARD and ACTIVE_BOARD_SNAPSHOT we inspected before the games
+
+REFRESH CHECK
+
+This is a postgame reconciliation against the last pregame board. I am not claiming the workbook has rerun on these results yet.
+
+The board failed
+
+I’m not going to soften this:
+
+* CORE: 1–6
+* CORE Overs: 0–5
+* NO CORE directional leans: 5–3
+* Entire board directions: 6–9
+* Actual slate: 6 Overs, 9 Unders
+* Frostline leaned: 9 Overs, 6 Unders
+* Average absolute projection error across the seven CORE games: 5.56 runs
+
+The engine performed worse when it was more confident. That is a commissioning failure, not merely an unfortunate ticket result.
+
+Our three-ticket card finished 1–2:
+
+* ARI–WSN Over 9.5: loss
+* NYY–PHI Under 7.5: win
+* SD–MIA Over 8.5: loss
+
+CORE postmortem
+
+Game	Projection	Final	Result	Game-truth grade
+COL–MIL Over 8.5	10.18	7	Loss	Conversion overprojection
+CHC–PIT Over 8	10.17	5	Loss	Clear truth failure
+ARI–WSN Over 9.5	12.42	5	Loss	Staff-deployment failure
+NYY–PHI Under 7.5	5.55	1	Win	Correct suppression truth
+SD–MIA Over 9	11.94	6	Loss	Traffic-to-runs failure
+TOR–BOS Under 9	7.19	10	Loss	Late bullpen failure
+OAK–MIN Over 9.5	11.84	2	Loss	Catastrophic multiplier failure
+
+CHC–PIT: your Jared Jones objection was exactly right
+
+Jones:
+
+* 6 IP
+* 2 H
+* 1 ER
+* 1 BB
+* 5 K
+
+Boyd:
+
+* 7 IP
+* 7 H
+* 1 ER
+
+The game was 1–1 after nine innings and finished 3–2 in ten.
+
+Frostline projected:
+
+* Chicago 4.61
+* Pittsburgh 5.56 approximately
+* Total 10.17
+
+Both offenses were badly overstated. This was not just the wrong vehicle. The game truth itself was suppression.
+
+Your Jones concern was the clearest correct human veto on the entire slate.
+
+ARI–WSN: opener handling was incomplete
+
+Palmquist did fail early:
+
+* 1⅓ IP
+* 2 ER
+* 3 BB
+* 41 pitches
+
+But Zack Littell then supplied:
+
+* 5 IP
+* 1 ER
+* 5 K
+
+The model saw opener vulnerability and converted it into a 12.42-run environment. It did not correctly model the bulk bridge that followed.
+
+This is the exact distinction Frostline is supposed to make:
+
+Vulnerable opener does not automatically mean vulnerable full staff.
+
+Final: 3–2.
+
+SD–MIA: vulnerability did not become conversion
+
+Márquez lasted only 2⅓ innings, so the fragility signal was not imaginary. Miami also collected nine hits.
+
+But Miami produced only two runs, and San Diego generated only five hits.
+
+The model projected 11.94 because it treated:
+
+* short starter exposure,
+* traffic potential,
+* bullpen innings,
+* and recent offense
+
+as if they would convert efficiently.
+
+They did not.
+
+This is a contact/damage/conversion failure. Frostline identified ways baserunners could exist but failed to distinguish traffic from actual run conversion.
+
+OAK–MIN: the worst read on the board
+
+Projection: 11.84
+Final: 2
+
+The Over was constructed from:
+
+* Jacob Lopez vulnerability
+* Zebby Matthews vulnerability
+* Target Field enhancement
+* 12 mph wind out
+* a 1.1146 combined run multiplier
+
+Actual starters:
+
+* Lopez: 5 IP, 1 H, 0 ER
+* Matthews: 6 IP, 3 H, 2 ER
+
+Minnesota recorded two hits and no runs.
+
+This is the clearest evidence that park and weather were allowed to originate a detonation thesis rather than merely modify one. That directly violates Frostline canon.
+
+TOR–BOS: the least-bad CORE loss
+
+The game was 4–0 entering the seventh and then produced:
+
+* three Toronto runs in the seventh
+* one Toronto run in the eighth
+* two Boston runs in the eighth
+
+The Under thesis was viable through the starter window. It lost in the bullpen/state phase.
+
+This points to a narrower defect than the other misses:
+
+Bullpen continuation and late-game state were not adequately priced into an Under at Fenway.
+
+NYY–PHI: the only clean truth win
+
+Frostline projected 5.55. Final was 1–0.
+
+Both starters dominated:
+
+* Schlittler: 7⅓ IP, 0 ER, 12 K
+* Luzardo: 7 IP, 1 ER, 9 K
+
+The ticket won because the suppression architecture was correct. The model still overprojected the final by 4.55 runs, so even the successful CORE was not tightly calibrated, but the underlying game truth and vehicle were correct.
+
+The most serious finding
+
+The NO CORE directions went 5–3, while CORE went 1–6.
+
+Correct NO CORE directions included:
+
+* KC–DET Under
+* ATL–BAL Over
+* CLE–TB Over
+* HOU–CHW Over
+* CIN–STL Under
+
+That means the engine did not merely have a bad forecasting night. Its authorization layer selected the worse portion of its own board.
+
+The two largest projected edges also lost badly:
+
+* SD–MIA: +2.94
+* ARI–WSN: +2.92
+
+So projection separation and reported confidence were not predictive of survival.
+
+What failed structurally
+
+1. CORE Over construction is additive, not survival-based
+
+The engine stacked:
+
+* team run form
+* starter-quality penalties
+* lineup factors
+* Statcast contact
+* park
+* weather
+
+But it did not ask whether the Over survived common low-conversion scripts.
+
+All five CORE Overs lost.
+
+2. Starter-quality factors are still too deterministic
+
+A poor FIP/K-BB profile increases attack probability. It does not guarantee same-day detonation.
+
+OAK–MIN is the strongest example. Both “bad” starters survived.
+
+3. Staff roles remain incomplete
+
+ARI–WSN was modeled through Palmquist without properly valuing the scheduled or likely bulk bridge.
+
+4. Contact and traffic are being mistaken for runs
+
+COL–MIL and SD–MIA both produced traffic and hard contact without enough scoring. Frostline needs a distinct conversion layer rather than treating offensive access as automatic realization.
+
+5. Environment became an originator
+
+The Target Field multiplier materially created the OAK–MIN CORE. Park and weather must modify an already-supported baseball thesis, never manufacture one.
+
+6. Late board expansion added noise
+
+At 4:50 PM, the board expanded from four to seven CORE selections. The three additions were:
+
+* COL–MIL Over
+* TOR–BOS Under
+* OAK–MIN Over
+
+They went 0–3.
+
+The repeated late refreshes degraded the board rather than sharpening it.
+
+Correct operational conclusion
+
+This model version is not commissioned for CORE authorization.
+
+The player and pitcher integrations may contain useful information, but they were moved into the live decision layer before:
+
+* historical replay of the new combined formula
+* calibration testing
+* regression validation
+* vehicle comparison
+* live shadow validation
+
+The next move is not another same-night weight adjustment.
+
+It is:
+
+1. Freeze this version from issuing operational CORE selections.
+2. Preserve July 24 as an untouched diagnostic holdout.
+3. Replay the integrated model historically.
+4. Test whether confidence is monotonic: higher confidence must outperform lower confidence.
+5. Build a hard survival gate for Overs.
+6. Model opener plus bulk deployment as one staff structure.
+7. Separate traffic, damage and run conversion.
+8. Prevent park/weather from independently creating a CORE.
+9. Add a true final-board lock so late numerical refreshes cannot repeatedly expand the card without a named baseball input.
+
+Bottom line: the July 24 board was not unlucky. It was structurally overconfident, systematically Over-biased, and anti-calibrated at the CORE-selection layer.
