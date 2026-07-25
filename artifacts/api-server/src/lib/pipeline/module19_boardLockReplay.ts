@@ -84,7 +84,7 @@ const REPLAY_HEADER = [
   "Notes",
 ];
 
-export type BoardLockStatus = "LOCKED_IN" | "LOCKED_OUT" | "PRE_LOCK" | "NO_SCHEDULED_TIME";
+export type BoardLockStatus = "LOCKED_IN" | "LOCKED_OUT" | "PRE_LOCK" | "LOCK_TIME_UNAVAILABLE";
 
 export interface BoardLockReplayRow {
   date: string;
@@ -106,7 +106,7 @@ export interface BoardLockReplayRow {
    *   LOCKED_IN          — lock fired, game was CORE → stable
    *   LOCKED_OUT         — lock fired, game was NOT CORE → promotion blocked
    *   PRE_LOCK           — lock cutoff has not yet passed at query_time
-   *   NO_SCHEDULED_TIME  — no first pitch time available; lock never fires
+   *   LOCK_TIME_UNAVAILABLE  — no first pitch time available; lock never fires
    */
   lock_status_at_query_time: BoardLockStatus;
   query_time_utc: string;
@@ -126,7 +126,7 @@ export interface BoardLockReplayResult {
   locked_in_count: number;
   locked_out_count: number;
   pre_lock_count: number;
-  no_scheduled_time_count: number;
+  lock_time_unavailable_count: number;
   /** Games LOCKED_IN (were CORE when their lock fired). */
   locked_in: BoardLockReplayRow[];
   /** Games LOCKED_OUT (were NOT CORE when their lock fired). */
@@ -134,7 +134,7 @@ export interface BoardLockReplayResult {
   /** Games still PRE_LOCK at query_time. */
   pre_lock: BoardLockReplayRow[];
   /** Games with no scheduled first-pitch time (lock never fires). */
-  no_scheduled_time: BoardLockReplayRow[];
+  lock_time_unavailable: BoardLockReplayRow[];
   rows: BoardLockReplayRow[];
   errors: string[];
 }
@@ -273,7 +273,7 @@ export async function runBoardLockReplay(
     let notes = "";
 
     if (!hasFpTime || isNaN(cutoffMs)) {
-      lockStatus = "NO_SCHEDULED_TIME";
+      lockStatus = "LOCK_TIME_UNAVAILABLE";
       notes = "No scheduled_utc_time — buildGameLockCutoffs skips this game; lock never fires";
     } else if (queryTimeMs >= cutoffMs) {
       // Lock has fired by query_time.
@@ -318,10 +318,10 @@ export async function runBoardLockReplay(
     });
   }
 
-  // Sort: LOCKED_IN first, then LOCKED_OUT, then PRE_LOCK, then NO_SCHEDULED_TIME;
+  // Sort: LOCKED_IN first, then LOCKED_OUT, then PRE_LOCK, then LOCK_TIME_UNAVAILABLE;
   // within each group, by lock_cutoff_utc ascending.
   const ORDER: Record<BoardLockStatus, number> = {
-    LOCKED_IN: 0, LOCKED_OUT: 1, PRE_LOCK: 2, NO_SCHEDULED_TIME: 3,
+    LOCKED_IN: 0, LOCKED_OUT: 1, PRE_LOCK: 2, LOCK_TIME_UNAVAILABLE: 3,
   };
   rows.sort((a, b) => {
     const so = ORDER[a.lock_status_at_query_time] - ORDER[b.lock_status_at_query_time];
@@ -332,13 +332,13 @@ export async function runBoardLockReplay(
   const locked_in          = rows.filter((r) => r.lock_status_at_query_time === "LOCKED_IN");
   const locked_out         = rows.filter((r) => r.lock_status_at_query_time === "LOCKED_OUT");
   const pre_lock           = rows.filter((r) => r.lock_status_at_query_time === "PRE_LOCK");
-  const no_scheduled_time  = rows.filter((r) => r.lock_status_at_query_time === "NO_SCHEDULED_TIME");
+  const lock_time_unavailable  = rows.filter((r) => r.lock_status_at_query_time === "LOCK_TIME_UNAVAILABLE");
 
   logger.info(
     {
       date, query_time: queryTimeIso,
       locked_in: locked_in.length, locked_out: locked_out.length,
-      pre_lock: pre_lock.length, no_scheduled_time: no_scheduled_time.length,
+      pre_lock: pre_lock.length, lock_time_unavailable: lock_time_unavailable.length,
     },
     "MODULE_19: Board lock replay complete",
   );
@@ -390,11 +390,11 @@ export async function runBoardLockReplay(
     locked_in_count:        locked_in.length,
     locked_out_count:       locked_out.length,
     pre_lock_count:         pre_lock.length,
-    no_scheduled_time_count: no_scheduled_time.length,
+    lock_time_unavailable_count: lock_time_unavailable.length,
     locked_in,
     locked_out,
     pre_lock,
-    no_scheduled_time,
+    lock_time_unavailable,
     rows,
     errors,
   };
@@ -415,11 +415,11 @@ function buildFailure(
     locked_in_count: 0,
     locked_out_count: 0,
     pre_lock_count: 0,
-    no_scheduled_time_count: 0,
+    lock_time_unavailable_count: 0,
     locked_in: [],
     locked_out: [],
     pre_lock: [],
-    no_scheduled_time: [],
+    lock_time_unavailable: [],
     rows: [],
     errors,
   };

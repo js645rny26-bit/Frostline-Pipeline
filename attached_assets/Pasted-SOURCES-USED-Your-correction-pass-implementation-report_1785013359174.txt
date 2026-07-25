@@ -1,0 +1,61 @@
+SOURCES USED
+
+* Your correction-pass implementation report
+* The fail-closed lock behavior defined for this task
+
+REFRESH CHECK
+
+I have not inspected the revised module or tests directly. Assessment is based on the reported implementation, 32 passing tests, and clean TypeScript compilation.
+
+Task assessment
+
+The core defect is corrected:
+
+* Missing game times are no longer indistinguishable from normal PRE_LOCK
+* A partially missing slate identifies the affected games
+* A slate with at least 50% missing times fails closed
+* New CORE promotion is blocked
+* Existing baseball and downgrade checks can continue
+* == 50% and > 50% are tested separately
+
+Two items should be confirmed in one final verification pass before accepting the task.
+
+1. Test the actual decision outcome, not only cutoff construction
+
+At least one integration-style test must start with a game that would otherwise become CORE and assert:
+
+Missing individual time:
+Decision = NO_CORE
+CORE_Blocker = LOCK_TIME_UNAVAILABLE
+Lock_Status = LOCK_TIME_UNAVAILABLE
+Slate lock data unavailable:
+Decision = NO_CORE
+CORE_Blocker = LOCK_DATA_UNAVAILABLE
+Lock_Status = LOCK_DATA_UNAVAILABLE
+
+This proves the new structured result is correctly consumed by the production decision loop, not merely returned by buildGameLockCutoffs.
+
+2. Persist the new states through the authoritative lock path
+
+The two statuses must survive through every existing lock surface:
+
+* BOARD_LOCK_STATE
+* SLATE_BOARD.Lock_Status
+* SLATE_INPUT.Board_Lock_Status
+* /pipeline/board-status
+* frontend lock-status rendering and aggregate counts
+* sheet/schema type definitions
+
+They must not be converted back to PRE_LOCK, omitted from counts, or treated as unknown strings.
+
+The operator-facing meaning should be explicit:
+
+* Lock Time Unavailable
+* Lock Data Unavailable
+* CORE promotion disabled
+
+Status
+
+Production logic appears corrected. Acceptance is pending only those two end-to-end confirmations.
+
+No additional model changes, endpoint expansion, follow-up-task generation, or broader refactor belongs in this pass.

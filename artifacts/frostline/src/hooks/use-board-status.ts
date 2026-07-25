@@ -3,7 +3,14 @@ import { customFetch } from "@workspace/api-client-react";
 
 export interface BoardStatusEntry {
   game_id: string;
-  lock_status: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT";
+  /**
+   * PRE_LOCK              — before cutoff; normal promotion allowed.
+   * LOCKED_IN             — was CORE at cutoff; still downgradable.
+   * LOCKED_OUT            — not CORE at cutoff; promotion blocked.
+   * LOCK_TIME_UNAVAILABLE — no scheduled_utc_time; CORE promotion disabled.
+   * LOCK_DATA_UNAVAILABLE — ≥ 50 % of slate games have no time; all new CORE blocked.
+   */
+  lock_status: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT" | "LOCK_TIME_UNAVAILABLE" | "LOCK_DATA_UNAVAILABLE";
   lock_cutoff_ts: string;
   pre_lock_decision: string;
   final_decision: string;
@@ -21,6 +28,10 @@ export interface BoardStatusResult {
   locked_in_count: number;
   locked_out_count: number;
   pre_lock_count: number;
+  /** Games whose scheduled start time is absent — CORE promotion disabled for these games. */
+  lock_time_unavailable_count: number;
+  /** Entire slate has ≥ 50 % games with no time — all new CORE promotions blocked. */
+  lock_data_unavailable_count: number;
 }
 
 async function fetchBoardStatus(date: string): Promise<BoardStatusResult> {

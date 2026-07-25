@@ -435,7 +435,14 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
 
     interface BoardStatusEntry {
       game_id: string;
-      lock_status: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT";
+      /**
+       * PRE_LOCK              — before cutoff; normal promotion allowed.
+       * LOCKED_IN             — was CORE at cutoff; still downgradable.
+       * LOCKED_OUT            — not CORE at cutoff; promotion blocked.
+       * LOCK_TIME_UNAVAILABLE — no scheduled_utc_time; CORE promotion disabled.
+       * LOCK_DATA_UNAVAILABLE — ≥ 50 % of slate games have no time; all new CORE blocked.
+       */
+      lock_status: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT" | "LOCK_TIME_UNAVAILABLE" | "LOCK_DATA_UNAVAILABLE";
       lock_cutoff_ts: string;
       pre_lock_decision: string;
       final_decision: string;
@@ -444,14 +451,19 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
 
     const games: BoardStatusEntry[] = [];
 
+    const KNOWN_LOCK_STATUSES = new Set([
+      "LOCKED_IN", "LOCKED_OUT", "LOCK_TIME_UNAVAILABLE", "LOCK_DATA_UNAVAILABLE",
+    ]);
+
     for (const row of blsForDate) {
       const gameId = String(row[1] ?? "").trim();
       if (!gameId) continue;
       const lockCutoffTs = String(row[3] ?? "").trim();
       const rawStatus = String(row[4] ?? "").trim();
-      const lockStatus: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT" =
-        rawStatus === "LOCKED_IN" || rawStatus === "LOCKED_OUT"
-          ? rawStatus
+      // Pass through all known statuses; unrecognised values default to PRE_LOCK.
+      const lockStatus: BoardStatusEntry["lock_status"] =
+        KNOWN_LOCK_STATUSES.has(rawStatus)
+          ? (rawStatus as BoardStatusEntry["lock_status"])
           : "PRE_LOCK";
       const sb = sbMap.get(gameId);
       games.push({
@@ -485,18 +497,21 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
       }
     }
 
-    const lockedInCount = games.filter(
-      (g) => g.lock_status === "LOCKED_IN",
-    ).length;
-    const lockedOutCount = games.filter(
-      (g) => g.lock_status === "LOCKED_OUT",
-    ).length;
-    const preLockCount = games.filter(
-      (g) => g.lock_status === "PRE_LOCK",
-    ).length;
+    const lockedInCount              = games.filter((g) => g.lock_status === "LOCKED_IN").length;
+    const lockedOutCount             = games.filter((g) => g.lock_status === "LOCKED_OUT").length;
+    const preLockCount               = games.filter((g) => g.lock_status === "PRE_LOCK").length;
+    const lockTimeUnavailableCount   = games.filter((g) => g.lock_status === "LOCK_TIME_UNAVAILABLE").length;
+    const lockDataUnavailableCount   = games.filter((g) => g.lock_status === "LOCK_DATA_UNAVAILABLE").length;
 
     logger.info(
-      { date, locked_in: lockedInCount, locked_out: lockedOutCount, pre_lock: preLockCount },
+      {
+        date,
+        locked_in:              lockedInCount,
+        locked_out:             lockedOutCount,
+        pre_lock:               preLockCount,
+        lock_time_unavailable:  lockTimeUnavailableCount,
+        lock_data_unavailable:  lockDataUnavailableCount,
+      },
       "BOARD_STATUS: read complete",
     );
 
@@ -504,11 +519,13 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
       date,
       timestamp: new Date().toISOString(),
       games,
-      next_upcoming_cutoff_ts: nextUpcomingCutoffTs,
-      cutoff_approaching: cutoffApproaching,
-      locked_in_count: lockedInCount,
-      locked_out_count: lockedOutCount,
-      pre_lock_count: preLockCount,
+      next_upcoming_cutoff_ts:      nextUpcomingCutoffTs,
+      cutoff_approaching:           cutoffApproaching,
+      locked_in_count:              lockedInCount,
+      locked_out_count:             lockedOutCount,
+      pre_lock_count:               preLockCount,
+      lock_time_unavailable_count:  lockTimeUnavailableCount,
+      lock_data_unavailable_count:  lockDataUnavailableCount,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

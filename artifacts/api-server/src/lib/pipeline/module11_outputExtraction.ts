@@ -29,8 +29,15 @@ export interface SlateBoardEntry {
   edge_strength: string;
   /** Named reason a game did not authorize. Empty string for CORE or PENDING. */
   core_blocker: string;
-  /** Board-lock state for this game. PRE_LOCK = before cutoff; LOCKED_IN = was CORE at lock; LOCKED_OUT = was not CORE at lock. */
-  lock_status: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT";
+  /**
+   * Board-lock state for this game.
+   *   PRE_LOCK              — before this game's own cutoff; normal promotion allowed.
+   *   LOCKED_IN             — was CORE when the cutoff fired; still downgradable.
+   *   LOCKED_OUT            — was not CORE at cutoff; no new promotion (operator exception required).
+   *   LOCK_TIME_UNAVAILABLE — game has no scheduled_utc_time; no new CORE promotion until time is known.
+   *   LOCK_DATA_UNAVAILABLE — ≥ 50 % of slate games have no time; entire slate lock suppressed, no new CORE.
+   */
+  lock_status: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT" | "LOCK_TIME_UNAVAILABLE" | "LOCK_DATA_UNAVAILABLE";
   // ── Shadow-mode prop comparison fields (no CORE impact) ──
   starter_k_market_signal: string;
   starter_er_market_signal: string;
@@ -378,24 +385,92 @@ function parseBLSRow(row: unknown[]): BLSRecord {
 }
 
 /**
+ * Result returned by buildGameLockCutoffs.
+ *
+ * Consumers must inspect lockDataStatus and missingGameIds rather than
+ * treating an absent cutoff entry as equivalent to PRE_LOCK.
+ */
+export interface GameLockCutoffResult {
+  /** Per-game cutoff Date objects — present only for games that have a valid scheduled_utc_time. */
+  cutoffs: Map<string, Date>;
+  /**
+   * Game IDs whose scheduled_utc_time was null/blank/unparseable.
+   * These games must be treated as LOCK_TIME_UNAVAILABLE, not PRE_LOCK.
+   */
+  missingGameIds: Set<string>;
+  /**
+   * OK          — all games have a scheduled time; lock proceeds normally.
+   * PARTIAL     — some games are missing a time (< 50 %); timed games lock normally,
+   *               untimed games are individually flagged as LOCK_TIME_UNAVAILABLE.
+   * UNAVAILABLE — ≥ 50 % of games have no time; the entire slate lock is suppressed
+   *               and every game is flagged as LOCK_DATA_UNAVAILABLE.
+   */
+  lockDataStatus: "OK" | "PARTIAL" | "UNAVAILABLE";
+}
+
+/**
  * Build a per-game board-lock cutoff map.
  * Each game locks BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH hours before its own
  * scheduled first pitch.  A 1:05 PM game does not lock a 9:40 PM game.
- * Games with no scheduled_utc_time are excluded — they will never lock.
+ *
+ * Warning behaviour:
+ *   - A warning is logged for every game missing a scheduled_utc_time so
+ *     operators know which games have an uncertain lock window.
+ *   - If ≥ 50 % of slate games have no scheduled time the entire slate lock is
+ *     suppressed (lockDataStatus = UNAVAILABLE) rather than silently shifting
+ *     the window earlier; a slate-level warning is logged.
+ *
+ * Callers MUST use missingGameIds and lockDataStatus to distinguish:
+ *   • a game that is genuinely before its cutoff (PRE_LOCK), from
+ *   • a game whose start time is unknown (LOCK_TIME_UNAVAILABLE / LOCK_DATA_UNAVAILABLE).
+ * An absent entry in `cutoffs` alone is NOT sufficient to determine lock state.
  */
-function buildGameLockCutoffs(normalizedGames?: NormalizedGame[]): Map<string, Date> {
-  const cutoffs = new Map<string, Date>();
-  if (!normalizedGames) return cutoffs;
+export function buildGameLockCutoffs(normalizedGames?: NormalizedGame[]): GameLockCutoffResult {
+  const cutoffs      = new Map<string, Date>();
+  const missingGameIds = new Set<string>();
+
+  if (!normalizedGames || normalizedGames.length === 0) {
+    return { cutoffs, missingGameIds, lockDataStatus: "OK" };
+  }
+
+  const total = normalizedGames.length;
+
+  // Identify and warn about every game missing a scheduled time.
   for (const g of normalizedGames) {
-    if (!g.scheduled_utc_time) continue;
-    const t = new Date(g.scheduled_utc_time).getTime();
-    if (isNaN(t)) continue;
+    const t = g.scheduled_utc_time ? new Date(g.scheduled_utc_time).getTime() : NaN;
+    if (!g.scheduled_utc_time || isNaN(t)) {
+      missingGameIds.add(g.legacy_game_id);
+      logger.warn(
+        { game: g.legacy_game_id, away: g.away_team?.team_abbr, home: g.home_team?.team_abbr },
+        "MODULE_11: Game has no scheduled_utc_time — will be treated as LOCK_TIME_UNAVAILABLE",
+      );
+    }
+  }
+
+  const missing = missingGameIds.size;
+
+  // ≥ 50 % missing: the lock window is untrustworthy for the whole slate.
+  // Return without populating cutoffs so callers see UNAVAILABLE everywhere.
+  if (missing / total >= 0.5) {
+    logger.warn(
+      { total, missing, pct: Math.round((missing / total) * 100) },
+      "MODULE_11: ≥ 50 % of slate games have no scheduled_utc_time — board lock suppressed for entire slate (LOCK_DATA_UNAVAILABLE)",
+    );
+    return { cutoffs, missingGameIds, lockDataStatus: "UNAVAILABLE" };
+  }
+
+  // < 50 % missing: build cutoffs for timed games only.
+  for (const g of normalizedGames) {
+    if (missingGameIds.has(g.legacy_game_id)) continue;
+    const t = new Date(g.scheduled_utc_time!).getTime();
     cutoffs.set(
       g.legacy_game_id,
       new Date(t - BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH * 60 * 60 * 1000),
     );
   }
-  return cutoffs;
+
+  const lockDataStatus: GameLockCutoffResult["lockDataStatus"] = missing > 0 ? "PARTIAL" : "OK";
+  return { cutoffs, missingGameIds, lockDataStatus };
 }
 
 export async function extractOutputBoards(
@@ -419,7 +494,8 @@ export async function extractOutputBoards(
     const nowMs = Date.now();
 
     // ── Per-game lock cutoffs (each game locks independently) ─────────────────
-    const gameLockCutoffs = buildGameLockCutoffs(normalizedGames);
+    const gameLockCutoffResult = buildGameLockCutoffs(normalizedGames);
+    const { cutoffs: gameLockCutoffs, missingGameIds: lockTimeMissingIds, lockDataStatus } = gameLockCutoffResult;
 
     // ── Read SLATE_INPUT and BOARD_LOCK_STATE concurrently ──
     // BOARD_LOCK_STATE may not exist on first publish after the schema update — treat
@@ -549,6 +625,12 @@ export async function extractOutputBoards(
       // A LOCKED_OUT game can be promoted only when the operator documents a named
       // baseball reason (Late_Change_Reason) and sets Late_Promotion_Authorized=TRUE
       // in BOARD_LOCK_STATE.  Odds/line movement never satisfies this check.
+      //
+      // Games with no scheduled_utc_time receive LOCK_TIME_UNAVAILABLE — no new CORE
+      // promotion is allowed until a time is known, though existing CORE can still be
+      // downgraded by the survival gate and other post-lock checks that follow.
+      // When ≥ 50 % of slate games have no time the entire slate gets
+      // LOCK_DATA_UNAVAILABLE and all new CORE promotions are suppressed.
       let decision = rawDecision;
       let coreBlocker = rawCoreBlocker;
 
@@ -558,11 +640,29 @@ export async function extractOutputBoards(
       const persistedLockStatus  = existingBLS?.lock_status ?? "PRE_LOCK";
       const lateReasonPresent    = (existingBLS?.late_change_reason?.trim() ?? "") !== "";
       const latePromotionAuth    = existingBLS?.late_promotion_authorized === true && lateReasonPresent;
-      let lockStatus: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT";
+      let lockStatus: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT" | "LOCK_TIME_UNAVAILABLE" | "LOCK_DATA_UNAVAILABLE";
       let isFirstLock = false;
       let preLockDecision = existingBLS?.pre_lock_decision ?? "";
 
-      if (!gameLocked) {
+      if (lockDataStatus === "UNAVAILABLE") {
+        // ≥ 50 % of slate games have no scheduled time — entire slate lock suppressed.
+        // No new CORE promotion is allowed; survival and other downgrade gates still run.
+        lockStatus = "LOCK_DATA_UNAVAILABLE";
+        if (decision === "CORE") {
+          decision    = "NO_CORE";
+          coreBlocker = "LOCK_DATA_UNAVAILABLE";
+          logger.warn({ game: gs.game_id }, "MODULE_11: CORE blocked — LOCK_DATA_UNAVAILABLE (slate-wide lock suppressed)");
+        }
+      } else if (lockTimeMissingIds.has(gs.game_id)) {
+        // This specific game has no scheduled time — cannot establish a lock window.
+        // Block new CORE promotion; downgrade gates still apply after this block.
+        lockStatus = "LOCK_TIME_UNAVAILABLE";
+        if (decision === "CORE") {
+          decision    = "NO_CORE";
+          coreBlocker = "LOCK_TIME_UNAVAILABLE";
+          logger.warn({ game: gs.game_id }, "MODULE_11: CORE blocked — LOCK_TIME_UNAVAILABLE (no scheduled_utc_time)");
+        }
+      } else if (!gameLocked) {
         // Before this game's own cutoff — no restriction.
         lockStatus = "PRE_LOCK";
       } else if (persistedLockStatus === "LOCKED_OUT") {

@@ -96,6 +96,26 @@ function LockStatusBadge({ lockEntry }: { lockEntry: BoardStatusEntry }) {
     );
   }
 
+  if (lock_status === "LOCK_TIME_UNAVAILABLE") {
+    // No scheduled start time — lock window unknown; CORE promotion disabled.
+    return (
+      <span className="flex items-center gap-1 text-muted-foreground border border-border bg-muted/30 px-2 py-0.5 rounded text-[11px] font-medium">
+        <LockOpen className="w-3 h-3" />
+        Lock Time Unavailable · CORE Disabled
+      </span>
+    );
+  }
+
+  if (lock_status === "LOCK_DATA_UNAVAILABLE") {
+    // ≥ 50 % of slate games have no time — entire slate lock suppressed.
+    return (
+      <span className="flex items-center gap-1 text-muted-foreground border border-border bg-muted/30 px-2 py-0.5 rounded text-[11px] font-medium">
+        <LockOpen className="w-3 h-3" />
+        Lock Data Unavailable · CORE Disabled
+      </span>
+    );
+  }
+
   // PRE_LOCK → no indicator
   return null;
 }
@@ -109,7 +129,10 @@ export function GameCard({ game, lockEntry }: GameCardProps) {
 
   const showLockBadge =
     lockEntry &&
-    (lockEntry.lock_status === "LOCKED_IN" || lockEntry.lock_status === "LOCKED_OUT");
+    (lockEntry.lock_status === "LOCKED_IN" ||
+     lockEntry.lock_status === "LOCKED_OUT" ||
+     lockEntry.lock_status === "LOCK_TIME_UNAVAILABLE" ||
+     lockEntry.lock_status === "LOCK_DATA_UNAVAILABLE");
 
   return (
     <Card className="flex flex-col">
