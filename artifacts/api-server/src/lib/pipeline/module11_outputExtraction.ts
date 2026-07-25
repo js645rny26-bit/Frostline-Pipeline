@@ -5,7 +5,7 @@
  * then returns typed results for the API response.
  */
 
-import { readRange, clearRange, writeRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
+import { readRange, clearRange, writeRange, expandSheetColumns, addSheet, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
 import { computePropComparison, type RotowirePropsResult } from "./module05e_rotowireProps.js";
@@ -422,9 +422,11 @@ export async function extractOutputBoards(
     const gameLockCutoffs = buildGameLockCutoffs(normalizedGames);
 
     // ── Read SLATE_INPUT and BOARD_LOCK_STATE concurrently ──
+    // BOARD_LOCK_STATE may not exist on first publish after the schema update — treat
+    // a 400 / INVALID_ARGUMENT (sheet missing) as an empty result so we can create it.
     const [slateInputData, blsData] = await Promise.all([
       readRange(workbookId, "SLATE_INPUT!A:AH"),
-      readRange(workbookId, "BOARD_LOCK_STATE!A:L"),
+      readRange(workbookId, "BOARD_LOCK_STATE!A:L").catch(() => ({ values: [] as unknown[][] })),
     ]);
     const slateInputRows = (slateInputData.values ?? []).slice(1);
 
@@ -840,6 +842,11 @@ export async function extractOutputBoards(
       { rows: sbRows.length, core: output.core_count, noCore: output.no_core_count },
       "MODULE_11: SLATE_BOARD written",
     );
+
+    // ── Ensure BOARD_LOCK_STATE sheet exists (creates it on first publish) ──────
+    await addSheet(workbookId, "BOARD_LOCK_STATE").catch(() => {
+      // addSheet throws if the sheet already exists — that is the normal case; swallow it.
+    });
 
     // ── Write BOARD_LOCK_STATE header (written every publish so it stays in sync) ──
     await writeRange(workbookId, "BOARD_LOCK_STATE!A1:L1", [[
