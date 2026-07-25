@@ -213,10 +213,25 @@ export interface SurvivalReplayResult {
   blocked_floor_edge: number;
   /** Of replayed-CORE OVERs, how many had correct thesis (actual > line)? */
   core_thesis_correct: number;
+  /**
+   * Of replayed-CORE OVERs, how many had wrong thesis (actual ≤ line)?
+   * These are picks the gate passed that still lost — the gate's "missed blocks".
+   */
+  passed_losses: number;
   /** Of replayed-BLOCKED OVERs, how many had wrong thesis (actual ≤ line) — correct blocks? */
   correct_blocks: number;
   /** Of replayed-BLOCKED OVERs, how many had correct thesis — collateral damage? */
   collateral_blocks: number;
+  /**
+   * correct_blocks + collateral_blocks — the gate decision denominator.
+   * Null means no survival-gate-blocked OVERs with settled outcomes exist for this range.
+   */
+  gate_denominator: number | null;
+  /**
+   * Total OVER rows with a known actual_total (settled games only).
+   * Used to assess calibration sample adequacy.
+   */
+  total_eligible_settled: number;
   rows: SurvivalReplayRow[];
   errors: string[];
 }
@@ -284,10 +299,21 @@ function applyGate(
 export async function runSurvivalGateReplay(
   startDate: string,
   endDate: string,
-  options: { workbookId?: string; writeSheets?: boolean } = {},
+  options: {
+    workbookId?: string;
+    writeSheets?: boolean;
+    /**
+     * When true, existing rows outside the replay date range are preserved
+     * and new rows are appended (replacing any rows that fall within
+     * [startDate, endDate] for idempotency). When false (default), the sheet
+     * is fully cleared and rewritten with only the rows from this run.
+     */
+    appendMode?: boolean;
+  } = {},
 ): Promise<SurvivalReplayResult> {
   const wbId      = options.workbookId ?? WORKBOOK_ID;
   const writeOut  = options.writeSheets ?? false;
+  const appendMode = options.appendMode ?? false;
   const replayTs  = new Date().toISOString();
   const errors: string[] = [];
 
@@ -305,10 +331,21 @@ export async function runSurvivalGateReplay(
       status: "failure",
       date_range: { start: startDate, end: endDate },
       replay_ts: replayTs,
-      total_overs: 0, replayed_core: 0, replayed_blocked: 0, blocked_prior: 0,
-      blocked_env_dependent: 0, blocked_baseball_edge: 0, blocked_floor_edge: 0,
-      core_thesis_correct: 0, correct_blocks: 0, collateral_blocks: 0,
-      rows: [], errors,
+      total_overs: 0,
+      total_eligible_settled: 0,
+      replayed_core: 0,
+      replayed_blocked: 0,
+      blocked_prior: 0,
+      blocked_env_dependent: 0,
+      blocked_baseball_edge: 0,
+      blocked_floor_edge: 0,
+      core_thesis_correct: 0,
+      passed_losses: 0,
+      correct_blocks: 0,
+      collateral_blocks: 0,
+      gate_denominator: null,
+      rows: [],
+      errors,
     };
   }
 
@@ -557,9 +594,39 @@ export async function runSurvivalGateReplay(
     r.replayed_decision === "BLOCKED" && r.replay_blocker !== "PRIOR_GATE",
   );
 
-  const core_thesis_correct  = coreRows.filter((r) => r.thesis_correct === true).length;
-  const correct_blocks       = survivalBlocked.filter((r) => r.thesis_correct === false).length;
-  const collateral_blocks    = survivalBlocked.filter((r) => r.thesis_correct === true).length;
+  const core_thesis_correct = coreRows.filter((r) => r.thesis_correct === true).length;
+  // CORE picks that passed the gate but lost — the gate's missed blocks.
+  const passed_losses       = coreRows.filter((r) => r.thesis_correct === false).length;
+  const correct_blocks      = survivalBlocked.filter((r) => r.thesis_correct === false).length;
+  const collateral_blocks   = survivalBlocked.filter((r) => r.thesis_correct === true).length;
+
+  // Denominator: only survival-gate-blocked overs with settled outcomes.
+  // Null when no settled survival-blocked overs exist (avoids misleading 0% or 100%).
+  const rawDenominator = correct_blocks + collateral_blocks;
+  const gate_denominator: number | null = rawDenominator > 0 ? rawDenominator : null;
+  const hitRate = gate_denominator !== null
+    ? Math.round((correct_blocks / gate_denominator) * 1000) / 10
+    : null;
+
+  // Total settled OVER rows (actual_total known) — sample-size gauge.
+  const total_eligible_settled = overs.filter((r) => r.actual_total !== null).length;
+
+  // ── Compute and log daily gate hit-rate ───────────────────────────────────
+  logger.info(
+    {
+      startDate, endDate,
+      total_overs,
+      total_eligible_settled,
+      replayed_core,
+      replayed_blocked,
+      passed_losses,
+      correct_blocks,
+      collateral_blocks,
+      gate_denominator,
+      hit_rate_pct: hitRate,
+    },
+    "MODULE_18: Daily survival gate hit-rate — correct_blocks / (correct_blocks + collateral_blocks)",
+  );
 
   // ── Write SURVIVAL_GATE_REPLAY sheet ─────────────────────────────────────
   if (writeOut) {
@@ -567,44 +634,66 @@ export async function runSurvivalGateReplay(
       // Create sheet if absent (addSheet is idempotent-ish — ignore "already exists" errors)
       await addSheet(wbId, REPLAY_SHEET).catch(() => {/* sheet already exists — fine */});
       await expandSheetColumns(wbId, REPLAY_SHEET, REPLAY_COLS);
-      await clearRange(wbId, `${REPLAY_SHEET}!A1:AA5000`);
 
-      const sheetRows: unknown[][] = [REPLAY_HEADER];
-      for (const r of replayRows) {
-        sheetRows.push([
-          r.date,
-          r.game_id,
-          r.away_team,
-          r.home_team,
-          r.away_pitcher,
-          r.home_pitcher,
-          r.market_line     ?? "",
-          r.projected_total,
-          r.variance        ?? "",
-          r.direction,
-          r.actual_total    ?? "",
-          r.thesis_correct  === null ? "" : r.thesis_correct ? "TRUE" : "FALSE",
-          r.original_decision,
-          r.original_blocker,
-          r.replayed_decision,
-          r.replay_blocker,
-          r.baseball_only_projection ?? "",
-          r.combined_multiplier      ?? "",
-          r.environment_run_adjustment ?? "",
-          r.approx_survival_floor    ?? "",
-          r.floor_edge               ?? "",
-          r.baseball_only_edge       ?? "",
-          r.park_multiplier          ?? "",
-          r.weather_multiplier       ?? "",
-          r.park_source,
-          r.marginal_flag,
-          r.notes,
-        ]);
+      /** Serialize a SurvivalReplayRow to the column-ordered sheet row. */
+      const toSheetRow = (r: SurvivalReplayRow): unknown[] => [
+        r.date,
+        r.game_id,
+        r.away_team,
+        r.home_team,
+        r.away_pitcher,
+        r.home_pitcher,
+        r.market_line     ?? "",
+        r.projected_total,
+        r.variance        ?? "",
+        r.direction,
+        r.actual_total    ?? "",
+        r.thesis_correct  === null ? "" : r.thesis_correct ? "TRUE" : "FALSE",
+        r.original_decision,
+        r.original_blocker,
+        r.replayed_decision,
+        r.replay_blocker,
+        r.baseball_only_projection ?? "",
+        r.combined_multiplier      ?? "",
+        r.environment_run_adjustment ?? "",
+        r.approx_survival_floor    ?? "",
+        r.floor_edge               ?? "",
+        r.baseball_only_edge       ?? "",
+        r.park_multiplier          ?? "",
+        r.weather_multiplier       ?? "",
+        r.park_source,
+        r.marginal_flag,
+        r.notes,
+      ];
+
+      let sheetRows: unknown[][];
+
+      if (appendMode) {
+        // ── Append mode: preserve rows outside the replay date range ────────
+        // Read existing sheet content, drop rows whose Date falls within
+        // [startDate, endDate] (so re-running for the same date is idempotent),
+        // then write header + retained rows + new rows.
+        const existing = await readRange(wbId, `${REPLAY_SHEET}!A1:AA5000`).catch(
+          () => null,
+        );
+        const existingValues = (existing?.values ?? []) as unknown[][];
+        // Slice off header row; filter out rows in the replay date range
+        const retained = existingValues.slice(1).filter((row) => {
+          const rowDate = String(row[0] ?? "").trim();
+          return rowDate < startDate || rowDate > endDate;
+        });
+        sheetRows = [REPLAY_HEADER, ...retained, ...replayRows.map(toSheetRow)];
+        // Clear and rewrite so row order is deterministic
+        await clearRange(wbId, `${REPLAY_SHEET}!A1:AA5000`);
+      } else {
+        // ── Full overwrite mode (original behaviour) ─────────────────────────
+        await clearRange(wbId, `${REPLAY_SHEET}!A1:AA5000`);
+        sheetRows = [REPLAY_HEADER, ...replayRows.map(toSheetRow)];
       }
 
       await writeRange(wbId, `${REPLAY_SHEET}!A1`, sheetRows);
       logger.info(
-        { rows: sheetRows.length - 1, sheet: REPLAY_SHEET },
+        { rows: sheetRows.length - 1, sheet: REPLAY_SHEET, appendMode },
         "MODULE_18: Survival gate replay written to sheet",
       );
     } catch (err: unknown) {
@@ -619,6 +708,7 @@ export async function runSurvivalGateReplay(
     date_range: { start: startDate, end: endDate },
     replay_ts: replayTs,
     total_overs,
+    total_eligible_settled,
     replayed_core,
     replayed_blocked,
     blocked_prior,
@@ -626,8 +716,10 @@ export async function runSurvivalGateReplay(
     blocked_baseball_edge,
     blocked_floor_edge,
     core_thesis_correct,
+    passed_losses,
     correct_blocks,
     collateral_blocks,
+    gate_denominator,
     rows: replayRows,
     errors,
   };

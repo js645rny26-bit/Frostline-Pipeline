@@ -1,0 +1,77 @@
+SOURCES USED
+
+* Your Task 11 implementation report
+* The previously inspected settlement, replay, and historical-record architecture
+
+REFRESH CHECK
+
+I have not inspected the revised source code, endpoint response, or newly written workbook rows directly. Assessment is based on the reported compile and server restart.
+
+Task 11 assessment
+
+The orchestration is sound:
+
+Daily settlement
+→ SHADOW_OUTCOMES
+→ same-date survival replay
+→ idempotent historical append
+
+That closes an important operational gap. The task is acceptable provided three behaviors are already true.
+
+Required verification
+
+1. Partial failures must not report full success
+
+runDailySettlement should preserve separate module statuses.
+
+If Module 14 succeeds but Module 18 fails, the response must show something equivalent to:
+
+status = partial_failure
+settlement_status = success
+replay_status = failure
+
+It must not report the entire settlement run as successful merely because actual scores were written.
+
+A rerun after partial failure must replace that date’s replay rows without duplicating the already-settled outcomes.
+
+2. Replay replacement must use normalized slate dates
+
+The replacement key should be the normalized baseball date, not a loose timestamp range or formatted cell string.
+
+At minimum:
+
+normalized Date + Game_ID
+
+must uniquely identify replay rows. This prevents:
+
+* duplicate rows from repeated settlement
+* July 25 games appearing under July 24
+* stale PENDING rows surviving beside valid settled rows
+* deleting unrelated rows because of timezone boundaries
+
+3. Hit-rate reporting needs denominator visibility
+
+The reported rate:
+
+correct_blocks / (correct_blocks + collateral_blocks)
+
+is valid as a block precision measure, but it is not overall gate accuracy.
+
+The response and log should also expose:
+
+* correct_blocks
+* collateral_blocks
+* missed_blocks or passed losses
+* passed_winners
+* denominator
+* total eligible settled rows
+
+Handle a zero denominator explicitly as N_A, not 0% or 100%.
+
+Also, thirty calendar days does not automatically mean adequate calibration. Authorization should depend on the previously frozen sample-size requirements, not elapsed time alone.
+
+Status
+
+Task 11 plumbing accepted.
+
+The accumulated replay remains diagnostic rather than commissioning-grade until the canonical decision-history and exact replay-equivalence defects from Pass A are repaired. No additional feature expansion is needed inside this task.

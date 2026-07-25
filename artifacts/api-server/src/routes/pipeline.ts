@@ -4,12 +4,11 @@ import {
   GetPipelineSummaryQueryParams,
   GetPipelineScheduleQueryParams,
 } from "@workspace/api-zod";
-import { runPipeline, getPipelineSummary, runFullPipeline } from "../lib/pipeline/runner.js";
+import { runPipeline, getPipelineSummary, runFullPipeline, runDailySettlement } from "../lib/pipeline/runner.js";
 import { fetchMlbSchedule } from "../lib/pipeline/module01_mlbStatsApi.js";
 import { getTodayDateStr } from "../lib/pipeline/config.js";
 import { runHistoricalReplay } from "../lib/pipeline/module13_historicalReplay.js";
 import { logger } from "../lib/logger.js";
-import { runShadowSettlement } from "../lib/pipeline/module14_shadowSettlement.js";
 import { runRegressionReport } from "../lib/pipeline/module15_regressionReport.js";
 import { runStarterAudit } from "../lib/pipeline/module16_starterAudit.js";
 import { runPostmortem } from "../lib/pipeline/module17_vehiclePostmortem.js";
@@ -120,7 +119,12 @@ router.get("/pipeline/replay", async (req, res): Promise<void> => {
 /**
  * GET /pipeline/settle
  * Settle shadow projections for a given date by pairing them with actual
- * MLB final scores. Appends settled rows to the SHADOW_OUTCOMES sheet.
+ * MLB final scores, then automatically run survival gate replay for the
+ * same date so the SURVIVAL_GATE_REPLAY sheet accumulates without manual work.
+ *
+ * Step 1 (Module 14): Appends settled rows to SHADOW_OUTCOMES (idempotent).
+ * Step 2 (Module 18): Appends/replaces survival gate replay rows for the date
+ *                     in SURVIVAL_GATE_REPLAY (idempotent by date+game_id).
  *
  * Query params:
  *   date        — YYYY-MM-DD (optional; defaults to yesterday)
@@ -138,11 +142,14 @@ router.get("/pipeline/settle", async (req, res): Promise<void> => {
     settleDate = d.toISOString().slice(0, 10);
   }
 
+  const workbookId = typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID;
+
   try {
-    const result = await runShadowSettlement(settleDate, {
-      workbookId: typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID,
-    });
-    res.status(result.status === "failure" ? 500 : 200).json(result);
+    const result = await runDailySettlement(settleDate, workbookId);
+    const hasFailure =
+      result.settlement.status === "failure" ||
+      result.survival_replay.status === "failure";
+    res.status(hasFailure ? 500 : 200).json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });

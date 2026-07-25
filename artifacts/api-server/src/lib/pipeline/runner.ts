@@ -30,6 +30,8 @@ import { extractOutputBoards, type Module11Result } from "./module11_outputExtra
 import { archiveRunBundle, type Module12Result } from "./module12_archival.js";
 import { runShadowValidation, type ShadowValidationResult } from "./module12s_shadowValidation.js";
 import { logVehicles, type VehicleLogResult } from "./module17_vehiclePostmortem.js";
+import { runShadowSettlement, type SettlementResult } from "./module14_shadowSettlement.js";
+import { runSurvivalGateReplay, type SurvivalReplayResult } from "./module18_survivalGateReplay.js";
 import { WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 
@@ -485,6 +487,163 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_17: mod17,
     workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
     errors: allErrors,
+  };
+}
+
+// ─── Daily settlement + survival-gate replay ──────────────────────────────────
+
+export interface DailySettlementResult {
+  /** "success" — both modules OK; "partial_failure" — one module failed; "failure" — both failed. */
+  status: "success" | "partial_failure" | "failure";
+  date: string;
+  settlement_status: SettlementResult["status"];
+  replay_status: SurvivalReplayResult["status"];
+  settlement: SettlementResult;
+  survival_replay: SurvivalReplayResult;
+  /**
+   * Block precision: correct_blocks / (correct_blocks + collateral_blocks).
+   * Null when the gate blocked no settled OVERs (zero denominator).
+   */
+  gate_hit_rate_pct: number | null;
+  /** Picks that passed the gate but lost — gate's missed blocks. */
+  passed_losses: number;
+  /** Picks that passed the gate and won. */
+  passed_winners: number;
+  /** correct_blocks + collateral_blocks; null when no settled blocked OVERs. */
+  gate_denominator: number | null;
+  /** OVER rows with a known actual total — sample-size gauge for calibration. */
+  total_eligible_settled: number;
+  errors: string[];
+}
+
+/**
+ * Runs the end-of-day settlement pipeline for a given date:
+ *   1. Module 14: Shadow settlement — pairs SHADOW_HISTORY projections with
+ *      actual MLB final scores and appends settled rows to SHADOW_OUTCOMES.
+ *   2. Module 18: Survival gate replay — retroactively grades every OVER pick
+ *      for the same date against the survival gate and appends results to
+ *      SURVIVAL_GATE_REPLAY (idempotent: rows for this date are replaced).
+ *
+ * The gate hit-rate (correct_blocks / (correct_blocks + collateral_blocks))
+ * is logged and returned so operators can track threshold calibration over time.
+ *
+ * Called automatically after each day's games complete.  Can also be triggered
+ * manually via GET /api/pipeline/settle?date=YYYY-MM-DD.
+ */
+export async function runDailySettlement(
+  date: string,
+  workbookId: string = WORKBOOK_ID,
+): Promise<DailySettlementResult> {
+  logger.info({ date, workbookId }, "Daily settlement: starting settlement + survival replay");
+  const errors: string[] = [];
+
+  // Step 1 — Shadow settlement (idempotent: already-settled games are skipped)
+  const settlement = await runShadowSettlement(date, { workbookId }).catch(
+    (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err: msg }, "Daily settlement: Module 14 shadow settlement threw");
+      errors.push(`settlement: ${msg}`);
+      return {
+        status: "failure" as const,
+        settle_date: date,
+        settlement_timestamp_utc: new Date().toISOString(),
+        games_found: 0,
+        games_settled: 0,
+        games_skipped: 0,
+        games_no_actual: 0,
+        rows: [],
+        errors: [msg],
+      } satisfies SettlementResult;
+    },
+  );
+
+  if (settlement.status !== "failure") {
+    logger.info(
+      { settled: settlement.games_settled, skipped: settlement.games_skipped },
+      "Daily settlement: Module 14 complete",
+    );
+  }
+
+  // Step 2 — Survival gate replay for the same date (append mode: idempotent by date)
+  const survival_replay = await runSurvivalGateReplay(date, date, {
+    workbookId,
+    writeSheets: true,
+    appendMode: true,
+  }).catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: msg }, "Daily settlement: Module 18 survival gate replay threw");
+    errors.push(`survival_replay: ${msg}`);
+    return {
+      status: "failure" as const,
+      date_range: { start: date, end: date },
+      replay_ts: new Date().toISOString(),
+      total_overs: 0,
+      total_eligible_settled: 0,
+      replayed_core: 0,
+      replayed_blocked: 0,
+      blocked_prior: 0,
+      blocked_env_dependent: 0,
+      blocked_baseball_edge: 0,
+      blocked_floor_edge: 0,
+      core_thesis_correct: 0,
+      passed_losses: 0,
+      correct_blocks: 0,
+      collateral_blocks: 0,
+      gate_denominator: null,
+      rows: [],
+      errors: [msg],
+    } satisfies SurvivalReplayResult;
+  });
+
+  // Derive top-level summary fields from the replay result.
+  const gate_denominator    = survival_replay.gate_denominator;
+  const gate_hit_rate_pct   = gate_denominator !== null
+    ? Math.round((survival_replay.correct_blocks / gate_denominator) * 1000) / 10
+    : null;
+  const passed_losses       = survival_replay.passed_losses;
+  const passed_winners      = survival_replay.core_thesis_correct;
+  const total_eligible_settled = survival_replay.total_eligible_settled;
+
+  // Overall status: success only when both modules succeed; failure when both fail.
+  const settleFailed = settlement.status === "failure";
+  const replayFailed = survival_replay.status === "failure";
+  const overallStatus: DailySettlementResult["status"] =
+    settleFailed && replayFailed ? "failure"
+    : settleFailed || replayFailed ? "partial_failure"
+    : "success";
+
+  logger.info(
+    {
+      date,
+      overall_status: overallStatus,
+      settlement_status: settlement.status,
+      replay_status: survival_replay.status,
+      gate_hit_rate_pct,
+      gate_denominator,
+      passed_losses,
+      passed_winners,
+      correct_blocks: survival_replay.correct_blocks,
+      collateral_blocks: survival_replay.collateral_blocks,
+      total_eligible_settled,
+      replayed_core: survival_replay.replayed_core,
+      replayed_blocked: survival_replay.replayed_blocked,
+    },
+    "Daily settlement: complete — survival gate hit-rate logged",
+  );
+
+  return {
+    status: overallStatus,
+    date,
+    settlement_status: settlement.status,
+    replay_status: survival_replay.status,
+    settlement,
+    survival_replay,
+    gate_hit_rate_pct,
+    passed_losses,
+    passed_winners,
+    gate_denominator,
+    total_eligible_settled,
+    errors,
   };
 }
 
