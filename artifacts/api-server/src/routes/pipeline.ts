@@ -12,6 +12,7 @@ import { runShadowSettlement } from "../lib/pipeline/module14_shadowSettlement.j
 import { runRegressionReport } from "../lib/pipeline/module15_regressionReport.js";
 import { runStarterAudit } from "../lib/pipeline/module16_starterAudit.js";
 import { runPostmortem } from "../lib/pipeline/module17_vehiclePostmortem.js";
+import { runSurvivalGateReplay } from "../lib/pipeline/module18_survivalGateReplay.js";
 import { WORKBOOK_ID, writeRange, clearRange, expandSheetColumns } from "../lib/sheets/client.js";
 import { WORKBOOK_SCHEMA, generateSchemaReferenceRows, WORKBOOK_SCHEMA_VERSION } from "../lib/workbook/workbookSchema.js";
 
@@ -213,6 +214,43 @@ router.get("/pipeline/postmortem", async (req, res): Promise<void> => {
 
   try {
     const result = await runPostmortem(date, {
+      writeSheets: write_sheets === "true",
+      workbookId:  typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID,
+    });
+    res.status(result.status === "failure" ? 500 : 200).json(result);
+  } catch (err: unknown) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+/**
+ * GET /pipeline/survival-replay
+ * Retroactively applies the Over survival gate to historical VEHICLE_LOG data.
+ *
+ * Reconstructs baseball_only_projection = projected_total / combined_multiplier
+ * (exact, from SHADOW_HISTORY multiplier data) and re-grades every OVER pick
+ * in the date range against the gate thresholds.
+ *
+ * Query params:
+ *   start_date   — YYYY-MM-DD (required)
+ *   end_date     — YYYY-MM-DD (required)
+ *   write_sheets — "true" to write SURVIVAL_GATE_REPLAY sheet (optional)
+ *   workbook_id  — override workbook (optional)
+ */
+router.get("/pipeline/survival-replay", async (req, res): Promise<void> => {
+  const { start_date, end_date, write_sheets, workbook_id } = req.query;
+
+  if (!start_date || typeof start_date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
+    res.status(400).json({ error: "start_date query param required (YYYY-MM-DD)" });
+    return;
+  }
+  if (!end_date || typeof end_date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+    res.status(400).json({ error: "end_date query param required (YYYY-MM-DD)" });
+    return;
+  }
+
+  try {
+    const result = await runSurvivalGateReplay(start_date, end_date, {
       writeSheets: write_sheets === "true",
       workbookId:  typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID,
     });

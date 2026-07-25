@@ -28,8 +28,9 @@
  *      enabling controlled post-lock CORE exceptions for named baseball reasons only.
  *  v7 (2026-07-25): MONOTONICITY sheet — edge-tier hit-rate analysis from module15.
  *      REPLAY_RESULTS extended with Market_Line + Edge_BLEND_PARK_PITCHER columns (cols AE–AE).
+ *  v8 (2026-07-25): SURVIVAL_GATE_REPLAY sheet — retroactive survival gate analysis from module18.
  */
-export const WORKBOOK_SCHEMA_VERSION = 7;
+export const WORKBOOK_SCHEMA_VERSION = 8;
 
 export interface ColumnDef {
   name: string;
@@ -40,7 +41,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_09" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_09" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -947,6 +948,42 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Away_Offense_Source",index: 14, type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "BLENDED" },
       { name: "Home_Offense_Source",index: 15, type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "L30_ONLY" },
       { name: "Graded_TS",          index: 16, type: "string", width: 200, filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-25T08:30:00.000Z" },
+    ],
+  },
+
+  {
+    name: "SURVIVAL_GATE_REPLAY",
+    description: "Retroactive survival gate analysis written by module18. Reconstructs baseball_only_projection = projected_total / combined_multiplier for every OVER pick in the date range and re-grades against gate thresholds. Never cleared; overwritten on each run.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date",                  index: 0,  type: "string", width: 90,  filledBy: "MODULE_18", readOnly: true, exampleValue: "2026-07-24" },
+      { name: "Game_ID",               index: 1,  type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, exampleValue: "20260724_OAK_MIN" },
+      { name: "Away_Team",             index: 2,  type: "string", width: 80,  filledBy: "MODULE_18", readOnly: true, exampleValue: "OAK" },
+      { name: "Home_Team",             index: 3,  type: "string", width: 80,  filledBy: "MODULE_18", readOnly: true, exampleValue: "MIN" },
+      { name: "Away_Pitcher",          index: 4,  type: "string", width: 140, filledBy: "MODULE_18", readOnly: true, exampleValue: "Jacob Lopez" },
+      { name: "Home_Pitcher",          index: 5,  type: "string", width: 140, filledBy: "MODULE_18", readOnly: true, exampleValue: "Zebby Matthews" },
+      { name: "Market_Line",           index: 6,  type: "number", width: 90,  format: "0.0", filledBy: "MODULE_18", readOnly: true, exampleValue: "9.5" },
+      { name: "Projected_Total",       index: 7,  type: "number", width: 130, format: "0.00", filledBy: "MODULE_18", readOnly: true, exampleValue: "10.47" },
+      { name: "Variance",              index: 8,  type: "number", width: 90,  format: "0.00", filledBy: "MODULE_18", readOnly: true, description: "Projected − Market", exampleValue: "0.97" },
+      { name: "Direction",             index: 9,  type: "string", width: 80,  filledBy: "MODULE_18", readOnly: true, exampleValue: "OVER" },
+      { name: "Actual_Total",          index: 10, type: "number", width: 90,  format: "0",   filledBy: "MODULE_18", readOnly: true, exampleValue: "2" },
+      { name: "Thesis_Correct",        index: 11, type: "string", width: 110, filledBy: "MODULE_18", readOnly: true, description: "TRUE | FALSE | blank when no outcome yet", exampleValue: "FALSE" },
+      { name: "Original_Decision",     index: 12, type: "string", width: 110, filledBy: "MODULE_18", readOnly: true, description: "CORE | NO_CORE | PENDING at time of publish", exampleValue: "NO_CORE" },
+      { name: "Original_Blocker",      index: 13, type: "string", width: 220, filledBy: "MODULE_18", readOnly: true, exampleValue: "INSUFFICIENT_PROJECTION_SEPARATION" },
+      { name: "Replayed_Decision",     index: 14, type: "string", width: 110, filledBy: "MODULE_18", readOnly: true, description: "CORE | BLOCKED | PENDING | NOT_OVER under survival gate", exampleValue: "BLOCKED" },
+      { name: "Replay_Blocker",        index: 15, type: "string", width: 250, filledBy: "MODULE_18", readOnly: true, description: "Survival gate failure reason, or PRIOR_GATE", exampleValue: "BASEBALL_ONLY_EDGE_BELOW_THRESHOLD" },
+      { name: "Baseball_Only_Proj",    index: 16, type: "number", width: 130, format: "0.00", filledBy: "MODULE_18", readOnly: true, description: "projected_total / combined_multiplier — environment-free projection", exampleValue: "10.69" },
+      { name: "Combined_Multiplier",   index: 17, type: "number", width: 130, format: "0.0000", filledBy: "MODULE_18", readOnly: true, description: "park × weather combined run multiplier (capped)", exampleValue: "0.9794" },
+      { name: "Environment_Run_Adj",   index: 18, type: "number", width: 140, format: "0.00", filledBy: "MODULE_18", readOnly: true, description: "projected_total − baseball_only_proj. Positive = env boosted.", exampleValue: "-0.22" },
+      { name: "Approx_Survival_Floor", index: 19, type: "number", width: 150, format: "0.00", filledBy: "MODULE_18", readOnly: true, description: "baseball_only × 0.781 (approximate; uses default 5.5 IP starter split)", exampleValue: "8.34" },
+      { name: "Floor_Edge",            index: 20, type: "number", width: 90,  format: "0.00", filledBy: "MODULE_18", readOnly: true, description: "Approx_Floor − Market_Line. Must be ≥ 0.25 to pass.", exampleValue: "-1.16" },
+      { name: "Baseball_Only_Edge",    index: 21, type: "number", width: 130, format: "0.00", filledBy: "MODULE_18", readOnly: true, description: "Baseball_Only_Proj − Market_Line. Must be ≥ 1.25 to pass.", exampleValue: "1.19" },
+      { name: "Park_Multiplier",       index: 22, type: "number", width: 120, format: "0.0000", filledBy: "MODULE_18", readOnly: true, exampleValue: "0.95" },
+      { name: "Weather_Multiplier",    index: 23, type: "number", width: 130, format: "0.0000", filledBy: "MODULE_18", readOnly: true, exampleValue: "1.031" },
+      { name: "Park_Source",           index: 24, type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, exampleValue: "VENUE_FACTOR_USED" },
+      { name: "Marginal_Flag",         index: 25, type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, description: "MARGINAL when verdict is within 0.15 of a threshold. NO_MULTIPLIER_DATA when SHADOW_HISTORY absent.", exampleValue: "MARGINAL" },
+      { name: "Notes",                 index: 26, type: "string", width: 220, filledBy: "MODULE_18", readOnly: true, exampleValue: "SHADOW_HISTORY_ABSENT" },
     ],
   },
 
