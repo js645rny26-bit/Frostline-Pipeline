@@ -51,7 +51,7 @@
  *   8. Calibration      — MAE breakdown by projection band (< 7, 7–9, 9–11, ≥ 11)
  */
 
-import { clearRange, expandSheetColumns, writeRange, WORKBOOK_ID } from "../sheets/client.js";
+import { clearRange, expandSheetColumns, readRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { SEASONAL_PARK_FACTORS_2026 } from "./module04d_parkFactors.js";
@@ -87,6 +87,12 @@ const MIN_L30_GAMES     = 15; // below this, L30 treated as missing
 
 const REPLAY_RESULTS_SHEET = "REPLAY_RESULTS";
 const REPLAY_METRICS_SHEET = "REPLAY_METRICS";
+const ODDS_HISTORY_SHEET   = "ODDS_HISTORY";
+
+// ODDS_HISTORY column indices (0-based): Snapshot_TS_UTC | Date | Game_ID | Total | …
+const OH_TS      = 0;
+const OH_GAME_ID = 2;
+const OH_TOTAL   = 3;
 
 const RESULTS_HEADER: string[] = [
   "Replay_Date", "Game_ID", "Away_Team", "Home_Team",
@@ -105,6 +111,9 @@ const RESULTS_HEADER: string[] = [
   "Home_Starter_Quality",
   "Blend_Park_Pitcher_Projected",
   "Blend_Park_Pitcher_Error",
+  // ── Market edge columns ──
+  "Market_Line",
+  "Edge_BLEND_PARK_PITCHER",
   "Replay_Run_TS",
 ];
 
@@ -114,6 +123,51 @@ const METRICS_HEADER: string[] = [
   "Miss_4Plus_Pct", "Overproject_Pct", "Underproject_Pct",
   "Replay_Run_TS",
 ];
+
+// ─── ODDS_HISTORY helpers ─────────────────────────────────────────────────────
+
+/**
+ * Normalise a REPLAY_RESULTS game_id to the ODDS_HISTORY legacy_game_id format.
+ *   REPLAY:      "2026-07-24_SDP@ATL"   (YYYY-MM-DD_AWAY@HOME)
+ *   ODDS_HISTORY: "20260724_SDP_ATL"    (YYYYMMDD_AWAY_HOME)
+ */
+function replayToOddsGameId(replayId: string): string {
+  const sepIdx = replayId.indexOf("_");
+  if (sepIdx === -1) return replayId;
+  const datePart = replayId.slice(0, sepIdx).replace(/-/g, "");
+  const teamPart = replayId.slice(sepIdx + 1).replace("@", "_");
+  return `${datePart}_${teamPart}`;
+}
+
+/**
+ * Read ODDS_HISTORY sheet and return the **latest** logged total per game_id
+ * (closing line: the snapshot with the most-recent Snapshot_TS_UTC).
+ * Returns an empty map if the sheet is absent or unreadable.
+ */
+async function readClosingLinesFromOddsHistory(
+  workbookId: string,
+): Promise<Map<string, number>> {
+  const lineMap  = new Map<string, number>();
+  const latestTs = new Map<string, string>();  // game_id → best snapshot TS so far
+  try {
+    const resp = await readRange(workbookId, `${ODDS_HISTORY_SHEET}!A2:D10000`);
+    for (const row of (resp.values ?? []) as string[][]) {
+      const snapTs = row[OH_TS];
+      const gameId = row[OH_GAME_ID];
+      const total  = parseFloat(row[OH_TOTAL] ?? "");
+      if (!snapTs || !gameId || !Number.isFinite(total) || total === 0) continue;
+      // Keep the snapshot with the latest TS per game_id (closing line)
+      const prev = latestTs.get(gameId);
+      if (!prev || snapTs > prev) {
+        latestTs.set(gameId, snapTs);
+        lineMap.set(gameId, total);
+      }
+    }
+  } catch {
+    // ODDS_HISTORY absent or unreadable — return empty map; callers treat as null lines
+  }
+  return lineMap;
+}
 
 // ─── Team name → abbr map (same as module05c) ────────────────────────────────
 
@@ -163,6 +217,13 @@ export interface ReplayGameRow {
   away_starter_quality: number;
   /** Quality factor of the HOME starter (faces AWAY batters). 1.0 = league avg; > 1.0 = permissive. */
   home_starter_quality: number;
+  /** Closing O/U market line from ODDS_HISTORY; null if not logged for this game. */
+  market_line: number | null;
+  /**
+   * BLEND_PARK_PITCHER projection minus market_line. Positive = we projected Over.
+   * Null when market_line is absent.
+   */
+  edge_blend_park_pitcher: number | null;
 }
 
 export interface CalibrationBand {
@@ -547,10 +608,10 @@ async function writeResultsSheet(
   runTs: string,
   workbookId: string,
 ): Promise<void> {
-  // 29 data cols (A–AC) + Replay_Run_TS (AD) = 30 total
+  // 31 data cols (A–AE): 29 original + Market_Line + Edge_BLEND_PARK_PITCHER + Replay_Run_TS
   await expandSheetColumns(workbookId, REPLAY_RESULTS_SHEET, RESULTS_HEADER.length);
-  await clearRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:AD5000`);
-  await writeRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:AD1`, [RESULTS_HEADER]);
+  await clearRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:AE5000`);
+  await writeRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:AE1`, [RESULTS_HEADER]);
 
   const sheetRows = rows.map((r) => [
     r.replay_date,
@@ -582,13 +643,16 @@ async function writeResultsSheet(
     r.home_starter_quality,
     r.projections.BLEND_PARK_PITCHER  ?? "",
     r.errors.BLEND_PARK_PITCHER       ?? "",
+    // ── Market edge columns ──
+    r.market_line                     ?? "",
+    r.edge_blend_park_pitcher         ?? "",
     runTs,
   ]);
 
   if (sheetRows.length > 0) {
     await writeRange(
       workbookId,
-      `${REPLAY_RESULTS_SHEET}!A2:AD${1 + sheetRows.length}`,
+      `${REPLAY_RESULTS_SHEET}!A2:AE${1 + sheetRows.length}`,
       sheetRows,
     );
   }
@@ -659,6 +723,16 @@ export async function runHistoricalReplay(
       metrics: [],
       errors: ["No dates in range (check start/end order and MAX_DATE_RANGE cap)"],
     };
+  }
+
+  // ── Read ODDS_HISTORY closing lines for edge computation ──
+  let oddsLineMap = new Map<string, number>();
+  try {
+    oddsLineMap = await readClosingLinesFromOddsHistory(wbId);
+    logger.info({ games: oddsLineMap.size }, "MODULE_13: ODDS_HISTORY closing lines loaded");
+  } catch (err: unknown) {
+    errors.push(`ODDS_HISTORY read failed: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn("MODULE_13: Could not load ODDS_HISTORY — market_line/edge will be null for all rows");
   }
 
   // ── Build park factors map: home_abbr → ParkFactors ──
@@ -816,25 +890,36 @@ export async function runHistoricalReplay(
         errs[v] = p !== null ? parseFloat((p - actualTotal).toFixed(2)) : null;
       }
 
+      // Resolve market line via ODDS_HISTORY (latest snapshot per game)
+      const oddsKey   = replayToOddsGameId(gameId);
+      const marketLine = oddsLineMap.get(oddsKey) ?? null;
+      const blendParkPitcherProj = computed.projections.BLEND_PARK_PITCHER;
+      const edgeBlendParkPitcher =
+        marketLine !== null && blendParkPitcherProj !== null
+          ? parseFloat((blendParkPitcherProj - marketLine).toFixed(2))
+          : null;
+
       allRows.push({
-        replay_date:          date,
-        game_id:              gameId,
-        away_team:            awayAbbr,
-        home_team:            homeAbbr,
-        actual_total:         actualTotal,
-        projections:          computed.projections,
-        errors:               errs,
-        away_l30_rate:        computed.away_l30,
-        home_l30_rate:        computed.home_l30,
-        away_l10_rate:        computed.away_l10,
-        home_l10_rate:        computed.home_l10,
-        away_offense_source:  computed.away_offense_source,
-        home_offense_source:  computed.home_offense_source,
-        park_runs_pct:        computed.park_runs_pct,
-        park_multiplier:      computed.park_multiplier,
-        park_source_status:   parkSourceStatus,
-        away_starter_quality: computed.away_starter_quality,
-        home_starter_quality: computed.home_starter_quality,
+        replay_date:             date,
+        game_id:                 gameId,
+        away_team:               awayAbbr,
+        home_team:               homeAbbr,
+        actual_total:            actualTotal,
+        projections:             computed.projections,
+        errors:                  errs,
+        away_l30_rate:           computed.away_l30,
+        home_l30_rate:           computed.home_l30,
+        away_l10_rate:           computed.away_l10,
+        home_l10_rate:           computed.home_l10,
+        away_offense_source:     computed.away_offense_source,
+        home_offense_source:     computed.home_offense_source,
+        park_runs_pct:           computed.park_runs_pct,
+        park_multiplier:         computed.park_multiplier,
+        park_source_status:      parkSourceStatus,
+        away_starter_quality:    computed.away_starter_quality,
+        home_starter_quality:    computed.home_starter_quality,
+        market_line:             marketLine,
+        edge_blend_park_pitcher: edgeBlendParkPitcher,
       });
     }
   }

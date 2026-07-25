@@ -26,8 +26,10 @@
  *      first pitch.  BOARD_LOCK_STATE sheet added as authoritative governance store
  *      (12 cols A–L) with operator Late_Change_Reason / Late_Promotion_Authorized fields
  *      enabling controlled post-lock CORE exceptions for named baseball reasons only.
+ *  v7 (2026-07-25): MONOTONICITY sheet — edge-tier hit-rate analysis from module15.
+ *      REPLAY_RESULTS extended with Market_Line + Edge_BLEND_PARK_PITCHER columns (cols AE–AE).
  */
-export const WORKBOOK_SCHEMA_VERSION = 6;
+export const WORKBOOK_SCHEMA_VERSION = 7;
 
 export interface ColumnDef {
   name: string;
@@ -853,6 +855,30 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Bias_Alert",   index: 9,  type: "string", width: 90,  filledBy: "MODULE_15", readOnly: true, description: "YES when |bias| > 0.20", exampleValue: "NO" },
       { name: "Miss_Alert",   index: 10, type: "string", width: 90,  filledBy: "MODULE_15", readOnly: true, description: "YES when miss_4plus > 45%", exampleValue: "NO" },
       { name: "Report_TS",    index: 11, type: "string", width: 200, filledBy: "MODULE_15", readOnly: true, exampleValue: "2026-07-25T08:00:00.000Z" },
+    ],
+  },
+
+  {
+    name: "MONOTONICITY",
+    description: "Edge-tier hit-rate analysis written by module15. Joins VEHICLE_LOG (prediction-time market line + direction) with SHADOW_OUTCOMES. Tests whether higher |proj − line| edge correlates with higher directional hit rate. Separate OVER and UNDER sections. Overwritten on each regression run.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Direction",              index: 0,  type: "string", width: 90,  filledBy: "MODULE_15", readOnly: true, description: "OVER | UNDER | OVERALL — the directional bucket this row belongs to.", exampleValue: "OVER" },
+      { name: "Analysis_Type",          index: 1,  type: "string", width: 110, filledBy: "MODULE_15", readOnly: true, description: "FIXED_TIER | QUINTILE | SUMMARY | VERDICT", exampleValue: "FIXED_TIER" },
+      { name: "Tier",                   index: 2,  type: "string", width: 150, filledBy: "MODULE_15", readOnly: true, description: "Tier label, e.g. '2.00–2.49', 'Q3 (2.10–2.61)', or verdict string for summary rows.", exampleValue: "2.00–2.49" },
+      { name: "Edge_Min",               index: 3,  type: "number", width: 90,  format: "0.00",  filledBy: "MODULE_15", readOnly: true, description: "|proj − market_line| lower bound (inclusive). -999 for first quintile.", exampleValue: "2.00" },
+      { name: "Edge_Max",               index: 4,  type: "string", width: 90,  filledBy: "MODULE_15", readOnly: true, description: "|proj − market_line| upper bound (exclusive). '∞' for the 3.00+ tier.", exampleValue: "2.50" },
+      { name: "N_Games",                index: 5,  type: "number", width: 80,  format: "0",     filledBy: "MODULE_15", readOnly: true, exampleValue: "18" },
+      { name: "N_Hits",                 index: 6,  type: "number", width: 70,  format: "0",     filledBy: "MODULE_15", readOnly: true, description: "Games where the direction was correct (push excluded).", exampleValue: "11" },
+      { name: "N_Pushes",               index: 7,  type: "number", width: 80,  format: "0",     filledBy: "MODULE_15", readOnly: true, description: "Games where actual_total = market_line (excluded from hit rate).", exampleValue: "1" },
+      { name: "Hit_Rate_Pct",           index: 8,  type: "number", width: 110, format: "0.0",   filledBy: "MODULE_15", readOnly: true, description: "Hits / (N_Games − N_Pushes) × 100. OVER: actual > line; UNDER: actual < line.", exampleValue: "61.1" },
+      { name: "MAE",                    index: 9,  type: "number", width: 80,  format: "0.000", filledBy: "MODULE_15", readOnly: true, exampleValue: "3.120" },
+      { name: "Median_AE",              index: 10, type: "number", width: 90,  format: "0.000", filledBy: "MODULE_15", readOnly: true, exampleValue: "2.900" },
+      { name: "Bias",                   index: 11, type: "number", width: 80,  format: "0.000", filledBy: "MODULE_15", readOnly: true, description: "Mean(proj − actual). Positive = systematic overprojection.", exampleValue: "1.820" },
+      { name: "Hit_Monotone_vs_Prior",  index: 12, type: "string", width: 185, filledBy: "MODULE_15", readOnly: true, description: "PASS | FAIL | N/A | INSUFFICIENT_SAMPLE. PASS if hit_rate_pct ≥ prior tier's and both n ≥ 75.", exampleValue: "PASS" },
+      { name: "MAE_Monotone_vs_Prior",  index: 13, type: "string", width: 185, filledBy: "MODULE_15", readOnly: true, description: "PASS | FAIL | N/A | INSUFFICIENT_SAMPLE. PASS if MAE ≤ prior tier's and both n ≥ 75.", exampleValue: "PASS" },
+      { name: "Report_TS",              index: 14, type: "string", width: 200, filledBy: "MODULE_15", readOnly: true, exampleValue: "2026-07-25T08:00:00.000Z" },
     ],
   },
 

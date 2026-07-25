@@ -1,0 +1,97 @@
+SOURCES USED
+
+* Your Task 3 implementation summary
+* The previously agreed Task 3 monotonicity specification
+
+REFRESH CHECK
+
+This is a critique of Task 3 only. I have not inspected the source code or republished workbook.
+
+Task 3 critique
+
+The implementation has good infrastructure, but the reported analysis does not yet satisfy the Task 3 specification.
+
+Correctly implemented
+
+* Replay-to-odds game-ID normalization
+* Market-line and edge columns added to REPLAY_RESULTS
+* Dedicated MONOTONICITY sheet
+* Sheet cleared before each report
+* Fixed edge-bucket framework
+* Monotonicity result returned by module 15
+
+Specific defects
+
+1. It uses the closing line instead of the line available at prediction time
+
+readClosingLinesFromOddsHistory() keeps the latest snapshot per game.
+
+That changes the historical edge after the prediction was made. Task 3 requires:
+
+latest odds snapshot where Odds_TS <= Prediction_TS
+
+Closing line may be stored separately for CLV, but it cannot define the confidence bucket.
+
+2. The hit-rate calculation is directionally wrong
+
+Reported rule:
+
+actual > line
+
+That only settles Overs correctly. An Under win must be:
+
+actual < line
+
+Pushes must also be separated.
+
+3. Overs and Unders are not analyzed separately
+
+Task 3 explicitly required separate monotonicity reports for:
+
+* OVER
+* UNDER
+
+A combined report can conceal direction-specific failure.
+
+4. The sample rule is far too permissive
+
+Excluding adjacent comparisons only when n < 3 does not meet the required minimum.
+
+The agreed output must return:
+
+INSUFFICIENT_SAMPLE
+
+until each compared primary bucket has roughly 75–100 decisions.
+
+5. Equal-count quintiles are missing
+
+The required report includes both:
+
+* Fixed tiers: 1.50–1.99, 2.00–2.49, 2.50–2.99, 3.00+
+* Equal-count quintiles
+
+The reported implementation only supplies fixed ranges.
+
+6. The PASS verdict is incomplete
+
+The reported verdict tests only adjacent hit-rate ordering.
+
+Task 3 requires PASS to consider:
+
+* non-decreasing hit rate
+* meaningful top-tier versus bottom-tier separation
+* MAE not worsening as edge rises
+* adequate sample
+* separate Over and Under results
+
+Task 3 status
+
+Infrastructure implemented, validation logic incomplete.
+
+The primary corrections are:
+
+1. Join the market line available at the prediction timestamp.
+2. Settle results using the recorded direction.
+3. Split Over and Under analysis.
+4. Enforce the required sample threshold.
+5. Add quintiles and the complete PASS criteria.
