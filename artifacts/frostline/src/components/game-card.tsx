@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   CloudRain, Wind, Thermometer, AlertCircle, CheckCircle2,
   Clock, Lock, LockOpen, TrendingUp, TrendingDown, Minus,
-  ShieldCheck, ShieldAlert,
+  ShieldCheck, ShieldAlert, Timer,
 } from "lucide-react";
 import type { NormalizedGame, PitcherClassification } from "@workspace/api-client-react";
 import type { BoardStatusEntry } from "@/hooks/use-board-status";
@@ -12,6 +12,22 @@ import type { BoardStatusEntry } from "@/hooks/use-board-status";
 interface GameCardProps {
   game: NormalizedGame;
   lockEntry?: BoardStatusEntry;
+}
+
+/** Format a UTC ISO timestamp as Eastern Time, e.g. "4:40 PM ET" */
+function toEtTimeStr(isoUtc: string): string {
+  if (!isoUtc) return "";
+  try {
+    return new Date(isoUtc).toLocaleTimeString("en-US", {
+      timeZone: "America/New_York",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    });
+  } catch {
+    return "";
+  }
 }
 
 function RoleBadge({ role }: { role: string }) {
@@ -63,40 +79,75 @@ function PitcherInfo({ pitcher, teamAbbr, isHome }: { pitcher: PitcherClassifica
 /**
  * Lock status pill shown in the game card header.
  *
- * LOCKED_IN records the historical cutoff snapshot — the game was CORE when
- * the board locked. The current authorization (final_decision) may differ if
- * a post-lock downgrade occurred (starter scratch, data loss, etc.).
- * We show both states so the operator never confuses cutoff history with
- * live authorization.
+ * PRE_LOCK       — shows "Locks at [time] ET" so the operator knows when
+ *                  the window closes.
+ * LOCKED_IN      — records the cutoff snapshot (game was CORE when the board
+ *                  locked). Shows the decision time and the decision at lock.
+ *                  The current authorization (final_decision) may differ if a
+ *                  post-lock downgrade occurred; we show both states so the
+ *                  operator never confuses cutoff history with live auth.
+ * LOCKED_OUT     — shows the blocker reason and a note that any late
+ *                  promotion requires a named baseball exception.
  */
 function LockStatusBadge({ lockEntry }: { lockEntry: BoardStatusEntry }) {
-  const { lock_status, final_decision } = lockEntry;
+  const { lock_status, final_decision, lock_cutoff_ts, core_blocker, pre_lock_decision } = lockEntry;
+  const cutoffEt = toEtTimeStr(lock_cutoff_ts);
 
-  if (lock_status === "LOCKED_IN") {
-    // Post-lock downgrade: was CORE at cutoff, now NO_CORE. Show amber warning.
-    if (final_decision === "NO_CORE") {
-      return (
-        <span className="flex items-center gap-1 text-warning border border-warning/40 bg-warning/10 px-2 py-0.5 rounded text-[11px] font-medium">
-          <Lock className="w-3 h-3" />
-          Locked In · Downgraded
-        </span>
-      );
-    }
-    // Still CORE (or no publish data yet) — green.
+  // ── PRE_LOCK — approaching lock window ────────────────────────────────────
+  if (lock_status === "PRE_LOCK") {
+    if (!cutoffEt) return null;
     return (
-      <span className="flex items-center gap-1 text-success border border-success/40 bg-success/10 px-2 py-0.5 rounded text-[11px] font-medium">
-        <Lock className="w-3 h-3" />
-        Locked In
+      <span className="flex items-center gap-1 text-muted-foreground border border-border/60 bg-muted/20 px-2 py-0.5 rounded text-[11px] font-medium">
+        <Timer className="w-3 h-3 flex-shrink-0" />
+        Locks at {cutoffEt}
       </span>
     );
   }
 
-  if (lock_status === "LOCKED_OUT") {
+  // ── LOCKED_IN — game was CORE at cutoff snapshot ──────────────────────────
+  if (lock_status === "LOCKED_IN") {
+    const isDowngraded = final_decision === "NO_CORE";
     return (
-      <span className="flex items-center gap-1 text-warning border border-warning/40 bg-warning/10 px-2 py-0.5 rounded text-[11px] font-medium">
-        <LockOpen className="w-3 h-3" />
-        Locked Out
-      </span>
+      <div className="flex flex-col items-end gap-0.5">
+        <span className={`flex items-center gap-1 border px-2 py-0.5 rounded text-[11px] font-medium ${
+          isDowngraded
+            ? "text-warning border-warning/40 bg-warning/10"
+            : "text-success border-success/40 bg-success/10"
+        }`}>
+          <Lock className="w-3 h-3 flex-shrink-0" />
+          {isDowngraded ? "Locked In · Downgraded" : "Locked In"}
+        </span>
+        {cutoffEt && (
+          <span className="text-[10px] text-muted-foreground font-mono">
+            Decision at {cutoffEt}{pre_lock_decision ? ` · ${pre_lock_decision}` : ""}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  // ── LOCKED_OUT — missed CORE cutoff; late promotion blocked ───────────────
+  if (lock_status === "LOCKED_OUT") {
+    // Prefer the current blocker reason; fall back to the decision at lock time.
+    const blockerLabel = core_blocker || pre_lock_decision || "";
+    return (
+      <div className="flex flex-col items-end gap-0.5">
+        <span className="flex items-center gap-1 text-warning border border-warning/40 bg-warning/10 px-2 py-0.5 rounded text-[11px] font-medium">
+          <LockOpen className="w-3 h-3 flex-shrink-0" />
+          Locked Out{cutoffEt ? ` · ${cutoffEt}` : ""}
+        </span>
+        {blockerLabel && (
+          <span
+            className="text-[10px] text-muted-foreground font-mono truncate max-w-[220px]"
+            title={blockerLabel}
+          >
+            {blockerLabel.replace(/_/g, " ")}
+          </span>
+        )}
+        <span className="text-[10px] text-muted-foreground italic">
+          Promotion requires named baseball exception
+        </span>
+      </div>
     );
   }
 
@@ -120,7 +171,6 @@ function LockStatusBadge({ lockEntry }: { lockEntry: BoardStatusEntry }) {
     );
   }
 
-  // PRE_LOCK → no indicator
   return null;
 }
 
@@ -238,7 +288,10 @@ export function GameCard({ game, lockEntry }: GameCardProps) {
     (lockEntry.lock_status === "LOCKED_IN" ||
      lockEntry.lock_status === "LOCKED_OUT" ||
      lockEntry.lock_status === "LOCK_TIME_UNAVAILABLE" ||
-     lockEntry.lock_status === "LOCK_DATA_UNAVAILABLE");
+     lockEntry.lock_status === "LOCK_DATA_UNAVAILABLE" ||
+     // Show PRE_LOCK pill only when a cutoff time is known — otherwise there's
+     // nothing meaningful to display (no "Locks at …" text).
+     (lockEntry.lock_status === "PRE_LOCK" && !!lockEntry.lock_cutoff_ts));
 
   return (
     <Card className="flex flex-col">
