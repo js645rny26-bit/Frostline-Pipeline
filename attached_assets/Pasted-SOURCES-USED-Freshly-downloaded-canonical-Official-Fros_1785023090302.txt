@@ -1,0 +1,136 @@
+SOURCES USED
+
+* Freshly downloaded canonical Official Frostline Engine
+* Direct inspection of all 26 live tabs
+* Header-to-SCHEMA_REFERENCE comparison
+* Current RUN_LOG, BOARD_LOCK_STATE, SLATE_INPUT, SLATE_BOARD, VEHICLE_LOG, REPLAY_RESULTS, and SURVIVAL_GATE_REPLAY
+* Your report for the code-only pre-lock snapshot change
+
+REFRESH CHECK
+
+I re-downloaded the workbook after this repair pass. The canonical file was last modified at 2026-07-25 23:35:29 UTC. Official Frostline Engine
+
+Fresh verdict
+
+This pass genuinely fixed the schema and current-board problems, but the historical cleanup is not complete.
+
+Confirmed fixed
+
+Schema truth: PASS
+
+I compared the live row-one headers against all 508 data-dictionary entries in SCHEMA_REFERENCE.
+
+* SLATE_INPUT: 34/34 documented and aligned
+* GAME_SUMMARY: 34/34 aligned
+* GAME_INTEGRATION: 27/27 aligned
+* REPLAY_RESULTS: 31/31 header names aligned
+* All other live sheets: no header-position mismatches
+* README now correctly reports schema version 8
+
+This part is real and complete.
+
+Current pipeline publication: PASS
+
+Latest recorded run:
+
+Pipeline_Status: success
+Games: 15
+M11_Status: success
+Board rows: 15
+CORE: 0
+NO CORE: 15
+Errors: []
+Schema: 8
+
+Current lock-state consistency: PASS
+
+The three live representations agree for all 15 games:
+
+SLATE_INPUT.Board_Lock_Status
+= SLATE_BOARD.Lock_Status
+= BOARD_LOCK_STATE.Lock_Status
+
+Current distribution:
+
+LOCKED_OUT: 14
+LOCKED_IN:   1
+
+ARI–WSN and TOR–BOS are now correctly fail-closed as:
+
+LOCKED_OUT
+UNKNOWN_LATE_FIRST_RUN
+
+The monotonicity tab remains absent, and the system remains safely 0 CORE.
+
+Historical integrity still failing
+
+1. VEHICLE_LOG history was erased
+
+The live tab now contains only:
+
+15 data rows
+All dated 2026-07-25
+
+The valid July 24 vehicle records are gone.
+
+This confirms what happened during the date-normalization bug:
+
+34 rows deleted
+Current publish restored only the 15 current-slate rows
+Historical July 24 rows were not restored
+
+So the statement that all 34 deleted rows were cross-date contamination is not correct. The prior workbook contained valid July 24 decisions mixed with four contaminated July 25 IDs.
+
+This matters because historical board replay now lacks its fallback source for July 24.
+
+2. SURVIVAL_GATE_REPLAY still contains the four contaminated rows
+
+These remain dated July 24 while their Game IDs encode July 25:
+
+20260725_CIN_STL
+20260725_LAA_SFG
+20260725_OAK_MIN
+20260725_SEA_TEX
+
+So the cross-date repair did not propagate to this dependent sheet.
+
+3. REPLAY_RESULTS headers were repaired, but the 348 historical rows were not migrated
+
+The header now correctly contains:
+
+Park_Source_Status
+Away_Starter_Quality
+Home_Starter_Quality
+Blend_Park_Pitcher_Projected
+Blend_Park_Pitcher_Error
+Market_Line
+Edge_BLEND_PARK_PITCHER
+Replay_Run_TS
+
+But for all 348 rows:
+
+Market_Line contains the old Replay_Run_TS timestamp
+Edge_BLEND_PARK_PITCHER is blank
+Replay_Run_TS is blank
+
+So the data is two columns out of alignment with the new 31-column schema.
+
+The duplicate Date + Game_ID keys were successfully removed. That portion passed. But the resulting table is not semantically valid yet.
+
+4. The remaining CLE–TBR LOCKED_IN is plausible, but no longer independently auditable
+
+CLE–TBR had a successful pipeline run before its 20:10 UTC cutoff and was locked at 20:30 UTC. That makes the retained CORE plausible.
+
+However, because the historical VEHICLE_LOG snapshots were erased, the workbook no longer preserves the per-game pre-cutoff record needed to prove it independently. The code fix should protect future slates, but I cannot verify the source implementation itself from the workbook.
+
+Final status
+
+NO CORE — RESEARCH-ONLY
+
+The engine should remain frozen. The current slate path is coherent and safely fail-closed, but the bounded integrity pass is not yet complete because:
+
+VEHICLE_LOG historical loss
++ SURVIVAL_GATE_REPLAY cross-date contamination
++ REPLAY_RESULTS row migration failure
+
+This is now one narrow historical-data repair, not another architectural rebuild or UI queue.
