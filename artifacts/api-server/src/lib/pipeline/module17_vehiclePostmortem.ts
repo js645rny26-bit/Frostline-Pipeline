@@ -4,9 +4,14 @@
  * Two-phase module that separates thesis accuracy from ticket result:
  *
  *   Phase 1 — logVehicles()
- *     Called during every publish run (from runner.ts) to append each game's
+ *     Called during every publish run (from runner.ts) to UPSERT each game's
  *     vehicle selection, market line, projection, and authorization decision
- *     to VEHICLE_LOG. Idempotent — deduplicates by (date + game_id).
+ *     into VEHICLE_LOG. Overwrites existing rows for today (canonical snapshot
+ *     = final decision before lock) and appends new ones.
+ *
+ *     Cross-date validation: any slateBoard entry whose game_id date prefix
+ *     does not match the `date` parameter is rejected to prevent contamination
+ *     from games that appear in the schedule with the wrong date key.
  *
  *   Phase 2 — runPostmortem()
  *     Called after settlement (any time SHADOW_OUTCOMES has rows for a date)
@@ -121,7 +126,7 @@ export interface PostmortemResult {
   errors: string[];
 }
 
-// ─── Grading helper ───────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function gradeTicket(
   direction: string,
@@ -147,6 +152,16 @@ function gradeTicket(
   return { thesis_correct, ticket_result };
 }
 
+/**
+ * Validate that the date encoded in a game_id matches the expected date string.
+ * game_id format: YYYYMMDD_AWAY_HOME  (e.g. "20260725_KCR_DET")
+ * date format:    YYYY-MM-DD           (e.g. "2026-07-25")
+ */
+function gameIdDateMatchesDate(gameId: string, date: string): boolean {
+  const expectedPrefix = date.replace(/-/g, ""); // "20260725"
+  return gameId.slice(0, 8) === expectedPrefix;
+}
+
 // ─── Phase 1: log vehicles from a publish run ─────────────────────────────────
 
 export async function logVehicles(
@@ -164,25 +179,60 @@ export async function logVehicles(
     return { status: "success", date, publish_ts: ts, rows_written: 0, rows_skipped: 0, errors };
   }
 
-  // ── Read existing log to deduplicate by (date + game_id) ──
-  let existingKeys = new Set<string>();
+  // ── Cross-date validation ──────────────────────────────────────────────────
+  // Reject any slateBoard entry whose game_id date prefix doesn't match `date`.
+  // This prevents contamination from games that appear with incorrect date keys.
+  const validEntries = slateBoard.filter((e) => {
+    if (!gameIdDateMatchesDate(e.legacy_game_id, date)) {
+      logger.warn(
+        { date, game_id: e.legacy_game_id },
+        "MODULE_17: Cross-date game_id rejected — game_id date does not match log date",
+      );
+      return false;
+    }
+    return true;
+  });
+  const crossDateSkipped = slateBoard.length - validEntries.length;
+
+  // ── Read existing VEHICLE_LOG (full rows for UPSERT) ──────────────────────
+  let existingAllRows: unknown[][] = [];
   let existingRowCount = 0;
   try {
-    const resp = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:B5000`);
-    const rows = (resp.values ?? []) as string[][];
-    existingRowCount = rows.length;
-    existingKeys = new Set(
-      rows.slice(1)
-        .map((r) => `${r[0] ?? ""}_${r[1] ?? ""}`)
-        .filter((k) => k !== "_"),
-    );
+    const resp = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:N5000`);
+    existingAllRows = (resp.values ?? []) as unknown[][];
+    existingRowCount = existingAllRows.length;
   } catch {
-    logger.warn("MODULE_17: Could not read VEHICLE_LOG for dedup — proceeding");
+    logger.warn("MODULE_17: Could not read VEHICLE_LOG — proceeding as empty");
   }
 
-  const logRows = slateBoard
-    .filter((e) => !existingKeys.has(`${date}_${e.legacy_game_id}`))
-    .map((e) => [
+  const existingDataRows = existingAllRows.slice(1); // exclude header row
+
+  // Build upsert index: (date + game_id) → 0-based index in existingDataRows.
+  // Skip rows that are already cross-date contaminated (game_id date ≠ row date)
+  // so contaminated rows cannot win deduplication.
+  const existingIndex = new Map<string, number>();
+  for (let i = 0; i < existingDataRows.length; i++) {
+    const row       = existingDataRows[i] as unknown[];
+    const rowDate   = String(row[L_DATE]    ?? "");
+    const rowGameId = String(row[L_GAME_ID] ?? "");
+    if (!rowDate || !rowGameId) continue;
+    if (!gameIdDateMatchesDate(rowGameId, rowDate)) {
+      logger.warn(
+        { rowDate, rowGameId },
+        "MODULE_17: Contaminated row in VEHICLE_LOG index — skipping for upsert",
+      );
+      continue;
+    }
+    existingIndex.set(`${rowDate}_${rowGameId}`, i);
+  }
+
+  // ── Build update and append lists ──────────────────────────────────────────
+  const rowUpdates = new Map<number, unknown[]>(); // dataRow index → new row data
+  const newRows: unknown[][] = [];
+
+  for (const e of validEntries) {
+    const key = `${date}_${e.legacy_game_id}`;
+    const row: unknown[] = [
       date,
       e.legacy_game_id,
       e.away_team,
@@ -197,15 +247,17 @@ export async function logVehicles(
       e.edge_strength,
       e.confidence,
       ts,
-    ]);
+    ];
 
-  const skipped = slateBoard.length - logRows.length;
-
-  if (logRows.length === 0) {
-    logger.info({ skipped }, "MODULE_17: All vehicle rows already logged — nothing to write");
-    return { status: "success", date, publish_ts: ts, rows_written: 0, rows_skipped: skipped, errors };
+    if (existingIndex.has(key)) {
+      rowUpdates.set(existingIndex.get(key)!, row);
+    } else {
+      newRows.push(row);
+    }
   }
 
+  // ── Write ─────────────────────────────────────────────────────────────────
+  let rowsWritten = 0;
   try {
     await expandSheetColumns(wbId, VEHICLE_LOG_SHEET, LOG_COLS);
     const needsHeader = existingRowCount === 0;
@@ -213,21 +265,38 @@ export async function logVehicles(
       await writeRange(wbId, `${VEHICLE_LOG_SHEET}!A1:N1`, [LOG_HEADER]);
       existingRowCount = 1;
     }
-    const startRow = existingRowCount + 1;
-    await writeRange(
-      wbId,
-      `${VEHICLE_LOG_SHEET}!A${startRow}:N${startRow + logRows.length - 1}`,
-      logRows,
+
+    // In-place updates for existing rows (canonical snapshot = latest decision)
+    for (const [dataRowIdx, updatedRow] of rowUpdates) {
+      const sheetRow = dataRowIdx + 2; // +1 for header, +1 for 1-based sheet rows
+      await writeRange(wbId, `${VEHICLE_LOG_SHEET}!A${sheetRow}:N${sheetRow}`, [updatedRow]);
+      rowsWritten++;
+    }
+
+    // Append new rows not previously in the log
+    if (newRows.length > 0) {
+      const startRow = existingRowCount + 1;
+      await writeRange(
+        wbId,
+        `${VEHICLE_LOG_SHEET}!A${startRow}:N${startRow + newRows.length - 1}`,
+        newRows,
+      );
+      rowsWritten += newRows.length;
+    }
+
+    logger.info(
+      { updated: rowUpdates.size, appended: newRows.length, crossDateSkipped },
+      "MODULE_17: Vehicle log written",
     );
-    logger.info({ written: logRows.length, skipped }, "MODULE_17: Vehicle log written");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     errors.push(`VEHICLE_LOG write failed: ${msg}`);
     logger.error({ err: msg }, "MODULE_17: Vehicle log write failed");
   }
 
-  const status = errors.length === 0 ? "success" : logRows.length > 0 ? "partial" : "failure";
-  return { status, date, publish_ts: ts, rows_written: logRows.length, rows_skipped: skipped, errors };
+  const rowsSkipped = crossDateSkipped;
+  const status = errors.length === 0 ? "success" : rowsWritten > 0 ? "partial" : "failure";
+  return { status, date, publish_ts: ts, rows_written: rowsWritten, rows_skipped: rowsSkipped, errors };
 }
 
 // ─── Phase 2: grade vehicles against settled outcomes ─────────────────────────
@@ -255,7 +324,14 @@ export async function runPostmortem(
   try {
     const resp = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:N5000`);
     const all  = (resp.values ?? []) as string[][];
-    vehicleRows = all.slice(1).filter((r) => (r[L_DATE] ?? "") === date);
+    vehicleRows = all.slice(1).filter((r) => {
+      const rowDate   = r[L_DATE]    ?? "";
+      const rowGameId = r[L_GAME_ID] ?? "";
+      // Only include rows where (a) date matches requested date and
+      // (b) game_id date prefix is consistent with the row date — guards against
+      // contaminated rows (game_id from wrong date) skewing postmortem grades.
+      return rowDate === date && gameIdDateMatchesDate(rowGameId, rowDate);
+    });
     logger.info({ found: vehicleRows.length }, "MODULE_17: Vehicle log rows for date");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

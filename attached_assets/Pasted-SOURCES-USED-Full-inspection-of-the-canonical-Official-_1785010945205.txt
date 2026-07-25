@@ -1,0 +1,73 @@
+SOURCES USED
+
+* Full inspection of the canonical Official Frostline Engine
+* Current schema-v8 runtime, lock state, vehicle history, and pipeline logs
+
+REFRESH CHECK
+
+No new workbook run is required to answer this implementation decision.
+
+Implement Pass A directly. Do not split the implementation across task agents.
+
+Pass A touches one tightly coupled integrity chain:
+
+sheet schema
+→ module11 decision publication
+→ module17 lock persistence
+→ module12 historical capture
+→ runner.ts status propagation
+
+Dividing those components among agents creates a serious risk that each task passes locally while the end-to-end state contract remains inconsistent. This repair needs one owner, one branch, one coordinated migration, and one atomic deployment.
+
+Recommended division of labor
+
+You implement the repair directly in an explicitly authorized test copy/branch.
+
+Use task agents only afterward for independent verification:
+
+1. Schema-contract audit
+2. Cross-date contamination test
+3. Late-first-run lock replay
+4. Module-11 failure propagation test
+5. Historical decision reconstruction test
+6. Regression comparison against the untouched canonical master
+
+Required implementation order
+
+1. Define the canonical decision snapshot
+    * Final decision at or before lock cutoff
+    * Never “first row ever written”
+    * Enforce Game_ID date = row date
+2. Repair module17 lock behavior
+    * No valid pre-cutoff snapshot means LOCKED_OUT
+    * Late promotion requires explicit authorization fields and a named baseball reason
+3. Repair module12 historical persistence
+    * Upsert the canonical snapshot by Date + Game_ID
+    * Prevent stale PENDING records from winning deduplication
+4. Repair module11 publication
+    * Publish current decision and lock status consistently
+    * Do not overwrite preserved pre-lock truth with post-cutoff recalculation
+5. Migrate the sheet schema
+    * Fix SLATE_INPUT headers and column placement
+    * Remove or archive stale rows
+    * Reconcile SCHEMA_REFERENCE, README, and live sheets
+6. Repair runner.ts status propagation
+    * Module-11 failure must force pipeline failure or partial success
+    * Validation cannot report PASS with zero board rows
+    * Named errors must be written to RUN_LOG
+
+Deployment gate
+
+Do not touch the canonical master until the test copy passes all of these:
+
+* clean full-slate run
+* rerun with no changes
+* pre-cutoff decision change
+* post-cutoff ordinary refresh
+* post-cutoff authorized promotion
+* first run occurring after cutoff
+* module11 forced failure
+* cross-date reuse of the same matchup
+* historical reconstruction matching the issued board exactly
+
+Decision: direct implementation by you, task agents as adversarial QA afterward. This is the safest and fastest route because Pass A is an integration repair, not a collection of independent chores.

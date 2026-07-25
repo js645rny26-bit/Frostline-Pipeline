@@ -9,7 +9,7 @@ import { readRange, clearRange, writeRange, expandSheetColumns, addSheet, WORKBO
 import { logger } from "../../lib/logger.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
 import { computePropComparison, type RotowirePropsResult } from "./module05e_rotowireProps.js";
-import { BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH } from "./config.js";
+import { BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH, BOARD_LOCK_LATE_GRACE_MS } from "./config.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 
 export interface SlateBoardEntry {
@@ -585,14 +585,30 @@ export async function extractOutputBoards(
         // Was CORE at lock; let all remaining gates run (still downgradable).
         lockStatus = "LOCKED_IN";
       } else {
-        // First publish at or after this game's cutoff — snapshot the current status.
-        isFirstLock     = true;
-        preLockDecision = rawDecision;
-        if (rawDecision === "CORE") {
-          lockStatus = "LOCKED_IN";
+        // First publish at or after this game's cutoff.
+        // If the first lock fires significantly after the cutoff there is no valid
+        // pre-cutoff decision snapshot — default LOCKED_OUT rather than retroactively
+        // stamping the current (post-cutoff) decision as "pre-lock."
+        isFirstLock = true;
+        const msLate = nowMs - (gameLockCutoff?.getTime() ?? nowMs);
+        if (msLate > BOARD_LOCK_LATE_GRACE_MS) {
+          lockStatus      = "LOCKED_OUT";
+          preLockDecision = "UNKNOWN_LATE_FIRST_RUN";
+          logger.warn(
+            {
+              game: gs.game_id,
+              cutoff: gameLockCutoff?.toISOString(),
+              minutesLate: Math.round(msLate / 60000),
+            },
+            "MODULE_11: Board lock fired late — no valid pre-cutoff snapshot, defaulting LOCKED_OUT",
+          );
+        } else if (rawDecision === "CORE") {
+          preLockDecision = rawDecision;
+          lockStatus      = "LOCKED_IN";
           logger.info({ game: gs.game_id, cutoff: gameLockCutoff?.toISOString() }, "MODULE_11: Board lock fired — LOCKED_IN");
         } else {
-          lockStatus = "LOCKED_OUT";
+          preLockDecision = rawDecision;
+          lockStatus      = "LOCKED_OUT";
           logger.info({ game: gs.game_id, cutoff: gameLockCutoff?.toISOString(), rawDecision, rawCoreBlocker }, "MODULE_11: Board lock fired — LOCKED_OUT");
         }
       }

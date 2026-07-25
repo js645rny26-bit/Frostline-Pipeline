@@ -6,7 +6,7 @@
  * overrides — non-null values — are always preserved).
  */
 
-import { readRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
+import { readRange, writeRange, clearRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { NormalizationResult } from "./module06_normalization.js";
 import type { MarketLine } from "./module05b_marketOdds.js";
@@ -161,9 +161,25 @@ export async function seedSlateInput(
     errors: [],
   };
 
+  // ── SLATE_INPUT column headers (written every publish to stay in sync) ──────
+  const SLATE_INPUT_HEADERS = [
+    "Game_ID", "Date", "Matchup", "Target", "Opposing_Starter",
+    "Truth_Family", "Event_Score", "Run_Conversion", "Early_Conversion",
+    "Contact_Quality", "Truth_Score", "Vehicle_Score", "Confirmation_Gate", "Execution_Status",
+    "Candidate_Vehicle", "Line", "Odds", "Market_Available",
+    "Kill_Flag", "Notes", "Owner", "Manual_Kill_Override", "Model_Freeze_Reason",
+    "Market_Phase", "Authoritative_Pregame_Total", "Authoritative_Over_Odds",
+    "Authoritative_Under_Odds", "Pregame_Line_Locked_TS",
+    "Away_Spread", "Away_Spread_Odds", "Home_Spread_Odds", "Away_ML", "Home_ML",
+    "Board_Lock_Status",
+  ];
+  await writeRange(workbookId, "SLATE_INPUT!A1:AH1", [SLATE_INPUT_HEADERS]).catch((err: unknown) => {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_10: Could not write SLATE_INPUT headers — continuing");
+  });
+
   try {
-    // Read existing SLATE_INPUT (including header) — A:AG covers all 33 cols (incl. spread/ML)
-    const existing = await readRange(workbookId, "SLATE_INPUT!A:AG");
+    // Read existing SLATE_INPUT data rows — A:AH covers all 34 cols
+    const existing = await readRange(workbookId, "SLATE_INPUT!A:AH");
     const existingRows = existing.values ?? [];
     const dataRows = existingRows.slice(1);
 
@@ -324,6 +340,26 @@ export async function seedSlateInput(
         workbookId,
         `SLATE_INPUT!A2:AH${1 + seededRows.length}`,
         seededRows,
+      );
+    }
+
+    // Clear stale rows from prior dates that are beyond the current slate.
+    // Any existing row whose game_id is not in today's normalized slate was
+    // left untouched above — purge those trailing rows now.
+    if (dataRows.length > seededRows.length) {
+      const firstStaleRow = seededRows.length + 2; // 1-based, after header + seeded rows
+      const lastStaleRow  = dataRows.length + 1;
+      await clearRange(workbookId, `SLATE_INPUT!A${firstStaleRow}:AH${lastStaleRow}`).catch(
+        (err: unknown) => {
+          logger.warn(
+            { err: err instanceof Error ? err.message : String(err) },
+            "MODULE_10: Could not clear stale SLATE_INPUT rows — continuing",
+          );
+        },
+      );
+      logger.info(
+        { cleared: dataRows.length - seededRows.length },
+        "MODULE_10: Cleared stale SLATE_INPUT rows from prior dates",
       );
     }
 

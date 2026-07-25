@@ -441,15 +441,25 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     },
   );
 
-  // Overall status before archival (so we can write it into the run log row)
+  // Overall status before archival (so we can write it into the run log row).
   // mod08 "failure" case is already handled by the early return above;
   // at this point mod08.status is "success" | "partial_failure".
+  // A module-11 failure (zero board rows written) is a decision-board outage —
+  // it must surface as at least partial_success, never success.
+  if (mod11.status === "failure" || mod11.slate_board.length === 0) {
+    const m11Err = mod11.error ?? "Module 11 produced zero board rows";
+    allErrors.push({ module: "11_output_extraction", error: m11Err, timestamp: new Date().toISOString() });
+    logger.error({ err: m11Err }, "Full pipeline: Module 11 failed — decision board not produced");
+  }
+
   const overallStatus =
     mod10.status === "failure"
       ? "failure"
-      : mod08.status === "partial_failure"
+      : mod11.status === "failure" || mod11.slate_board.length === 0
         ? "partial_success"
-        : "success";
+        : mod08.status === "partial_failure"
+          ? "partial_success"
+          : "success";
 
   // Module 12: Append run log row to RUN_LOG sheet (non-blocking — failure is advisory)
   const mod12 = await archiveRunBundle(slate, mod08, mod09, mod10, mod11, overallStatus, 1, workbookId);

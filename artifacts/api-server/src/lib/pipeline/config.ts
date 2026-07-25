@@ -136,6 +136,16 @@ export const VALIDATION_RULES = {
  */
 export const BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH = 2.0;
 
+/**
+ * Grace window (ms) within which a first-lock-fire is considered "on-time."
+ * If the first publish at or after the lock cutoff occurs within this window,
+ * the current rawDecision is accepted as the canonical pre-lock snapshot.
+ * If the first publish occurs MORE than this many ms after the cutoff, no valid
+ * pre-cutoff snapshot exists — the game defaults to LOCKED_OUT to prevent
+ * retroactive pre-lock stamping of a post-cutoff decision.
+ */
+export const BOARD_LOCK_LATE_GRACE_MS = 30 * 60 * 1000; // 30 minutes
+
 export function getTodayDateStr(): string {
   // Use America/New_York (ET) so the date matches the MLB schedule calendar.
   // UTC would roll to the next day after 20:00 ET, fetching tomorrow's games.
