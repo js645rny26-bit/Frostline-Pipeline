@@ -8,13 +8,14 @@ import { runPipeline, getPipelineSummary, runFullPipeline } from "../lib/pipelin
 import { fetchMlbSchedule } from "../lib/pipeline/module01_mlbStatsApi.js";
 import { getTodayDateStr } from "../lib/pipeline/config.js";
 import { runHistoricalReplay } from "../lib/pipeline/module13_historicalReplay.js";
+import { logger } from "../lib/logger.js";
 import { runShadowSettlement } from "../lib/pipeline/module14_shadowSettlement.js";
 import { runRegressionReport } from "../lib/pipeline/module15_regressionReport.js";
 import { runStarterAudit } from "../lib/pipeline/module16_starterAudit.js";
 import { runPostmortem } from "../lib/pipeline/module17_vehiclePostmortem.js";
 import { runSurvivalGateReplay } from "../lib/pipeline/module18_survivalGateReplay.js";
 import { runBoardLockReplay } from "../lib/pipeline/module19_boardLockReplay.js";
-import { WORKBOOK_ID, writeRange, clearRange, expandSheetColumns } from "../lib/sheets/client.js";
+import { WORKBOOK_ID, readRange, writeRange, clearRange, expandSheetColumns } from "../lib/sheets/client.js";
 import { WORKBOOK_SCHEMA, generateSchemaReferenceRows, WORKBOOK_SCHEMA_VERSION } from "../lib/workbook/workbookSchema.js";
 
 const router: IRouter = Router();
@@ -372,6 +373,143 @@ router.get("/pipeline/board-lock-replay", async (req, res): Promise<void> => {
       workbookId:    typeof workbook_id === "string" && workbook_id ? workbook_id : undefined,
     });
     res.status(result.status === "failure" ? 500 : 200).json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * GET /pipeline/board-status
+ * Returns per-game board lock status for a given date, read from the
+ * BOARD_LOCK_STATE and SLATE_BOARD sheets. Used by the Frostline UI to
+ * surface Locked In / Locked Out indicators without re-running the pipeline.
+ *
+ * Query params:
+ *   date        — YYYY-MM-DD (optional; defaults to today ET)
+ *   workbook_id — override workbook (optional)
+ */
+router.get("/pipeline/board-status", async (req, res): Promise<void> => {
+  const { date: dateParam, workbook_id } = req.query;
+  const date =
+    typeof dateParam === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+      ? dateParam
+      : getTodayDateStr();
+  const wbId =
+    typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID;
+
+  try {
+    const [blsData, sbData] = await Promise.all([
+      readRange(wbId, "BOARD_LOCK_STATE!A:L").catch(() => ({
+        values: [] as unknown[][],
+      })),
+      readRange(wbId, "SLATE_BOARD!A:AH").catch(() => ({
+        values: [] as unknown[][],
+      })),
+    ]);
+
+    // BOARD_LOCK_STATE cols (0-based): A=Date, B=Game_ID, C=Scheduled_First_Pitch,
+    // D=Lock_Cutoff_TS, E=Lock_Status, F=Pre_Lock_Decision, G=Locked_TS
+    const blsRows = ((blsData.values ?? []) as unknown[][]).slice(1);
+    const blsForDate = blsRows.filter(
+      (row) => String(row[0] ?? "").trim() === date,
+    );
+
+    // SLATE_BOARD cols (0-based): A=Date, B=Game_ID, J=Decision(9), N=CORE_Blocker(13), AH=Lock_Status(33)
+    const sbRows = ((sbData.values ?? []) as unknown[][]).slice(1);
+    const sbMap = new Map<
+      string,
+      { final_decision: string; core_blocker: string }
+    >();
+    for (const row of sbRows) {
+      const gameId = String(row[1] ?? "").trim();
+      if (!gameId) continue;
+      sbMap.set(gameId, {
+        final_decision: String(row[9] ?? "").trim(),
+        core_blocker: String(row[13] ?? "").trim(),
+      });
+    }
+
+    const nowMs = Date.now();
+    const THIRTY_MIN_MS = 30 * 60 * 1000;
+
+    interface BoardStatusEntry {
+      game_id: string;
+      lock_status: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT";
+      lock_cutoff_ts: string;
+      pre_lock_decision: string;
+      final_decision: string;
+      core_blocker: string;
+    }
+
+    const games: BoardStatusEntry[] = [];
+
+    for (const row of blsForDate) {
+      const gameId = String(row[1] ?? "").trim();
+      if (!gameId) continue;
+      const lockCutoffTs = String(row[3] ?? "").trim();
+      const rawStatus = String(row[4] ?? "").trim();
+      const lockStatus: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT" =
+        rawStatus === "LOCKED_IN" || rawStatus === "LOCKED_OUT"
+          ? rawStatus
+          : "PRE_LOCK";
+      const sb = sbMap.get(gameId);
+      games.push({
+        game_id: gameId,
+        lock_status: lockStatus,
+        lock_cutoff_ts: lockCutoffTs,
+        pre_lock_decision: String(row[5] ?? "").trim(),
+        final_decision: sb?.final_decision ?? "",
+        core_blocker: sb?.core_blocker ?? "",
+      });
+    }
+
+    // Nearest upcoming cutoff (has not yet passed) — used for "locking soon" banner
+    let nextUpcomingCutoffTs: string | null = null;
+    let nextCutoffMs = Infinity;
+    let cutoffApproaching = false;
+
+    for (const g of games) {
+      if (!g.lock_cutoff_ts) continue;
+      const cMs = new Date(g.lock_cutoff_ts).getTime();
+      if (isNaN(cMs)) continue;
+      if (cMs > nowMs) {
+        // Still in the future
+        if (cMs < nextCutoffMs) {
+          nextCutoffMs = cMs;
+          nextUpcomingCutoffTs = g.lock_cutoff_ts;
+        }
+        if (cMs - nowMs <= THIRTY_MIN_MS) {
+          cutoffApproaching = true;
+        }
+      }
+    }
+
+    const lockedInCount = games.filter(
+      (g) => g.lock_status === "LOCKED_IN",
+    ).length;
+    const lockedOutCount = games.filter(
+      (g) => g.lock_status === "LOCKED_OUT",
+    ).length;
+    const preLockCount = games.filter(
+      (g) => g.lock_status === "PRE_LOCK",
+    ).length;
+
+    logger.info(
+      { date, locked_in: lockedInCount, locked_out: lockedOutCount, pre_lock: preLockCount },
+      "BOARD_STATUS: read complete",
+    );
+
+    res.json({
+      date,
+      timestamp: new Date().toISOString(),
+      games,
+      next_upcoming_cutoff_ts: nextUpcomingCutoffTs,
+      cutoff_approaching: cutoffApproaching,
+      locked_in_count: lockedInCount,
+      locked_out_count: lockedOutCount,
+      pre_lock_count: preLockCount,
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });

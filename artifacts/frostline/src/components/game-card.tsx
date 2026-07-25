@@ -1,11 +1,13 @@
 import React from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CloudRain, Wind, Thermometer, AlertCircle, CheckCircle2, Clock } from "lucide-react";
-import type { NormalizedGame, PitcherClassification } from "@workspace/api-client-react/src/generated/api.schemas";
+import { CloudRain, Wind, Thermometer, AlertCircle, CheckCircle2, Clock, Lock, LockOpen } from "lucide-react";
+import type { NormalizedGame, PitcherClassification } from "@workspace/api-client-react";
+import type { BoardStatusEntry } from "@/hooks/use-board-status";
 
 interface GameCardProps {
   game: NormalizedGame;
+  lockEntry?: BoardStatusEntry;
 }
 
 function RoleBadge({ role }: { role: string }) {
@@ -38,7 +40,7 @@ function PitcherInfo({ pitcher, teamAbbr, isHome }: { pitcher: PitcherClassifica
             {pitcher.hand}HP
           </Badge>
         )}
-        {pitcher.workload_flags?.map((flag) => (
+        {pitcher.workload_flags?.map((flag: string) => (
           <Badge key={flag} variant="secondary" className="text-xs">
             {flag.replace(/_/g, " ")}
           </Badge>
@@ -54,12 +56,60 @@ function PitcherInfo({ pitcher, teamAbbr, isHome }: { pitcher: PitcherClassifica
   );
 }
 
-export function GameCard({ game }: GameCardProps) {
+/**
+ * Lock status pill shown in the game card header.
+ *
+ * LOCKED_IN records the historical cutoff snapshot — the game was CORE when
+ * the board locked. The current authorization (final_decision) may differ if
+ * a post-lock downgrade occurred (starter scratch, data loss, etc.).
+ * We show both states so the operator never confuses cutoff history with
+ * live authorization.
+ */
+function LockStatusBadge({ lockEntry }: { lockEntry: BoardStatusEntry }) {
+  const { lock_status, final_decision } = lockEntry;
+
+  if (lock_status === "LOCKED_IN") {
+    // Post-lock downgrade: was CORE at cutoff, now NO_CORE. Show amber warning.
+    if (final_decision === "NO_CORE") {
+      return (
+        <span className="flex items-center gap-1 text-warning border border-warning/40 bg-warning/10 px-2 py-0.5 rounded text-[11px] font-medium">
+          <Lock className="w-3 h-3" />
+          Locked In · Downgraded
+        </span>
+      );
+    }
+    // Still CORE (or no publish data yet) — green.
+    return (
+      <span className="flex items-center gap-1 text-success border border-success/40 bg-success/10 px-2 py-0.5 rounded text-[11px] font-medium">
+        <Lock className="w-3 h-3" />
+        Locked In
+      </span>
+    );
+  }
+
+  if (lock_status === "LOCKED_OUT") {
+    return (
+      <span className="flex items-center gap-1 text-warning border border-warning/40 bg-warning/10 px-2 py-0.5 rounded text-[11px] font-medium">
+        <LockOpen className="w-3 h-3" />
+        Locked Out
+      </span>
+    );
+  }
+
+  // PRE_LOCK → no indicator
+  return null;
+}
+
+export function GameCard({ game, lockEntry }: GameCardProps) {
   const isFallbackWeather = game.environment.data_quality === "fallback";
 
   const timeStr = game.scheduled_utc_time 
     ? new Date(game.scheduled_utc_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : "TBD";
+
+  const showLockBadge =
+    lockEntry &&
+    (lockEntry.lock_status === "LOCKED_IN" || lockEntry.lock_status === "LOCKED_OUT");
 
   return (
     <Card className="flex flex-col">
@@ -70,6 +120,7 @@ export function GameCard({ game }: GameCardProps) {
           <span className="text-xs text-muted-foreground">@ {game.venue.name}</span>
         </div>
         <div className="flex items-center gap-2 text-xs">
+          {showLockBadge && lockEntry && <LockStatusBadge lockEntry={lockEntry} />}
           {game.game_status.abstractGameState === "Final" ? (
             <Badge variant="outline">FINAL</Badge>
           ) : (

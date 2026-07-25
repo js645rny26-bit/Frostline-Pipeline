@@ -5,7 +5,8 @@ import { useGetPipelineSlate, getGetPipelineSlateQueryKey } from "@workspace/api
 import { GameCard } from "@/components/game-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, XCircle, Lock, LockOpen, Timer } from "lucide-react";
+import { useBoardStatus, buildBoardStatusMap } from "@/hooks/use-board-status";
 
 export default function SlatePage() {
   const [date, setDate] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
@@ -14,6 +15,27 @@ export default function SlatePage() {
     { date },
     { query: { queryKey: getGetPipelineSlateQueryKey({ date }) } }
   );
+
+  const { data: boardStatus } = useBoardStatus(date);
+  const lockMap = buildBoardStatusMap(boardStatus);
+
+  // Determine which lock banner to show (if any)
+  const showLockedBanner =
+    boardStatus && (boardStatus.locked_in_count > 0 || boardStatus.locked_out_count > 0);
+  const showApproachingBanner =
+    boardStatus?.cutoff_approaching && boardStatus.next_upcoming_cutoff_ts;
+
+  function formatCutoffTime(iso: string): string {
+    return new Date(iso).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+  }
+
+  function minutesUntilCutoff(iso: string): number {
+    return Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60_000));
+  }
 
   return (
     <Layout>
@@ -28,6 +50,43 @@ export default function SlatePage() {
             <DatePicker date={date} onDateChange={setDate} />
           </div>
         </div>
+
+        {/* ── Board Lock Status Banner ── */}
+        {showApproachingBanner && boardStatus?.next_upcoming_cutoff_ts && (
+          <div className="flex items-center gap-3 px-4 py-3 rounded-md border border-warning/40 bg-warning/10 text-warning text-sm">
+            <Timer className="w-4 h-4 flex-shrink-0" />
+            <span>
+              <strong>Board locking soon</strong> — next cutoff in{" "}
+              {minutesUntilCutoff(boardStatus.next_upcoming_cutoff_ts)} min (
+              {formatCutoffTime(boardStatus.next_upcoming_cutoff_ts)}). No new
+              CORE authorizations after this time without an operator exception.
+            </span>
+          </div>
+        )}
+
+        {!showApproachingBanner && showLockedBanner && boardStatus && (
+          <div className="flex items-center gap-3 px-4 py-3 rounded-md border border-border bg-secondary/30 text-sm text-foreground">
+            <Lock className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+            <span className="flex items-center gap-3 flex-wrap">
+              <span className="text-muted-foreground font-medium">Board lock active</span>
+              <span className="text-muted-foreground">·</span>
+              <span>
+                <span className="text-success font-medium">{boardStatus.locked_in_count}</span>
+                <span className="text-muted-foreground"> Locked In at cutoff</span>
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span>
+                <span className="text-warning font-medium">{boardStatus.locked_out_count}</span>
+                <span className="text-muted-foreground"> Locked Out at cutoff</span>
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span>
+                <span className="font-medium">{boardStatus.pre_lock_count}</span>
+                <span className="text-muted-foreground"> Pre-Lock</span>
+              </span>
+            </span>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="space-y-6">
@@ -124,7 +183,11 @@ export default function SlatePage() {
               {slate.games.length > 0 ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                   {slate.games.map((game) => (
-                    <GameCard key={game.gamePk} game={game} />
+                    <GameCard
+                      key={game.gamePk}
+                      game={game}
+                      lockEntry={lockMap.get(game.legacy_game_id)}
+                    />
                   ))}
                 </div>
               ) : (
