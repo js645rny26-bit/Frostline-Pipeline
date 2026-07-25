@@ -11,11 +11,12 @@
  * Drive v3 is not available).
  */
 
-import { createSpreadsheet, batchUpdate, writeRange } from "../sheets/client.js";
+import { createSpreadsheet, batchUpdate, clearRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import {
   WORKBOOK_SCHEMA,
   WORKBOOK_NAME_TEMPLATE,
+  WORKBOOK_SCHEMA_VERSION,
   SECTION_COLORS,
   generateSchemaReferenceRows,
   type SheetDef,
@@ -202,6 +203,85 @@ export async function createOptimizedWorkbook(dateStr?: string): Promise<Workboo
     workbook_url: created.spreadsheetUrl,
     sheets_created: created.sheets.map((s) => s.title),
     schema_reference_rows: schemaRowsWritten,
+    errors,
+  };
+}
+
+// ─── Repair: sync SCHEMA_REFERENCE + README to current schema definitions ─────
+
+export interface RepairSchemaResult {
+  workbook_id: string;
+  schema_reference_rows: number;
+  readme_rows: number;
+  errors: Array<{ step: string; error: string }>;
+}
+
+/**
+ * Rewrites SCHEMA_REFERENCE and README in the live workbook so they reflect
+ * the current WORKBOOK_SCHEMA definitions and WORKBOOK_SCHEMA_VERSION.
+ *
+ * Idempotent — safe to run at any time without affecting pipeline data tabs.
+ * Targets the workbook configured by WORKBOOK_ID (or the override passed in).
+ */
+export async function repairWorkbookSchemaReference(
+  workbookId = WORKBOOK_ID,
+): Promise<RepairSchemaResult> {
+  logger.info({ workbookId }, "WORKBOOK_REPAIR: Rewriting SCHEMA_REFERENCE + README");
+
+  const errors: Array<{ step: string; error: string }> = [];
+
+  // ── Step 1: Rewrite SCHEMA_REFERENCE ─────────────────────────────────────
+  let schemaRows = 0;
+  try {
+    await clearRange(workbookId, "SCHEMA_REFERENCE!A2:J10000");
+    const rows = generateSchemaReferenceRows();
+    if (rows.length > 0) {
+      await writeRange(workbookId, "SCHEMA_REFERENCE!A2", rows);
+    }
+    schemaRows = rows.length;
+    logger.info({ rows: schemaRows }, "WORKBOOK_REPAIR: SCHEMA_REFERENCE rewritten");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: msg }, "WORKBOOK_REPAIR: SCHEMA_REFERENCE write failed");
+    errors.push({ step: "schema_reference", error: msg });
+  }
+
+  // ── Step 2: Rewrite README with correct schema version ───────────────────
+  const readmeRows: string[][] = [
+    ["Schema_Version",      String(WORKBOOK_SCHEMA_VERSION)],
+    ["Schema_Version_Note",
+      "v1 (2026-07-20): initial workbook. "
+      + "v2 (2026-07-23): totals expansion — ODDS_HISTORY, RUN_LOG Schema_Version, README. "
+      + "v3 (2026-07-24): ANALYSIS sheets added (SHADOW_HISTORY/OUTCOMES, REGRESSION_REPORT, STARTER_AUDIT, VEHICLE_LOG/POSTMORTEM). "
+      + "v4 (2026-07-25): SLATE_BOARD Survival_Floor column; park × weather run-addition cap. "
+      + "v5 (2026-07-25): Per-game board-lock gate; SLATE_INPUT Board_Lock_Status; SLATE_BOARD Lock_Status. "
+      + "v6 (2026-07-25): BOARD_LOCK_STATE sheet; per-game lock governance with operator Late_Change_Reason override. "
+      + "v7 (2026-07-25): MONOTONICITY sheet; REPLAY_RESULTS Market_Line + Edge_BLEND_PARK_PITCHER cols. "
+      + "v8 (2026-07-25): SURVIVAL_GATE_REPLAY sheet — retroactive survival gate analysis from module18."],
+    ["Workbook_Purpose",    "Frostline Pipeline — MLB totals projection and CORE pick authorization."],
+    ["Operator_Columns",    "Cells highlighted amber are operator-editable. All other cells are pipeline-maintained — do not edit."],
+    ["CORE_Definition",     "CORE = authorized bet. NO_CORE = blocked by eligibility or survival gate. Requires: projection separation ≥ 1.5 AND survival gate PASS."],
+    ["Lock_Rules",          "Each game locks independently BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH (default 2 h) before its own first pitch. LOCKED_OUT games cannot be promoted to CORE without a named Late_Change_Reason."],
+    ["Schema_Reference",    "See SCHEMA_REFERENCE tab for column-by-column definitions, types, and fill sources."],
+    ["Last_Repair_TS",      new Date().toISOString()],
+  ];
+
+  let readmeRowsWritten = 0;
+  try {
+    await clearRange(workbookId, "README!A2:B200");
+    await writeRange(workbookId, "README!A2", readmeRows);
+    readmeRowsWritten = readmeRows.length;
+    logger.info({ rows: readmeRowsWritten }, "WORKBOOK_REPAIR: README rewritten");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: msg }, "WORKBOOK_REPAIR: README write failed");
+    errors.push({ step: "readme", error: msg });
+  }
+
+  return {
+    workbook_id: workbookId,
+    schema_reference_rows: schemaRows,
+    readme_rows: readmeRowsWritten,
     errors,
   };
 }
