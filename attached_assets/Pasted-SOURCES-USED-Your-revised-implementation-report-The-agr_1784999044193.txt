@@ -1,0 +1,105 @@
+SOURCES USED
+
+* Your revised implementation report
+* The agreed component-decomposed survival-gate specification
+* July 24 postmortem requirements
+
+REFRESH CHECK
+
+I have not inspected the newly published workbook or source files, so I am validating the reported architecture, not certifying the deployment.
+
+Assessment
+
+This revision is now structurally aligned with the specification at the current model’s level of granularity.
+
+The critical corrections are present:
+
+* Park and weather are separated from baseball-only projection.
+* An Over must qualify before environment is added.
+* Starter and bullpen phases receive different stress factors.
+* The floor must clear the market by a positive buffer.
+* Failure reasons are specific and auditable.
+* All six required operator-facing fields are reportedly written.
+
+That resolves the fundamental defect in the original flat projectedTotal × 0.75 implementation.
+
+Important limitation
+
+This is not yet a fully decomposed contact/conversion model because:
+
+traffic_conversion_runs = 0
+hr_xbh_damage_runs = 0
+
+Therefore, the current survival floor effectively tests:
+
+starter phase × 0.80
++ bullpen phase × 0.75
+
+The infrastructure is correctly prepared for later conversion and damage components, but those components do not yet influence the result.
+
+That is acceptable as a staged implementation, provided it is labeled accurately:
+
+Phase-one starter/bullpen survival gate, not completed traffic/damage survival modeling.
+
+Required reconciliation checks
+
+Before considering the gate structurally passed, verify these identities for every game:
+
+Baseball_Only_Projection
+= Starter_Attack_Runs
++ Bullpen_Continuation_Runs
++ Traffic_Conversion_Runs
++ HR_XBH_Damage_Runs
+
+With the current stubs:
+
+Baseball_Only_Projection
+= Starter_Attack_Runs
++ Bullpen_Continuation_Runs
+
+And:
+
+Environment_Run_Adjustment
+= Final_Projected_Total
+- Baseball_Only_Projection
+
+Minor rounding differences are fine. Material differences indicate omitted or double-counted components.
+
+Baseline_Offense_Runs must remain informational. It should not also be added into the survival floor if starter and bullpen runs already represent the full nine-inning scoring estimate. Doing so would double-count the offensive baseline.
+
+Mandatory smoke tests
+
+Use the July 24 failures as fixed regression cases.
+
+Expected behavior
+
+* OAK–MIN Over 9.5: should fail the baseball-only or survival-floor gate rather than reach CORE through Target Field weather.
+* ARI–WSN Over 9.5: should be challenged by the stressed starter/bullpen projection.
+* CHC–PIT Over 8: should show whether the remaining baseball-only edge genuinely survives Jones/Boyd suppression.
+* SD–MIA Over 9: should be tested for dependence on aggressive conversion assumptions.
+* NYY–PHI Under 7.5: should remain unaffected because the new gate applies only to Overs.
+
+Also verify:
+
+* Favorable park/weather cannot rescue a failed baseball-only thesis.
+* Negative environment adjustments remain negative rather than being silently zeroed.
+* Missing components return COMPONENT_DATA_UNAVAILABLE.
+* Every eligible Over row populates columns AB–AG, including NO CORE rows.
+* Unders do not receive misleading survival values.
+* Schema v4 expanded every relevant write range, not only the header.
+* Repeated publishes do not shift or truncate existing columns.
+
+Commissioning status
+
+Component	Status
+Park/weather run cap	Implemented, needs replay
+Component survival architecture	Structurally corrected
+Traffic/conversion component	Stub only
+HR/XBH damage component	Stub only
+Board lock	Still required
+Historical replay	Not complete
+Monotonicity validation	Not complete
+Live shadow validation	Not complete
+Operational CORE	Disabled / research-only
+
+The correct next step is to publish this version, inspect the six new board fields, and replay the July 24 slate before beginning another formula change.

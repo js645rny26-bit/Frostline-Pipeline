@@ -45,6 +45,20 @@ import { MIN_STATCAST_PA } from "./module02d_statcastBatters.js";
 const LEAGUE_AVG_ERA = 4.20;
 
 /**
+ * Maximum run addition that park × weather factors are allowed to contribute
+ * to any single-game projection. Prevents extreme park/weather combinations
+ * from independently inflating totals past what the baseball inputs support.
+ *
+ * Rationale: Combined park × weather can reach 1.30× on very hot, wind-out days
+ * at homer-friendly parks. For a ~9-run game that adds 2.7 runs — far exceeding
+ * the actual park/weather signal quality. Capping at 1.5 runs keeps the modifier
+ * in the role of a secondary adjustment rather than a primary thesis driver.
+ *
+ * Do not raise above 2.0 without historical replay validation.
+ */
+const PARK_WEATHER_MAX_RUN_ADDITION = 1.5;
+
+/**
  * League-average K-BB% (strikeout rate minus walk rate).
  * 2024–2026 MLB average is approximately 14.8 percentage points.
  */
@@ -557,6 +571,41 @@ function resolveRunMultiplier(
   return { park_runs_pct, park_multiplier, weather_multiplier, combined_multiplier, park_source_status };
 }
 
+/**
+ * Applies the PARK_WEATHER_MAX_RUN_ADDITION ceiling to the combined run multiplier.
+ *
+ * The park × weather multiplier is only allowed to add at most PARK_WEATHER_MAX_RUN_ADDITION
+ * runs to a game's projection. Beyond that ceiling the modifiers have exceeded their
+ * signal quality and become the primary driver of the thesis — which they must not be.
+ *
+ * Cap formula:
+ *   maxAllowedMultiplier = 1 + PARK_WEATHER_MAX_RUN_ADDITION / baseTotal
+ *   effectiveMultiplier  = min(combinedMultiplier, maxAllowedMultiplier)
+ *
+ * Only activates when combined_multiplier > 1.0 (i.e. park/weather is boosting runs).
+ * Suppressive scenarios (multiplier < 1.0) are not capped — the floor is already
+ * handled by the existing [0.85, 1.30] clamp in resolveRunMultiplier.
+ *
+ * @param combinedMultiplier  The park × weather multiplier before the run-addition cap.
+ * @param awayOffenseRate     Away team's blended RS/9 rate (pre-multiplier).
+ * @param homeOffenseRate     Home team's blended RS/9 rate (pre-multiplier).
+ * @returns Effective multiplier, capped so the run addition ≤ PARK_WEATHER_MAX_RUN_ADDITION.
+ */
+function capRunMultiplierAddition(
+  combinedMultiplier: number,
+  awayOffenseRate: number,
+  homeOffenseRate: number,
+): number {
+  if (combinedMultiplier <= 1.0) return combinedMultiplier; // suppressive — no cap needed
+  const baseTotal = awayOffenseRate + homeOffenseRate;
+  if (baseTotal <= 0) return combinedMultiplier;
+  const addition = (combinedMultiplier - 1) * baseTotal;
+  if (addition > PARK_WEATHER_MAX_RUN_ADDITION) {
+    return parseFloat((1 + PARK_WEATHER_MAX_RUN_ADDITION / baseTotal).toFixed(4));
+  }
+  return combinedMultiplier;
+}
+
 function confidenceNum(c: string | null | undefined): number {
   if (c === "high")   return 0.9;
   if (c === "medium") return 0.75;
@@ -633,6 +682,49 @@ export interface GameSummaryRow {
   away_starter_quality: number;
   /** Starter quality factor for the home team's starter (FIP + K-BB%). 1.0 = league average. */
   home_starter_quality: number;
+  // ── Over survival gate projection components ──
+  /**
+   * Total runs expected during starter innings for both teams, at baseline offense rates
+   * (lineup-adjusted, no park/weather multiplier). = awayBaselineRate × (homeSP_IP/9) × homeQual
+   *                                                  + homeBaselineRate × (awaySP_IP/9) × awayQual
+   */
+  starter_attack_runs: number;
+  /**
+   * Total runs expected during bullpen innings for both teams, at baseline offense rates
+   * (no park/weather). = awayBaselineRate × ((9-homeSP_IP)/9) × homeBullpenQual + mirror
+   */
+  bullpen_continuation_runs: number;
+  /**
+   * Informational: both teams' total offense at league-average pitching with no environment.
+   * = awayOff.rate_used × awayLineup.factor + homeOff.rate_used × homeLineup.factor.
+   * Not used directly in the survival formula — documents the baseline before pitcher adjustment.
+   */
+  baseline_offense_runs: number;
+  /**
+   * Traffic-to-run conversion component. Currently 0 — not separately modelled.
+   * Captured implicitly in the L30/L10 RS/G rate (which includes actual runs, not just baserunners).
+   * Reserved for a future traffic-conversion model upgrade.
+   */
+  traffic_conversion_runs: number;
+  /**
+   * Extra-base / HR damage component. Currently 0 — not separately modelled at game level.
+   * Structural park HR tendency is embedded in the park multiplier (environment_run_adjustment).
+   * Reserved for a future HR/XBH decomposition upgrade.
+   */
+  hr_xbh_damage_runs: number;
+  /**
+   * Baseball-only projection: starter_attack_runs + bullpen_continuation_runs.
+   * Excludes the park/weather contribution. This is the thesis test baseline:
+   * an Over must clear the market line on baseball grounds alone.
+   */
+  baseball_only_projection: number;
+  /**
+   * Run contribution from the park × weather combined multiplier.
+   * = projected_total_runs − baseball_only_projection.
+   * Positive = environment boosted runs; negative = environment suppressed them.
+   * Must not independently manufacture an Over thesis.
+   */
+  environment_run_adjustment: number;
 }
 
 export interface Module09Result {
@@ -733,7 +825,14 @@ export async function verifyRecalculation(
       const parkData   = parkFactorMap.get(g.legacy_game_id) ?? null;
       const parkSource = parkSourceMap.get(g.legacy_game_id);
       const runMult    = resolveRunMultiplier(g.environment, parkData, parkSource);
-      const adjRate   = parseFloat((offRate.rate_used * runMult.combined_multiplier).toFixed(2));
+      // Cap the park × weather addition so it cannot contribute more than
+      // PARK_WEATHER_MAX_RUN_ADDITION runs to the total projection.
+      const cappedMultiplier = capRunMultiplierAddition(
+        runMult.combined_multiplier,
+        offRate.rate_used,
+        oppRate.rate_used,
+      );
+      const adjRate   = parseFloat((offRate.rate_used * cappedMultiplier).toFixed(2));
 
       // Lineup strength for the batting team (away team bats against home pitcher)
       const bSg      = lineupMap.get(g.legacy_game_id) ?? null;
@@ -761,7 +860,7 @@ export async function verifyRecalculation(
         oppRate.rate_used,                         // O: Opp_Offense_Rate_Used
         g.environment.temperature_f ?? "",         // P: Temperature_F
         g.environment.wind_speed_mph ?? "",        // Q: Wind_MPH
-        runMult.combined_multiplier,               // R: Combined_Run_Multiplier (park × weather)
+        cappedMultiplier,                          // R: Combined_Run_Multiplier (park × weather, capped)
         adjRate,                                   // S: Adjusted_Scoring_Rate
         "",                                        // T: Notes (operator)
         // ── Offensive rate audit (new cols U–W) ──
@@ -770,8 +869,8 @@ export async function verifyRecalculation(
         offRate.source_status,                     // W: Offense_Source_Status
         // ── Park / weather audit (new cols X–AA) ──
         runMult.park_runs_pct ?? "",               // X: Park_Runs_Pct
-        runMult.park_multiplier,                   // Y: Park_Multiplier
-        runMult.weather_multiplier,                // Z: Weather_Multiplier
+        runMult.park_multiplier,                   // Y: Park_Multiplier (raw, uncapped)
+        runMult.weather_multiplier,                // Z: Weather_Multiplier (raw, uncapped)
         runMult.park_source_status,                // AA: Park_Source_Status
       ]);
     }
@@ -786,9 +885,16 @@ export async function verifyRecalculation(
     const parkData   = parkFactorMap.get(g.legacy_game_id) ?? null;
     const parkSource = parkSourceMap.get(g.legacy_game_id);
     const runMult    = resolveRunMultiplier(g.environment, parkData, parkSource);
+    // Cap the park × weather addition — must not add more than PARK_WEATHER_MAX_RUN_ADDITION
+    // runs to the total projection. The raw multiplier is preserved in audit columns.
+    const cappedMult = capRunMultiplierAddition(
+      runMult.combined_multiplier,
+      awayOff.rate_used,
+      homeOff.rate_used,
+    );
 
-    const awayAdj = awayOff.rate_used * runMult.combined_multiplier;
-    const homeAdj = homeOff.rate_used * runMult.combined_multiplier;
+    const awayAdj = awayOff.rate_used * cappedMult;
+    const homeAdj = homeOff.rate_used * cappedMult;
 
     // ── Lineup strength (Step 2 commissioning) ──
     // Away team bats against the HOME pitcher → apply away lineup factor.
@@ -834,6 +940,24 @@ export async function verifyRecalculation(
     const bullpenCoverage = teamBullpenERAMap.has(g.home_team.team_abbr ?? "") &&
                             teamBullpenERAMap.has(g.away_team.team_abbr ?? "");
 
+    // ── Over survival gate: decompose projection into baseball vs environment ──
+    // Baseline rates strip the park/weather multiplier; lineup factor is retained
+    // (today's lineup is a baseball input, not an environmental one).
+    const awayBaselineRate = parseFloat((awayOff.rate_used * awayLineup.factor).toFixed(3));
+    const homeBaselineRate = parseFloat((homeOff.rate_used * homeLineup.factor).toFixed(3));
+    // Runs during starter innings (both teams), environment-free:
+    const awayStarterRuns = awayBaselineRate * (homePitchExp / 9) * homeQual;
+    const homeStarterRuns = homeBaselineRate * (awayPitchExp / 9) * awayQual;
+    // Runs during bullpen innings (both teams), environment-free:
+    const awayBullpenRuns = awayBaselineRate * ((9 - homePitchExp) / 9) * homeBullpenQual;
+    const homeBullpenRuns = homeBaselineRate * ((9 - awayPitchExp) / 9) * awayBullpenQual;
+    const starterAttackRuns       = parseFloat((awayStarterRuns + homeStarterRuns).toFixed(2));
+    const bullpenContinuationRuns = parseFloat((awayBullpenRuns + homeBullpenRuns).toFixed(2));
+    const baseballOnlyProj        = parseFloat((starterAttackRuns + bullpenContinuationRuns).toFixed(2));
+    const baselineOffRuns         = parseFloat((awayBaselineRate + homeBaselineRate).toFixed(2));
+    // Environment contribution = what park × weather added (or removed) from the total.
+    const envRunAdj               = parseFloat((projTotal - baseballOnlyProj).toFixed(2));
+
     gameSummaryRows.push({
       game_id:               g.legacy_game_id,
       date:                  g.date,
@@ -848,7 +972,7 @@ export async function verifyRecalculation(
       projected_away_runs:   projAway,
       projected_home_runs:   projHome,
       projected_total_runs:  projTotal,
-      run_multiplier:        runMult.combined_multiplier,
+      run_multiplier:        cappedMult,
       stadium:               g.venue.name ?? "",
       environment_quality:   g.environment.data_quality === "good" ? "good" : "fallback",
       bullpen_available:     bullpenCoverage,
@@ -861,11 +985,11 @@ export async function verifyRecalculation(
       home_offense_rate_used:     homeOff.rate_used,
       away_offense_source_status: awayOff.source_status,
       home_offense_source_status: homeOff.source_status,
-      // Park / weather audit
+      // Park / weather audit (raw uncapped values for traceability)
       park_runs_pct:         runMult.park_runs_pct,
       park_multiplier:       runMult.park_multiplier,
       weather_multiplier:    runMult.weather_multiplier,
-      combined_run_multiplier: runMult.combined_multiplier,
+      combined_run_multiplier: cappedMult,
       park_source_status:    runMult.park_source_status,
       // Lineup strength audit
       away_lineup_factor:       awayLineup.factor,
@@ -883,6 +1007,14 @@ export async function verifyRecalculation(
       proj_run_diff:                 parseFloat((projAway - projHome).toFixed(2)),
       away_starter_quality:          parseFloat(awayQual.toFixed(4)),
       home_starter_quality:          parseFloat(homeQual.toFixed(4)),
+      // Over survival gate components
+      starter_attack_runs:           starterAttackRuns,
+      bullpen_continuation_runs:     bullpenContinuationRuns,
+      baseline_offense_runs:         baselineOffRuns,
+      traffic_conversion_runs:       0,  // not yet modelled — reserved
+      hr_xbh_damage_runs:            0,  // not yet modelled — reserved
+      baseball_only_projection:      baseballOnlyProj,
+      environment_run_adjustment:    envRunAdj,
     });
 
     gsRows.push([
@@ -901,7 +1033,7 @@ export async function verifyRecalculation(
       projTotal,                                        // M: Projected_Total_Runs
       g.environment.temperature_f ?? "",                // N: Temperature_F
       g.environment.wind_speed_mph ?? "",               // O: Wind_MPH
-      runMult.combined_multiplier,                      // P: Combined_Run_Multiplier (park × weather)
+      cappedMult,                                        // P: Combined_Run_Multiplier (park × weather, capped)
       g.venue.name ?? "",                               // Q: Stadium
       "",                                               // R: Notes (operator)
       // ── Offensive rate audit (new cols S–Z) ──
@@ -914,10 +1046,11 @@ export async function verifyRecalculation(
       awayOff.source_status,                            // Y: Away_Offense_Source_Status
       homeOff.source_status,                            // Z: Home_Offense_Source_Status
       // ── Park / weather audit (new cols AA–AE) ──
+      // Raw uncapped values preserved here for full traceability.
       runMult.park_runs_pct ?? "",                      // AA: Park_Runs_Pct
-      runMult.park_multiplier,                          // AB: Park_Multiplier
-      runMult.weather_multiplier,                       // AC: Weather_Multiplier
-      runMult.combined_multiplier,                      // AD: Combined_Run_Multiplier
+      runMult.park_multiplier,                          // AB: Park_Multiplier (raw)
+      runMult.weather_multiplier,                       // AC: Weather_Multiplier (raw)
+      cappedMult,                                       // AD: Combined_Run_Multiplier (capped)
       runMult.park_source_status,                       // AE: Park_Source_Status
       // ── Step 5 derivatives ──
       parseFloat((projAway - projHome).toFixed(2)),     // AF: Projected_Run_Diff

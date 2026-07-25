@@ -43,6 +43,26 @@ export interface SlateBoardEntry {
   // ── Starter quality derivatives ──
   away_starter_quality: number | null;
   home_starter_quality: number | null;
+  // ── Over survival gate audit fields (non-null for OVER games with a market line) ──
+  /** starter_attack_runs + bullpen_continuation_runs: total runs on baseball grounds only, no park/weather. */
+  baseball_only_projection: number | null;
+  /** park × weather run contribution: projected_total − baseball_only_projection. */
+  environment_run_adjustment: number | null;
+  /** Low-conversion stress floor: starter × 0.80 + bullpen × 0.75 + traffic × 0.70 + HR/XBH × 0.90. */
+  survival_floor: number | null;
+  /** survival_floor − market_line. Must be ≥ 0.25 for CORE. */
+  survival_floor_edge: number | null;
+  /** PASS | FAIL | N_A. FAIL triggers NO_CORE with a specific blocker reason. */
+  survival_check: "PASS" | "FAIL" | "N_A";
+  /**
+   * Why the survival check failed. One of:
+   *   ENVIRONMENT_DEPENDENT_OVER       — baseball_only_projection < market_line (env manufactured the Over)
+   *   BASEBALL_ONLY_EDGE_BELOW_THRESHOLD — baseball-only edge < 1.25 but ≥ 0
+   *   SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD — floor edge < 0.25 after baseball-only edge cleared
+   *   COMPONENT_DATA_UNAVAILABLE       — projection components missing from module09
+   * Empty string for PASS or N_A.
+   */
+  survival_failure_reason: string;
 }
 
 export interface ActiveBoardEntry {
@@ -106,6 +126,121 @@ function parseStr(v: unknown): string {
 
 /** Provisional commissioning threshold. Replay historical slates to calibrate. */
 const CORE_THRESHOLD = 1.5;
+
+// ── Over survival gate constants ─────────────────────────────────────────────
+/**
+ * Minimum edge that the baseball-only projection (no park/weather) must clear
+ * above the market line for an Over to qualify as CORE.
+ * If the baseball thesis alone doesn't provide ≥ 1.25 runs of edge, the Over
+ * may be environment-dependent and must be blocked.
+ */
+const OVER_BASEBALL_ONLY_EDGE_THRESHOLD = 1.25;
+
+/**
+ * Minimum edge that the survival floor must clear above the market line.
+ * The floor represents a low-conversion game scenario; the Over must survive
+ * even that adverse case by at least 0.25 runs.
+ */
+const OVER_SURVIVAL_FLOOR_EDGE_THRESHOLD = 0.25;
+
+// Per-component stress penalties for the survival floor formula.
+// These simulate a low-conversion game: starters outperform their season profile
+// (→ fewer runs allowed), traffic doesn't convert efficiently, bullpen is clean,
+// and extra-base damage is muted compared to the projection.
+const SURVIVAL_STARTER_PENALTY  = 0.80;   // starters pitch better than modelled
+const SURVIVAL_BULLPEN_PENALTY  = 0.75;   // bullpen continuation rate is suppressed
+const SURVIVAL_TRAFFIC_PENALTY  = 0.70;   // baserunner-to-run conversion is poor
+const SURVIVAL_HR_XBH_PENALTY   = 0.90;   // extra-base / HR damage is muted
+
+export interface OverSurvivalResult {
+  /** Projection excluding park/weather: starter_attack_runs + bullpen_continuation_runs. */
+  baseball_only_projection: number;
+  /** Park × weather run contribution (projected_total − baseball_only_projection). */
+  environment_run_adjustment: number;
+  /**
+   * Stress-test floor:
+   *   starter × 0.80 + bullpen × 0.75 + traffic × 0.70 + HR_XBH × 0.90
+   * This is the minimum plausible Over total if baseball conditions are adverse.
+   */
+  survival_floor: number;
+  /** survival_floor − market_line. Must be ≥ OVER_SURVIVAL_FLOOR_EDGE_THRESHOLD. */
+  survival_floor_edge: number;
+  survival_check: "PASS" | "FAIL";
+  /**
+   * Specific reason for failure. One of:
+   *   ENVIRONMENT_DEPENDENT_OVER         — baseball-only projection is below the market line
+   *   BASEBALL_ONLY_EDGE_BELOW_THRESHOLD — baseball edge ≥ 0 but < 1.25
+   *   SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD — floor edge < 0.25 (baseball edge was adequate)
+   * Empty string for PASS.
+   */
+  survival_failure_reason: string;
+}
+
+/**
+ * Component-decomposed Over survival gate.
+ *
+ * Tests two independent conditions before an Over can reach CORE:
+ *
+ * 1. Baseball-only edge ≥ 1.25:
+ *    The projection must clear the market line by ≥ 1.25 runs on baseball
+ *    grounds alone (starter + bullpen quality), without any contribution from
+ *    park or weather factors. This prevents environment from manufacturing
+ *    an Over thesis that has no baseball basis.
+ *
+ * 2. Survival floor edge ≥ 0.25:
+ *    Even under a low-conversion scenario (starters outperform, traffic
+ *    doesn't convert, bullpen is clean, extra-base damage is muted), the
+ *    discounted projection must still clear the line by ≥ 0.25 runs.
+ *    A legitimate Over thesis should have a margin that survives adverse
+ *    baseball conditions.
+ *
+ * Park and weather are excluded from both tests. At most, a separately
+ * bounded environment modifier may be included in future after replay.
+ */
+export function overSurvivalCheck(
+  starterAttackRuns: number,
+  bullpenContinuationRuns: number,
+  trafficConversionRuns: number,
+  hrXbhDamageRuns: number,
+  baseballOnlyProjection: number,
+  environmentRunAdjustment: number,
+  marketLine: number,
+): OverSurvivalResult {
+  const survivalFloor = parseFloat((
+    starterAttackRuns       * SURVIVAL_STARTER_PENALTY +
+    bullpenContinuationRuns * SURVIVAL_BULLPEN_PENALTY +
+    trafficConversionRuns   * SURVIVAL_TRAFFIC_PENALTY +
+    hrXbhDamageRuns         * SURVIVAL_HR_XBH_PENALTY
+  ).toFixed(2));
+
+  const baseballOnlyEdge  = parseFloat((baseballOnlyProjection - marketLine).toFixed(2));
+  const survivalFloorEdge = parseFloat((survivalFloor - marketLine).toFixed(2));
+
+  let survivalCheck: "PASS" | "FAIL" = "PASS";
+  let survivalFailureReason = "";
+
+  if (baseballOnlyEdge < 0) {
+    // Baseball alone doesn't even reach the line — environment is entirely
+    // responsible for the Over thesis. Block unconditionally.
+    survivalCheck = "FAIL";
+    survivalFailureReason = "ENVIRONMENT_DEPENDENT_OVER";
+  } else if (baseballOnlyEdge < OVER_BASEBALL_ONLY_EDGE_THRESHOLD) {
+    survivalCheck = "FAIL";
+    survivalFailureReason = "BASEBALL_ONLY_EDGE_BELOW_THRESHOLD";
+  } else if (survivalFloorEdge < OVER_SURVIVAL_FLOOR_EDGE_THRESHOLD) {
+    survivalCheck = "FAIL";
+    survivalFailureReason = "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD";
+  }
+
+  return {
+    baseball_only_projection: baseballOnlyProjection,
+    environment_run_adjustment: environmentRunAdjustment,
+    survival_floor: survivalFloor,
+    survival_floor_edge: survivalFloorEdge,
+    survival_check: survivalCheck,
+    survival_failure_reason: survivalFailureReason,
+  };
+}
 
 interface GameEligibilityContext {
   awayPitcherRole: string;
@@ -227,8 +362,8 @@ export async function extractOutputBoards(
       });
     }
 
-    // ── Ensure SLATE_BOARD has at least 22 columns (A–V) for prop signal fields ──
-    await expandSheetColumns(workbookId, "SLATE_BOARD", 22).catch((err: unknown) => {
+    // ── Ensure SLATE_BOARD has at least 33 columns (A–AG) for all output fields ──
+    await expandSheetColumns(workbookId, "SLATE_BOARD", 33).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not expand SLATE_BOARD columns — continuing");
     });
 
@@ -276,12 +411,73 @@ export async function extractOutputBoards(
         homeExpectedInnings:  gs.home_expected_innings,
         bullpenAvailable:     gs.bullpen_available,
       };
-      const { decision, direction, edgeStrength, coreBlocker, confidence, roi } = computeDecision(
+      const { decision: rawDecision, direction, edgeStrength, coreBlocker: rawCoreBlocker, confidence, roi } = computeDecision(
         gs.projected_total_runs,
         market.line,
         market.vehicle,
         gameCtx,
       );
+
+      // ── Over survival gate ────────────────────────────────────────────────────
+      // Every Over CORE candidate must pass a two-part component-decomposed stress
+      // test before authorization. Park and weather cannot manufacture the thesis —
+      // the Over must survive on baseball grounds alone.
+      let decision = rawDecision;
+      let coreBlocker = rawCoreBlocker;
+
+      // Initialise all survival audit fields (populated for all OVERs with a line)
+      let survivalBaseballOnly: number | null = null;
+      let survivalEnvAdj: number | null = null;
+      let survivalFloor: number | null = null;
+      let survivalFloorEdge: number | null = null;
+      let survivalCheck: "PASS" | "FAIL" | "N_A" = "N_A";
+      let survivalFailureReason = "";
+
+      if (direction === "OVER" && market.line !== null) {
+        // Check that module09 provided the decomposed components.
+        if (gs.baseball_only_projection === undefined || gs.starter_attack_runs === undefined) {
+          // Data unavailable — block conservatively rather than silently passing.
+          survivalCheck = "FAIL";
+          survivalFailureReason = "COMPONENT_DATA_UNAVAILABLE";
+          if (decision === "CORE") {
+            decision = "NO_CORE";
+            coreBlocker = "COMPONENT_DATA_UNAVAILABLE";
+          }
+        } else {
+          const sr = overSurvivalCheck(
+            gs.starter_attack_runs,
+            gs.bullpen_continuation_runs,
+            gs.traffic_conversion_runs,
+            gs.hr_xbh_damage_runs,
+            gs.baseball_only_projection,
+            gs.environment_run_adjustment,
+            market.line,
+          );
+          survivalBaseballOnly  = sr.baseball_only_projection;
+          survivalEnvAdj        = sr.environment_run_adjustment;
+          survivalFloor         = sr.survival_floor;
+          survivalFloorEdge     = sr.survival_floor_edge;
+          survivalCheck         = sr.survival_check;
+          survivalFailureReason = sr.survival_failure_reason;
+
+          if (decision === "CORE" && sr.survival_check === "FAIL") {
+            decision    = "NO_CORE";
+            coreBlocker = sr.survival_failure_reason;
+            logger.info(
+              {
+                game: gs.game_id,
+                baseballOnly: sr.baseball_only_projection,
+                envAdj: sr.environment_run_adjustment,
+                floor: sr.survival_floor,
+                floorEdge: sr.survival_floor_edge,
+                line: market.line,
+                reason: sr.survival_failure_reason,
+              },
+              "MODULE_11: Over CORE downgraded by survival gate",
+            );
+          }
+        }
+      }
 
       // ── Side (run-line) derivative signal ──────────────────────────────
       const projRunDiff  = parseFloat((gs.projected_away_runs - gs.projected_home_runs).toFixed(2));
@@ -345,6 +541,12 @@ export async function extractOutputBoards(
         side_decision:          sideDecision,
         away_starter_quality:   gs.away_starter_quality ?? null,
         home_starter_quality:   gs.home_starter_quality ?? null,
+        baseball_only_projection:   survivalBaseballOnly,
+        environment_run_adjustment: survivalEnvAdj,
+        survival_floor:             survivalFloor,
+        survival_floor_edge:        survivalFloorEdge,
+        survival_check:             survivalCheck,
+        survival_failure_reason:    survivalFailureReason,
         starter_k_market_signal:         propSignals.starter_k_market_signal,
         starter_er_market_signal:        propSignals.starter_er_market_signal,
         lineup_tb_coverage_pct:          propSignals.lineup_tb_coverage_pct,
@@ -385,28 +587,40 @@ export async function extractOutputBoards(
         sideDecision,                                 // Y: Side_Decision
         gs.away_starter_quality ?? "",                // Z: Away_Starter_Quality
         gs.home_starter_quality ?? "",                // AA: Home_Starter_Quality
+        survivalBaseballOnly ?? "",                   // AB: Baseball_Only_Projection
+        survivalEnvAdj ?? "",                         // AC: Environment_Run_Adjustment
+        survivalFloor ?? "",                          // AD: Survival_Floor
+        survivalFloorEdge ?? "",                      // AE: Survival_Floor_Edge
+        survivalCheck,                                // AF: Survival_Check (PASS | FAIL | N_A)
+        survivalFailureReason,                        // AG: Survival_Failure_Reason
       ]);
     }
 
-    // ── Ensure SLATE_BOARD has 27 columns (A–AA) for step-5 derivative fields ──
-    await expandSheetColumns(workbookId, "SLATE_BOARD", 27).catch((err: unknown) => {
+    // ── Ensure SLATE_BOARD has 33 columns (A–AG) for step-5 + survival gate fields ──
+    await expandSheetColumns(workbookId, "SLATE_BOARD", 33).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not expand SLATE_BOARD columns — continuing");
     });
 
-    // Write step-5 derivative headers (W–AA)
-    await writeRange(workbookId, "SLATE_BOARD!W1:AA1", [[
+    // Write step-5 derivative + survival gate headers (W–AG)
+    await writeRange(workbookId, "SLATE_BOARD!W1:AG1", [[
       "Side_Edge",
       "Side_Direction",
       "Side_Decision",
       "Away_Starter_Quality",
       "Home_Starter_Quality",
+      "Baseball_Only_Projection",
+      "Environment_Run_Adjustment",
+      "Survival_Floor",
+      "Survival_Floor_Edge",
+      "Survival_Check",
+      "Survival_Failure_Reason",
     ]]).catch((err: unknown) => {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write step-5 headers — continuing");
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write step-5/survival headers — continuing");
     });
 
-    await clearRange(workbookId, "SLATE_BOARD!A2:AA100");
+    await clearRange(workbookId, "SLATE_BOARD!A2:AG100");
     if (sbRows.length > 0) {
-      await writeRange(workbookId, `SLATE_BOARD!A2:AA${1 + sbRows.length}`, sbRows);
+      await writeRange(workbookId, `SLATE_BOARD!A2:AG${1 + sbRows.length}`, sbRows);
     }
     logger.info(
       { rows: sbRows.length, core: output.core_count, noCore: output.no_core_count },

@@ -1,0 +1,120 @@
+SOURCES USED
+
+* Your implementation report
+* The refined survival-gate specification we agreed to immediately beforehand
+
+REFRESH CHECK
+
+I have not inspected the code or a newly published workbook. A clean TypeScript compile confirms syntax and type compatibility only. It does not establish that the repaired logic matches specification or has passed commissioning.
+
+This task is not complete
+
+The park/weather cap is directionally correct, but the survival gate reverted to the exact flat-multiplier design we explicitly rejected.
+
+Requirement	Agreed specification	Reported implementation
+Survival model	Component-decomposed stress test	projectedTotal × 0.75
+Starter attack	×0.80	Included indiscriminately in ×0.75
+Bullpen continuation	×0.75	Included indiscriminately in ×0.75
+Traffic/conversion	×0.70	Included indiscriminately in ×0.75
+HR/XBH damage	×0.90	Included indiscriminately in ×0.75
+Baseline offense	Retained	Reduced by 25%
+Environment	Separated, removed or capped	Capped upstream, but not separated in the gate
+CORE test	Baseball-only edge ≥1.25 and floor edge ≥0.25	Floor merely clears market line
+Board audit fields	Six required fields	Only Survival_Floor
+Failure diagnosis	Specific failure reason	Generic OVER_SURVIVAL_FLOOR_FAILED
+
+So the implementation currently answers:
+
+Is 75% of the final projection still above the line?
+
+The required design answers:
+
+Which baseball components survive a low-conversion game, and does the thesis still clear the market without environment manufacturing the edge?
+
+Those are not equivalent.
+
+What is valid
+
+These pieces can remain:
+
+* PARK_WEATHER_MAX_RUN_ADDITION = 1.5
+* The multiplier-cap helper
+* Applying the cap consistently to integration and summary calculations
+* Preserving uncapped values for audit
+* Schema plumbing for additional board columns
+* Running the Over gate before final CORE authorization
+
+The problem is specifically the survival formula and incomplete audit output.
+
+Required correction
+
+The survival check cannot be constructed from only projectedTotal and marketLine. Module11 needs the projection components from module09.
+
+Module09 should expose something conceptually equivalent to:
+
+interface ProjectionComponents {
+  baselineOffenseRuns: number;
+  starterAttackRuns: number;
+  bullpenContinuationRuns: number;
+  trafficConversionRuns: number;
+  hrXbhDamageRuns: number;
+  environmentRunAdjustment: number;
+}
+
+Then calculate:
+
+const baseballOnlyProjection =
+  baselineOffenseRuns +
+  starterAttackRuns +
+  bullpenContinuationRuns +
+  trafficConversionRuns +
+  hrXbhDamageRuns;
+const survivalFloor =
+  baselineOffenseRuns +
+  starterAttackRuns * 0.80 +
+  bullpenContinuationRuns * 0.75 +
+  trafficConversionRuns * 0.70 +
+  hrXbhDamageRuns * 0.90;
+
+Park and weather should not create survival. At most, a separately bounded portion may be included after replay validates that choice.
+
+CORE qualification should require:
+
+const baseballOnlyEdge = baseballOnlyProjection - marketLine;
+const survivalFloorEdge = survivalFloor - marketLine;
+const passes =
+  baseballOnlyEdge >= 1.25 &&
+  survivalFloorEdge >= 0.25;
+
+Required board fields
+
+Schema v4 should contain all six agreed fields, not only Survival_Floor:
+
+* Baseball_Only_Projection
+* Environment_Run_Adjustment
+* Survival_Floor
+* Survival_Floor_Edge
+* Survival_Check
+* Survival_Failure_Reason
+
+Failure reasons should distinguish at minimum:
+
+* BASEBALL_ONLY_EDGE_BELOW_THRESHOLD
+* SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD
+* ENVIRONMENT_DEPENDENT_OVER
+* COMPONENT_DATA_UNAVAILABLE
+
+Commissioning status
+
+Do not mark this repair complete or allow it to restore operational CORE authorization.
+
+Current status:
+
+* Park/weather cap: structurally implemented, untested
+* Survival gate: does not match commissioned specification
+* Board lock: still required
+* Historical replay: not completed
+* Monotonicity: not completed
+* Live CORE: research-only
+
+The flat 0.75 implementation may be retained temporarily as an explicitly labeled experimental comparator during replay, but it cannot be presented as the final survival gate.

@@ -16,8 +16,10 @@
  *      SCHEMA_REFERENCE documents the full commissioning stack:
  *      SHADOW_HISTORY, SHADOW_OUTCOMES, REGRESSION_REPORT, STARTER_AUDIT,
  *      VEHICLE_LOG, VEHICLE_POSTMORTEM.
+ *  v4 (2026-07-25): SLATE_BOARD AB column — Survival_Floor (Over stress-test floor).
+ *      Park × weather combined multiplier capped at +1.5-run addition in MODULE_09.
  */
-export const WORKBOOK_SCHEMA_VERSION = 3;
+export const WORKBOOK_SCHEMA_VERSION = 4;
 
 export interface ColumnDef {
   name: string;
@@ -381,6 +383,90 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Prop_Market_Agreement", index: 19, type: "string", width: 180, readOnly: true, filledBy: "MODULE_11", description: "AGREES | MIXED | CONTRADICTS | INSUFFICIENT_COVERAGE — whether prop market direction aligns with Frostline's OVER/UNDER. Shadow mode: informational only.", exampleValue: "AGREES" },
       { name: "Prop_Market_Disagreement_Reason", index: 20, type: "string", width: 280, readOnly: true, filledBy: "MODULE_11", description: "Human-readable explanation when Prop_Market_Agreement is CONTRADICTS or MIXED. Empty for AGREES or INSUFFICIENT_COVERAGE.", exampleValue: "ER market implies UNDER (away ER: 2.5, home ER: 2.5); Frostline projects OVER" },
       { name: "Prop_Snapshot_TS", index: 21, type: "string", width: 185, readOnly: true, filledBy: "MODULE_11", description: "ISO 8601 UTC timestamp of when the Rotowire props page was fetched for this publish run.", exampleValue: "2026-07-24T13:42:11.000Z" },
+      // ── Side derivative signals (W–Y, indices 22–24) — step-5 commissioning ──
+      { name: "Side_Edge", index: 22, type: "number", width: 100, format: "0.00", readOnly: true, filledBy: "MODULE_11", description: "proj_run_diff + away_spread. Positive = model says away covers; negative = home covers.", exampleValue: "1.2" },
+      { name: "Side_Direction", index: 23, type: "string", width: 100, readOnly: true, filledBy: "MODULE_11", description: "AWAY | HOME | NONE | NO_MARKET — direction the model favours on the run line.", exampleValue: "AWAY" },
+      { name: "Side_Decision", index: 24, type: "string", width: 100, readOnly: true, filledBy: "MODULE_11", description: "CORE | NO_CORE | NO_MARKET — side authorization against the 1.5-edge threshold.", exampleValue: "NO_CORE" },
+      // ── Starter quality derivatives (Z–AA, indices 25–26) ──
+      { name: "Away_Starter_Quality", index: 25, type: "number", width: 155, format: "0.0000", readOnly: true, filledBy: "MODULE_11", description: "FIP + K-BB% composite factor for the away starter. 1.0 = league average; <1 = better than average.", exampleValue: "0.8923" },
+      { name: "Home_Starter_Quality", index: 26, type: "number", width: 155, format: "0.0000", readOnly: true, filledBy: "MODULE_11", description: "FIP + K-BB% composite factor for the home starter. 1.0 = league average; <1 = better than average.", exampleValue: "1.1042" },
+      // ── Over survival gate audit columns (AB–AG, indices 27–32) ──
+      {
+        name: "Baseball_Only_Projection",
+        index: 27,
+        type: "number",
+        width: 175,
+        format: "0.00",
+        readOnly: true,
+        filledBy: "MODULE_11",
+        description: "starter_attack_runs + bullpen_continuation_runs: total projected runs from baseball factors only "
+          + "(lineup-adjusted offense × pitcher quality, no park/weather). Non-null for OVER games with a market line. "
+          + "An Over must clear the market line by ≥ 1.25 on this number alone.",
+        exampleValue: "7.42",
+      },
+      {
+        name: "Environment_Run_Adjustment",
+        index: 28,
+        type: "number",
+        width: 185,
+        format: "0.00",
+        readOnly: true,
+        filledBy: "MODULE_11",
+        description: "Park × weather run contribution: projected_total − Baseball_Only_Projection. "
+          + "Positive = environment boosted runs; negative = suppressed. Must not be the sole reason an Over clears the market line.",
+        exampleValue: "0.62",
+      },
+      {
+        name: "Survival_Floor",
+        index: 29,
+        type: "number",
+        width: 140,
+        format: "0.00",
+        readOnly: true,
+        filledBy: "MODULE_11",
+        description: "Low-conversion stress floor: starter × 0.80 + bullpen × 0.75 + traffic × 0.70 + HR/XBH × 0.90. "
+          + "Simulates a game where starters outperform, traffic doesn't convert, and extra-base damage is muted. "
+          + "Must exceed the market line by ≥ 0.25 (Survival_Floor_Edge) for CORE authorization.",
+        exampleValue: "6.84",
+      },
+      {
+        name: "Survival_Floor_Edge",
+        index: 30,
+        type: "number",
+        width: 155,
+        format: "0.00",
+        readOnly: true,
+        filledBy: "MODULE_11",
+        description: "Survival_Floor − Market_Line. Must be ≥ 0.25 for an Over to qualify as CORE. "
+          + "Negative means the Over fails even the stress-tested floor.",
+        exampleValue: "-0.16",
+      },
+      {
+        name: "Survival_Check",
+        index: 31,
+        type: "string",
+        width: 110,
+        readOnly: true,
+        filledBy: "MODULE_11",
+        description: "PASS | FAIL | N_A. FAIL means the Over cannot reach CORE; Survival_Failure_Reason explains why. "
+          + "N_A for UNDER, NONE, or PENDING games.",
+        exampleValue: "FAIL",
+      },
+      {
+        name: "Survival_Failure_Reason",
+        index: 32,
+        type: "string",
+        width: 270,
+        readOnly: true,
+        filledBy: "MODULE_11",
+        description: "Specific survival gate failure mode. One of: "
+          + "ENVIRONMENT_DEPENDENT_OVER (baseball-only projection below market line), "
+          + "BASEBALL_ONLY_EDGE_BELOW_THRESHOLD (edge ≥ 0 but < 1.25), "
+          + "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD (floor edge < 0.25), "
+          + "COMPONENT_DATA_UNAVAILABLE (projection components missing from module09). "
+          + "Empty for PASS or N_A.",
+        exampleValue: "ENVIRONMENT_DEPENDENT_OVER",
+      },
     ],
   },
 
