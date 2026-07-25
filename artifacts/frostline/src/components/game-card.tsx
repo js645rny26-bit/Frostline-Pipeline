@@ -181,8 +181,20 @@ function LockStatusBadge({ lockEntry }: { lockEntry: BoardStatusEntry }) {
 function PickDecisionStrip({ entry }: { entry: BoardStatusEntry }) {
   const { final_decision, direction, projected_total, market_line, edge_strength, core_blocker, survival_check, survival_failure_reason } = entry;
 
-  // Nothing to show if no decision has been computed yet
-  if (!final_decision || final_decision === "PENDING") return null;
+  // No decision computed at all — nothing to show
+  if (!final_decision) return null;
+
+  // Market line not yet posted — show a neutral pending indicator
+  if (final_decision === "PENDING") {
+    return (
+      <div className="pt-3 border-t border-border">
+        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground font-medium">
+          <Minus className="w-3.5 h-3.5" />
+          Pending — no market line yet
+        </span>
+      </div>
+    );
+  }
 
   const isCore    = final_decision === "CORE";
   const isOver    = direction === "OVER";
