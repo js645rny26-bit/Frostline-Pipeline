@@ -383,8 +383,23 @@ router.get("/pipeline/repair-data", async (req, res): Promise<void> => {
   const report: Record<string, unknown> = {};
   const errors: string[] = [];
 
-  // Helper: parse a cell as string
+  // ── Shared helpers ─────────────────────────────────────────────────────────
+  // Parse a cell as string.
   const cell = (row: unknown[], i: number): string => String(row[i] ?? "").trim();
+
+  // Normalize any date string to bare "YYYYMMDD" regardless of Sheets formatting.
+  // Sheets returns Date cells as "MM/DD/YYYY" (FORMATTED_VALUE) even when written
+  // as "2026-07-25". Module17/18 Game_ID prefix is already "YYYYMMDD" (first 8 chars).
+  const toYMD = (s: string): string => {
+    if (!s) return "";
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10).replace(/-/g, ""); // "YYYY-MM-DD"
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (m) return `${m[3]}${m[1].padStart(2, "0")}${m[2].padStart(2, "0")}`;   // "MM/DD/YYYY"
+    return "";
+  };
+
+  // Detect ISO-timestamp-like strings (written by the replay module as Replay_Run_TS).
+  const isIsoTs = (s: string): boolean => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s);
 
   // ── 1. BOARD_LOCK_STATE: invalidate false LOCKED_IN stamps ───────────────
   try {
@@ -442,48 +457,30 @@ router.get("/pipeline/repair-data", async (req, res): Promise<void> => {
   }
 
   // ── 2. VEHICLE_LOG: remove cross-date rows ───────────────────────────────
-  // Cross-date = Game_ID date prefix (YYYY/MM/DD) doesn't match the Date col.
-  // Game_ID format: "YYYY/MM/DD-AWAY-HOME"; Date col format: "YYYY-MM-DD".
+  // Game_ID format: "YYYYMMDD_AWAY_HOME". Cross-date = first 8 chars of
+  // Game_ID don't match the Date column (normalized via shared toYMD).
   try {
     const vlResp = await readRange(wbId, "VEHICLE_LOG!A1:N5000");
     const vlAll  = (vlResp.values ?? []) as unknown[][];
     if (vlAll.length > 1) {
-      const header   = vlAll[0];
       const dataRows = vlAll.slice(1);
-
-      // Normalize any date string to "YYYY-MM-DD" regardless of Sheets formatting.
-      // Sheets may return dates as "07/25/2026" (FORMATTED_VALUE) even when
-      // written as "2026-07-25".
-      const normDate = (s: string): string => {
-        if (!s) return "";
-        if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-        const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-        if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
-        return s;
-      };
-
       const clean: unknown[][] = [];
       let removed = 0;
       for (const row of dataRows) {
-        const dateCol  = cell(row, 0); // A: Date
-        const gameId   = cell(row, 1); // B: Game_ID ("YYYY/MM/DD-...")
-        // Game_ID date prefix: "2026/07/25" → normalize → "2026-07-25"
-        const gameDate = normDate(gameId.slice(0, 10).replace(/\//g, "-"));
-        const recDate  = normDate(dateCol);
-        if (gameDate && recDate && gameDate !== recDate) {
+        const dateCol = cell(row, 0); // A: Date
+        const gameId  = cell(row, 1); // B: Game_ID ("YYYYMMDD_AWAY_HOME")
+        const gameYMD = gameId.slice(0, 8); // first 8 chars = "YYYYMMDD"
+        const rowYMD  = toYMD(dateCol);
+        if (gameYMD && rowYMD && gameYMD !== rowYMD) {
           removed++;
-          logger.warn({ dateCol, gameId, gameDate, recDate }, "REPAIR_DATA: Removing cross-date VEHICLE_LOG row");
+          logger.warn({ dateCol, gameId, gameYMD, rowYMD }, "REPAIR_DATA: Removing cross-date VEHICLE_LOG row");
           continue;
         }
         clean.push(row);
       }
-
       if (removed > 0) {
-        // Clear data range then rewrite only clean rows.
         await clearRange(wbId, "VEHICLE_LOG!A2:N5000");
-        if (clean.length > 0) {
-          await writeRange(wbId, "VEHICLE_LOG!A2", clean);
-        }
+        if (clean.length > 0) await writeRange(wbId, "VEHICLE_LOG!A2", clean);
       }
       report["vehicle_log"] = { rows_inspected: dataRows.length, removed };
     }
@@ -492,32 +489,108 @@ router.get("/pipeline/repair-data", async (req, res): Promise<void> => {
     errors.push(`VEHICLE_LOG: ${msg}`);
   }
 
-  // ── 3. REPLAY_RESULTS: deduplicate by Date + Game_ID ────────────────────
-  // Keep the last (highest-row) occurrence of each Date + Game_ID pair.
-  // Date = col 0 ("Replay_Date"), Game_ID = col 1.
+  // ── 3. SURVIVAL_GATE_REPLAY: remove cross-date rows ──────────────────────
+  // Same Game_ID format as VEHICLE_LOG. The 4 contaminated rows have
+  // Date = 2026-07-24 but Game_ID prefix = 20260725.
   try {
-    const rrResp = await readRange(wbId, "REPLAY_RESULTS!A1:AE5000");
-    const rrAll  = (rrResp.values ?? []) as unknown[][];
+    const sgrResp = await readRange(wbId, "SURVIVAL_GATE_REPLAY!A1:AA5000");
+    const sgrAll  = (sgrResp.values ?? []) as unknown[][];
+    if (sgrAll.length > 1) {
+      const dataRows = sgrAll.slice(1);
+      const clean: unknown[][] = [];
+      let removed = 0;
+      for (const row of dataRows) {
+        const dateCol = cell(row, 0); // A: Date
+        const gameId  = cell(row, 1); // B: Game_ID
+        const gameYMD = gameId.slice(0, 8);
+        const rowYMD  = toYMD(dateCol);
+        if (gameYMD && rowYMD && gameYMD !== rowYMD) {
+          removed++;
+          logger.warn({ dateCol, gameId, gameYMD, rowYMD }, "REPAIR_DATA: Removing cross-date SURVIVAL_GATE_REPLAY row");
+          continue;
+        }
+        clean.push(row);
+      }
+      if (removed > 0) {
+        await clearRange(wbId, "SURVIVAL_GATE_REPLAY!A2:AA5000");
+        if (clean.length > 0) await writeRange(wbId, "SURVIVAL_GATE_REPLAY!A2", clean);
+      }
+      report["survival_gate_replay"] = { rows_inspected: dataRows.length, removed };
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`SURVIVAL_GATE_REPLAY: ${msg}`);
+  }
+
+  // ── 4. REPLAY_RESULTS: migrate legacy column layout + deduplicate ─────────
+  // RESULTS_HEADER grew in two steps; rows written before the current 31-col
+  // layout have Replay_Run_TS in the wrong column:
+  //
+  //   Era A (24-col, oldest): Replay_Run_TS was at index 23
+  //     → cols 0-22 correct; col 23 (now Park_Source_Status) holds the TS.
+  //   Era B (29-col): Replay_Run_TS was at index 28
+  //     → cols 0-27 correct; col 28 (now Market_Line) holds the TS.
+  //   Current (31-col): Replay_Run_TS at index 30. Market_Line=28, Edge=29.
+  //
+  // Migration: if col 30 is blank and the candidate column (28 or 23) is an
+  // ISO timestamp, move it to col 30 and blank the candidate.
+  // After migration, deduplicate by Replay_Date + Game_ID (keep last row).
+  try {
+    const rrResp  = await readRange(wbId, "REPLAY_RESULTS!A1:AE5000");
+    const rrAll   = (rrResp.values ?? []) as unknown[][];
     if (rrAll.length > 1) {
-      const dataRows = rrAll.slice(1);
-      // Build last-occurrence map; later rows overwrite earlier ones.
+      const dataRows  = rrAll.slice(1);
+      let migrated29  = 0;
+      let migrated24  = 0;
+
+      const migrated: unknown[][] = dataRows.map(rawRow => {
+        // Pad to 31 cols so index 30 always exists.
+        const row: unknown[] = [...rawRow];
+        while (row.length < 31) row.push("");
+
+        const col30 = cell(row, 30); // current Replay_Run_TS slot
+        if (col30) return row;       // already populated — nothing to migrate
+
+        const col28 = cell(row, 28); // Market_Line slot (holds old TS in era-B rows)
+        if (isIsoTs(col28)) {
+          row[30] = col28;
+          row[28] = "";
+          migrated29++;
+          return row;
+        }
+
+        const col23 = cell(row, 23); // Park_Source_Status slot (holds old TS in era-A rows)
+        if (isIsoTs(col23)) {
+          row[30] = col23;
+          row[23] = "";
+          migrated24++;
+          return row;
+        }
+
+        return row;
+      });
+
+      // Deduplicate by Replay_Date (col 0) + Game_ID (col 1) — keep last occurrence.
       const lastSeen = new Map<string, unknown[]>();
       let dupes = 0;
-      for (const row of dataRows) {
+      for (const row of migrated) {
         const key = `${cell(row, 0)}|${cell(row, 1)}`;
         if (!key || key === "|") continue;
         if (lastSeen.has(key)) dupes++;
         lastSeen.set(key, row);
       }
 
-      if (dupes > 0) {
-        const deduped = Array.from(lastSeen.values());
+      if (migrated29 > 0 || migrated24 > 0 || dupes > 0) {
+        const final = Array.from(lastSeen.values());
         await clearRange(wbId, "REPLAY_RESULTS!A2:AE5000");
-        if (deduped.length > 0) {
-          await writeRange(wbId, "REPLAY_RESULTS!A2", deduped);
-        }
+        if (final.length > 0) await writeRange(wbId, "REPLAY_RESULTS!A2", final);
       }
-      report["replay_results"] = { rows_inspected: dataRows.length, duplicates_removed: dupes };
+      report["replay_results"] = {
+        rows_inspected: dataRows.length,
+        migrated_era_b_29col: migrated29,
+        migrated_era_a_24col: migrated24,
+        duplicates_removed:   dupes,
+      };
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
