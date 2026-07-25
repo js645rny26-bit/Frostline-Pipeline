@@ -1,5 +1,7 @@
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { customFetch } from "@workspace/api-client-react";
+import { advanceEtagGate, type EtagGateState } from "./etag-gate.js";
 
 export interface BoardStatusEntry {
   game_id: string;
@@ -33,6 +35,12 @@ export interface BoardStatusEntry {
 export interface BoardStatusResult {
   date: string;
   timestamp: string;
+  /**
+   * 16-hex SHA-256 prefix computed from sorted game_id:lock_status pairs.
+   * Changes whenever any game's lock badge changes.  Two consecutive reads
+   * returning the same etag means the data is consistent (write has settled).
+   */
+  etag: string;
   games: BoardStatusEntry[];
   /** Earliest cutoff that has NOT yet passed — for "locking soon" banner */
   next_upcoming_cutoff_ts: string | null;
@@ -68,18 +76,91 @@ async function fetchBoardStatus(date: string): Promise<BoardStatusResult> {
   return customFetch<BoardStatusResult>(`/api/pipeline/board-status?date=${date}`);
 }
 
+/**
+ * Poll /pipeline/board-status every 60 s.
+ *
+ * Anti-flicker strategy (Task #18):
+ *
+ *   ETag confirmation gate — prevents a partially-written BOARD_LOCK_STATE
+ *   (mid-publish) from flickering badges.  The hook maintains two separate
+ *   pieces of state:
+ *
+ *     stableData  — the last response whose ETag was confirmed stable.
+ *                   This is what callers receive as `data` and what drives
+ *                   all badge rendering.  It only advances when the same ETag
+ *                   is seen on two consecutive reads (proving the write settled).
+ *
+ *     pendingEtag — the ETag from the most-recent unconfirmed read.
+ *                   When this differs from stableEtag, a confirmation re-fetch
+ *                   fires after CONFIRM_DELAY_MS.  If the re-fetch returns the
+ *                   same ETag, the data is promoted to stableData.  If the ETag
+ *                   is still changing (write in flight), the previous stable
+ *                   snapshot remains on screen until it settles.
+ *
+ *   First load accepts the first response immediately (no prior stable state
+ *   to protect) so the initial page render is not delayed.
+ */
+const CONFIRM_DELAY_MS = 3_000;
+
 export function useBoardStatus(date: string) {
-  return useQuery({
+  // ── Stable state: only updates once ETag is confirmed ──────────────────────
+  const [stableData, setStableData] = useState<BoardStatusResult | undefined>(undefined);
+
+  // ETag gate — pure state machine; held in a ref to avoid stale-closure issues.
+  const gateRef  = useRef<EtagGateState>({ stableEtag: undefined, pendingEtag: undefined });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Raw React Query — only used to drive fetches; data gated below ──────────
+  const query = useQuery({
     queryKey: ["board-status", date],
-    queryFn: () => fetchBoardStatus(date),
+    queryFn:  () => fetchBoardStatus(date),
     // Refetch every 60 s — lock status changes infrequently but we want it current.
     refetchInterval: 60_000,
-    // Keep previous data visible while the next fetch is in flight so lock badges
-    // don't flicker to blank/undefined between refreshes (Task #18 fix).
-    placeholderData: keepPreviousData,
     // Don't throw on 404 (no BOARD_LOCK_STATE yet) — treat as empty.
     retry: false,
   });
+
+  // ── Gate: process each new fetch result through the state machine ───────────
+  useEffect(() => {
+    const incoming = query.data;
+    if (!incoming?.etag) return;
+
+    const { nextState, action } = advanceEtagGate(gateRef.current, incoming.etag);
+    gateRef.current = nextState;
+
+    if (action.type === "NEW_CHANGE") {
+      // ETag changed for the first time — may be a partial write.
+      // Do NOT update stableData; schedule a confirmation re-fetch.
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        query.refetch();
+      }, CONFIRM_DELAY_MS);
+    } else {
+      // FIRST_LOAD | UNCHANGED | CONFIRMED — data is consistent; promote to stable.
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+      setStableData(incoming);
+    }
+  }, [query.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Reset when date changes ─────────────────────────────────────────────────
+  useEffect(() => {
+    gateRef.current = { stableEtag: undefined, pendingEtag: undefined };
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    setStableData(undefined);
+  }, [date]);
+
+  // ── Return stable data, not raw query.data ──────────────────────────────────
+  return {
+    ...query,
+    /** Last ETag-confirmed stable snapshot — drives all badge rendering. */
+    data: stableData,
+    /**
+     * True while a confirmation re-fetch is pending (first-changed ETag not
+     * yet seen a second time).  Callers can show a subtle "updating…" indicator.
+     */
+    isConfirmingEtag: gateRef.current.pendingEtag !== undefined,
+  };
 }
 
 /** Build a Map<game_id, BoardStatusEntry> for O(1) lookup in GameCard */

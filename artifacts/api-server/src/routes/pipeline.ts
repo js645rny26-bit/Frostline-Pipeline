@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { createHash } from "node:crypto";
 import {
   GetPipelineSlateQueryParams,
   GetPipelineSummaryQueryParams,
@@ -810,6 +811,17 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
     const lockTimeUnavailableCount   = games.filter((g) => g.lock_status === "LOCK_TIME_UNAVAILABLE").length;
     const lockDataUnavailableCount   = games.filter((g) => g.lock_status === "LOCK_DATA_UNAVAILABLE").length;
 
+    // ── ETag — hash of sorted game_id:lock_status pairs ────────────────────────
+    // Computed from the lock status for each game so any badge change produces a
+    // new ETag.  The UI uses this to detect when a publish run just completed and
+    // schedule a confirmatory re-fetch; if two consecutive reads return the same
+    // ETag the data is considered consistent and badges update.
+    const etagBody = games
+      .map((g) => `${g.game_id}:${g.lock_status}`)
+      .sort()
+      .join("|");
+    const etag = `"${createHash("sha256").update(etagBody).digest("hex").slice(0, 16)}"`;
+
     logger.info(
       {
         date,
@@ -820,13 +832,25 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
         lock_data_unavailable:  lockDataUnavailableCount,
         core_auth_status:       coreAuthStatus,
         monotonicity_verdict:   monotonicityVerdict,
+        etag,
       },
       "BOARD_STATUS: read complete",
     );
 
+    // Set ETag header so HTTP caches and the client can detect content changes.
+    res.setHeader("ETag", etag);
+    // Prevent stale intermediary caches from serving a snapshot mid-write.
+    res.setHeader("Cache-Control", "no-cache");
+
     res.json({
       date,
       timestamp: new Date().toISOString(),
+      /**
+       * Content hash of sorted game_id:lock_status pairs (16-hex-char SHA-256 prefix).
+       * Changes whenever any game's lock badge changes.  The UI uses consecutive
+       * ETag equality to confirm data is consistent after a publish run completes.
+       */
+      etag,
       games,
       next_upcoming_cutoff_ts:      nextUpcomingCutoffTs,
       cutoff_approaching:           cutoffApproaching,
