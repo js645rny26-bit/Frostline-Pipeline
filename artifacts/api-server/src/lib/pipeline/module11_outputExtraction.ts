@@ -229,6 +229,36 @@ const CORE_THRESHOLD = 1.5;
  * above the market line for an Over to qualify as CORE.
  * If the baseball thesis alone doesn't provide ≥ 1.25 runs of edge, the Over
  * may be environment-dependent and must be blocked.
+ *
+ * ── CHC-PIT July 24 case study (2024-07-24) ──────────────────────────────────
+ * CHC-PIT was the only CORE Over that passed the survival gate on July 24 and
+ * it lost badly (actual=5, line=8, proj=11.36). Reconstructed gate values:
+ *
+ *   baseball_only  = 11.36 / 0.9524 = 11.93  (mult < 1 → env was a suppressor)
+ *   baseball_edge  = 11.93 − 8      = 3.93   (threshold = 1.25 → cleared by 2.68)
+ *   approx_floor   = 11.93 × 0.781  = 9.31   (starter+bullpen stress floor)
+ *   floor_edge     = 9.31 − 8       = 1.31   (threshold = 0.25 → cleared by 1.06)
+ *
+ * Verdict: No threshold defect demonstrated by this case. The reconstruction
+ * strongly suggests CHC-PIT would have passed the survival gate, but module18
+ * uses an approximation (÷ combined_multiplier × 0.781), not the exact live
+ * component formula (starter×0.80 + bullpen×0.75 + traffic×0.70 + HR×0.90).
+ * The projection miss of 6.36 runs is an unresolved projection error — its root
+ * cause (offense overprojection, starter/bullpen component error, unmodeled
+ * suppression, or ordinary variance) cannot be determined from one observation.
+ *
+ * Why no threshold change was made:
+ *   • Raising OVER_BASEBALL_ONLY_EDGE_THRESHOLD would not have blocked CHC-PIT
+ *     (edge 3.93 >> any reasonable raised threshold). It would collaterally block
+ *     marginal winners near the current 1.25 floor.
+ *   • Adding a projected-total cap requires a larger settled sample to calibrate —
+ *     changing a constant from one settled CORE loss is outcome-driven overfitting.
+ *
+ * When to reassess: once ≥ 10 settled CORE outcomes exist in SURVIVAL_GATE_REPLAY,
+ * re-examine passed_losses / replayed_core using exact component-level replay
+ * (not the multiplier approximation). If the rate exceeds ~40 % and high-proj
+ * outliers (baseball_only > 11) cluster in the losses, evaluate a soft cap then.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 const OVER_BASEBALL_ONLY_EDGE_THRESHOLD = 1.25;
 

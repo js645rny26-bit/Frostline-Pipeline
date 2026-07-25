@@ -1,0 +1,91 @@
+SOURCES USED
+
+* Your CHC–PIT July 24 analysis
+* The inspected SURVIVAL_GATE_REPLAY methodology
+* The frozen survival-gate thresholds and commissioning rules
+
+REFRESH CHECK
+
+No fresh workbook or source-code inspection was performed. This review is based on the reported calculations and previously verified replay architecture.
+
+Assessment
+
+The decision not to change either threshold is correct.
+
+With the reconstructed values:
+
+Baseball-only edge: +3.93
+Required: +1.25
+Approximate survival-floor edge: +1.31
+Required: +0.25
+
+No reasonable incremental threshold adjustment would have filtered CHC–PIT without materially changing the gate’s purpose. Changing constants from one settled CORE loss would be outcome-driven overfitting.
+
+However, two conclusions are stated more strongly than the evidence supports.
+
+What the replay supports
+
+* Park/weather did not manufacture the Over thesis.
+* The reconstructed baseball-only projection was substantially above the market.
+* The approximate stress floor also cleared comfortably.
+* This game does not reveal a weakness in the environment-dependence thresholds.
+* The projection missed the final total by 6.36 runs.
+* One settled CORE result is insufficient for recalibration.
+
+What it does not yet prove
+
+“The gate worked exactly as designed”
+
+Module 18 currently reconstructs:
+
+Baseball-only projection = projected total ÷ combined multiplier
+Approximate floor = baseball-only projection × 0.781
+
+That is not the exact live component calculation:
+
+starter × 0.80
++ bullpen × 0.75
++ traffic × 0.70
++ HR/XBH × 0.90
+
+The replay strongly suggests CHC–PIT would have passed, but it cannot prove exact component-level behavior until the replay uses the actual persisted components.
+
+“Outcome variance, not a gate blind spot”
+
+With one observation, the miss could represent:
+
+* ordinary baseball variance
+* an offense-strength overprojection
+* a starter or bullpen component error
+* double-counting within the underlying projection
+* an unmodeled suppression path
+* some combination of those factors
+
+The defensible verdict is:
+
+No demonstrated survival-threshold blind spot. Large projection miss remains unclassified pending a larger settled sample and component-level replay.
+
+That preserves the valid finding without prematurely diagnosing variance.
+
+Documentation verdict
+
+Placing the numerical case study permanently in production constant comments is heavier than necessary and risks anchoring future developers to an unproven diagnosis.
+
+Do not spend a separate paid pass changing comments alone. During the next already-required module 11 or module 18 edit, revise the wording from:
+
+outcome variance
+gate worked exactly as designed
+
+to:
+
+No threshold defect demonstrated by this case.
+Replay is approximate and does not establish the root cause of the projection miss.
+Reassess after sufficient settled CORE observations using exact component-level replay.
+
+The proposed follow-ups are non-blocking. Offense-source quality and outlier flags may help diagnosis, but neither should be promoted ahead of canonical history repair and exact replay equivalence.
+
+Final status
+
+Accept the no-change threshold decision.
+
+Do not accept “outcome variance” as a settled diagnosis. The proper classification is unresolved projection miss, with no demonstrated survival-gate threshold defect.

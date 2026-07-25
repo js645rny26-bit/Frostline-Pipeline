@@ -41,6 +41,39 @@
  *   • Was the actual outcome a loser (thesis failed)?
  *   • Were any winners collaterally blocked?
  *
+ * ── CHC-PIT July 24 case study (2024-07-24) ──────────────────────────────────
+ * CHC-PIT was the first settled CORE Over in the SURVIVAL_GATE_REPLAY sheet.
+ * It lost badly (actual=5, line=8, proj=11.36) and prompted a gate review.
+ *
+ * Reconstructed gate values (via this module's approximation):
+ *   proj=11.36, baseball_only=11.93, combined_mult=0.9524, line=8, actual=5
+ *   baseball_only_edge = 3.93  (threshold 1.25 — cleared with 2.68 margin)
+ *   floor_edge         = 1.31  (threshold 0.25 — cleared with 1.06 margin)
+ *   combined_mult < 1  → park/weather was a net suppressor (−0.57 env runs)
+ *
+ * Verdict: No threshold defect demonstrated. The reconstruction strongly
+ * suggests CHC-PIT would have passed the survival gate. However, this module
+ * uses an approximation (baseball_only = proj ÷ mult; floor = baseball_only ×
+ * 0.781) rather than the exact live formula (starter×0.80 + bullpen×0.75 +
+ * traffic×0.70 + HR×0.90), so exact component-level behavior is not proven.
+ * The 6.36-run projection miss is an unresolved projection error — its root
+ * cause (offense overprojection, component error, unmodeled suppression, or
+ * ordinary variance) cannot be classified from one observation.
+ *
+ * Why no threshold was changed:
+ *   1. Raising OVER_BASEBALL_ONLY_EDGE_THRESHOLD could not have blocked CHC-PIT
+ *      (edge 3.93 >> any operationally useful threshold).
+ *   2. A projected-total cap requires a larger settled sample; changing a
+ *      constant from one settled CORE loss is outcome-driven overfitting.
+ *
+ * When to reassess: ≥ 10 settled CORE rows with exact component-level replay
+ * (not this multiplier approximation). If passed_losses / replayed_core > ~40 %
+ * and high-proj games (baseball_only > 11) cluster in the losses, evaluate a
+ * soft cap then.
+ *
+ * See also: OVER_BASEBALL_ONLY_EDGE_THRESHOLD comment in module11_outputExtraction.ts.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
  * Endpoint: GET /api/pipeline/survival-replay?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
  *           Optional: &write_sheets=true to persist SURVIVAL_GATE_REPLAY
  */
