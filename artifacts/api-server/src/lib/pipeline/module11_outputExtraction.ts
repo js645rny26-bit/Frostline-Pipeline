@@ -248,7 +248,7 @@ export function overSurvivalCheck(
   };
 }
 
-interface GameEligibilityContext {
+export interface GameEligibilityContext {
   awayPitcherRole: string;
   homePitcherRole: string;
   awayExpectedInnings: number | null;
@@ -256,7 +256,7 @@ interface GameEligibilityContext {
   bullpenAvailable: boolean;
 }
 
-function computeDecision(
+export function computeDecision(
   projectedTotal: number,
   marketLine: number | null,
   vehicle: string,
