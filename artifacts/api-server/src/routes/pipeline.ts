@@ -13,6 +13,7 @@ import { runRegressionReport } from "../lib/pipeline/module15_regressionReport.j
 import { runStarterAudit } from "../lib/pipeline/module16_starterAudit.js";
 import { runPostmortem } from "../lib/pipeline/module17_vehiclePostmortem.js";
 import { runSurvivalGateReplay } from "../lib/pipeline/module18_survivalGateReplay.js";
+import { runBoardLockReplay } from "../lib/pipeline/module19_boardLockReplay.js";
 import { WORKBOOK_ID, writeRange, clearRange, expandSheetColumns } from "../lib/sheets/client.js";
 import { WORKBOOK_SCHEMA, generateSchemaReferenceRows, WORKBOOK_SCHEMA_VERSION } from "../lib/workbook/workbookSchema.js";
 
@@ -332,6 +333,49 @@ router.get("/pipeline/repair-headers", async (req, res): Promise<void> => {
     repaired_sheets:      repaired,
     errors,
   });
+});
+
+/**
+ * GET /pipeline/board-lock-replay
+ * Retroactively compute per-game board lock status for a historical date.
+ * Shows which games would have been LOCKED_IN, LOCKED_OUT, or PRE_LOCK at
+ * a given UTC time — confirming whether the gate would have stopped late
+ * promotions.
+ *
+ * Query params:
+ *   date             — YYYY-MM-DD (required)
+ *   query_time_utc   — ISO UTC timestamp to evaluate lock status at
+ *                      (optional; defaults to the earliest lock cutoff on the slate)
+ *   write_sheets     — "true" to write BOARD_LOCK_REPLAY sheet (optional)
+ *   workbook_id      — override workbook (optional)
+ *
+ * Returns BoardLockReplayResult JSON.
+ *
+ * July 24, 2026 replay (query_time_utc=2026-07-24T20:50:35Z):
+ *   LOCKED_IN  (2): CHC_PIT, ARI_WSN  — both CORE at their 4:40/4:45 PM ET cutoffs
+ *   LOCKED_OUT (3): COL_MIL, KCR_DET, NYY_PHI  — NO_CORE; any late promotion blocked
+ *   PRE_LOCK  (10): all games with first pitch after 6:50 PM ET
+ *   NO_SCHED   (4): 20260725_* IDs from early run — no scheduled_utc_time, never lock
+ */
+router.get("/pipeline/board-lock-replay", async (req, res): Promise<void> => {
+  const { date, query_time_utc, write_sheets, workbook_id } = req.query;
+
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    res.status(400).json({ error: "date is required (YYYY-MM-DD)" });
+    return;
+  }
+
+  try {
+    const result = await runBoardLockReplay(date, {
+      queryTimeUtc:  typeof query_time_utc === "string" ? query_time_utc : undefined,
+      writeSheets:   write_sheets === "true",
+      workbookId:    typeof workbook_id === "string" && workbook_id ? workbook_id : undefined,
+    });
+    res.status(result.status === "failure" ? 500 : 200).json(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
 });
 
 export default router;

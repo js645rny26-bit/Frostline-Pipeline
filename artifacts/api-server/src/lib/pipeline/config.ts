@@ -126,10 +126,13 @@ export const VALIDATION_RULES = {
 };
 
 /**
- * Hours before the earliest first pitch of the slate at which the board locks.
- * After the lock cutoff, no new CORE authorizations are issued for games that
- * were not already CORE at the moment the lock fired.  Existing CORE picks may
- * still be downgraded if a disqualifying signal arrives (starter scratch, etc.).
+ * Hours before each game's own scheduled first pitch at which that game's
+ * board lock fires.  Each game locks independently — a 1:05 PM game does not
+ * lock a 7:10 PM game.  After a game's lock cutoff, no new CORE authorization
+ * is issued for that game unless the operator supplies a named baseball reason
+ * (Late_Change_Reason) and sets Late_Promotion_Authorized = TRUE in
+ * BOARD_LOCK_STATE.  Existing CORE picks may still be downgraded if a
+ * disqualifying signal arrives (starter scratch, bullpen data lost, etc.).
  */
 export const BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH = 2.0;
 
