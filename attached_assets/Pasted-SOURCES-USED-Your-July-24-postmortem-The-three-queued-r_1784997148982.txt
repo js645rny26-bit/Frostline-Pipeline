@@ -1,0 +1,303 @@
+SOURCES USED
+
+* Your July 24 postmortem
+* The three queued repair specifications
+* The opener/bulk and traffic/conversion notes supplied here
+
+REFRESH CHECK
+
+The repair direction is correct. Live CORE authorization should remain disabled. The pipeline may continue publishing projections, settlements, replay outputs, and research labels, but nothing should be presented operationally as CORE until the survival and calibration work passes.
+
+A few specifications should be tightened before implementation.
+
+1. Over survival gate
+
+This is the right first repair, but a universal:
+
+floor projection = normal projection × 0.75
+
+is too blunt.
+
+It would apply the same penalty to:
+
+* a low-contact offense reliant on sequencing,
+* a home-run-heavy offense,
+* a two-sided traffic game,
+* and a one-sided starter detonation thesis.
+
+Those games have different low-conversion behavior.
+
+Better survival calculation
+
+Split projected runs into components:
+
+* Starter-window runs
+* Bullpen-window runs
+* Environment contribution
+* Lineup/contact adjustment
+* Conversion-sensitive contribution
+
+Then stress the unstable pieces more aggressively than the stable pieces.
+
+A reasonable first version:
+
+* Starter attack component: ×0.80
+* Bullpen continuation component: ×0.75
+* Generic traffic/conversion component: ×0.70
+* Home-run or extra-base damage component: ×0.90
+* Park/weather incremental contribution: removed or capped
+* Baseline offense component: retained
+
+The gate should answer:
+
+Does this game still clear the market under a plausible lower-conversion script?
+
+Not:
+
+Is 75% of the final projection still above the line?
+
+Qualification rule
+
+For an Over to reach CORE, require both:
+
+1. Baseball-only projection clears the market, before favorable park/weather enhancement.
+2. Survival floor clears the market by a minimum buffer.
+
+For example:
+
+Baseball_Edge >= 1.25 runs
+Survival_Floor_Edge >= 0.25 runs
+
+Those values remain provisional until replay, but the two-part structure is better than permitting environment to create the thesis.
+
+Required board fields
+
+Add more than one field:
+
+* Baseball_Only_Projection
+* Environment_Run_Adjustment
+* Survival_Floor
+* Survival_Floor_Edge
+* Survival_Check
+* Survival_Failure_Reason
+
+That will let us identify whether an Over failed because of:
+
+* weak conversion,
+* excessive bullpen dependence,
+* environment dependence,
+* one-sided scoring,
+* or starter-survival risk.
+
+2. Final-board lock
+
+The governance idea is correct. The proposed global cutoff needs adjustment.
+
+Do not lock the entire slate based on the first game
+
+On a slate with a 1:05 PM game and multiple 9:40 PM games, locking everything two hours before the first pitch would freeze the late games before official lineups and weather become available.
+
+Use a per-game lock, or at minimum grouped slate windows.
+
+Recommended rule:
+
+Game_Lock_Time = Scheduled_First_Pitch - 120 minutes
+
+After that game-specific cutoff:
+
+* Existing CORE may be downgraded.
+* Existing CORE may change price or stake status.
+* New factual invalidators may be recorded.
+* NO CORE may not be promoted merely because projection edge increased.
+* Promotion is allowed only when a named substantive baseball input arrives and the system records it.
+
+Named-reason exception
+
+A real baseball update might justify a late promotion, such as:
+
+* confirmed lineup materially stronger than projected,
+* starter scratch,
+* opener/bulk deployment confirmed,
+* roof decision,
+* bullpen arm unavailability,
+* corrected pitcher identity.
+
+That should require an explicit field:
+
+* Late_Change_Reason
+* Late_Change_Source
+* Late_Change_TS
+* Late_Promotion_Authorized
+
+A price move or hundredth-of-a-run recalculation is not a baseball reason.
+
+Persistence warning
+
+The lock state should not be inserted casually into operator-owned SLATE_INPUT columns O–W. The README identifies those as operator-controlled cells.
+
+Either:
+
+* add dedicated system-owned columns outside that range, or
+* create a small BOARD_LOCK_STATE sheet keyed by Game_ID.
+
+The lock must persist without overwriting operator input.
+
+3. Monotonicity validation
+
+This is essential, but hit rate by raw projection edge is insufficient on its own.
+
+Historical integrity requirement
+
+Every replay row must use only information that existed at the selected pregame snapshot:
+
+* projection at that time,
+* market line at that time,
+* lineup state at that time,
+* pitcher identity at that time,
+* weather state at that time,
+* CORE decision at that time.
+
+Do not reconstruct historical edges using closing lines combined with later-refreshed inputs. That would introduce lookahead and invalidate the test.
+
+Metrics by tier
+
+For each edge bucket, calculate:
+
+* Sample size
+* Win rate
+* Push rate
+* Average projection error
+* Median absolute error
+* Directional accuracy
+* Average closing-line value, when available
+* Average market price
+* Expected and realized ROI
+* Calibration gap
+* Overs and Unders separately
+
+Separating Overs from Unders is mandatory after July 24. A combined monotonicity result could hide an Over-specific authorization failure.
+
+Bucket design
+
+Fixed buckets are understandable:
+
+* 1.5–1.99
+* 2.0–2.49
+* 2.5–2.99
+* 3.0+
+
+But sparse upper buckets can produce misleading results. Report both:
+
+* fixed operational tiers,
+* and equal-count quartiles or quintiles.
+
+Pass/fail logic
+
+The proposed “80% of adjacent comparisons” rule needs refinement.
+
+With four buckets, there are only three adjacent comparisons. Eighty percent effectively means all three must pass, because two of three is only 66.7%.
+
+That may be acceptable, but state it directly.
+
+A stronger commissioning verdict would require:
+
+1. Hit rate is non-decreasing across all adequately populated adjacent tiers.
+2. Top tier outperforms bottom tier by a meaningful margin.
+3. MAE does not worsen materially as edge increases.
+4. Each tier meets a minimum sample requirement.
+5. The relationship holds separately for Overs and Unders.
+6. Results are not driven by one season, park, team, or line range.
+
+Suggested minimum:
+
+* At least 75–100 decisions per primary bucket
+* Otherwise label the result INSUFFICIENT_SAMPLE, not PASS or FAIL
+
+Opener plus bulk bridge
+
+The targeted diagnosis is right, but generic bullpen ERA is not enough.
+
+For Palmquist, the relevant question was not:
+
+How good is Washington’s bullpen overall?
+
+It was:
+
+Who is expected to absorb innings two through six, and how good is that specific bulk bridge?
+
+Preferred hierarchy:
+
+1. Confirmed bulk pitcher
+2. Probable long reliever based on recent usage and roster role
+3. Long-relief pool weighted by availability
+4. Team bullpen estimate as fallback only
+
+The projected staff quality should be innings-weighted:
+
+Staff_Quality =
+(Opener_Expected_IP × Opener_Quality
+ + Bulk_Expected_IP × Bulk_Quality
+ + Relief_Expected_IP × Available_Pen_Quality)
+ / 9
+
+If no bulk identity can be resolved, widen the projection band and reduce authorization stability. Do not simply extend the opener’s FIP across six innings, and do not treat the full bullpen ERA as a precise substitute.
+
+Traffic versus conversion
+
+LOB% is relevant, but directly adding recent strand rate could introduce another noisy, regression-prone feature.
+
+A better long-term solution is a component scoring model, such as a BaseRuns-style estimate built from:
+
+* hits,
+* walks,
+* home runs,
+* extra-base hits,
+* strikeouts,
+* total bases,
+* and outs.
+
+That estimates how much scoring the underlying offensive events typically generate without depending on exact sequencing.
+
+Use LOB% as:
+
+* a regression flag,
+* a descriptive diagnostic,
+* or a bounded modifier,
+
+not as the central conversion engine.
+
+Useful classifications could be:
+
+* TRAFFIC_PLUS_CONVERSION
+* TRAFFIC_LOW_CONVERSION
+* POWER_WITHOUT_TRAFFIC
+* SEQUENCING_DEPENDENT
+* DEAD_CONTACT
+* TRUE_DAMAGE
+
+July 24 examples:
+
+* SD–MIA: traffic existed, conversion failed
+* COL–MIL: contact existed, total conversion underperformed
+* OAK–MIN: projected access itself failed, not merely sequencing
+* CHC–PIT: starter suppression dominated the entire script
+
+Those should not all receive the same postmortem label.
+
+Recommended implementation order
+
+1. Keep live CORE disabled
+2. Add the per-game board lock as an immediate governance safeguard
+3. Build the decomposed Over survival gate
+4. Add opener/bulk staff weighting
+5. Replay the repaired projection and survival logic
+6. Run the monotonicity and calibration report
+7. Add component conversion modeling
+8. Perform live shadow validation
+9. Re-enable CORE only after documented pass criteria
+
+The key correction is this:
+
+The survival gate cannot be another arbitrary multiplier layered onto the existing arbitrary edge threshold.
+
+It must expose which part of the projection survives, which part collapses, and why. Otherwise Frostline risks replacing one opaque confidence mechanism with another.
