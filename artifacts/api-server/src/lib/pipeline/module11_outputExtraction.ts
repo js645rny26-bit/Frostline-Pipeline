@@ -368,6 +368,80 @@ export function overSurvivalCheck(
   };
 }
 
+/**
+ * Result returned by applyOverSurvivalGate.
+ * survival_check is always PASS or FAIL (never N_A — N_A is set by the caller
+ * when direction ≠ OVER or no market line; this function is called only when
+ * direction === "OVER" && marketLine !== null).
+ */
+export interface OverSurvivalGateResult {
+  survival_check: "PASS" | "FAIL";
+  /** Populated only when components were present (i.e. not COMPONENT_DATA_UNAVAILABLE). */
+  baseball_only_projection: number | null;
+  environment_run_adjustment: number | null;
+  survival_floor: number | null;
+  survival_floor_edge: number | null;
+  /**
+   * One of:
+   *   COMPONENT_DATA_UNAVAILABLE          — baseball_only_projection or starter_attack_runs undefined
+   *   ENVIRONMENT_DEPENDENT_OVER          — baseball-only < market line
+   *   BASEBALL_ONLY_EDGE_BELOW_THRESHOLD  — baseball edge < 1.25
+   *   SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD — floor edge < 0.25
+   * Empty string for PASS.
+   */
+  survival_failure_reason: string;
+}
+
+/**
+ * Full Over survival gate, including the COMPONENT_DATA_UNAVAILABLE guard.
+ *
+ * Must only be called when direction === "OVER" && marketLine !== null.
+ *
+ * When baseball_only_projection or starter_attack_runs are undefined (module09
+ * did not supply decomposed components), returns FAIL with
+ * survival_failure_reason = "COMPONENT_DATA_UNAVAILABLE" rather than silently
+ * passing or computing with bad values.
+ *
+ * When all components are present, delegates to overSurvivalCheck.
+ */
+export function applyOverSurvivalGate(
+  baseballOnlyProjection:  number | undefined,
+  starterAttackRuns:       number | undefined,
+  bullpenContinuationRuns: number | undefined,
+  trafficConversionRuns:   number | undefined,
+  hrXbhDamageRuns:         number | undefined,
+  environmentRunAdjustment: number | undefined,
+  marketLine: number,
+): OverSurvivalGateResult {
+  if (baseballOnlyProjection === undefined || starterAttackRuns === undefined) {
+    return {
+      survival_check:             "FAIL",
+      survival_failure_reason:    "COMPONENT_DATA_UNAVAILABLE",
+      baseball_only_projection:   null,
+      environment_run_adjustment: null,
+      survival_floor:             null,
+      survival_floor_edge:        null,
+    };
+  }
+  const sr = overSurvivalCheck(
+    starterAttackRuns,
+    bullpenContinuationRuns ?? 0,
+    trafficConversionRuns   ?? 0,
+    hrXbhDamageRuns         ?? 0,
+    baseballOnlyProjection,
+    environmentRunAdjustment ?? 0,
+    marketLine,
+  );
+  return {
+    survival_check:             sr.survival_check,
+    survival_failure_reason:    sr.survival_failure_reason,
+    baseball_only_projection:   sr.baseball_only_projection,
+    environment_run_adjustment: sr.environment_run_adjustment,
+    survival_floor:             sr.survival_floor,
+    survival_floor_edge:        sr.survival_floor_edge,
+  };
+}
+
 export interface GameEligibilityContext {
   awayPitcherRole: string;
   homePitcherRole: string;
@@ -963,48 +1037,37 @@ export async function extractOutputBoards(
       let survivalFailureReason = "";
 
       if (direction === "OVER" && market.line !== null) {
-        // Check that module09 provided the decomposed components.
-        if (gs.baseball_only_projection === undefined || gs.starter_attack_runs === undefined) {
-          // Data unavailable — block conservatively rather than silently passing.
-          survivalCheck = "FAIL";
-          survivalFailureReason = "COMPONENT_DATA_UNAVAILABLE";
-          if (decision === "CORE") {
-            decision = "NO_CORE";
-            coreBlocker = "COMPONENT_DATA_UNAVAILABLE";
-          }
-        } else {
-          const sr = overSurvivalCheck(
-            gs.starter_attack_runs,
-            gs.bullpen_continuation_runs,
-            gs.traffic_conversion_runs,
-            gs.hr_xbh_damage_runs,
-            gs.baseball_only_projection,
-            gs.environment_run_adjustment,
-            market.line,
-          );
-          survivalBaseballOnly  = sr.baseball_only_projection;
-          survivalEnvAdj        = sr.environment_run_adjustment;
-          survivalFloor         = sr.survival_floor;
-          survivalFloorEdge     = sr.survival_floor_edge;
-          survivalCheck         = sr.survival_check;
-          survivalFailureReason = sr.survival_failure_reason;
+        const sg = applyOverSurvivalGate(
+          gs.baseball_only_projection,
+          gs.starter_attack_runs,
+          gs.bullpen_continuation_runs,
+          gs.traffic_conversion_runs,
+          gs.hr_xbh_damage_runs,
+          gs.environment_run_adjustment,
+          market.line,
+        );
+        survivalBaseballOnly  = sg.baseball_only_projection;
+        survivalEnvAdj        = sg.environment_run_adjustment;
+        survivalFloor         = sg.survival_floor;
+        survivalFloorEdge     = sg.survival_floor_edge;
+        survivalCheck         = sg.survival_check;
+        survivalFailureReason = sg.survival_failure_reason;
 
-          if (decision === "CORE" && sr.survival_check === "FAIL") {
-            decision    = "NO_CORE";
-            coreBlocker = sr.survival_failure_reason;
-            logger.info(
-              {
-                game: gs.game_id,
-                baseballOnly: sr.baseball_only_projection,
-                envAdj: sr.environment_run_adjustment,
-                floor: sr.survival_floor,
-                floorEdge: sr.survival_floor_edge,
-                line: market.line,
-                reason: sr.survival_failure_reason,
-              },
-              "MODULE_11: Over CORE downgraded by survival gate",
-            );
-          }
+        if (decision === "CORE" && sg.survival_check === "FAIL") {
+          decision    = "NO_CORE";
+          coreBlocker = sg.survival_failure_reason;
+          logger.info(
+            {
+              game:        gs.game_id,
+              baseballOnly: sg.baseball_only_projection,
+              envAdj:       sg.environment_run_adjustment,
+              floor:        sg.survival_floor,
+              floorEdge:    sg.survival_floor_edge,
+              line:         market.line,
+              reason:       sg.survival_failure_reason,
+            },
+            "MODULE_11: Over CORE downgraded by survival gate",
+          );
         }
       }
 

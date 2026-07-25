@@ -27,8 +27,10 @@ import assert from "node:assert/strict";
 import {
   overSurvivalCheck,
   computeDecision,
+  applyOverSurvivalGate,
   type GameEligibilityContext,
   type OverSurvivalResult,
+  type OverSurvivalGateResult,
 } from "./module11_outputExtraction.js";
 
 // ─── shared fixtures ─────────────────────────────────────────────────────────
@@ -494,5 +496,162 @@ describe("Survival_Floor populated for all Over games with a market line", () =>
 
     assert.notEqual(survivalFloor, null, "survival_floor must be populated for a CORE Over");
     assert.equal(survivalCheck, "PASS", "gate must PASS for a strong Over");
+  });
+});
+
+// ─── §5: COMPONENT_DATA_UNAVAILABLE — missing projection components ────────────
+//
+// When gs.baseball_only_projection or gs.starter_attack_runs are undefined
+// (module09 did not populate the decomposed components), the survival gate must
+// conservatively block CORE rather than silently passing.
+//
+// Tests call applyOverSurvivalGate — the exported production function used by
+// the module11 main loop — so changes to the guard condition or its blocker
+// string break these tests immediately.
+//
+// Contract:
+//   survival_check         = "FAIL"
+//   survival_failure_reason = "COMPONENT_DATA_UNAVAILABLE"
+// And in the combined decision path: decision = "NO_CORE", coreBlocker = "COMPONENT_DATA_UNAVAILABLE"
+
+describe("COMPONENT_DATA_UNAVAILABLE — survival gate blocks when components are missing", () => {
+  /**
+   * Simulates the module11 main-loop decision + gate for one Over game.
+   * Calls computeDecision and then applyOverSurvivalGate — the same exported
+   * production functions used by the real pipeline loop — so this is not a
+   * test-only reimplementation.
+   */
+  function simulateOverWithGate(params: {
+    projectedTotal:           number;
+    marketLine:               number | null;
+    ctx:                      GameEligibilityContext;
+    baseballOnlyProjection:   number | undefined;
+    starterAttackRuns:        number | undefined;
+    bullpenContinuationRuns:  number;
+    trafficConversionRuns:    number;
+    hrXbhDamageRuns:          number;
+    environmentRunAdjustment: number;
+  }): {
+    decision:    "CORE" | "NO_CORE" | "PENDING";
+    direction:   "OVER" | "UNDER" | "NONE";
+    coreBlocker: string;
+    gate:        OverSurvivalGateResult | null;  // null when gate didn't run
+  } {
+    const { decision: rawDecision, direction, coreBlocker: rawBlocker } =
+      computeDecision(params.projectedTotal, params.marketLine, "FULL_GAME_OU", params.ctx);
+
+    let decision    = rawDecision;
+    let coreBlocker = rawBlocker;
+    let gate: OverSurvivalGateResult | null = null;
+
+    if (direction === "OVER" && params.marketLine !== null) {
+      // applyOverSurvivalGate is the real exported production function — no logic is duplicated here.
+      gate = applyOverSurvivalGate(
+        params.baseballOnlyProjection,
+        params.starterAttackRuns,
+        params.bullpenContinuationRuns,
+        params.trafficConversionRuns,
+        params.hrXbhDamageRuns,
+        params.environmentRunAdjustment,
+        params.marketLine,
+      );
+      if (decision === "CORE" && gate.survival_check === "FAIL") {
+        decision    = "NO_CORE";
+        coreBlocker = gate.survival_failure_reason;
+      }
+    }
+
+    return { decision, direction, coreBlocker, gate };
+  }
+
+  // ── applyOverSurvivalGate direct unit tests ─────────────────────────────────
+
+  it("returns FAIL/COMPONENT_DATA_UNAVAILABLE when both components are undefined", () => {
+    const gate = applyOverSurvivalGate(
+      undefined,   // baseball_only_projection
+      undefined,   // starter_attack_runs
+      4.5, 0, 0, 0.5,
+      7.5,         // market line
+    );
+    assert.equal(gate.survival_check,          "FAIL",                       "survival_check must be FAIL");
+    assert.equal(gate.survival_failure_reason,  "COMPONENT_DATA_UNAVAILABLE", "survival_failure_reason must be COMPONENT_DATA_UNAVAILABLE");
+    assert.equal(gate.survival_floor,           null,                         "survival_floor must be null — gate aborted before overSurvivalCheck");
+    assert.equal(gate.baseball_only_projection, null,                         "baseball_only_projection must be null");
+  });
+
+  it("returns FAIL/COMPONENT_DATA_UNAVAILABLE when only baseball_only_projection is undefined", () => {
+    const gate = applyOverSurvivalGate(
+      undefined,   // baseball_only_projection missing
+      5.5,         // starter_attack_runs present
+      4.5, 0, 0, 0.5,
+      7.5,
+    );
+    assert.equal(gate.survival_check,         "FAIL",                       "survival_check must be FAIL");
+    assert.equal(gate.survival_failure_reason, "COMPONENT_DATA_UNAVAILABLE", "survival_failure_reason must be COMPONENT_DATA_UNAVAILABLE");
+    assert.equal(gate.survival_floor,          null,                         "survival_floor must be null");
+  });
+
+  it("returns FAIL/COMPONENT_DATA_UNAVAILABLE when only starter_attack_runs is undefined", () => {
+    const gate = applyOverSurvivalGate(
+      10.0,        // baseball_only_projection present
+      undefined,   // starter_attack_runs missing
+      4.5, 0, 0, 0.5,
+      7.5,
+    );
+    assert.equal(gate.survival_check,         "FAIL",                       "survival_check must be FAIL");
+    assert.equal(gate.survival_failure_reason, "COMPONENT_DATA_UNAVAILABLE", "survival_failure_reason must be COMPONENT_DATA_UNAVAILABLE");
+    assert.equal(gate.survival_floor,          null,                         "survival_floor must be null");
+  });
+
+  it("delegates to overSurvivalCheck (PASS) when both components are present", () => {
+    // starterAttack=5.5, bullpen=4.5, baseball_only=10.0, line=7.5
+    //   baseball edge = 2.5 ≥ 1.25 ✓
+    //   floor = 5.5×0.80 + 4.5×0.75 = 7.775, floor edge = 0.275 ≥ 0.25 ✓ → PASS
+    const gate = applyOverSurvivalGate(10.0, 5.5, 4.5, 0, 0, 0.5, 7.5);
+    assert.notEqual(gate.survival_failure_reason, "COMPONENT_DATA_UNAVAILABLE", "must not hit component guard when data is present");
+    assert.equal(gate.survival_check,             "PASS",                        "gate must PASS with valid components");
+    assert.notEqual(gate.survival_floor,           null,                          "survival_floor must be populated");
+    assert.ok((gate.survival_floor ?? 0) > 0,                                    "survival_floor must be a positive number");
+  });
+
+  // ── Combined decision path tests ────────────────────────────────────────────
+
+  it("blocks a CORE candidate with NO_CORE when both components are undefined", () => {
+    // projected=10.5, line=7.5 → variance=3.0 ≥ 1.5 threshold → CORE candidate before gate
+    const { decision, coreBlocker, gate } = simulateOverWithGate({
+      projectedTotal:           10.5,
+      marketLine:               7.5,
+      ctx:                      ELIGIBLE_CTX,
+      baseballOnlyProjection:   undefined,
+      starterAttackRuns:        undefined,
+      bullpenContinuationRuns:  4.5,
+      trafficConversionRuns:    0,
+      hrXbhDamageRuns:          0,
+      environmentRunAdjustment: 0.5,
+    });
+
+    assert.equal(decision,    "NO_CORE",                    "decision must flip to NO_CORE");
+    assert.equal(coreBlocker, "COMPONENT_DATA_UNAVAILABLE", "CORE_Blocker must be COMPONENT_DATA_UNAVAILABLE");
+    assert.ok(gate !== null,                                "gate must have run (direction=OVER, line present)");
+    assert.equal(gate!.survival_check,         "FAIL",                       "gate survival_check must be FAIL");
+    assert.equal(gate!.survival_failure_reason, "COMPONENT_DATA_UNAVAILABLE", "gate reason must be COMPONENT_DATA_UNAVAILABLE");
+  });
+
+  it("gate does not run (null) for an Under game — missing components are irrelevant", () => {
+    // projected=7.0, line=9.0 → direction=UNDER → gate skipped entirely
+    const { gate, decision } = simulateOverWithGate({
+      projectedTotal:           7.0,
+      marketLine:               9.0,
+      ctx:                      ELIGIBLE_CTX,
+      baseballOnlyProjection:   undefined,
+      starterAttackRuns:        undefined,
+      bullpenContinuationRuns:  3.5,
+      trafficConversionRuns:    0,
+      hrXbhDamageRuns:          0,
+      environmentRunAdjustment: 0,
+    });
+
+    assert.equal(gate, null, "gate must not run for Under direction");
+    assert.notEqual(decision, "PENDING", "game has a market line; must not be PENDING");
   });
 });
