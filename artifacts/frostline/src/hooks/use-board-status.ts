@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { customFetch } from "@workspace/api-client-react";
 
 export interface BoardStatusEntry {
@@ -15,6 +15,19 @@ export interface BoardStatusEntry {
   pre_lock_decision: string;
   final_decision: string;
   core_blocker: string;
+  // ── Pick decision detail fields ──────────────────────────────────────────────
+  /** OVER / UNDER / NONE */
+  direction: string;
+  /** Model projected total runs */
+  projected_total: number | null;
+  /** Market over/under line */
+  market_line: number | null;
+  /** Edge strength label (e.g. "STRONG", "MODERATE") */
+  edge_strength: string;
+  /** PASS / FAIL / N_A — survival gate result for this game */
+  survival_check: string;
+  /** Human-readable reason the survival gate failed, or "" when it passed */
+  survival_failure_reason: string;
 }
 
 export interface BoardStatusResult {
@@ -59,9 +72,12 @@ export function useBoardStatus(date: string) {
   return useQuery({
     queryKey: ["board-status", date],
     queryFn: () => fetchBoardStatus(date),
-    // Refetch every 60 s — lock status changes infrequently but we want it current
+    // Refetch every 60 s — lock status changes infrequently but we want it current.
     refetchInterval: 60_000,
-    // Don't throw on 404 (no BOARD_LOCK_STATE yet) — treat as empty
+    // Keep previous data visible while the next fetch is in flight so lock badges
+    // don't flicker to blank/undefined between refreshes (Task #18 fix).
+    placeholderData: keepPreviousData,
+    // Don't throw on 404 (no BOARD_LOCK_STATE yet) — treat as empty.
     retry: false,
   });
 }

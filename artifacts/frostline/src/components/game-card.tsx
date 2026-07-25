@@ -1,7 +1,11 @@
 import React from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CloudRain, Wind, Thermometer, AlertCircle, CheckCircle2, Clock, Lock, LockOpen } from "lucide-react";
+import {
+  CloudRain, Wind, Thermometer, AlertCircle, CheckCircle2,
+  Clock, Lock, LockOpen, TrendingUp, TrendingDown, Minus,
+  ShieldCheck, ShieldAlert,
+} from "lucide-react";
 import type { NormalizedGame, PitcherClassification } from "@workspace/api-client-react";
 import type { BoardStatusEntry } from "@/hooks/use-board-status";
 
@@ -120,6 +124,108 @@ function LockStatusBadge({ lockEntry }: { lockEntry: BoardStatusEntry }) {
   return null;
 }
 
+/**
+ * Pick decision strip — shows direction, projected vs. line, edge, and survival gate result.
+ * Only rendered when the board has published a decision for this game.
+ */
+function PickDecisionStrip({ entry }: { entry: BoardStatusEntry }) {
+  const { final_decision, direction, projected_total, market_line, edge_strength, core_blocker, survival_check, survival_failure_reason } = entry;
+
+  // Nothing to show if no decision has been computed yet
+  if (!final_decision || final_decision === "PENDING") return null;
+
+  const isCore    = final_decision === "CORE";
+  const isOver    = direction === "OVER";
+  const isUnder   = direction === "UNDER";
+  const hasLine   = projected_total !== null && market_line !== null;
+  const variance  = hasLine ? parseFloat((projected_total! - market_line!).toFixed(2)) : null;
+
+  const DirectionIcon = isOver ? TrendingUp : isUnder ? TrendingDown : Minus;
+  const directionColor = isOver
+    ? "text-success"
+    : isUnder
+    ? "text-info"
+    : "text-muted-foreground";
+
+  const edgeLabel = edge_strength
+    ? edge_strength.replace(/_/g, " ")
+    : null;
+
+  const survivalFailed = survival_check === "FAIL";
+  const survivalPass   = survival_check === "PASS";
+
+  return (
+    <div className={`pt-3 border-t border-border flex flex-col gap-2`}>
+      {/* Decision header row */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {isCore ? (
+            <span className="px-2 py-0.5 text-[11px] font-bold tracking-wide rounded bg-success/15 text-success border border-success/30">
+              CORE
+            </span>
+          ) : (
+            <span className="px-2 py-0.5 text-[11px] font-medium rounded bg-muted/40 text-muted-foreground border border-border">
+              NO CORE
+            </span>
+          )}
+          {direction && direction !== "NONE" && (
+            <span className={`flex items-center gap-0.5 text-xs font-semibold ${directionColor}`}>
+              <DirectionIcon className="w-3.5 h-3.5" />
+              {direction}
+            </span>
+          )}
+        </div>
+        {edgeLabel && (
+          <span className="text-[10px] font-mono text-muted-foreground border border-border/60 px-1.5 py-0.5 rounded">
+            {edgeLabel}
+          </span>
+        )}
+      </div>
+
+      {/* Projection vs. line */}
+      {hasLine && (
+        <div className="flex items-center gap-3 text-xs font-mono text-muted-foreground">
+          <span>
+            Proj <span className="text-foreground font-semibold">{projected_total!.toFixed(1)}</span>
+          </span>
+          <span className="text-border">vs</span>
+          <span>
+            Line <span className="text-foreground font-semibold">{market_line!.toFixed(1)}</span>
+          </span>
+          {variance !== null && (
+            <span className={`ml-auto font-semibold ${Math.abs(variance) < 0.5 ? "text-muted-foreground" : isOver ? "text-success" : "text-info"}`}>
+              {variance > 0 ? "+" : ""}{variance.toFixed(2)}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Survival gate result */}
+      {(survivalPass || survivalFailed) && (
+        <div className={`flex items-start gap-1.5 text-[11px] ${survivalPass ? "text-success/80" : "text-warning"}`}>
+          {survivalPass
+            ? <ShieldCheck className="w-3 h-3 flex-shrink-0 mt-0.5" />
+            : <ShieldAlert className="w-3 h-3 flex-shrink-0 mt-0.5" />
+          }
+          <span>
+            Survival gate: <span className="font-semibold">{survivalPass ? "PASS" : "FAIL"}</span>
+            {survivalFailed && survival_failure_reason && (
+              <span className="text-muted-foreground"> — {survival_failure_reason.replace(/_/g, " ")}</span>
+            )}
+          </span>
+        </div>
+      )}
+
+      {/* Blocker reason (NO_CORE only) */}
+      {!isCore && core_blocker && (
+        <div className="text-[10px] text-muted-foreground font-mono bg-muted/30 px-2 py-1 rounded truncate" title={core_blocker}>
+          {core_blocker.replace(/_/g, " ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function GameCard({ game, lockEntry }: GameCardProps) {
   const isFallbackWeather = game.environment.data_quality === "fallback";
 
@@ -167,6 +273,9 @@ export function GameCard({ game, lockEntry }: GameCardProps) {
             isHome={true} 
           />
         </div>
+
+        {/* Pick decision strip (Task #17) — only when board data is available */}
+        {lockEntry && <PickDecisionStrip entry={lockEntry} />}
 
         {/* Environment Bar */}
         <div className="mt-auto pt-4 border-t border-border flex items-center justify-between text-xs text-muted-foreground">

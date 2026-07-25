@@ -491,18 +491,40 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
       (row) => String(row[0] ?? "").trim() === date,
     );
 
-    // SLATE_BOARD cols (0-based): A=Date, B=Game_ID, J=Decision(9), N=CORE_Blocker(13), AH=Lock_Status(33)
+    // SLATE_BOARD cols (0-based):
+    //   B(1)=Game_ID, F(5)=Projected_Value, G(6)=Market_Line, I(8)=Direction,
+    //   J(9)=Decision, M(12)=Edge_Strength, N(13)=CORE_Blocker,
+    //   AF(31)=Survival_Check, AG(32)=Survival_Failure_Reason, AH(33)=Lock_Status
     const sbRows = ((sbData.values ?? []) as unknown[][]).slice(1);
     const sbMap = new Map<
       string,
-      { final_decision: string; core_blocker: string }
+      {
+        final_decision: string;
+        core_blocker: string;
+        direction: string;
+        projected_total: number | null;
+        market_line: number | null;
+        edge_strength: string;
+        survival_check: string;
+        survival_failure_reason: string;
+      }
     >();
     for (const row of sbRows) {
       const gameId = String(row[1] ?? "").trim();
       if (!gameId) continue;
+      const parseNum = (v: unknown) => {
+        const n = parseFloat(String(v ?? ""));
+        return isNaN(n) ? null : n;
+      };
       sbMap.set(gameId, {
-        final_decision: String(row[9] ?? "").trim(),
-        core_blocker: String(row[13] ?? "").trim(),
+        final_decision:          String(row[9]  ?? "").trim(),
+        core_blocker:            String(row[13] ?? "").trim(),
+        direction:               String(row[8]  ?? "").trim(),
+        projected_total:         parseNum(row[5]),
+        market_line:             parseNum(row[6]),
+        edge_strength:           String(row[12] ?? "").trim(),
+        survival_check:          String(row[31] ?? "").trim(),
+        survival_failure_reason: String(row[32] ?? "").trim(),
       });
     }
 
@@ -523,6 +545,13 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
       pre_lock_decision: string;
       final_decision: string;
       core_blocker: string;
+      // ── Pick decision detail fields (from SLATE_BOARD) ──
+      direction: string;
+      projected_total: number | null;
+      market_line: number | null;
+      edge_strength: string;
+      survival_check: string;
+      survival_failure_reason: string;
     }
 
     const games: BoardStatusEntry[] = [];
@@ -545,12 +574,18 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
           : "PRE_LOCK";
       const sb = sbMap.get(gameId);
       games.push({
-        game_id: gameId,
-        lock_status: lockStatus,
-        lock_cutoff_ts: lockCutoffTs,
-        pre_lock_decision: String(row[5] ?? "").trim(),
-        final_decision: sb?.final_decision ?? "",
-        core_blocker: sb?.core_blocker ?? "",
+        game_id:                 gameId,
+        lock_status:             lockStatus,
+        lock_cutoff_ts:          lockCutoffTs,
+        pre_lock_decision:       String(row[5] ?? "").trim(),
+        final_decision:          sb?.final_decision          ?? "",
+        core_blocker:            sb?.core_blocker            ?? "",
+        direction:               sb?.direction               ?? "",
+        projected_total:         sb?.projected_total         ?? null,
+        market_line:             sb?.market_line             ?? null,
+        edge_strength:           sb?.edge_strength           ?? "",
+        survival_check:          sb?.survival_check          ?? "",
+        survival_failure_reason: sb?.survival_failure_reason ?? "",
       });
     }
 
@@ -617,6 +652,77 @@ router.get("/pipeline/board-status", async (req, res): Promise<void> => {
       /** True when the operator sentinel row in BOARD_LOCK_STATE bypasses the gate. */
       monotonicity_override_active: monotonicityOverrideActive,
     });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * POST /pipeline/monotonicity-override
+ * Writes (or revokes) an operator MONOTONICITY_GATE_OVERRIDE sentinel row in
+ * BOARD_LOCK_STATE so the operator can re-enable CORE picks from the UI without
+ * editing the spreadsheet directly.
+ *
+ * Body: { date, reason, active?, workbook_id? }
+ *   active — optional boolean (default true); pass false to revoke the override.
+ */
+router.post("/pipeline/monotonicity-override", async (req, res): Promise<void> => {
+  const { date: dateParam, reason, active, workbook_id } = req.body as {
+    date?: string;
+    reason?: string;
+    active?: boolean;
+    workbook_id?: string;
+  };
+
+  const date =
+    typeof dateParam === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+      ? dateParam
+      : getTodayDateStr();
+  const wbId = typeof workbook_id === "string" && workbook_id ? workbook_id : WORKBOOK_ID;
+  const isActive = active !== false; // default true
+
+  if (isActive && (!reason || typeof reason !== "string" || !reason.trim())) {
+    res.status(400).json({ error: "reason is required when activating an override" });
+    return;
+  }
+
+  const OVERRIDE_ID = "MONOTONICITY_GATE_OVERRIDE";
+  const ts = new Date().toISOString();
+
+  try {
+    const blsData = await readRange(wbId, "BOARD_LOCK_STATE!A:L").catch(() => ({
+      values: [] as unknown[][],
+    }));
+    const allRows = (blsData.values ?? []) as unknown[][];
+    const dataRows = allRows.slice(1);
+
+    // Find existing sentinel row index
+    const existingIdx = dataRows.findIndex(
+      (r) => String(r[1] ?? "").trim() === OVERRIDE_ID,
+    );
+
+    const overrideRow: unknown[] = [
+      date, OVERRIDE_ID, "", "", "", "", "",
+      isActive ? (reason ?? "").trim() : "",   // Late_Change_Reason
+      isActive ? "OPERATOR_UI" : "",            // Late_Change_Source
+      ts,                                       // Late_Change_TS
+      isActive ? "TRUE" : "FALSE",              // Late_Promotion_Authorized
+      ts,                                       // Last_Updated_TS
+    ];
+
+    if (existingIdx >= 0) {
+      // Update in place
+      const sheetRow = existingIdx + 2; // +1 header, +1 1-based
+      await writeRange(wbId, `BOARD_LOCK_STATE!A${sheetRow}:L${sheetRow}`, [overrideRow]);
+    } else {
+      // Append after existing rows
+      const startRow = allRows.length + 1;
+      await writeRange(wbId, `BOARD_LOCK_STATE!A${startRow}:L${startRow}`, [overrideRow]);
+    }
+
+    logger.info({ date, active: isActive, reason }, "BOARD_STATUS: Monotonicity override written");
+    res.json({ ok: true, date, active: isActive, reason: isActive ? (reason ?? "").trim() : "" });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });

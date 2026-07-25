@@ -1,12 +1,16 @@
 import React, { useState } from "react";
 import { Layout } from "@/components/layout";
 import { DatePicker } from "@/components/ui/date-picker";
-import { useGetPipelineSlate, getGetPipelineSlateQueryKey } from "@workspace/api-client-react";
+import { useGetPipelineSlate, getGetPipelineSlateQueryKey, customFetch } from "@workspace/api-client-react";
 import { GameCard } from "@/components/game-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertTriangle, CheckCircle2, Info, XCircle, Lock, LockOpen, Timer, ShieldOff, ShieldAlert } from "lucide-react";
+import {
+  AlertTriangle, CheckCircle2, Info, XCircle, Lock, Timer,
+  ShieldOff, ShieldAlert, ShieldCheck, RotateCcw,
+} from "lucide-react";
 import { useBoardStatus, buildBoardStatusMap } from "@/hooks/use-board-status";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function SlatePage() {
   const [date, setDate] = useState(() => new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
@@ -18,6 +22,33 @@ export default function SlatePage() {
 
   const { data: boardStatus } = useBoardStatus(date);
   const lockMap = buildBoardStatusMap(boardStatus);
+  const queryClient = useQueryClient();
+
+  // ── Override UI state (Task #22) ──────────────────────────────────────────
+  const [overrideReason, setOverrideReason] = useState("");
+  const [showOverrideForm, setShowOverrideForm] = useState(false);
+  const [overridePending, setOverridePending] = useState(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
+
+  async function submitOverride(active: boolean) {
+    if (active && !overrideReason.trim()) return;
+    setOverridePending(true);
+    setOverrideError(null);
+    try {
+      await customFetch("/api/pipeline/monotonicity-override", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, reason: overrideReason.trim(), active }),
+      });
+      setShowOverrideForm(false);
+      setOverrideReason("");
+      await queryClient.invalidateQueries({ queryKey: ["board-status", date] });
+    } catch (e: unknown) {
+      setOverrideError(e instanceof Error ? e.message : "Override failed");
+    } finally {
+      setOverridePending(false);
+    }
+  }
 
   // Determine which lock banner to show (if any)
   const showLockedBanner =
@@ -37,6 +68,12 @@ export default function SlatePage() {
     return Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60_000));
   }
 
+  // ── CORE auth banner helpers ──────────────────────────────────────────────
+  /** True when the auth block is a genuine failure (not just "needs a re-run") */
+  function isCoreAuthFailure(status: string) {
+    return status === "DISABLED_MONOTONICITY_FAIL" || status === "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE";
+  }
+
   return (
     <Layout>
       <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -51,42 +88,111 @@ export default function SlatePage() {
           </div>
         </div>
 
-        {/* ── CORE Authorization Status Banner ── */}
+        {/* ── CORE Authorization Status Banner ─────────────────────────────── */}
         {boardStatus && boardStatus.core_auth_status !== "ENABLED" && (() => {
           const status = boardStatus.core_auth_status;
+          // FAIL / INSUFFICIENT_SAMPLE → red (genuine failure)
+          // STALE / NOT_COMPUTED → amber (routine "re-run needed" state, Task #24)
+          const isFailure = isCoreAuthFailure(status);
+
           const title =
             status === "DISABLED_MONOTONICITY_FAIL"
               ? "CORE Authorization Disabled — Monotonicity FAIL"
               : status === "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE"
               ? "CORE Authorization Disabled — Insufficient Sample"
               : status === "DISABLED_MONOTONICITY_STALE"
-              ? "CORE Authorization Disabled — Stale Report"
-              : "CORE Authorization Disabled — Verdict Not Yet Computed";
+              ? "CORE Authorization Paused — Regression Report Stale"
+              : "CORE Authorization Paused — Regression Not Yet Run Today";
+
           const body =
             status === "DISABLED_MONOTONICITY_FAIL"
-              ? "The edge-tier monotonicity analysis failed: higher edge tiers do not reliably outperform lower ones. All CORE picks are blocked this session. Run /pipeline/regression?write_sheets=true to recheck, or add a MONOTONICITY_GATE_OVERRIDE sentinel row in BOARD_LOCK_STATE to override."
+              ? "The edge-tier monotonicity analysis failed: higher edge tiers do not reliably outperform lower ones. All CORE picks are blocked this session. Re-run the regression to recheck, or use the override below."
               : status === "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE"
-              ? "The monotonicity report does not yet have enough data per tier (< 75 qualifying games in at least one bucket). Accumulate more history and re-run /pipeline/regression?write_sheets=true. All CORE picks are blocked until the sample is sufficient."
+              ? "The monotonicity report does not yet have enough data per tier (< 75 qualifying games in at least one bucket). Accumulate more history and re-run the regression. All CORE picks are blocked until the sample is sufficient."
               : status === "DISABLED_MONOTONICITY_STALE"
-              ? "The most recent monotonicity report is older than 24 hours (or has no timestamp). Re-run /pipeline/regression?write_sheets=true to refresh it. All CORE picks are blocked until a fresh verdict is available."
-              : "The monotonicity verdict has not been computed yet. Run /pipeline/regression?write_sheets=true to produce it. All CORE picks are blocked until the verdict is available.";
+              ? "The most recent monotonicity report is older than 24 hours. Re-run the regression to refresh it, or use the override below if today's data is not yet available."
+              : "The monotonicity verdict has not been computed yet for today. Re-run the regression to produce it, or use the override below.";
+
           return (
-            <div className="flex items-start gap-3 px-4 py-3 rounded-md border border-destructive/40 bg-destructive/10 text-destructive text-sm">
+            <div className={`flex items-start gap-3 px-4 py-3 rounded-md border text-sm ${
+              isFailure
+                ? "border-destructive/40 bg-destructive/10 text-destructive"
+                : "border-warning/40 bg-warning/10 text-warning"
+            }`}>
               <ShieldOff className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <div className="space-y-1">
+              <div className="flex-1 space-y-2">
                 <p className="font-semibold">{title}</p>
-                <p className="text-destructive/80">{body}</p>
+                <p className={isFailure ? "text-destructive/80" : "text-warning/80"}>{body}</p>
+
+                {/* Override form (Task #22) */}
+                {!showOverrideForm ? (
+                  <button
+                    onClick={() => setShowOverrideForm(true)}
+                    className="mt-1 text-xs font-medium underline underline-offset-2 opacity-80 hover:opacity-100"
+                  >
+                    Override CORE authorization for today's slate →
+                  </button>
+                ) : (
+                  <div className="flex flex-col gap-2 pt-1">
+                    <input
+                      type="text"
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      placeholder="Reason for override (required)"
+                      className="text-xs px-2 py-1.5 rounded border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring w-full max-w-sm"
+                      disabled={overridePending}
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => submitOverride(true)}
+                        disabled={overridePending || !overrideReason.trim()}
+                        className="text-xs px-3 py-1.5 rounded border border-current font-medium opacity-90 hover:opacity-100 disabled:opacity-40"
+                      >
+                        {overridePending ? "Saving…" : "Confirm Override"}
+                      </button>
+                      <button
+                        onClick={() => { setShowOverrideForm(false); setOverrideReason(""); setOverrideError(null); }}
+                        className="text-xs opacity-60 hover:opacity-80"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    {overrideError && (
+                      <p className="text-xs text-destructive">{overrideError}</p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           );
         })()}
 
+        {/* ── Monotonicity override active banner ── */}
         {boardStatus?.monotonicity_override_active && (
-          <div className="flex items-center gap-3 px-4 py-3 rounded-md border border-warning/40 bg-warning/10 text-warning text-sm">
-            <ShieldAlert className="w-4 h-4 flex-shrink-0" />
-            <span>
-              <strong>Monotonicity gate overridden</strong> — operator exception active for today's slate. CORE authorization enabled despite verdict.
-            </span>
+          <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-md border border-warning/40 bg-warning/10 text-warning text-sm">
+            <div className="flex items-center gap-3">
+              <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+              <span>
+                <strong>Monotonicity gate overridden</strong> — operator exception active for today's slate. CORE authorization enabled despite verdict.
+              </span>
+            </div>
+            {/* Revoke button (Task #22) */}
+            <button
+              onClick={() => submitOverride(false)}
+              disabled={overridePending}
+              className="flex items-center gap-1 text-xs font-medium text-warning border border-warning/40 px-2 py-1 rounded hover:bg-warning/20 disabled:opacity-40 flex-shrink-0"
+            >
+              <RotateCcw className="w-3 h-3" />
+              Revoke
+            </button>
+          </div>
+        )}
+
+        {/* ── Monotonicity PASS + override not needed — quiet confirmation ── */}
+        {boardStatus?.core_auth_status === "ENABLED" && !boardStatus.monotonicity_override_active && (
+          <div className="flex items-center gap-3 px-4 py-2 rounded-md border border-success/30 bg-success/5 text-success text-xs">
+            <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
+            <span>Monotonicity PASS — CORE authorization enabled.</span>
           </div>
         )}
 
