@@ -636,6 +636,58 @@ export async function fetchStatcastPreviews(
     (r) => r.preview_availability === "IDENTITY_MISMATCH",
   ).length;
 
+  // Emit one concise per-game warning for each failure mode so operators can
+  // identify problems without reading the full STATCAST_GAME_PREVIEW sheet.
+  // Cached-payload-reuse detection requires Phase-3 caching logic; not yet emitted.
+  for (const r of results) {
+    switch (r.preview_availability) {
+      case "SOURCE_UNAVAILABLE":
+        logger.warn(
+          { gamePk: r.gamePk, game_id: r.game_id, fetch_status: r.fetch_status, error: r.parse_error },
+          "MODULE_02e: source unavailable — preview fetch failed for game",
+        );
+        break;
+      case "NOT_PUBLISHED":
+        logger.warn(
+          { gamePk: r.gamePk, game_id: r.game_id },
+          "MODULE_02e: preview not yet published for game",
+        );
+        break;
+      case "PARSE_FAILED":
+      case "UNSUPPORTED_FORMAT":
+        logger.warn(
+          { gamePk: r.gamePk, game_id: r.game_id, availability: r.preview_availability, error: r.parse_error },
+          "MODULE_02e: parser failure — var teams JSON could not be extracted or parsed",
+        );
+        break;
+      case "IDENTITY_MISMATCH":
+        logger.warn(
+          { gamePk: r.gamePk, game_id: r.game_id, error: r.parse_error },
+          "MODULE_02e: team identity mismatch — preview page teams do not match expected game",
+        );
+        break;
+      case "NOT_FOUND":
+        logger.warn(
+          { gamePk: r.gamePk, game_id: r.game_id },
+          "MODULE_02e: game preview page not found (HTTP 404) — gamePk may be invalid or game cancelled",
+        );
+        break;
+      case "STALE":
+        logger.warn(
+          { gamePk: r.gamePk, game_id: r.game_id },
+          "MODULE_02e: stale preview data for game",
+        );
+        break;
+    }
+    // Per-game parse warnings (starter mismatch, pitcher ID mismatch, missing hitter rows, etc.)
+    for (const w of r.parse_warnings) {
+      logger.warn(
+        { gamePk: r.gamePk, game_id: r.game_id, warning: w },
+        "MODULE_02e: game preview parse warning",
+      );
+    }
+  }
+
   logger.info(
     {
       expected: games.length,

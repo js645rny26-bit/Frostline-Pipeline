@@ -13,6 +13,7 @@ import type { Module09Result } from "./module09_recalculation.js";
 import type { Module10Result } from "./module10_slateInput.js";
 import type { Module11Result } from "./module11_outputExtraction.js";
 import type { PipelineSlateResult } from "./runner.js";
+import type { StatcastPreviewResult } from "./module02e_statcastPreview.js";
 
 const RUN_LOG_SHEET = "RUN_LOG";
 
@@ -47,6 +48,14 @@ const RUN_LOG_HEADERS = [
   "M11_SlateBoardRows",
   "Errors",
   "Schema_Version",
+  "M08b_Preview_Status",
+  "M08b_Preview_Games_Expected",
+  "M08b_Preview_Games_Available",
+  "M08b_Preview_Games_Parsed",
+  "M08b_Preview_Games_Missing",
+  "M08b_Preview_Games_Failed",
+  "M08b_Preview_Stale_Count",
+  "M08b_Preview_Identity_Mismatch_Count",
 ];
 
 export interface ArchivedFile {
@@ -111,6 +120,7 @@ export async function archiveRunBundle(
   pipelineStatus: "success" | "partial_success" | "failure" = "partial_success",
   versionNumber = 1,
   workbookId = WORKBOOK_ID,
+  statcastPreview: StatcastPreviewResult | null = null,
 ): Promise<Module12Result> {
   const dateStr = slate.date;
   const bundleName = `${dateStr}_v${String(versionNumber).padStart(2, "0")}`;
@@ -177,6 +187,14 @@ export async function archiveRunBundle(
     mod11.slate_board.length,                            // M11_SlateBoardRows
     errorsJson,                                          // Errors
     WORKBOOK_SCHEMA_VERSION,                             // Schema_Version
+    statcastPreview?.status ?? "skipped",                // M08b_Preview_Status
+    statcastPreview?.games_expected ?? 0,                // M08b_Preview_Games_Expected
+    statcastPreview?.games_available ?? 0,               // M08b_Preview_Games_Available
+    statcastPreview?.games_parsed ?? 0,                  // M08b_Preview_Games_Parsed
+    statcastPreview?.games_missing ?? 0,                 // M08b_Preview_Games_Missing
+    statcastPreview?.games_failed ?? 0,                  // M08b_Preview_Games_Failed
+    statcastPreview?.games.filter((g) => g.preview_availability === "STALE").length ?? 0, // M08b_Preview_Stale_Count
+    statcastPreview?.games_identity_mismatch ?? 0,       // M08b_Preview_Identity_Mismatch_Count
   ];
 
   try {

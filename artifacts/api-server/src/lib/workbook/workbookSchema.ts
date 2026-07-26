@@ -40,8 +40,12 @@
  *      preview ingestion (55-col schema: identity + status + pitcher Statcast +
  *      hitter aggregates). Fail-open; Preview_Used_In_Projection = NO throughout
  *      Phase 1. No projection or authorization change.
+ *  v12 (2026-07-26): RUN_LOG extended with 8 Statcast preview observability cols
+ *      (indices 30–37): M08b_Preview_Status, _Games_Expected, _Games_Available,
+ *      _Games_Parsed, _Games_Missing, _Games_Failed, _Stale_Count,
+ *      _Identity_Mismatch_Count. Phase 2 completion.
  */
-export const WORKBOOK_SCHEMA_VERSION = 11;
+export const WORKBOOK_SCHEMA_VERSION = 12;
 
 export interface ColumnDef {
   name: string;
@@ -796,7 +800,16 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "M11_NotCoreCount", index: 26, type: "number", width: 120, format: "0", filledBy: "MODULE_12", exampleValue: "14" },
       { name: "M11_SlateBoardRows", index: 27, type: "number", width: 130, format: "0", filledBy: "MODULE_12", exampleValue: "17" },
       { name: "Errors", index: 28, type: "string", width: 300, filledBy: "MODULE_12", exampleValue: "[]" },
-      { name: "Schema_Version", index: 29, type: "number", width: 110, format: "0", filledBy: "MODULE_12", description: "WORKBOOK_SCHEMA_VERSION that produced this row", exampleValue: "8" },
+      { name: "Schema_Version",                     index: 29, type: "number", width: 110, format: "0",   filledBy: "MODULE_12", description: "WORKBOOK_SCHEMA_VERSION that produced this row", exampleValue: "11" },
+      // ── Statcast preview observability (cols AE–AL, indices 30–37) ─────────
+      { name: "M08b_Preview_Status",                index: 30, type: "string", width: 130,               filledBy: "MODULE_12", description: "success | partial | failure | skipped", exampleValue: "partial" },
+      { name: "M08b_Preview_Games_Expected",        index: 31, type: "number", width: 170, format: "0",   filledBy: "MODULE_12", description: "Total games on the slate that a preview was attempted for", exampleValue: "15" },
+      { name: "M08b_Preview_Games_Available",       index: 32, type: "number", width: 175, format: "0",   filledBy: "MODULE_12", description: "Games where Preview_Availability = AVAILABLE", exampleValue: "13" },
+      { name: "M08b_Preview_Games_Parsed",          index: 33, type: "number", width: 165, format: "0",   filledBy: "MODULE_12", description: "Games successfully parsed (same as Available in Phase 1)", exampleValue: "13" },
+      { name: "M08b_Preview_Games_Missing",         index: 34, type: "number", width: 165, format: "0",   filledBy: "MODULE_12", description: "NOT_PUBLISHED + NOT_FOUND + STALE", exampleValue: "1" },
+      { name: "M08b_Preview_Games_Failed",          index: 35, type: "number", width: 155, format: "0",   filledBy: "MODULE_12", description: "SOURCE_UNAVAILABLE + PARSE_FAILED + UNSUPPORTED_FORMAT", exampleValue: "1" },
+      { name: "M08b_Preview_Stale_Count",           index: 36, type: "number", width: 155, format: "0",   filledBy: "MODULE_12", description: "Games where Preview_Availability = STALE", exampleValue: "0" },
+      { name: "M08b_Preview_Identity_Mismatch_Count", index: 37, type: "number", width: 215, format: "0", filledBy: "MODULE_12", description: "Games where Preview_Availability = IDENTITY_MISMATCH", exampleValue: "0" },
     ],
   },
 
