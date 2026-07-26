@@ -1,0 +1,103 @@
+SOURCES USED
+
+* Your proposed #63 Statcast Game Preview Pipeline Integration
+* The live workbook inspection showing only DAILY_MATCHUPS.Statcast_Last_Updated
+* Frostline’s commissioning and one-master-workbook rules
+
+REFRESH CHECK
+
+No new code or workbook inspection occurred in this turn. This is a scope and execution review of the proposed task.
+
+Verdict
+
+The technical specification is strong, but #63 is too large to authorize as one uninterrupted task.
+
+As written, Replit may finish the feasibility investigation, decide the source is usable, and immediately proceed through ingestion, schema expansion, workbook publication, shadow modeling, and multi-slate validation. That defeats the feasibility checkpoint and could consume substantial work before we review what “Statcast game preview” actually contains.
+
+Required execution boundary
+
+Authorize Phase 0 only now.
+
+Add this immediately after the Phase 0 heading:
+
+Execution stop: This task run is authorized for Phase 0 only. After producing the feasibility report and sample-payload evidence, stop and return the findings. Do not begin Phase 1, modify the workbook schema, publish the canonical workbook, or write production ingestion code without explicit Neon approval.
+
+Phases 1 through 4 should remain in #63 as the frozen conditional specification, but they are not yet authorized for execution.
+
+Three corrections before starting
+
+1. Resolve the raw-payload path contradiction
+
+The current path:
+
+artifacts/statcast-preview/YYYY-MM-DD/<gamePk>.json
+
+cannot preserve multiple fetches without overwriting earlier payloads.
+
+Use:
+
+artifacts/statcast-preview/YYYY-MM-DD/<gamePk>/<fetchTimestamp>.json
+
+Optionally maintain a separate latest.json pointer or manifest. The immutable timestamped payload is the audit record.
+
+2. Clarify failure semantics
+
+The specification uses “fail-closed,” but also correctly says the wider pipeline continues when Statcast is missing.
+
+Use this explicit distinction:
+
+Overall Frostline pipeline: fail-open when Statcast preview is unavailable
+Statcast-derived influence: fail-closed to zero
+Authorization: unchanged
+
+That prevents Replit from freezing an entire slate because one optional preview source failed.
+
+3. Expand the relevant-file instruction
+
+The listed files are not enough to investigate the misleading timestamp behavior. Add:
+
+Locate and inspect the module or source adapter that currently populates DAILY_MATCHUPS.Statcast_Last_Updated, including any shared refresh-timestamp helper. Do not assume module09 owns this field.
+
+This is important because the identical FanGraphs and Statcast timestamps likely originate upstream of module09.
+
+Phase 0 acceptance standard
+
+For the first authorized run, “done” should mean only:
+
+Three real sample payloads collected
+Official source ownership confirmed
+Pregame availability confirmed or disproven
+Payload fields inventoried
+Historical availability assessed
+Identity and edge-case behavior assessed
+Rate-limit/blocking behavior assessed
+Feasibility verdict issued
+No production code written
+No canonical workbook changes
+No schema-version change
+No projection or authorization change
+
+A screenshot of a preview webpage or a successful one-off HTML request is not enough for FEASIBLE. Replit should demonstrate a repeatable request and structured payload for multiple gamePk values.
+
+Important realism about Outcome C
+
+“Live shadow validation for multiple full slates” cannot be completed during the same ordinary implementation session. It requires prospective data collection over time.
+
+Therefore:
+
+Outcome B: engineering and smoke-test completion
+Outcome C: later commissioning state after sufficient live slates
+
+Outcome C should not hold Phase 0 or Phase 1 open indefinitely.
+
+Final authorization
+
+#63 specification:              APPROVED WITH AMENDMENTS
+Phase 0 feasibility work:       START
+Phase 1 ingestion:              NOT YET AUTHORIZED
+Canonical workbook publication: NO
+Projection influence:           NO
+Authorization influence:        NO
+Engine status:                  NO CORE — RESEARCH-ONLY
+
+This preserves the excellent full design while preventing Replit from turning an uncertain source investigation into another sprawling build before we know whether the source is real, stable, and useful.
