@@ -16,7 +16,7 @@
  * Authorization: unchanged in all cases.
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { logger } from "../../lib/logger.js";
@@ -223,31 +223,48 @@ function avg(values: (number | null)[]): number | null {
   return valid.reduce((a, b) => a + b, 0) / valid.length;
 }
 
+interface PersistResult {
+  path: string | null;
+  /**
+   * Count of prior .json files already in the same date/gamePk directory
+   * before this write.  > 0 means this gamePk was fetched in an earlier
+   * pipeline run today — the caller should emit a cached-payload-reuse warning.
+   */
+  priorFetchCount: number;
+}
+
 /**
  * Save the raw payload JSON to disk at
  *   {RAW_PAYLOAD_DIR}/{date}/{gamePk}/{fetchTimestamp}.json
- * Returns the path on success or null on I/O failure (non-blocking).
+ * Returns the path on success (null on I/O failure) and a count of any prior
+ * fetch files already present so the caller can warn on re-runs (non-blocking).
  */
 async function persistPayload(
   date: string,
   gamePk: number,
   payload: unknown,
   fetchTs: string,
-): Promise<string | null> {
+): Promise<PersistResult> {
   try {
     const dir = join(RAW_PAYLOAD_DIR, date, String(gamePk));
     await mkdir(dir, { recursive: true });
+
+    // Count existing fetch files before writing — a non-zero count means this
+    // gamePk was already fetched earlier today (re-run or duplicate run).
+    const existing = await readdir(dir).catch(() => [] as string[]);
+    const priorFetchCount = existing.filter((e) => e.endsWith(".json")).length;
+
     // Replace colons and dots so the filename is safe on all filesystems
     const safeName = fetchTs.replace(/[:.]/g, "-") + ".json";
     const filePath = join(dir, safeName);
     await writeFile(filePath, JSON.stringify(payload, null, 2), "utf-8");
-    return filePath;
+    return { path: filePath, priorFetchCount };
   } catch (err) {
     logger.warn(
       { gamePk, err: err instanceof Error ? err.message : String(err) },
       "MODULE_02e: failed to persist raw payload to disk",
     );
-    return null;
+    return { path: null, priorFetchCount: 0 };
   }
 }
 
@@ -360,7 +377,11 @@ async function fetchOneGame(game: NormalizedGame): Promise<StatcastPreviewGameRe
 
   // ── 3. Persist raw payload ─────────────────────────────────────────────────
   const payloadHash = hashPayload(teamsRaw);
-  const rawPayloadPath = await persistPayload(game.date, game.gamePk, teamsRaw, fetchTs);
+  const { path: rawPayloadPath, priorFetchCount } = await persistPayload(game.date, game.gamePk, teamsRaw, fetchTs);
+  if (priorFetchCount > 0) {
+    // A prior fetch file already exists for this gamePk today — re-run detected.
+    warnings.push(`Cached payload reused: ${priorFetchCount} prior fetch(es) already on disk for this gamePk today`);
+  }
 
   // ── 4. Parse structure ────────────────────────────────────────────────────
   if (typeof teamsRaw !== "object" || teamsRaw === null) {
@@ -424,6 +445,18 @@ async function fetchOneGame(game: NormalizedGame): Promise<StatcastPreviewGameRe
       };
     }
     pitcherMatchStatus = "MATCHED";
+  }
+
+  // ── 5b. gamePk identity check ─────────────────────────────────────────────
+  // If the payload embeds a game_pk / gamePk / pk field, verify it matches the
+  // requested gamePk.  A mismatch is unusual (Savant routes by URL param) but
+  // detectable as a distinct observable warning without blocking the parse.
+  const embeddedGamePk = teams["game_pk"] ?? teams["gamePk"] ?? teams["pk"];
+  if (embeddedGamePk !== undefined && embeddedGamePk !== null) {
+    const pageGamePk = Number(embeddedGamePk);
+    if (!Number.isNaN(pageGamePk) && pageGamePk !== game.gamePk) {
+      warnings.push(`gamePk mismatch: page embeds game_pk=${pageGamePk}, expected=${game.gamePk}`);
+    }
   }
 
   if (!hasProbableAway || !hasProbableHome) {
@@ -663,7 +696,7 @@ export async function fetchStatcastPreviews(
       case "IDENTITY_MISMATCH":
         logger.warn(
           { gamePk: r.gamePk, game_id: r.game_id, error: r.parse_error },
-          "MODULE_02e: team identity mismatch — preview page teams do not match expected game",
+          "MODULE_02e: team mismatch — preview page team abbreviations do not match expected game",
         );
         break;
       case "NOT_FOUND":
@@ -675,16 +708,34 @@ export async function fetchStatcastPreviews(
       case "STALE":
         logger.warn(
           { gamePk: r.gamePk, game_id: r.game_id },
-          "MODULE_02e: stale preview data for game",
+          "MODULE_02e: stale preview — preview data is stale for game",
         );
         break;
     }
-    // Per-game parse warnings (starter mismatch, pitcher ID mismatch, missing hitter rows, etc.)
+    // Emit distinct named warnings for parse_warnings with known failure tags;
+    // fall back to a generic parse-warning line for everything else.
     for (const w of r.parse_warnings) {
-      logger.warn(
-        { gamePk: r.gamePk, game_id: r.game_id, warning: w },
-        "MODULE_02e: game preview parse warning",
-      );
+      if (w.includes("gamePk mismatch")) {
+        logger.warn(
+          { gamePk: r.gamePk, game_id: r.game_id, warning: w },
+          "MODULE_02e: gamePk mismatch — embedded game_pk in preview payload differs from requested gamePk",
+        );
+      } else if (w.includes("pitcher ID mismatch")) {
+        logger.warn(
+          { gamePk: r.gamePk, game_id: r.game_id, warning: w },
+          "MODULE_02e: starter mismatch — pitcher ID on preview page differs from pipeline probable",
+        );
+      } else if (w.includes("Cached payload reused")) {
+        logger.warn(
+          { gamePk: r.gamePk, game_id: r.game_id, warning: w },
+          "MODULE_02e: cached-payload reuse — this gamePk was already fetched earlier today (re-run detected)",
+        );
+      } else {
+        logger.warn(
+          { gamePk: r.gamePk, game_id: r.game_id, warning: w },
+          "MODULE_02e: game preview parse warning",
+        );
+      }
     }
   }
 

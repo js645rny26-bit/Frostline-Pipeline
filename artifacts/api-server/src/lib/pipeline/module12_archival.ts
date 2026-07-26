@@ -17,7 +17,8 @@ import type { StatcastPreviewResult } from "./module02e_statcastPreview.js";
 
 const RUN_LOG_SHEET = "RUN_LOG";
 
-const RUN_LOG_HEADERS = [
+// Exported so schema-validation tests can assert exact alignment with workbookSchema.
+export const RUN_LOG_HEADERS = [
   "Run_Timestamp",
   "Date",
   "Bundle_Name",
@@ -48,15 +49,15 @@ const RUN_LOG_HEADERS = [
   "M11_SlateBoardRows",
   "Errors",
   "Schema_Version",
-  "M08b_Preview_Status",
-  "M08b_Preview_Games_Expected",
-  "M08b_Preview_Games_Available",
-  "M08b_Preview_Games_Parsed",
-  "M08b_Preview_Games_Missing",
-  "M08b_Preview_Games_Failed",
-  "M08b_Preview_Stale_Count",
-  "M08b_Preview_Identity_Mismatch_Count",
-];
+  "Statcast_Preview_Status",
+  "Statcast_Preview_Games_Expected",
+  "Statcast_Preview_Games_Available",
+  "Statcast_Preview_Games_Parsed",
+  "Statcast_Preview_Games_Missing",
+  "Statcast_Preview_Games_Failed",
+  "Statcast_Preview_Stale_Count",
+  "Statcast_Preview_Identity_Mismatch_Count",
+] as const;
 
 export interface ArchivedFile {
   name: string;
@@ -78,20 +79,19 @@ export interface Module12Result {
 async function ensureHeaders(workbookId: string): Promise<void> {
   // Try to read the header row. If it fails with "Unable to parse range", the
   // sheet tab doesn't exist yet — create it, then write headers. If the row
-  // exists but is missing newer columns (schema grew), rewrite the full header
-  // row in place — data rows are unaffected.
+  // exists but is outdated (wrong count OR any header out of position), rewrite
+  // the full header row in place — data rows are unaffected.
   let sheetExists = true;
   try {
     const existing = await readRange(workbookId, `${RUN_LOG_SHEET}!A1:AZ1`);
     const headerRow = (existing.values?.[0] ?? []).map((c) => String(c ?? "").trim());
-    const lastIdx = RUN_LOG_HEADERS.length - 1;
+    // All 38 headers must match in order — count-and-last-only check can miss renames.
     const upToDate =
-      headerRow[0] === "Run_Timestamp" &&
       headerRow.length >= RUN_LOG_HEADERS.length &&
-      headerRow[lastIdx] === RUN_LOG_HEADERS[lastIdx];
+      RUN_LOG_HEADERS.every((expected, idx) => headerRow[idx] === expected);
 
     if (!upToDate) {
-      await writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [RUN_LOG_HEADERS]);
+      await writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [Array.from(RUN_LOG_HEADERS)]);
       logger.info("MODULE_12: RUN_LOG headers written/refreshed");
     }
   } catch (err: unknown) {
@@ -106,7 +106,7 @@ async function ensureHeaders(workbookId: string): Promise<void> {
   if (!sheetExists) {
     logger.info("MODULE_12: RUN_LOG sheet not found — creating it");
     await addSheet(workbookId, RUN_LOG_SHEET);
-    await writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [RUN_LOG_HEADERS]);
+    await writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [Array.from(RUN_LOG_HEADERS)]);
     logger.info("MODULE_12: RUN_LOG sheet created with headers");
   }
 }
@@ -187,14 +187,14 @@ export async function archiveRunBundle(
     mod11.slate_board.length,                            // M11_SlateBoardRows
     errorsJson,                                          // Errors
     WORKBOOK_SCHEMA_VERSION,                             // Schema_Version
-    statcastPreview?.status ?? "skipped",                // M08b_Preview_Status
-    statcastPreview?.games_expected ?? 0,                // M08b_Preview_Games_Expected
-    statcastPreview?.games_available ?? 0,               // M08b_Preview_Games_Available
-    statcastPreview?.games_parsed ?? 0,                  // M08b_Preview_Games_Parsed
-    statcastPreview?.games_missing ?? 0,                 // M08b_Preview_Games_Missing
-    statcastPreview?.games_failed ?? 0,                  // M08b_Preview_Games_Failed
-    statcastPreview?.games.filter((g) => g.preview_availability === "STALE").length ?? 0, // M08b_Preview_Stale_Count
-    statcastPreview?.games_identity_mismatch ?? 0,       // M08b_Preview_Identity_Mismatch_Count
+    statcastPreview?.status ?? "skipped",                // Statcast_Preview_Status
+    statcastPreview?.games_expected ?? 0,                // Statcast_Preview_Games_Expected
+    statcastPreview?.games_available ?? 0,               // Statcast_Preview_Games_Available
+    statcastPreview?.games_parsed ?? 0,                  // Statcast_Preview_Games_Parsed
+    statcastPreview?.games_missing ?? 0,                 // Statcast_Preview_Games_Missing
+    statcastPreview?.games_failed ?? 0,                  // Statcast_Preview_Games_Failed
+    statcastPreview?.games.filter((g) => g.preview_availability === "STALE").length ?? 0, // Statcast_Preview_Stale_Count
+    statcastPreview?.games_identity_mismatch ?? 0,       // Statcast_Preview_Identity_Mismatch_Count
   ];
 
   try {
