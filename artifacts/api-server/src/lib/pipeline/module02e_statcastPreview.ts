@@ -379,8 +379,13 @@ async function fetchOneGame(game: NormalizedGame): Promise<StatcastPreviewGameRe
   const payloadHash = hashPayload(teamsRaw);
   const { path: rawPayloadPath, priorFetchCount } = await persistPayload(game.date, game.gamePk, teamsRaw, fetchTs);
   if (priorFetchCount > 0) {
-    // A prior fetch file already exists for this gamePk today — re-run detected.
-    warnings.push(`Cached payload reused: ${priorFetchCount} prior fetch(es) already on disk for this gamePk today`);
+    // A prior fetch file already exists for this gamePk today — this is a
+    // repeat pipeline run, not cache reuse.  The current fetch is a fresh
+    // network call that produced a new immutable payload file.
+    // CACHED_PAYLOAD_REUSED is NOT emitted here; it is reserved for a future
+    // Phase 3 code path that deliberately loads a prior payload instead of
+    // making a network request.
+    warnings.push(`Repeat fetch detected: ${priorFetchCount} prior fetch(es) already on disk for this gamePk today`);
   }
 
   // ── 4. Parse structure ────────────────────────────────────────────────────
@@ -725,10 +730,15 @@ export async function fetchStatcastPreviews(
           { gamePk: r.gamePk, game_id: r.game_id, warning: w },
           "MODULE_02e: starter mismatch — pitcher ID on preview page differs from pipeline probable",
         );
-      } else if (w.includes("Cached payload reused")) {
+      } else if (w.includes("Repeat fetch detected")) {
+        // Prior immutable payload(s) exist on disk for this gamePk today, but
+        // the current run made a fresh network fetch — this is a repeat run,
+        // not cache reuse.  CACHED_PAYLOAD_REUSED requires a Phase 3 cache-
+        // loading path that deliberately returns a stored payload instead of
+        // fetching; that path does not exist in Phase 1.
         logger.warn(
           { gamePk: r.gamePk, game_id: r.game_id, warning: w },
-          "MODULE_02e: cached-payload reuse — this gamePk was already fetched earlier today (re-run detected)",
+          "MODULE_02e: repeat fetch detected — prior payload(s) on disk for this gamePk today; fresh network fetch still performed",
         );
       } else {
         logger.warn(

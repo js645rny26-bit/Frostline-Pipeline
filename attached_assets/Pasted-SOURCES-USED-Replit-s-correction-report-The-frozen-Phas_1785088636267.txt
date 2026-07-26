@@ -1,0 +1,54 @@
+SOURCES USED
+
+* Replit’s correction report
+* The frozen Phase 2 requirements in #63
+* Current canonical workbook metadata
+
+REFRESH CHECK
+
+The canonical workbook remains unchanged at 2026-07-26 11:38:35 AM ET, so none of these schema changes have been published into today’s live workbook. Official Frostline Engine
+
+Phase 2 ruling
+
+Almost accepted. Five of the six corrections are now satisfied.
+
+Confirmed by report:
+
+* exact eight Statcast_Preview_* headers
+* complete 38-position header comparison
+* README schema note updated
+* distinct identity/starter/stale warnings
+* six new schema-alignment tests passed
+* clean TypeScript compile
+* 74 passing tests, with one baseline failure reproduced before these changes
+
+One remaining provenance defect
+
+This is not genuine cached-payload reuse:
+
+readdir() finds an earlier JSON file, so emit “cached-payload reuse”
+
+That proves only that the same game was fetched previously. It does not prove the current run loaded or reused cached data.
+
+A second live fetch with another immutable payload is a repeat fetch, not cache reuse. Calling it cache reuse would create the same kind of misleading provenance #63 was designed to eliminate.
+
+Required correction
+
+Use these semantics:
+
+Prior timestamped payload exists + fresh network fetch succeeds
+→ REPEAT_FETCH_DETECTED or PRIOR_FETCH_EXISTS
+Current request fails or is skipped and an earlier payload is actually loaded
+→ CACHED_PAYLOAD_REUSED
+
+If no cache-loading path exists, CACHED_PAYLOAD_REUSED should never be emitted. Its count remains zero until that behavior genuinely exists.
+
+The one pre-existing unit-test failure does not block this bounded Phase 2 change because Replit reproduced it against the untouched baseline. It must remain disclosed, not called newly passing.
+
+#63 Phase 2:               ONE SEMANTIC CORRECTION REMAINS
+Compile:                   PASS, report-based
+New schema tests:          6/6 PASS, report-based
+Regression delta:          NONE REPORTED
+Canonical publication:     NO
+Projection influence:      NO
+Authorization influence:   NO
