@@ -1,0 +1,492 @@
+SOURCES USED
+
+* Live inspection of the canonical Official Frostline Engine
+* DAILY_MATCHUPS, SCHEMA_REFERENCE, RUN_LOG, GAME_SUMMARY, and SLATE_BOARD
+* Current commissioning doctrine and engine freeze
+
+REFRESH CHECK
+
+The workbook currently has only DAILY_MATCHUPS.Statcast_Last_Updated. It does not expose an actual Statcast preview payload, ingestion status, parsed preview fields, projection influence, or preview-specific pipeline logging.
+
+The safest request is a feasibility-first, staged integration, not “scrape Statcast and immediately alter projections.”
+
+Paste this to Replit:
+
+⸻
+
+Task #58 - Statcast Game Preview Pipeline Integration
+
+Objective
+
+Determine whether official Statcast game preview data can be reliably obtained, parsed, audited, and incorporated into the Frostline daily pipeline.
+
+Do not assume that a stable public endpoint exists. Begin with a feasibility investigation. Do not change projections or CORE authorization until preview ingestion has passed structural validation, smoke testing, historical replay where possible, and live shadow validation.
+
+Current confirmed state
+
+The canonical workbook currently contains:
+
+DAILY_MATCHUPS.Statcast_Last_Updated
+
+However, there is no auditable evidence that actual Statcast game preview content is being fetched or used.
+
+Current gaps:
+
+* No preview-specific pipeline module status
+* No preview availability or failure status by game
+* No structured preview fields in the workbook
+* No raw-payload provenance or checksum
+* No indication of which preview fields affected projections
+* No preview-specific counts in RUN_LOG
+* No confirmation that Statcast_Last_Updated represents a successful preview fetch
+* FanGraphs_Last_Updated and Statcast_Last_Updated currently share identical timestamps, which may indicate generic refresh stamping rather than independent source ingestion
+
+Phase 0 - Feasibility investigation
+
+Before writing production integration code, identify whether an authoritative and operationally stable source exists.
+
+Source priority
+
+Use this order:
+
+1. Official MLB or Baseball Savant machine-readable JSON/API
+2. Official MLB page data embedded in page source or client-side JSON
+3. A documented and stable official feed accessible without authentication
+4. HTML parsing only if the page is stable, server-accessible, and legally/operationally appropriate
+
+Do not:
+
+* fabricate an endpoint
+* use postgame data as pregame preview data
+* bypass authentication or anti-bot controls
+* use an unofficial mirror without explicitly reporting it
+* silently substitute another source and continue labeling it Statcast
+* treat a page timestamp as proof that preview content was parsed
+
+Required feasibility output
+
+Return a report containing:
+
+Source URL or endpoint pattern
+Source owner
+Request method
+Authentication requirement
+Example game identifier
+Example response or payload structure
+Whether historical dates are available
+Whether the source works before first pitch
+Whether doubleheaders are distinguishable
+Whether starting-pitcher changes are reflected
+Whether lineups are included
+Rate-limit or blocking behavior
+Expected failure modes
+Operational recommendation:
+  FEASIBLE
+  FEASIBLE_WITH_LIMITATIONS
+  NOT_RELIABLY_FEASIBLE
+
+Capture sample payloads for at least three different games, including one ordinary game and one edge case such as a doubleheader, reschedule, opener, or changed probable pitcher.
+
+Stop condition
+
+If no reliable source can be found, stop after the feasibility report.
+
+Do not build a browser scraper merely to satisfy the task.
+
+⸻
+
+Phase 1 - Auditable ingestion
+
+Proceed only if Phase 0 returns FEASIBLE or FEASIBLE_WITH_LIMITATIONS.
+
+The first implementation phase is data landing and audit only.
+
+It must not alter:
+
+* projected runs
+* confidence
+* vehicle selection
+* survival-gate results
+* CORE or NO CORE decisions
+* lock behavior
+* market interpretation
+
+Pipeline location
+
+Fetch Statcast previews after the slate and official MLB game identifiers are resolved, but before module09 projection recalculation.
+
+Suggested flow:
+
+Slate and gamePk resolution
+→ Statcast preview fetch
+→ preview validation and normalization
+→ workbook audit output
+→ module09 continues using current logic unchanged
+
+Game identity
+
+Use authoritative identifiers whenever available:
+
+Date
+MLB gamePk
+Frostline Game_ID
+Away team
+Home team
+Scheduled first pitch
+Doubleheader game number
+
+Do not join preview records using team names alone.
+
+New workbook tab
+
+Create:
+
+STATCAST_GAME_PREVIEW
+
+Do not add dozens of speculative columns before examining the real payload.
+
+At minimum, include:
+
+Date
+Game_ID
+MLB_GamePk
+Away_Team
+Home_Team
+Scheduled_First_Pitch
+Preview_Availability
+Fetch_Status
+Fetch_TS
+Source_Name
+Source_URL_or_Endpoint
+Source_Published_TS
+Payload_Hash
+Parser_Version
+Starting_Pitcher_Match_Status
+Lineup_Match_Status
+Stale_Data_Flag
+Parse_Warnings
+Parse_Error
+Preview_Used_In_Projection
+Projection_Influence_Notes
+
+Then add only structured baseball fields that are genuinely present in the official preview payload.
+
+Do not invent placeholders and label them as sourced Statcast values.
+
+Preview status values
+
+Use controlled values:
+
+AVAILABLE
+NOT_PUBLISHED
+NOT_FOUND
+SOURCE_UNAVAILABLE
+PARSE_FAILED
+IDENTITY_MISMATCH
+STALE
+UNSUPPORTED_FORMAT
+
+Raw payload preservation
+
+Preserve enough evidence to reconstruct what was received.
+
+Preferred approach:
+
+* Store the normalized raw response in a dated server-side JSON audit artifact
+* Key it by date and gamePk
+* Record a deterministic payload hash in the workbook
+* Do not place oversized JSON blobs directly into spreadsheet cells
+
+Example storage shape:
+
+artifacts/statcast-preview/YYYY-MM-DD/<gamePk>.json
+
+Do not overwrite a prior payload without preserving the newer fetch timestamp and hash.
+
+Timestamp semantics
+
+Statcast_Last_Updated may only be populated when an actual Statcast preview fetch completes successfully.
+
+Do not stamp it merely because module08 ran.
+
+Separate:
+
+Fetch_TS
+Source_Published_TS
+Last_Successful_Fetch_TS
+
+⸻
+
+Phase 2 - Pipeline observability
+
+Add preview-specific pipeline reporting.
+
+RUN_LOG fields
+
+Add clearly named columns such as:
+
+Statcast_Preview_Status
+Statcast_Preview_Games_Expected
+Statcast_Preview_Games_Available
+Statcast_Preview_Games_Parsed
+Statcast_Preview_Games_Missing
+Statcast_Preview_Games_Failed
+Statcast_Preview_Stale_Count
+Statcast_Preview_Identity_Mismatch_Count
+
+Do not hide failures inside a generic warnings count.
+
+Logging requirements
+
+Log one concise game-level warning for:
+
+* source unavailable
+* preview not published
+* parser failure
+* gamePk mismatch
+* team mismatch
+* starter mismatch
+* stale preview
+* reused cached payload
+
+The pipeline should continue when preview data is unavailable.
+
+Only the Statcast-derived layer should remain unavailable. The rest of the game projection should continue normally.
+
+Workbook schema
+
+Update:
+
+* SCHEMA_REFERENCE
+* README
+* schema version
+* live row-one headers
+* schema validation tests
+
+No live sheet may have a header count that differs from the registered schema.
+
+⸻
+
+Phase 3 - Shadow feature mapping
+
+After ingestion is stable, map the preview fields into Frostline concepts in shadow mode only.
+
+Do not immediately add the data to final projections.
+
+For each available Statcast field, document:
+
+Raw field
+Statcast definition
+Pregame availability
+Unit
+Expected range
+Frostline component candidate
+Possible double-counting risk
+Proposed transformation
+Proposed cap
+Missing-data behavior
+
+Potential Frostline destinations may include:
+
+starter attack
+starter suppression
+traffic creation
+traffic conversion
+HR/XBH damage
+contact access
+lineup damage depth
+
+These are candidate destinations only. The actual source payload must determine what is valid.
+
+Double-counting audit
+
+Explicitly compare preview fields against information already represented by:
+
+* ERA/FIP/K%
+* starter-quality components
+* offense-rate inputs
+* lineup factors
+* park factors
+* weather
+* bullpen state
+* pitcher prop markets
+* FanGraphs data
+
+Do not add the same baseball signal twice under different names.
+
+Shadow output
+
+Add a separate shadow audit output showing:
+
+Current projection
+Statcast-shadow adjustment
+Shadow projection
+Fields responsible
+Adjustment cap applied
+Missing fields
+Identity warnings
+
+The live board must continue using the current projection.
+
+⸻
+
+Phase 4 - Commissioning tests
+
+Statcast preview data may not affect production projections until all tests pass.
+
+Structural tests
+
+Verify:
+
+* schema alignment
+* row widths
+* unique Date + Game_ID keys
+* valid gamePk mapping
+* no duplicate preview records
+* no stale cross-date records
+* no team-name-only joins
+* no silent parser fallback
+
+Dependency tests
+
+Verify:
+
+* module09 can run when preview data is unavailable
+* a single failed game does not freeze the full slate
+* cached data is clearly marked
+* pitcher changes invalidate or downgrade the affected preview record
+* a rescheduled game does not inherit the old preview incorrectly
+* doubleheader games remain separate
+* rerunning the same slate is idempotent
+
+Smoke tests
+
+Use at least:
+
+1. Preview available and valid
+2. Preview not yet published
+3. Source unavailable
+4. Malformed payload
+5. Wrong gamePk or team identity
+6. Starting pitcher changed
+7. Doubleheader
+8. Rescheduled game
+9. Cached payload reused
+10. Partial slate availability
+
+Historical replay
+
+Only perform replay if the official source provides true historical pregame preview payloads or if dated payloads were previously archived.
+
+Do not reconstruct historical previews using current or postgame data.
+
+Live shadow validation
+
+Run the preview layer in shadow mode for multiple full slates.
+
+Compare:
+
+Current projection error
+Shadow projection error
+Over lane error
+Under lane error
+Extreme projection frequency
+Traffic-to-scoring conversion error
+Starter-to-full-staff-collapse error
+
+The Statcast layer must demonstrate measurable improvement without increasing extreme projection instability.
+
+⸻
+
+Phase 5 - Controlled projection integration
+
+Production integration requires a separate approval after shadow results are reviewed.
+
+When approved:
+
+* use named component adjustments
+* cap each adjustment
+* preserve the unadjusted projection
+* expose every applied adjustment
+* never let Statcast preview data silently alter confidence
+* never let preview data independently create a CORE decision
+* preserve price-blind projection order
+* do not let park, weather, umpire, or price originate the play
+* fail closed only for the affected Statcast-derived component
+
+Required live audit fields:
+
+Statcast_Adjustment_Total
+Statcast_Starter_Adjustment
+Statcast_Traffic_Adjustment
+Statcast_Damage_Adjustment
+Statcast_Adjustment_Cap
+Statcast_Fields_Used
+Statcast_Preview_Status
+Projection_Before_Statcast
+Projection_After_Statcast
+
+⸻
+
+Acceptance criteria for this task
+
+This task is complete only when one of these outcomes is reached.
+
+Outcome A - Not feasible
+
+Reliable source unavailable
+Feasibility report complete
+No production scraper built
+No workbook changes published
+
+Outcome B - Ingestion commissioned
+
+Official source identified
+Preview payload fetched by gamePk
+Payload preserved and hashed
+Structured fields written to STATCAST_GAME_PREVIEW
+RUN_LOG preview counts present
+Schema aligned
+Failure states visible
+No projection influence
+Compile passes
+Tests pass
+Full-slate smoke test passes
+
+Outcome C - Shadow integration commissioned
+
+Requires everything in Outcome B plus:
+
+Field mapping documented
+Double-counting audit passed
+Shadow projection output created
+Historical or prospective validation completed
+No live authorization effect
+
+Production projection integration is not part of the initial task unless separately approved after the shadow evidence is reviewed.
+
+Final reporting format
+
+Report:
+
+Feasibility verdict
+Source identified
+Fields available
+Fields unavailable
+Files changed
+Workbook tabs changed
+Schema version
+Tests run
+Test results
+Full-slate smoke result
+Known limitations
+Projection logic changed: YES/NO
+Authorization logic changed: YES/NO
+Canonical workbook published: YES/NO
+Recommended next state
+
+Do not generate follow-up tasks from incidental observations. Report only concrete blockers required to complete this bounded integration.
+
+⸻
+
+That request gives Replit room to determine whether the source is technically usable without allowing a brittle scraper or unvalidated Statcast adjustment to slip directly into today’s projections.
