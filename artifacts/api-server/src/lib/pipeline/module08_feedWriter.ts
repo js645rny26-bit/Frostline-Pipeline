@@ -112,7 +112,7 @@ function buildDailyMatchupsRows(
       1.0,                                                             // U: Park_Factor_HR (stub)
       4.75,                                                            // V: Run_Environment (stub)
       now,                                                             // W: FanGraphs_Last_Updated
-      now,                                                             // X: Statcast_Last_Updated
+      now,                                                             // X: Pipeline_Last_Updated
       "",                                                              // Y: Notes
       // ── Away starter last outing (Baseball Savant) ─────────────────
       awayOuting?.outing_date  ?? "",                                  // Z:  Away_Last_Outing_Date

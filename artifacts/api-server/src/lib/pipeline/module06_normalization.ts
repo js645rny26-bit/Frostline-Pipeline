@@ -5,7 +5,7 @@
 
 import { logger } from "../../lib/logger.js";
 import type { GameScheduleResult } from "./module01_mlbStatsApi.js";
-import type { WorkloadResult } from "./module02_statcast.js";
+import type { WorkloadResult } from "./module02_pitcherWorkload.js";
 import type { ClassificationResult, PitcherClassificationData } from "./module03_pitcherClassification.js";
 import type { WeatherResult, WeatherData } from "./module04_openMeteo.js";
 import type { FangraphsResult } from "./module05_fangraphs.js";

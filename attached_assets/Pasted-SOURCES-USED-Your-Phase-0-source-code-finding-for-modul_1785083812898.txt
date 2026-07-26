@@ -1,0 +1,148 @@
+SOURCES USED
+
+* Your Phase 0 source-code finding for module08_feedWriter.ts
+* The live workbook inspection showing FanGraphs_Last_Updated and Statcast_Last_Updated receive identical timestamps
+* The current canonical schema structure
+
+REFRESH CHECK
+
+I have not independently inspected the Replit source code. The workbook evidence supports the finding, but the exact line assignment remains report-based.
+
+Verdict
+
+Approve #64, but choose one implementation path now: rename the column in place.
+
+Use:
+
+Statcast_Last_Updated
+→ Pipeline_Last_Updated
+
+Do not remove it and do not merely blank it.
+
+Why rename is the correct repair
+
+* Removing column X would shift every later DAILY_MATCHUPS column and create unnecessary index risk.
+* Blanking the values would leave a false Statcast label in the workbook.
+* Renaming preserves the useful module-refresh timestamp while eliminating the false provenance claim.
+* Existing historical timestamps remain semantically valid as pipeline-run timestamps.
+
+Frozen implementation scope
+
+module08_feedWriter.ts
+
+* Continue writing the module08 run timestamp to column X.
+* Rename the associated field/property to Pipeline_Last_Updated.
+* Do not add any Statcast request, adapter, parser, or fallback.
+
+workbookSchema.ts
+
+Update column index 23 to:
+
+Column_Name: Pipeline_Last_Updated
+Purpose: Timestamp of the most recent successful module08 feed-writing run
+Filled_By: MODULE_08
+
+Do not describe it as a source refresh or successful external fetch.
+
+Workbook and schema
+
+Update:
+
+* DAILY_MATCHUPS row-one header
+* SCHEMA_REFERENCE
+* README where the field is documented
+* schema version
+
+Keep the column at the same index.
+
+Required verification
+
+Column X remains index 23
+Header is Pipeline_Last_Updated
+No live schema/header mismatch
+No remaining production references to Statcast_Last_Updated
+Module08 still writes one valid timestamp per run
+Compile passes
+Schema tests pass
+Pipeline smoke test passes
+Projection values unchanged
+Authorization decisions unchanged
+Lock state unchanged
+
+Do not touch FanGraphs_Last_Updated inside #64. Whether that field represents a real FanGraphs fetch is a separate provenance question and should not expand this bounded repair.
+
+#64 status:                  APPROVED
+Implementation choice:      RENAME IN PLACE
+Statcast ingestion added:    NO
+Projection logic changed:    NO
+Authorization changed:       NO
+Canonical schema update:     REQUIRED
+
+SOURCES USED
+
+* Your #65 proposal
+* The Phase 0 finding that module02_statcast.ts actually uses the MLB Stats API for pitcher workload
+* The reported current import in runner.ts
+
+REFRESH CHECK
+
+I have not independently inspected the source file or run the test suite. The module behavior and line references are report-based.
+
+Verdict
+
+Approve #65.
+
+The rename is justified and appropriately bounded:
+
+module02_statcast.ts
+→ module02_pitcherWorkload.ts
+
+That name accurately describes the module’s function without implying Baseball Savant or Statcast ingestion.
+
+Frozen scope
+
+Update:
+
+* the filename
+* all static and dynamic imports
+* test imports and mocks
+* any index/barrel exports
+* comments or documentation that refer to the old module name
+* source maps or build references only if explicitly committed in the repository
+
+Preserve unchanged:
+
+PitcherRollingStats
+PitcherWorkloadData
+WorkloadResult
+fetchPitcherWorkload(...)
+
+Also preserve:
+
+* MLB Stats API endpoint behavior
+* workload calculations
+* timeout and retry behavior
+* fallback behavior
+* pipeline ordering
+* workbook output
+* projections
+* authorization
+* lock state
+
+Required verification
+
+No remaining references to module02_statcast
+No new references implying Statcast ownership
+TypeScript compile passes
+All affected tests pass
+Pipeline import resolves after clean build
+No output differences from the pre-rename implementation
+
+Use an actual filesystem rename rather than creating the new file and leaving the old one behind.
+
+#65 status:               APPROVED
+Change type:              NAMING / PROVENANCE CLARIFICATION
+Functional pipeline change: NO
+Statcast integration added: NO
+Projection change:        NO
+Authorization change:     NO

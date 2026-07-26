@@ -5,7 +5,7 @@
 
 import { logger } from "../../lib/logger.js";
 import type { GameScheduleResult } from "./module01_mlbStatsApi.js";
-import type { WorkloadResult } from "./module02_statcast.js";
+import type { WorkloadResult } from "./module02_pitcherWorkload.js";
 
 export interface PitcherClassificationData {
   player_id: number | null;

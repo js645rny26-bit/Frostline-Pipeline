@@ -5,7 +5,7 @@
 
 import { getTodayDateStr } from "./config.js";
 import { fetchMlbSchedule } from "./module01_mlbStatsApi.js";
-import { fetchPitcherWorkload } from "./module02_statcast.js";
+import { fetchPitcherWorkload } from "./module02_pitcherWorkload.js";
 import { classifyPitcherRoles } from "./module03_pitcherClassification.js";
 import { fetchWeatherForecasts } from "./module04_openMeteo.js";
 import { fetchTeamSplitsWithFallback } from "./module05_fangraphs.js";

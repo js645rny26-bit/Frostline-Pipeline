@@ -34,7 +34,7 @@
  *      module11 SlateBoardEntry carries away_offense_source / home_offense_source;
  *      warns when a CORE Over uses a non-BLENDED offense projection.
  */
-export const WORKBOOK_SCHEMA_VERSION = 9;
+export const WORKBOOK_SCHEMA_VERSION = 10;
 
 export interface ColumnDef {
   name: string;
@@ -98,7 +98,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Park_Factor_HR", index: 20, type: "number", width: 90, format: "0.000", filledBy: "MODULE_08", exampleValue: "1.052" },
       { name: "Run_Environment", index: 21, type: "number", width: 90, format: "0.00", filledBy: "MODULE_08", exampleValue: "4.75" },
       { name: "FanGraphs_Last_Updated", index: 22, type: "date", width: 130, format: "mm/dd/yyyy hh:mm", filledBy: "MODULE_08", exampleValue: "07/22/2026 08:00" },
-      { name: "Statcast_Last_Updated", index: 23, type: "date", width: 130, format: "mm/dd/yyyy hh:mm", filledBy: "MODULE_08", exampleValue: "07/22/2026 06:00" },
+      { name: "Pipeline_Last_Updated", index: 23, type: "date", width: 130, format: "mm/dd/yyyy hh:mm", filledBy: "MODULE_08", description: "Timestamp of the most recent successful module08 feed-writing run. Not a Statcast fetch timestamp.", exampleValue: "07/22/2026 06:00" },
       { name: "Notes", index: 24, type: "string", width: 200, filledBy: "OPERATOR", exampleValue: "Dome game — weather neutral" },
       // ── Starter previous outing (module 04d) ────────────────────────────────
       { name: "Away_Last_Outing_Date", index: 25, type: "string", width: 110, filledBy: "MODULE_08", exampleValue: "2026-07-18" },
