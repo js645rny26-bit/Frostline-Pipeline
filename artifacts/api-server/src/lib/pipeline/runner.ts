@@ -24,6 +24,8 @@ import { SOURCE_MAPPINGS } from "./config.js";
 import { normalizeSlate } from "./module06_normalization.js";
 import { validateNormalizedSlate } from "./module07_validation.js";
 import { writeGoogleSheetsFeed, type Module08Result } from "./module08_feedWriter.js";
+import { fetchStatcastPreviews, type StatcastPreviewResult } from "./module02e_statcastPreview.js";
+import { writeStatcastPreviewFeed, type StatcastPreviewWriterResult } from "./module08b_statcastPreviewWriter.js";
 import { verifyRecalculation, type Module09Result } from "./module09_recalculation.js";
 import { seedSlateInput, type Module10Result } from "./module10_slateInput.js";
 import { extractOutputBoards, type Module11Result } from "./module11_outputExtraction.js";
@@ -122,7 +124,7 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
   ]);
 
   moduleStatuses.push({
-    module: "02_statcast",
+    module: "02_pitcher_workload",
     status: workload.status === "success" || workload.status === "no_pitchers" ? "PASS" : "FAIL",
     message: `${workload.pitchers.length} pitchers fetched`,
     count: workload.pitchers.length,
@@ -192,6 +194,10 @@ export interface PublishResult {
   total_games: number;
   validation_status: string;
   module_08: Module08Result;
+  /** Module 08b: Statcast game preview fetch + STATCAST_GAME_PREVIEW sheet write */
+  module_08b: StatcastPreviewWriterResult;
+  /** Module 08b fetch result: per-game Baseball Savant preview data */
+  module_08b_preview: StatcastPreviewResult;
   module_09: Module09Result;
   module_09_shadow: ShadowValidationResult;
   module_10: Module10Result;
@@ -226,7 +232,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // Fetch schedule manifest for pitcher IDs (needed by module04d)
   const manifest = await fetchMlbSchedule(date).catch(() => null);
 
-  const [bullpenResult, startingNineResult, starterOutings, umpireResult, teamRunRates, oddsResult, rotowireProps, rosterNameMap] = await Promise.all([
+  const [bullpenResult, startingNineResult, starterOutings, umpireResult, teamRunRates, oddsResult, rotowireProps, rosterNameMap, statcastPreviewFetch] = await Promise.all([
     fetchBullpenUsage(date, slateTeamIds).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: bullpen fetch threw — skipping");
       return null;
@@ -260,6 +266,13 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: team roster fetch threw — returning empty map");
       return new Map<string, number>();
     }),
+    // Module 02e: Statcast game preview — fail-open; runs in parallel with other fetches
+    slate.games.length > 0
+      ? fetchStatcastPreviews(slate.games, date).catch((err: unknown) => {
+          logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: Statcast preview fetch threw — skipping");
+          return null as StatcastPreviewResult | null;
+        })
+      : Promise.resolve(null as StatcastPreviewResult | null),
   ]);
 
   if (bullpenResult) {
@@ -367,6 +380,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       total_games: slate.total_games,
       validation_status: slate.validation.status,
       module_08: mod08,
+      module_08b: { status: "failure", write_timestamp_utc: new Date().toISOString(), rows_written: 0, errors: ["Skipped: Module 08 failed"] },
+      module_08b_preview: statcastPreviewFetch ?? { status: "failure", fetch_timestamp: new Date().toISOString(), games_expected: 0, games_available: 0, games_parsed: 0, games_missing: 0, games_failed: 0, games_identity_mismatch: 0, games: [] },
       module_09: { status: "error", verification_timestamp_utc: new Date().toISOString(), checks: { game_integration: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, game_summary: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, consistency_check: { status: "inconsistent", read_1_timestamp: "", read_2_timestamp: "", diff_seconds: 0 } }, recalculation_time_ms: 0, game_summary_rows: [] },
       module_09_shadow: shadowSkipped,
       module_10: { status: "failure", seeding_timestamp_utc: new Date().toISOString(), games_seeded: { new_games: 0, updated_games: 0, total_games: 0 }, rows_written: 0, seed_results: [], errors: [{ module: "10", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
@@ -376,6 +391,29 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
     };
+  }
+
+  // Module 08b: Write STATCAST_GAME_PREVIEW sheet — fail-open, runs before module 09
+  const previewFetchResult: StatcastPreviewResult = statcastPreviewFetch ?? {
+    status: "failure",
+    fetch_timestamp: new Date().toISOString(),
+    games_expected: slate.games.length,
+    games_available: 0,
+    games_parsed: 0,
+    games_missing: 0,
+    games_failed: slate.games.length,
+    games_identity_mismatch: 0,
+    games: [],
+  };
+  const mod08b = await writeStatcastPreviewFeed(previewFetchResult, workbookId).catch(
+    (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err: msg }, "Full pipeline: Module 08b threw — continuing");
+      return { status: "failure" as const, write_timestamp_utc: new Date().toISOString(), rows_written: 0, errors: [msg] };
+    },
+  );
+  if (mod08b.status !== "success") {
+    allErrors.push({ module: "08b_statcast_preview_writer", error: mod08b.errors[0] ?? "write failed", timestamp: new Date().toISOString() });
   }
 
   // Module 09: Compute + write GAME_INTEGRATION and GAME_SUMMARY
@@ -487,6 +525,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     total_games: slate.total_games,
     validation_status: slate.validation.status,
     module_08: mod08,
+    module_08b: mod08b,
+    module_08b_preview: previewFetchResult,
     module_09: mod09,
     module_09_shadow: mod12s,
     module_10: mod10,

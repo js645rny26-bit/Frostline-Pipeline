@@ -33,8 +33,15 @@
  *      Home_Offense_Source read from SHADOW_HISTORY. Notes shifted to col 28. REPLAY_COLS = 29.
  *      module11 SlateBoardEntry carries away_offense_source / home_offense_source;
  *      warns when a CORE Over uses a non-BLENDED offense projection.
+ *  v10 (2026-07-26): Pipeline_Last_Updated renamed from Statcast_Last_Updated
+ *      (DAILY_MATCHUPS col X, index 23). module02_statcast.ts renamed to
+ *      module02_pitcherWorkload.ts.
+ *  v11 (2026-07-26): STATCAST_GAME_PREVIEW sheet added — per-game Baseball Savant
+ *      preview ingestion (55-col schema: identity + status + pitcher Statcast +
+ *      hitter aggregates). Fail-open; Preview_Used_In_Projection = NO throughout
+ *      Phase 1. No projection or authorization change.
  */
-export const WORKBOOK_SCHEMA_VERSION = 10;
+export const WORKBOOK_SCHEMA_VERSION = 11;
 
 export interface ColumnDef {
   name: string;
@@ -45,7 +52,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_09" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -228,6 +235,75 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Over_Odds", index: 4, type: "number", width: 90, format: "0", filledBy: "MODULE_05d", exampleValue: "-112" },
       { name: "Under_Odds", index: 5, type: "number", width: 90, format: "0", filledBy: "MODULE_05d", exampleValue: "-85" },
       { name: "Bookmaker", index: 6, type: "string", width: 110, filledBy: "MODULE_05d", exampleValue: "FanDuel" },
+    ],
+  },
+
+  {
+    name: "STATCAST_GAME_PREVIEW",
+    description: "Per-game Baseball Savant pregame preview: fetch status + pitcher Statcast + hitter aggregates. Phase 1 — ingestion only; Preview_Used_In_Projection = NO throughout.",
+    section: "INPUT",
+    frozenRows: 1,
+    columns: [
+      // ── Identity + fetch status (cols A–U, indices 0–20) ─────────────────
+      { name: "Date",                         index: 0,  type: "string",  width: 100, filledBy: "MODULE_08b", description: "ISO date string yyyy-mm-dd", exampleValue: "2026-07-26" },
+      { name: "Game_ID",                       index: 1,  type: "string",  width: 160, filledBy: "MODULE_08b", exampleValue: "2026/07/26-ARI-WAS" },
+      { name: "MLB_GamePk",                    index: 2,  type: "number",  width: 110, filledBy: "MODULE_08b", exampleValue: "822706" },
+      { name: "Away_Team",                     index: 3,  type: "string",  width: 80,  filledBy: "MODULE_08b", exampleValue: "ARI" },
+      { name: "Home_Team",                     index: 4,  type: "string",  width: 80,  filledBy: "MODULE_08b", exampleValue: "WAS" },
+      { name: "Scheduled_First_Pitch",         index: 5,  type: "string",  width: 190, filledBy: "MODULE_08b", description: "UTC ISO timestamp from MLB Stats API", exampleValue: "2026-07-26T17:05:00Z" },
+      { name: "Preview_Availability",          index: 6,  type: "string",  width: 180, filledBy: "MODULE_08b", description: "AVAILABLE | NOT_PUBLISHED | NOT_FOUND | SOURCE_UNAVAILABLE | PARSE_FAILED | IDENTITY_MISMATCH | STALE | UNSUPPORTED_FORMAT", exampleValue: "AVAILABLE" },
+      { name: "Fetch_Status",                  index: 7,  type: "string",  width: 120, filledBy: "MODULE_08b", description: "success | http_error | timeout | parse_error | skipped", exampleValue: "success" },
+      { name: "Fetch_TS",                      index: 8,  type: "string",  width: 190, filledBy: "MODULE_08b", description: "ISO timestamp when the HTTP fetch completed", exampleValue: "2026-07-26T06:00:01.234Z" },
+      { name: "Source_Name",                   index: 9,  type: "string",  width: 250, filledBy: "MODULE_08b", exampleValue: "Baseball Savant Game Preview (baseballsavant.mlb.com/preview)" },
+      { name: "Source_URL_or_Endpoint",        index: 10, type: "string",  width: 300, filledBy: "MODULE_08b", exampleValue: "https://baseballsavant.mlb.com/preview?game_pk=822706" },
+      { name: "Source_Published_TS",           index: 11, type: "string",  width: 190, filledBy: "MODULE_08b", description: "Not available from this source; blank in Phase 1", exampleValue: "" },
+      { name: "Payload_Hash",                  index: 12, type: "string",  width: 140, filledBy: "MODULE_08b", description: "First 16 hex chars of SHA-256 over the raw var teams JSON", exampleValue: "a3f9c2e1b5d07820" },
+      { name: "Parser_Version",                index: 13, type: "string",  width: 110, filledBy: "MODULE_08b", exampleValue: "1.0.0" },
+      { name: "Starting_Pitcher_Match_Status", index: 14, type: "string",  width: 200, filledBy: "MODULE_08b", description: "MATCHED | UNVERIFIED | MISMATCH | NO_PROBABLE", exampleValue: "MATCHED" },
+      { name: "Lineup_Match_Status",           index: 15, type: "string",  width: 180, filledBy: "MODULE_08b", description: "LINEUP_POSTED | LINEUP_NOT_POSTED | UNAVAILABLE", exampleValue: "LINEUP_NOT_POSTED" },
+      { name: "Stale_Data_Flag",               index: 16, type: "string",  width: 120, filledBy: "MODULE_08b", description: "YES | NO", exampleValue: "NO" },
+      { name: "Parse_Warnings",                index: 17, type: "string",  width: 300, filledBy: "MODULE_08b", description: "Semicolon-separated list of non-fatal parse issues", exampleValue: "" },
+      { name: "Parse_Error",                   index: 18, type: "string",  width: 250, filledBy: "MODULE_08b", description: "Fatal parse error message; blank on success", exampleValue: "" },
+      { name: "Preview_Used_In_Projection",    index: 19, type: "string",  width: 200, filledBy: "MODULE_08b", description: "Always NO in Phase 1", exampleValue: "NO" },
+      { name: "Projection_Influence_Notes",    index: 20, type: "string",  width: 300, filledBy: "MODULE_08b", exampleValue: "Phase 1 — ingestion only; no projection influence authorised" },
+      // ── Away probable pitcher Statcast (cols V–AE, indices 21–30) ────────
+      { name: "Away_Pitcher_ID",               index: 21, type: "number",  width: 110, filledBy: "MODULE_08b", description: "MLB player ID of the away probable pitcher", exampleValue: "684442" },
+      { name: "Away_Pitcher_Name",             index: 22, type: "string",  width: 160, filledBy: "MODULE_08b", exampleValue: "Kohl Drake" },
+      { name: "Away_Pitcher_Qualifies",        index: 23, type: "string",  width: 130, filledBy: "MODULE_08b", description: "YES when the pitcher has sufficient BF for Statcast metrics; NO = didNotQualify", exampleValue: "NO" },
+      { name: "Away_Pitcher_xwOBA",            index: 24, type: "number",  width: 130, format: "0.000", filledBy: "MODULE_08b", description: "Season xwOBA allowed by the away starter", exampleValue: "0.344" },
+      { name: "Away_Pitcher_K_Pct",            index: 25, type: "number",  width: 120, format: "0.0", filledBy: "MODULE_08b", description: "Season K% for the away starter", exampleValue: "23.8" },
+      { name: "Away_Pitcher_BB_Pct",           index: 26, type: "number",  width: 120, format: "0.0", filledBy: "MODULE_08b", exampleValue: "9.5" },
+      { name: "Away_Pitcher_EV_Avg",           index: 27, type: "number",  width: 130, format: "0.0", filledBy: "MODULE_08b", description: "Average exit velocity allowed (mph)", exampleValue: "87.7" },
+      { name: "Away_Pitcher_Whiff_Pct",        index: 28, type: "number",  width: 130, format: "0.0", filledBy: "MODULE_08b", exampleValue: "33.3" },
+      { name: "Away_Pitcher_Hard_Hit_Pct",     index: 29, type: "number",  width: 150, format: "0.0", filledBy: "MODULE_08b", description: "Hard-hit % allowed (EV ≥ 95 mph)", exampleValue: "46.2" },
+      { name: "Away_Pitcher_Barrel_Rate",      index: 30, type: "number",  width: 140, format: "0.0", filledBy: "MODULE_08b", exampleValue: "15.4" },
+      // ── Home probable pitcher Statcast (cols AF–AO, indices 31–40) ───────
+      { name: "Home_Pitcher_ID",               index: 31, type: "number",  width: 110, filledBy: "MODULE_08b", exampleValue: "571945" },
+      { name: "Home_Pitcher_Name",             index: 32, type: "string",  width: 160, filledBy: "MODULE_08b", exampleValue: "Miles Mikolas" },
+      { name: "Home_Pitcher_Qualifies",        index: 33, type: "string",  width: 130, filledBy: "MODULE_08b", description: "YES when the pitcher has sufficient BF for Statcast metrics; NO = didNotQualify", exampleValue: "YES" },
+      { name: "Home_Pitcher_xwOBA",            index: 34, type: "number",  width: 130, format: "0.000", filledBy: "MODULE_08b", exampleValue: "0.344" },
+      { name: "Home_Pitcher_K_Pct",            index: 35, type: "number",  width: 120, format: "0.0", filledBy: "MODULE_08b", exampleValue: "12.2" },
+      { name: "Home_Pitcher_BB_Pct",           index: 36, type: "number",  width: 120, format: "0.0", filledBy: "MODULE_08b", exampleValue: "4.8" },
+      { name: "Home_Pitcher_EV_Avg",           index: 37, type: "number",  width: 130, format: "0.0", filledBy: "MODULE_08b", exampleValue: "89.9" },
+      { name: "Home_Pitcher_Whiff_Pct",        index: 38, type: "number",  width: 130, format: "0.0", filledBy: "MODULE_08b", exampleValue: "14.7" },
+      { name: "Home_Pitcher_Hard_Hit_Pct",     index: 39, type: "number",  width: 150, format: "0.0", filledBy: "MODULE_08b", exampleValue: "41.6" },
+      { name: "Home_Pitcher_Barrel_Rate",      index: 40, type: "number",  width: 140, format: "0.0", filledBy: "MODULE_08b", exampleValue: "8.8" },
+      // ── Away hitter aggregates — qualified hitters only (cols AP–AV, indices 41–47) ──
+      { name: "Away_Hitters_Total",            index: 41, type: "number",  width: 130, format: "0", filledBy: "MODULE_08b", description: "Total hitter rows returned by the page for the away team", exampleValue: "26" },
+      { name: "Away_Hitters_Qualified",        index: 42, type: "number",  width: 150, format: "0", filledBy: "MODULE_08b", description: "Hitters with didNotQualify = false", exampleValue: "14" },
+      { name: "Away_Hitters_xwOBA_Avg",        index: 43, type: "number",  width: 160, format: "0.000", filledBy: "MODULE_08b", description: "Mean xwOBA across qualified away hitters", exampleValue: "0.318" },
+      { name: "Away_Hitters_EV_Avg",           index: 44, type: "number",  width: 150, format: "0.0", filledBy: "MODULE_08b", description: "Mean exit velocity across qualified away hitters", exampleValue: "88.4" },
+      { name: "Away_Hitters_Hard_Hit_Avg",     index: 45, type: "number",  width: 170, format: "0.0", filledBy: "MODULE_08b", description: "Mean hard-hit % across qualified away hitters", exampleValue: "37.2" },
+      { name: "Away_Hitters_K_Pct_Avg",        index: 46, type: "number",  width: 155, format: "0.0", filledBy: "MODULE_08b", description: "Mean K% across qualified away hitters", exampleValue: "21.4" },
+      { name: "Away_Hitters_BB_Pct_Avg",       index: 47, type: "number",  width: 155, format: "0.0", filledBy: "MODULE_08b", description: "Mean BB% across qualified away hitters", exampleValue: "8.1" },
+      // ── Home hitter aggregates — qualified hitters only (cols AW–BC, indices 48–54) ──
+      { name: "Home_Hitters_Total",            index: 48, type: "number",  width: 130, format: "0", filledBy: "MODULE_08b", exampleValue: "26" },
+      { name: "Home_Hitters_Qualified",        index: 49, type: "number",  width: 150, format: "0", filledBy: "MODULE_08b", exampleValue: "12" },
+      { name: "Home_Hitters_xwOBA_Avg",        index: 50, type: "number",  width: 160, format: "0.000", filledBy: "MODULE_08b", exampleValue: "0.305" },
+      { name: "Home_Hitters_EV_Avg",           index: 51, type: "number",  width: 150, format: "0.0", filledBy: "MODULE_08b", exampleValue: "87.9" },
+      { name: "Home_Hitters_Hard_Hit_Avg",     index: 52, type: "number",  width: 170, format: "0.0", filledBy: "MODULE_08b", exampleValue: "35.8" },
+      { name: "Home_Hitters_K_Pct_Avg",        index: 53, type: "number",  width: 155, format: "0.0", filledBy: "MODULE_08b", exampleValue: "20.1" },
+      { name: "Home_Hitters_BB_Pct_Avg",       index: 54, type: "number",  width: 155, format: "0.0", filledBy: "MODULE_08b", exampleValue: "7.6" },
     ],
   },
 
