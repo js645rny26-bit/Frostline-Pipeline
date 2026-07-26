@@ -1,0 +1,232 @@
+SOURCES USED
+
+* The complete July 25 box scores and Statcast summary you pasted
+* The frozen July 25 GAME_SUMMARY and SLATE_BOARD projections
+* No new workbook run
+
+REFRESH CHECK
+
+This is the full-slate postmortem. Ticket grading remains separate because Frostline authorized 0 CORE plays.
+
+July 25 board grade
+
+The board was not uniformly bad, but it had a pronounced and damaging Over bias.
+
+Actual runs:       104 total, 6.93 per game
+Projected runs:    134.16 total, 8.94 per game
+Overprojection:    30.16 runs, 2.01 per game
+Projection MAE:    2.86 runs
+Median error:      1.89 runs
+Raw directions:    8 hits, 6 misses, 1 push
+
+The directional record looks respectable until it is split:
+
+Lane	Record	Projection MAE
+UNDER	5–1	1.09
+OVER	3–5–1	4.04
+
+That is the real story. The Under lane read the slate well. The Over lane repeatedly manufactured offense that never appeared.
+
+About Bratt: your number read was right, but the box score sharpens the diagnosis
+
+You were absolutely right that 14.74 was wildly too high.
+
+But Mitch Bratt himself was not good:
+
+5.0 IP
+7 hits
+5 earned runs
+5 walks
+92 pitches
+
+That is a legitimate attackable-start result. He created traffic, failed to control counts, and allowed Washington to score five.
+
+So Frostline was not wrong to identify vulnerability. It was wrong to translate vulnerability into extreme detonation certainty.
+
+The distinction should have been:
+
+Bratt: ATTACKABLE / TRAFFIC-HEAVY
+not
+Bratt: AUTOMATIC 8–9 RUN TEAM ENVIRONMENT
+
+Washington’s bullpen allowed zero runs over three innings, while Foster Griffin and the Nationals bullpen held Arizona to three. The engine missed the full staff survival on both sides:
+
+Team	Projected	Actual
+Arizona	5.80	3
+Washington	8.94	5
+
+So the total miss was not exclusively “Bratt was underrated.” It was:
+
+1. Bratt’s vulnerability was exaggerated into near-certain staff collapse.
+2. Washington’s post-Bratt bullpen survival was undervalued.
+3. Griffin’s suppression and Arizona’s conversion difficulty were undervalued.
+4. The resulting inflated baseline then passed through the survival gate unchanged.
+
+Your instinct was still the important one: 14.74 did not pass the baseball smell test, even though Bratt ultimately struggled.
+
+Clean board successes
+
+These reads captured both the general scoring environment and most of the game shape.
+
+Yankees–Phillies Under
+
+Projected: 6.95
+Actual:    4
+Final:     NYY 3–1
+
+Strong result. The unusual Philadelphia pitching structure did not create chaos, and the Yankees staff suppressed Philadelphia.
+
+Dodgers–Mets Under
+
+Projected: 6.69
+Actual:    7
+Final:     LAD 4–3
+
+Excellent point projection and correct Dodgers side lean. This was the cleanest overall read.
+
+Angels–Giants Over
+
+Projected: 8.85
+Actual:    11
+Final:     SF 9–2
+
+Correct environment and correct dominant team. Ryan Johnson detonated exactly as the game needed.
+
+Rockies–Brewers Over
+
+Projected: 11.55
+Actual:    13
+Final:     MIL 8–5
+
+Correct scoring environment and correct Milwaukee lean. Feltner allowed five, and the bullpens extended the game.
+
+Hollow wins
+
+These totals graded correctly, but the underlying game truth was badly wrong.
+
+Cubs–Pirates Over
+
+Projected score shape: PIT 5.67, CHC 3.88
+Actual:                CHC 11, PIT 0
+
+The Over hit, but Frostline chose the wrong offense and wrong game controller. This cannot receive a full truth grade.
+
+Skenes struck out 11 and generated 22 whiffs, yet allowed five runs. Pittsburgh’s bullpen then collapsed. The valid thesis was Cubs pressure plus Pittsburgh bullpen continuation, not a Pittsburgh-led game.
+
+Blue Jays–Red Sox Under
+
+Projected score shape: BOS 3.71, TOR 2.68
+Actual:                TOR 6, BOS 0
+
+The Under won because Dylan Cease threw a one-hit shutout. The projected winner and offensive distribution were reversed.
+
+Reds–Cardinals Under
+
+Projected score shape: CIN 4.11, STL 2.75
+Actual:                STL 7, CIN 0
+
+The total stayed Under 8, but the game script was completely reversed. Pallante dominated while Hunter Greene allowed seven.
+
+These are useful vehicle results, not reliable game-truth successes.
+
+The major failures
+
+Athletics–Twins Over
+
+Projected: 10.41
+Actual:     2
+Error:     +8.41
+
+The largest miss. Frostline projected both teams above five runs. They combined for nine hits, no home runs, and four total hard-hit balls against Minnesota pitching.
+
+This was an offense-identity failure on both sides.
+
+Guardians–Rays Over
+
+Projected: 8.86
+Actual:     3
+Error:     +5.86
+
+Nick Martinez and the Tampa bullpen shut Cleveland out. The Guardians produced no extra-base hits and only one walk.
+
+The engine projected Cleveland for 3.91 despite a lineup that ultimately showed almost no conversion depth.
+
+Astros–White Sox Over
+
+Projected score: CHW 6.56, HOU 4.26
+Actual:          HOU 4, CHW 1
+
+This was one of the board’s worst team-identity reads.
+
+Hunter Brown dominated Chicago for seven innings. Sean Burke also pitched well, striking out ten and allowing only two earned runs. Frostline incorrectly made the White Sox the likely offensive driver.
+
+Braves–Orioles Over
+
+Projected: 9.38
+Actual:     5
+
+Both starters survived. Brandon Young allowed one run over 6⅓, while Bryce Elder worked through four walks and allowed only one earned run. The board did not give enough weight to survival despite traffic.
+
+D-backs–Nationals Over
+
+Projected: 14.74
+Actual:     8
+
+The most dangerous false-confidence output because it combined:
+
+* 95% displayed confidence
+* STRONG_BUY
+* +5.24 projected edge
+* survival-gate PASS
+
+That entire confidence stack came from the same inflated projection foundation.
+
+What the board actually demonstrated
+
+Projection truth
+
+Partial failure.
+
+The point estimates improved considerably from the prior ugly sample, but a +2.01-run bias is still severe. The board entered the slate expecting roughly 30 more runs than actually occurred.
+
+Vehicle truth
+
+Mixed.
+
+The raw total direction went 8–6–1, but three wins came through materially different scripts than Frostline projected.
+
+Authorization truth
+
+Pass.
+
+No bets were authorized. That prevented Arizona–Washington, Cleveland–Tampa Bay, and the other false Overs from becoming CORE tickets.
+
+Player and team identity
+
+Fail.
+
+The recurring weakness is not merely rookie pitchers. It is unstable identity translation:
+
+Vulnerable starter → projected full detonation
+Hot or capable offense → projected reliable conversion
+Large projected edge → elevated confidence
+
+But the board is not yet adequately distinguishing:
+
+traffic from scoring
+starter vulnerability from full-staff collapse
+power access from sustained conversion
+one team’s pressure from a two-sided Over
+
+Final labels
+
+Board transparency:          PASS
+Lock and safety architecture: PASS
+Under lane:                  PASS
+Over lane:                   FAIL
+Game-script accuracy:        FAIL
+Point-projection calibration: FAIL
+Ticket result:               NO BETS
+Operational status:          NO CORE — RESEARCH-ONLY
+
+And the sharpest human correction was exactly what you felt before first pitch: the giant D-backs–Nationals number was less believable than the spreadsheet’s confidence made it look. The box score confirms that the engine recognized Bratt’s traffic risk but grossly overstated how completely that risk would convert across the entire game.
