@@ -106,6 +106,22 @@ const DEFAULT_FLOOR_FACTOR =
 /** How close to a threshold a gate verdict must be for it to be MARGINAL. */
 const MARGINAL_MARGIN = 0.15;
 
+/**
+ * baseball_only_projection above this value triggers a HIGH_PROJECTION_OUTLIER
+ * note in the SURVIVAL_GATE_REPLAY sheet so operators can cluster and review
+ * extreme-total CORE picks without code access.
+ *
+ * Rationale: the survival floor scales linearly with baseball_only_proj, so a
+ * high absolute projection still passes the gate easily while carrying more
+ * outcome variance than a moderate one.  10.5 runs is roughly the 90th
+ * percentile of recent reconstructed projections.
+ *
+ * ⚠ Recalibrate once ≥ 15 settled CORE outcomes exist in SURVIVAL_GATE_REPLAY.
+ *   Compare the distribution of baseball_only_proj for CORE wins vs losses and
+ *   adjust to the value where losses begin clustering.
+ */
+const HIGH_PROJECTION_OUTLIER_THRESHOLD = 10.5;
+
 // ─── VEHICLE_LOG column indices (0-based) ─────────────────────────────────────
 // Date | Game_ID | Away | Home | Vehicle_Type | Market_Line | Direction |
 // Projected_Total | Variance | Final_Decision | Core_Blocker | Edge_Strength | Confidence | Publish_TS
@@ -584,6 +600,14 @@ export async function runSurvivalGateReplay(
         ? "FALLBACK_OFFENSE_SOURCE"
         : "";
 
+    // Flag when baseball_only_projection exceeds the outlier threshold.
+    // High-absolute-projection games pass the gate easily but carry more outcome
+    // variance; this note lets operators filter and review them in the sheet.
+    const highProjectionNote =
+      baseballOnlyProj !== null && baseballOnlyProj > HIGH_PROJECTION_OUTLIER_THRESHOLD
+        ? "HIGH_PROJECTION_OUTLIER"
+        : "";
+
     replayRows.push({
       date:              vl.date,
       game_id:           vl.game_id,
@@ -617,6 +641,7 @@ export async function runSurvivalGateReplay(
         sh ? "" : "SHADOW_HISTORY_ABSENT",
         actual === null ? "NO_OUTCOME" : "",
         fallbackOffenseNote,
+        highProjectionNote,
       ].filter(Boolean).join("; "),
     });
   }
