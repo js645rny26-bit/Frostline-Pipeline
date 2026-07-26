@@ -929,6 +929,17 @@ export async function extractOutputBoards(
       // Blocks any new CORE authorization when the edge formula is uncalibrated.
       // The survival gate and other per-game downgrade paths still run below.
       // The blocker string mirrors core_auth_status so callers see the exact reason.
+      //
+      // Authorization-integrity note (#23):
+      //   This is the SOLE global chokepoint for CORE authorization in the
+      //   per-game loop.  `decision` here equals `rawDecision` from
+      //   computeDecision — the only other function that produces "CORE".
+      //   `sideDecision` (the side-bet signal, computed after this block) is
+      //   informational only: it is written to the `side_decision` field of
+      //   SlateBoardEntry and to the SLATE_BOARD Y-column, but it never feeds
+      //   back into `decision`, `final_decision`, `core_count`, or any lock
+      //   logic.  The monotonicity gate therefore covers every authoritative
+      //   CORE path without exception.
       if (!coreAuthEnabled && decision === "CORE") {
         decision    = "NO_CORE";
         coreBlocker = coreAuthStatus; // e.g. DISABLED_MONOTONICITY_FAIL | _STALE | _NOT_COMPUTED | _INSUFFICIENT_SAMPLE
@@ -1192,6 +1203,21 @@ export async function extractOutputBoards(
       let survivalCheck: "PASS" | "FAIL" | "N_A" = "N_A";
       let survivalFailureReason = "";
 
+      // Authorization-integrity note (#30):
+      //   Guard is doubly safe against weakening:
+      //   (a) TypeScript type narrowing — `market.line` is typed `number | null`;
+      //       the `!== null` check narrows it to `number` before it is passed to
+      //       `applyOverSurvivalGate(marketLine: number)`.  Removing the null
+      //       check would be a compile-time error, not a silent runtime bypass.
+      //   (b) computeDecision returns PENDING (never CORE) when `marketLine` is
+      //       null (see computeDecision line ~493), so no CORE candidate can
+      //       arrive here with a null line even if the guard were somehow absent.
+      //   UNDER picks bypass this block intentionally — the survival gate is an
+      //   Over-only thesis test.  A CORE UNDER is locked by the board-lock gate
+      //   like any other CORE but is never run through the component stress test.
+      //   Note (#44): `gs.*` fields are in-memory from mod09.game_summary_rows
+      //   (runner.ts line ~427) — module11 never re-reads the GAME_SUMMARY sheet,
+      //   so column-index mismatches between the sheet and the gate are impossible.
       if (direction === "OVER" && market.line !== null) {
         const sg = applyOverSurvivalGate(
           gs.baseball_only_projection,

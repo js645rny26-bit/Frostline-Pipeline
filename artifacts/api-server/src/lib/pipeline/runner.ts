@@ -424,6 +424,14 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
 
   // Module 11: Compute + write SLATE_BOARD and ACTIVE_BOARD_SNAPSHOT
   // rotowireProps is passed for shadow-mode prop comparison signals — no CORE impact.
+  //
+  // Authorization-integrity note (#44): mod09.game_summary_rows is the in-memory
+  // GameSummaryRow[] produced by module09 above.  Module11 receives these objects
+  // directly and never re-reads the GAME_SUMMARY sheet.  All survival gate inputs
+  // (baseball_only_projection, starter_attack_runs, bullpen_continuation_runs,
+  // traffic_conversion_runs, hr_xbh_damage_runs, environment_run_adjustment) are
+  // typed as `number` on GameSummaryRow — not optional — so COMPONENT_DATA_UNAVAILABLE
+  // cannot fire in a healthy module09 run; it is a defensive guard for future callers.
   const mod11 = await extractOutputBoards(mod09.game_summary_rows, workbookId, rotowireProps, normalized.games);
 
   // Module 17 (phase 1): Log vehicle selections for this publish run.

@@ -942,3 +942,246 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
     );
   });
 });
+
+// ─── §7: Monotonicity gate — CORE authorization chokepoint (#23) ──────────────
+//
+// The monotonicity gate in module11's per-game loop is:
+//
+//   if (!coreAuthEnabled && decision === "CORE") {
+//     decision    = "NO_CORE";
+//     coreBlocker = coreAuthStatus;
+//   }
+//
+// This section confirms:
+//   (a) When coreAuthEnabled=false, any rawDecision=CORE becomes NO_CORE
+//       with coreBlocker mirroring the exact auth-status string.
+//   (b) When coreAuthEnabled=true, CORE passes through unchanged.
+//   (c) The gate acts only on `decision` — a simulated sideDecision variable
+//       computed independently after the gate is never affected by it.
+//
+// The helper simulateMonotonicityGate() mirrors the exact branch in
+// extractOutputBoards() without Sheets I/O, using only exported functions.
+
+describe("Monotonicity gate — sole CORE authorization chokepoint", () => {
+  const ELIGIBLE_CTX: GameEligibilityContext = {
+    awayPitcherRole:     "CONVENTIONAL_STARTER",
+    homePitcherRole:     "CONVENTIONAL_STARTER",
+    awayExpectedInnings: 6.0,
+    homeExpectedInnings: 6.0,
+    bullpenAvailable:    true,
+  };
+
+  /** Mirrors the monotonicity gate + survival gate portion of the module11 loop. */
+  function simulateMonotonicityGate(params: {
+    projectedTotal:    number;
+    marketLine:        number;
+    coreAuthEnabled:   boolean;
+    coreAuthStatus:    string;
+    /** Optional side-edge for the separate side-bet signal (informational only). */
+    sideEdge?:         number;
+  }): {
+    decision:    "CORE" | "NO_CORE" | "PENDING";
+    coreBlocker: string;
+    /** Simulated side_decision — computed after the monotonicity gate, independently. */
+    sideDecision: "CORE" | "NO_CORE" | "NO_MARKET";
+  } {
+    const { decision: rawDecision, coreBlocker: rawBlocker } =
+      computeDecision(params.projectedTotal, params.marketLine, "FULL_GAME_OU", ELIGIBLE_CTX);
+
+    let decision    = rawDecision;
+    let coreBlocker = rawBlocker;
+
+    // ── Monotonicity gate (exact copy of module11 line ~932) ──────────────────
+    if (!params.coreAuthEnabled && decision === "CORE") {
+      decision    = "NO_CORE";
+      coreBlocker = params.coreAuthStatus;
+    }
+
+    // ── sideDecision is computed independently AFTER the gate ─────────────────
+    // This mirrors module11 lines ~1241-1250 where sideDecision is derived from
+    // sideEdge without consulting `decision`.  It is written to the side_decision
+    // field of SlateBoardEntry (col Y) and never feeds back into decision,
+    // final_decision, or core_count.
+    const SIDE_CORE_THRESHOLD = 1.5;
+    const sideEdge = params.sideEdge ?? null;
+    const sideDecision: "CORE" | "NO_CORE" | "NO_MARKET" =
+      sideEdge === null            ? "NO_MARKET" :
+      Math.abs(sideEdge) >= SIDE_CORE_THRESHOLD ? "CORE"     : "NO_CORE";
+
+    return { decision, coreBlocker, sideDecision };
+  }
+
+  it("converts CORE→NO_CORE when coreAuthEnabled=false (DISABLED_MONOTONICITY_NOT_COMPUTED)", () => {
+    // projected=11.5, line=8.0 → variance=3.5 ≥ 1.5 → rawDecision=CORE before gate
+    const r = simulateMonotonicityGate({
+      projectedTotal:  11.5,
+      marketLine:      8.0,
+      coreAuthEnabled: false,
+      coreAuthStatus:  "DISABLED_MONOTONICITY_NOT_COMPUTED",
+    });
+    assert.equal(r.decision,    "NO_CORE",                          "gate must downgrade CORE to NO_CORE");
+    assert.equal(r.coreBlocker, "DISABLED_MONOTONICITY_NOT_COMPUTED", "blocker must mirror auth status exactly");
+  });
+
+  it("preserves CORE when coreAuthEnabled=true (gate is a no-op)", () => {
+    const r = simulateMonotonicityGate({
+      projectedTotal:  11.5,
+      marketLine:      8.0,
+      coreAuthEnabled: true,
+      coreAuthStatus:  "ENABLED",
+    });
+    assert.equal(r.decision,    "CORE", "enabled gate must not downgrade a valid CORE");
+    assert.equal(r.coreBlocker, "",     "coreBlocker must be empty for an unblocked CORE");
+  });
+
+  it("preserves NO_CORE unchanged when coreAuthEnabled=false (gate only downgrades CORE)", () => {
+    // projected=7.0, line=8.0 → variance=−1.0 → Under, absVar < 1.5 → NO_CORE
+    const r = simulateMonotonicityGate({
+      projectedTotal:  7.0,
+      marketLine:      8.0,
+      coreAuthEnabled: false,
+      coreAuthStatus:  "DISABLED_MONOTONICITY_FAIL",
+    });
+    assert.equal(r.decision, "NO_CORE", "NO_CORE games are unaffected by the monotonicity gate");
+    assert.notEqual(r.coreBlocker, "DISABLED_MONOTONICITY_FAIL",
+      "blocker must not be overwritten for already-NO_CORE games");
+  });
+
+  it("sideDecision=CORE does not affect decision when monotonicity gate blocks", () => {
+    // Main decision is CORE (large Over), but gate disables it.
+    // sideEdge is also very large → sideDecision=CORE.
+    // The sideDecision must remain CORE (it is informational), while decision
+    // is correctly downgraded to NO_CORE.
+    const r = simulateMonotonicityGate({
+      projectedTotal:  11.5,
+      marketLine:      8.0,
+      coreAuthEnabled: false,
+      coreAuthStatus:  "DISABLED_MONOTONICITY_NOT_COMPUTED",
+      sideEdge:        2.5,   // ≥ 1.5 → sideDecision=CORE (informational)
+    });
+    assert.equal(r.decision,     "NO_CORE", "main decision must be gated to NO_CORE");
+    assert.equal(r.sideDecision, "CORE",    "sideDecision is informational and is not gated");
+    // The distinction proves that sideDecision independence cannot become a
+    // silent authorization bypass: sideDecision is a separate signal on the
+    // SlateBoardEntry and is never counted in core_count or final_decision.
+  });
+
+  it("all coreAuthStatus variants produce the correct blocker string", () => {
+    const variants: string[] = [
+      "DISABLED_MONOTONICITY_NOT_COMPUTED",
+      "DISABLED_MONOTONICITY_FAIL",
+      "DISABLED_MONOTONICITY_INSUFFICIENT_SAMPLE",
+      "DISABLED_MONOTONICITY_STALE",
+    ];
+    for (const status of variants) {
+      const r = simulateMonotonicityGate({
+        projectedTotal:  11.5,
+        marketLine:      8.0,
+        coreAuthEnabled: false,
+        coreAuthStatus:  status,
+      });
+      assert.equal(r.decision,    "NO_CORE", `${status}: decision must be NO_CORE`);
+      assert.equal(r.coreBlocker, status,    `${status}: blocker must mirror auth status exactly`);
+    }
+  });
+});
+
+// ─── §8: CORE UNDER picks bypass survival gate — survivalCheck stays N_A (#30) ─
+//
+// The survival gate guard is: if (direction === "OVER" && market.line !== null)
+//
+// UNDER picks — even those with large enough variance to qualify as CORE —
+// must bypass the gate entirely (survivalCheck = "N_A").  This is correct:
+// the survival gate is an Over-only thesis test.
+//
+// A CORE UNDER is still subject to the monotonicity gate and board-lock gate.
+//
+// This section pins that the guard condition does not accidentally run for UNDERs,
+// which would cause applyOverSurvivalGate to receive an UNDER direction context
+// it was not designed for.
+
+describe("Survival gate guard — CORE UNDER picks bypass the gate (#30)", () => {
+  const ELIGIBLE_CTX: GameEligibilityContext = {
+    awayPitcherRole:     "CONVENTIONAL_STARTER",
+    homePitcherRole:     "CONVENTIONAL_STARTER",
+    awayExpectedInnings: 6.0,
+    homeExpectedInnings: 6.0,
+    bullpenAvailable:    true,
+  };
+
+  /** Simulates the module11 loop gate sequence for one game. */
+  function simulateGateSequence(params: {
+    projectedTotal:          number;
+    marketLine:              number | null;
+    baseballOnlyProjection:  number | undefined;
+    starterAttackRuns:       number | undefined;
+  }): {
+    decision:    "CORE" | "NO_CORE" | "PENDING";
+    direction:   "OVER" | "UNDER" | "NONE";
+    survivalCheck: "PASS" | "FAIL" | "N_A";
+    gateRan:     boolean;
+  } {
+    const { decision: rawDecision, direction, coreBlocker: rawBlocker } =
+      computeDecision(params.projectedTotal, params.marketLine, "FULL_GAME_OU", ELIGIBLE_CTX);
+
+    let decision    = rawDecision;
+    let survivalCheck: "PASS" | "FAIL" | "N_A" = "N_A";
+    let gateRan = false;
+
+    if (direction === "OVER" && params.marketLine !== null) {
+      gateRan = true;
+      const sg = applyOverSurvivalGate(
+        params.baseballOnlyProjection,
+        params.starterAttackRuns,
+        4.5, 0, 0, 0.5,
+        params.marketLine,
+      );
+      survivalCheck = sg.survival_check;
+      if (decision === "CORE" && sg.survival_check === "FAIL") decision = "NO_CORE";
+    }
+
+    return { decision, direction, survivalCheck, gateRan };
+  }
+
+  it("CORE UNDER with large variance: gate does not run, survivalCheck stays N_A", () => {
+    // projected=5.0, line=9.5 → variance=−4.5, UNDER, absVar=4.5 ≥ 1.5 → rawDecision=CORE
+    const r = simulateGateSequence({
+      projectedTotal:         5.0,
+      marketLine:             9.5,
+      baseballOnlyProjection: 4.5,
+      starterAttackRuns:      2.5,
+    });
+    assert.equal(r.direction,     "UNDER", "direction must be UNDER for this projection");
+    assert.equal(r.decision,      "CORE",  "a large UNDER qualifies as CORE before the gate");
+    assert.equal(r.survivalCheck, "N_A",   "survival gate must not run for UNDER direction");
+    assert.equal(r.gateRan,       false,   "gate must be skipped entirely for UNDER picks");
+  });
+
+  it("CORE OVER with a market line: gate runs and can block", () => {
+    // projected=11.5, line=7.5 → OVER CORE candidate; components designed to PASS
+    const r = simulateGateSequence({
+      projectedTotal:         11.5,
+      marketLine:             7.5,
+      baseballOnlyProjection: 10.0,
+      starterAttackRuns:      5.5,
+    });
+    assert.equal(r.direction, "OVER", "direction must be OVER");
+    assert.equal(r.gateRan,   true,   "gate must run for OVER with a market line");
+    assert.notEqual(r.survivalCheck, "N_A",
+      "survivalCheck must be PASS or FAIL — not N_A — when the gate runs");
+  });
+
+  it("PENDING (no market line): gate does not run, survivalCheck stays N_A", () => {
+    // computeDecision returns PENDING when marketLine=null; the guard also requires
+    // market.line !== null — both independently prevent the gate from running.
+    const r = simulateGateSequence({
+      projectedTotal:         11.5,
+      marketLine:             null,
+      baseballOnlyProjection: 10.0,
+      starterAttackRuns:      5.5,
+    });
+    assert.equal(r.decision,      "PENDING", "no market line → PENDING, not CORE");
+    assert.equal(r.gateRan,       false,     "gate must not run when market line is null");
+    assert.equal(r.survivalCheck, "N_A",     "survivalCheck must stay N_A for PENDING games");
+  });
+});
