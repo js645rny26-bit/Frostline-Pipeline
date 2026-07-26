@@ -1,0 +1,146 @@
+SOURCES USED
+
+* Your full list of 26 proposed tasks
+* Completed work on #21, #27, #28, and #31
+* The latest inspected canonical workbook state
+* The current NO CORE — RESEARCH-ONLY freeze
+
+REFRESH CHECK
+
+No new code or workbook inspection occurred in this turn. This is queue triage based on the task descriptions and already-verified engine state.
+
+Queue verdict
+
+Do not authorize this 26-task queue as written.
+
+It is exactly the task fragmentation that keeps turning one bounded commissioning problem into weeks of validation shards, UI refinements, and follow-up checks.
+
+Most of these are not independent tasks. Several are stale, several only become relevant after the stubs go live, and most UI items should not be touched while projection truth remains uncommissioned.
+
+Retain, but merge
+
+One authorization-integrity pass
+
+Merge these into a single bounded verification:
+
+* #23 monotonicity gate across every CORE path
+* #29 real pipeline COMPONENT_DATA_UNAVAILABLE
+* #30 fail closed if the survival guard is weakened
+* #44 GAME_SUMMARY survival columns reach the final decision
+
+These test one chain:
+
+GAME_SUMMARY components
+→ survival gate
+→ monotonicity gate
+→ final CORE/NO CORE
+
+They should not be four separate paid tasks.
+
+One lock-integrity pass
+
+Merge:
+
+* #41 atomic BOARD_LOCK_STATE writes
+* #45 30-minute reschedule boundary verification
+* #47 missing-first-pitch badge verification
+
+Only #41 changes backend integrity. The other two are smoke-test cases within the same pass.
+
+Schema drift protection
+
+Keep #43, but only as a small fail-closed preflight check. Schema drift happened repeatedly, so preventing recurrence is justified.
+
+It must not turn into another schema-management subsystem.
+
+Live outlier protection
+
+Keep #53, but do not run it yet.
+
+It belongs after:
+
+1. real offense splits replace the module05 stub,
+2. the projection formula is replayed,
+3. monotonicity/regression is populated.
+
+Otherwise we would be placing a new gate around projections that we already know are built from incomplete offense inputs.
+
+⸻
+
+Close or subsume now
+
+Task	Disposition
+#42	Close. Stale. The live workbook already shows schema v8 and 508 schema rows.
+#50	Fold into the #27 smoke test. It does not warrant a separate task.
+#45	Fold into lock-integrity testing.
+#47	Implementation is already reported complete. Verify during the consolidated smoke test, then close.
+#52	Remove from the development queue. This is a future analysis checkpoint after 15+ settled CORE outcomes, not a code task.
+
+Dormant until the stubs go live
+
+These should not be active tasks today:
+
+* #33 outcome-change alert after traffic/HR replacement
+* #54 traffic and HR/XBH flow verification
+* #55 baseline-offense audit consistency
+
+They are acceptance criteria for the future stub-replacement task. Creating them separately now only increases queue noise.
+
+Park all nonessential observability
+
+Park:
+
+* #34 lock-decision-change alerts
+* #35 fully approximated replay warning
+* #51 fallback-source fields in VEHICLE_LOG
+
+These may be useful later, but none improves current projection truth or unlocks commissioning.
+
+Freeze the UI queue
+
+Do not spend more work on:
+
+* #37 locked-at timestamp
+* #38 pre-lock pick details
+* #39 board filters
+* #40 dashboard pick counts
+* #46 visible reschedule-reset message
+* #48 lock-suppressed visual grouping
+* #49 fallback warning in the UI
+
+The board already exposes enough information to conduct research and QA. More polish does not make the projections accurate.
+
+Reject operator CORE re-enablement for now
+
+#22 should be removed from the active queue.
+
+An easy operator bypass is inappropriate while:
+
+* monotonicity is absent,
+* regression is uncommissioned,
+* the engine is intentionally fail-closed,
+* and the Over lane remains biased.
+
+The spreadsheet sentinel is inconvenient by design. That friction is currently protective.
+
+Actual working queue
+
+The 26 proposals reduce to:
+
+1. Authorization-integrity bundle: #23 + #29 + #30 + #44
+2. Lock-integrity bundle: #41, with #45 and #47 as test cases
+3. Schema drift preflight: #43
+4. Live outlier gate: #53, deferred until calibration foundations are live
+
+Everything else is closed, folded into those passes, trigger-dependent, or parked.
+
+Final judgment
+
+Proposed tasks:              26
+Actual active engineering:    3 bounded passes
+Deferred calibration gate:    1
+UI work authorized:           0
+Operator bypass authorized:   NO
+Engine freeze:                STANDS
+
+The engine needs to earn further interface work through projection performance. It does not need 26 more opportunities to generate another list of “three remaining issues.”
