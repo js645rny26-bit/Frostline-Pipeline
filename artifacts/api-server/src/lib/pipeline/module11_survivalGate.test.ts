@@ -798,6 +798,86 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
     );
   });
 
+  // ── §6.4: ENVIRONMENT_DEPENDENT_OVER — inclusive baseball_only determines env thesis ──
+  //
+  // This test confirms that the ENVIRONMENT_DEPENDENT_OVER path is evaluated against
+  // the INCLUSIVE baseball_only_projection (all four components), not a starter+bullpen
+  // only subset.
+  //
+  // Scenario A — exclusive definition would misclassify as env-dependent:
+  //   starter=3.0, bullpen=2.0, traffic=2.5, hr_xbh=1.5
+  //   starter+bullpen only = 5.0 < line 8.5 → would trigger ENVIRONMENT_DEPENDENT_OVER
+  //   but inclusive baseball_only = 3.0+2.0+2.5+1.5 = 9.0 > 8.5 → env did NOT manufacture thesis
+  //
+  // Scenario B — environment truly manufactured the Over:
+  //   same components but baseball_only passed in as 5.0 (exclusive, wrong)
+  //   vs 9.0 (inclusive, correct)
+  //   This test pins that the formula uses the caller-supplied baseball_only_projection,
+  //   and that module09 must supply the inclusive value.
+
+  it("§6.4 ENVIRONMENT_DEPENDENT_OVER: inclusive baseball_only (all 4 components) determines env thesis", () => {
+    // Scenario A: if baseball_only were computed as starter+bullpen only (5.0),
+    // this game would be wrongly classified ENVIRONMENT_DEPENDENT_OVER because 5.0 < 8.5.
+    const wrongResult = overSurvivalCheck(
+      3.0,   // starterAttackRuns
+      2.0,   // bullpenContinuationRuns
+      2.5,   // trafficConversionRuns   — non-zero (future real value)
+      1.5,   // hrXbhDamageRuns         — non-zero (future real value)
+      5.0,   // baseball_only_projection = starter+bullpen only (WRONG — excludes traffic/HR)
+      3.5,   // environmentRunAdjustment
+      8.5,   // marketLine
+    );
+    assert.equal(
+      wrongResult.survival_check, "FAIL",
+      "exclusive (starter+bullpen only) baseball_only triggers ENVIRONMENT_DEPENDENT_OVER",
+    );
+    assert.equal(
+      wrongResult.survival_failure_reason, "ENVIRONMENT_DEPENDENT_OVER",
+      "exclusive definition misclassifies this game as env-dependent",
+    );
+
+    // Scenario B: with the CORRECT inclusive baseball_only (all 4 components = 9.0),
+    // the game is NOT env-dependent because the baseball thesis (9.0 > 8.5) stands alone.
+    const correctResult = overSurvivalCheck(
+      3.0,   // starterAttackRuns
+      2.0,   // bullpenContinuationRuns
+      2.5,   // trafficConversionRuns   — non-zero (future real value)
+      1.5,   // hrXbhDamageRuns         — non-zero (future real value)
+      9.0,   // baseball_only_projection = 3.0+2.0+2.5+1.5 (CORRECT — includes traffic+HR)
+      0.0,   // environmentRunAdjustment — env adds nothing in this scenario
+      8.5,   // marketLine
+    );
+    assert.notEqual(
+      correctResult.survival_failure_reason, "ENVIRONMENT_DEPENDENT_OVER",
+      "inclusive definition must NOT classify this game as env-dependent (baseball_only=9.0 > line=8.5)",
+    );
+    // baseball edge = 9.0 − 8.5 = 0.5 < 1.25 → BASEBALL_ONLY_EDGE_BELOW_THRESHOLD (not env-dependent)
+    assert.equal(
+      correctResult.survival_failure_reason, "BASEBALL_ONLY_EDGE_BELOW_THRESHOLD",
+      "correct reason: baseball edge exists but is below threshold, not env-manufactured",
+    );
+
+    // Scenario C: raise components to ensure a full PASS with inclusive baseball_only
+    //   starter=4.0, bullpen=3.0, traffic=2.5, hr=1.5 → baseball_only=11.0
+    //   baseball edge = 11.0 − 8.5 = 2.5 ≥ 1.25 ✓
+    //   floor = 4.0×0.80 + 3.0×0.75 + 2.5×0.70 + 1.5×0.90
+    //         = 3.200 + 2.250 + 1.750 + 1.350 = 8.550  → edge = 8.55 − 8.5 = 0.05 < 0.25 → FAIL on floor
+    //   Increase line to 7.5 for a clean PASS:
+    //   baseball edge = 11.0 − 7.5 = 3.5 ✓ floor edge = 8.55 − 7.5 = 1.05 ≥ 0.25 ✓
+    const passResult = overSurvivalCheck(
+      4.0,   // starterAttackRuns
+      3.0,   // bullpenContinuationRuns
+      2.5,   // trafficConversionRuns   — non-zero
+      1.5,   // hrXbhDamageRuns         — non-zero
+      11.0,  // baseball_only_projection = 4.0+3.0+2.5+1.5 (inclusive)
+      0.2,   // environmentRunAdjustment
+      7.5,   // marketLine
+    );
+    assert.equal(passResult.survival_check, "PASS",
+      "inclusive baseball_only allows a legitimate baseball Over to PASS (not misclassified as env-dependent)");
+    assert.equal(passResult.survival_failure_reason, "");
+  });
+
   // ── §6.3: PASS — HR/XBH component alone is the deciding factor ────────────
   //
   // Setup: starter=5.5, bullpen=4.5, traffic=0, hr_xbh=0.7, line=8.0

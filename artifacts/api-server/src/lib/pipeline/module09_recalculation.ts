@@ -953,9 +953,20 @@ export async function verifyRecalculation(
     const homeBullpenRuns = homeBaselineRate * ((9 - awayPitchExp) / 9) * awayBullpenQual;
     const starterAttackRuns       = parseFloat((awayStarterRuns + homeStarterRuns).toFixed(2));
     const bullpenContinuationRuns = parseFloat((awayBullpenRuns + homeBullpenRuns).toFixed(2));
-    const baseballOnlyProj        = parseFloat((starterAttackRuns + bullpenContinuationRuns).toFixed(2));
+    // Traffic and HR/XBH are reserved stubs (not yet modelled — real values will be non-zero).
+    // They are extracted as named variables here so that baseballOnlyProj always equals
+    // the sum of ALL FOUR baseball components.  "Baseball only" means excluding the park ×
+    // weather environment modifier — traffic and HR/XBH are baseball inputs, not environmental
+    // factors.  Keeping the formula inclusive now ensures consistency with the survival floor
+    // formula in module11 (starter×0.80 + bullpen×0.75 + traffic×0.70 + HR_XBH×0.90) the
+    // moment the stubs are replaced with real values.
+    const trafficConversionRuns   = 0;  // not yet modelled — reserved
+    const hrXbhDamageRuns         = 0;  // not yet modelled — reserved
+    const baseballOnlyProj        = parseFloat(
+      (starterAttackRuns + bullpenContinuationRuns + trafficConversionRuns + hrXbhDamageRuns).toFixed(2),
+    );
     const baselineOffRuns         = parseFloat((awayBaselineRate + homeBaselineRate).toFixed(2));
-    // Environment contribution = what park × weather added (or removed) from the total.
+    // Environment contribution = projected_total minus all baseball components.
     const envRunAdj               = parseFloat((projTotal - baseballOnlyProj).toFixed(2));
 
     gameSummaryRows.push({
@@ -1011,9 +1022,9 @@ export async function verifyRecalculation(
       starter_attack_runs:           starterAttackRuns,
       bullpen_continuation_runs:     bullpenContinuationRuns,
       baseline_offense_runs:         baselineOffRuns,
-      traffic_conversion_runs:       0,  // not yet modelled — reserved
-      hr_xbh_damage_runs:            0,  // not yet modelled — reserved
-      baseball_only_projection:      baseballOnlyProj,
+      traffic_conversion_runs:       trafficConversionRuns,  // stub — currently 0; real value replaces this
+      hr_xbh_damage_runs:            hrXbhDamageRuns,        // stub — currently 0; real value replaces this
+      baseball_only_projection:      baseballOnlyProj,       // = starter + bullpen + traffic + HR/XBH
       environment_run_adjustment:    envRunAdj,
     });
 

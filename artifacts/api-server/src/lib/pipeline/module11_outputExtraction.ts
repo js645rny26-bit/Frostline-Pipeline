@@ -66,7 +66,13 @@ export interface SlateBoardEntry {
   /** Source of the home team's offensive rate. Same values as away_offense_source. */
   home_offense_source: string;
   // ── Over survival gate audit fields (non-null for OVER games with a market line) ──
-  /** starter_attack_runs + bullpen_continuation_runs: total runs on baseball grounds only, no park/weather. */
+  /**
+   * All four baseball components summed: starter_attack_runs + bullpen_continuation_runs
+   * + traffic_conversion_runs + hr_xbh_damage_runs.
+   * "Baseball only" means excluding the park × weather environment modifier — traffic and HR/XBH
+   * are baseball inputs, not environmental factors.  Must equal projected_total − environment_run_adjustment.
+   * When traffic and HR stubs are replaced with real values this field automatically includes them.
+   */
   baseball_only_projection: number | null;
   /** park × weather run contribution: projected_total − baseball_only_projection. */
   environment_run_adjustment: number | null;
@@ -290,7 +296,12 @@ const SURVIVAL_TRAFFIC_PENALTY  = 0.70;   // baserunner-to-run conversion is poo
 const SURVIVAL_HR_XBH_PENALTY   = 0.90;   // extra-base / HR damage is muted
 
 export interface OverSurvivalResult {
-  /** Projection excluding park/weather: starter_attack_runs + bullpen_continuation_runs. */
+  /**
+   * All four baseball components: starter_attack_runs + bullpen_continuation_runs
+   * + traffic_conversion_runs + hr_xbh_damage_runs.
+   * "Baseball only" means excluding the park × weather environment modifier.
+   * Traffic and HR/XBH are baseball inputs — they belong here, not in environment_run_adjustment.
+   */
   baseball_only_projection: number;
   /** Park × weather run contribution (projected_total − baseball_only_projection). */
   environment_run_adjustment: number;
@@ -320,9 +331,10 @@ export interface OverSurvivalResult {
  *
  * 1. Baseball-only edge ≥ 1.25:
  *    The projection must clear the market line by ≥ 1.25 runs on baseball
- *    grounds alone (starter + bullpen quality), without any contribution from
- *    park or weather factors. This prevents environment from manufacturing
- *    an Over thesis that has no baseball basis.
+ *    grounds alone (starter + bullpen + traffic + HR/XBH), without any
+ *    contribution from park or weather factors.  This prevents environment
+ *    from manufacturing an Over thesis that has no baseball basis.
+ *    Traffic and HR/XBH are baseball inputs, not environmental factors.
  *
  * 2. Survival floor edge ≥ 0.25:
  *    Even under a low-conversion scenario (starters outperform, traffic
@@ -387,7 +399,10 @@ export function overSurvivalCheck(
  */
 export interface OverSurvivalGateResult {
   survival_check: "PASS" | "FAIL";
-  /** Populated only when components were present (i.e. not COMPONENT_DATA_UNAVAILABLE). */
+  /**
+   * All four baseball components (starter + bullpen + traffic + HR/XBH), excluding park/weather.
+   * Null when components were unavailable (i.e. COMPONENT_DATA_UNAVAILABLE).
+   */
   baseball_only_projection: number | null;
   environment_run_adjustment: number | null;
   survival_floor: number | null;
