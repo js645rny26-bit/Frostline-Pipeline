@@ -41,11 +41,13 @@
  *      hitter aggregates). Fail-open; Preview_Used_In_Projection = NO throughout
  *      Phase 1. No projection or authorization change.
  *  v12 (2026-07-26): RUN_LOG extended with 8 Statcast preview observability cols
- *      (indices 30–37): M08b_Preview_Status, _Games_Expected, _Games_Available,
- *      _Games_Parsed, _Games_Missing, _Games_Failed, _Stale_Count,
- *      _Identity_Mismatch_Count. Phase 2 completion.
+ *      (indices 30–37): Statcast_Preview_Status/Games_Expected/Available/Parsed/
+ *      Missing/Failed/Stale_Count/Identity_Mismatch_Count. Phase 2 completion.
+ *  v13 (2026-07-26): STATCAST_SHADOW_AUDIT sheet added (23 cols) — per-game shadow
+ *      projection via Baseball Savant pitcher xwOBA-allowed. Phase 3 shadow feature
+ *      mapping. Preview_Used_In_Projection = NO throughout; no CORE/auth impact.
  */
-export const WORKBOOK_SCHEMA_VERSION = 12;
+export const WORKBOOK_SCHEMA_VERSION = 13;
 
 export interface ColumnDef {
   name: string;
@@ -56,7 +58,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -1108,6 +1110,38 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Away_Offense_Source",   index: 26, type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, description: "Source of the away team's offensive rate read from SHADOW_HISTORY col 9. BLENDED | L30_ONLY | L10_ONLY | LEAGUE_AVG_FALLBACK. Blank for pre-v9 rows.", exampleValue: "BLENDED" },
       { name: "Home_Offense_Source",   index: 27, type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, description: "Source of the home team's offensive rate read from SHADOW_HISTORY col 10. Same values as Away_Offense_Source.", exampleValue: "L30_ONLY" },
       { name: "Notes",                 index: 28, type: "string", width: 220, filledBy: "MODULE_18", readOnly: true, description: "Semicolon-separated flags: SHADOW_HISTORY_ABSENT | NO_OUTCOME | FALLBACK_OFFENSE_SOURCE", exampleValue: "FALLBACK_OFFENSE_SOURCE" },
+    ],
+  },
+
+  {
+    name: "STATCAST_SHADOW_AUDIT",
+    description: "Per-game shadow projection driven by Baseball Savant pitcher xwOBA-allowed. Full-replace each pipeline run (current-day snapshot only). Shadow-only — does not affect live board or CORE decisions. Written by module09s.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date",                          index: 0,  type: "string", width: 90,  filledBy: "MODULE_09s", readOnly: true, exampleValue: "2026-07-26" },
+      { name: "Game_ID",                       index: 1,  type: "string", width: 175, filledBy: "MODULE_09s", readOnly: true, exampleValue: "2026-07-26_NYY@BOS" },
+      { name: "Away_Team",                     index: 2,  type: "string", width: 80,  filledBy: "MODULE_09s", readOnly: true, exampleValue: "NYY" },
+      { name: "Home_Team",                     index: 3,  type: "string", width: 80,  filledBy: "MODULE_09s", readOnly: true, exampleValue: "BOS" },
+      { name: "Away_Pitcher",                  index: 4,  type: "string", width: 150, filledBy: "MODULE_09s", readOnly: true, exampleValue: "Gerrit Cole" },
+      { name: "Home_Pitcher",                  index: 5,  type: "string", width: 150, filledBy: "MODULE_09s", readOnly: true, exampleValue: "Brayan Bello" },
+      { name: "Preview_Availability",          index: 6,  type: "string", width: 160, filledBy: "MODULE_09s", readOnly: true, description: "AVAILABLE | NOT_PUBLISHED | FETCH_ERROR | PARSE_ERROR | UNAVAILABLE", exampleValue: "AVAILABLE" },
+      { name: "Current_Projection",            index: 7,  type: "number", width: 130, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Projected total runs from module09. This is the live projection used on the board.", exampleValue: "8.74" },
+      { name: "Shadow_xwOBA_Adjustment",       index: 8,  type: "number", width: 180, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Uncapped total run delta from both starter xwOBA adjustments. Positive = shadow model expects more runs.", exampleValue: "0.1820" },
+      { name: "Shadow_Projection",             index: 9,  type: "number", width: 140, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Current_Projection + capped adjustment. Shadow-only — NOT used in any live calculation.", exampleValue: "8.92" },
+      { name: "Cap_Applied",                   index: 10, type: "string", width: 100, filledBy: "MODULE_09s", readOnly: true, description: "YES when |uncapped adjustment| exceeded ±0.30 runs.", exampleValue: "NO" },
+      { name: "Away_Pitcher_xwOBA",            index: 11, type: "number", width: 145, format: "0.000", filledBy: "MODULE_09s", readOnly: true, description: "Season xwOBA allowed by the away starter. Blank when unavailable.", exampleValue: "0.290" },
+      { name: "Away_Pitcher_Shadow_Quality",   index: 12, type: "number", width: 200, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Shadow quality factor: currentQual × 0.75 + xwobaFactor × 0.25. Blank when xwOBA unavailable.", exampleValue: "0.9036" },
+      { name: "Away_Pitcher_Current_Quality",  index: 13, type: "number", width: 205, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "FIP/ERA-based quality factor from module09 (away_starter_quality).", exampleValue: "0.9200" },
+      { name: "Home_Pitcher_xwOBA",            index: 14, type: "number", width: 145, format: "0.000", filledBy: "MODULE_09s", readOnly: true, description: "Season xwOBA allowed by the home starter. Blank when unavailable.", exampleValue: "0.330" },
+      { name: "Home_Pitcher_Shadow_Quality",   index: 15, type: "number", width: 200, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Shadow quality factor for the home starter. Blank when xwOBA unavailable.", exampleValue: "1.0619" },
+      { name: "Home_Pitcher_Current_Quality",  index: 16, type: "number", width: 205, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "FIP/ERA-based quality factor from module09 (home_starter_quality).", exampleValue: "1.0500" },
+      { name: "Away_Starter_Delta",            index: 17, type: "number", width: 145, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Run delta from the HOME pitcher quality change affecting AWAY run scoring.", exampleValue: "0.1020" },
+      { name: "Home_Starter_Delta",            index: 18, type: "number", width: 145, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Run delta from the AWAY pitcher quality change affecting HOME run scoring.", exampleValue: "0.0800" },
+      { name: "Missing_Fields",                index: 19, type: "string", width: 280, filledBy: "MODULE_09s", readOnly: true, description: "Semicolon-separated list of unavailable fields that zeroed the shadow adjustment.", exampleValue: "away_pitcher_xwoba" },
+      { name: "Identity_Warnings",             index: 20, type: "string", width: 350, filledBy: "MODULE_09s", readOnly: true, description: "Semicolon-separated parse warnings (pitcher ID mismatch, team mismatch, stale data, etc.).", exampleValue: "" },
+      { name: "Preview_Used_In_Projection",    index: 21, type: "string", width: 200, filledBy: "MODULE_09s", readOnly: true, description: "Always NO throughout Phase 3.", exampleValue: "NO" },
+      { name: "Snapshot_TS",                   index: 22, type: "string", width: 200, filledBy: "MODULE_09s", readOnly: true, exampleValue: "2026-07-26T10:00:00.000Z" },
     ],
   },
 

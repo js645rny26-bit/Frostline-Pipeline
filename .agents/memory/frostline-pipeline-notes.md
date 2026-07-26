@@ -46,7 +46,15 @@ description: Non-obvious decisions, traps, and structural facts about the Frostl
 - Stored in col C as `Scheduled_First_Pitch` (ISO UTC). This is the reference value for reschedule detection.
 - `lockedTs` (col G) is stamped once on first lock; cleared to "" when effectiveBLS resets for a reschedule, then re-stamped by the fresh lock.
 
+## Statcast shadow module (module09s) — Phase 3
+- `module09s_statcastShadow.ts`: pure xwOBA shadow computation + STATCAST_SHADOW_AUDIT sheet write. Fail-open; no CORE impact.
+- Shadow formula: `xwobaFactor = clamp(xwoba/0.315, 0.40, 1.80)`, `shadowQual = currentQual×0.75 + xwobaFactor×0.25`, total adj capped ±0.30 runs.
+- Attribution: `away_starter_delta` driven by HOME pitcher; `home_starter_delta` driven by AWAY pitcher.
+- Pitcher stats are ONLY used when `previewAvailability === "AVAILABLE"` — NOT_PUBLISHED and error previews zero out stats.
+- Schema v13. After any schema bump, run `GET /api/pipeline/repair-headers` to sync the live workbook.
+- Excluded signals: pitcher K%/BB% (reserved for FanGraphs stub-replacement), hitter xwOBA (overlaps module02d lineup factor). See `docs/statcast-shadow-mapping.md`.
+
 ## Commissioning verification
 - `POST /api/pipeline/publish` → expect `pipeline_status: success`, 0 errors.
-- `GET /api/pipeline/repair-headers` → expect status success/partial (MONOTONICITY missing is acceptable — it's created lazily on first regression run), schema_version 8.
+- `GET /api/pipeline/repair-headers` → expect status success/partial (MONOTONICITY missing is acceptable — it's created lazily on first regression run).
 - Lock distribution check: count LOCKED_IN vs LOCKED_OUT in slate_board.
