@@ -95,7 +95,15 @@ function LockStatusBadge({ lockEntry }: { lockEntry: BoardStatusEntry }) {
 
   // ── PRE_LOCK — approaching lock window ────────────────────────────────────
   if (lock_status === "PRE_LOCK") {
-    if (!cutoffEt) return null;
+    if (!cutoffEt) {
+      // No scheduled first pitch — lock window cannot be computed.
+      return (
+        <span className="flex items-center gap-1 text-warning border border-warning/40 bg-warning/10 px-2 py-0.5 rounded text-[11px] font-medium">
+          <AlertCircle className="w-3 h-3 flex-shrink-0" />
+          No start time — lock window unknown
+        </span>
+      );
+    }
     return (
       <span className="flex items-center gap-1 text-muted-foreground border border-border/60 bg-muted/20 px-2 py-0.5 rounded text-[11px] font-medium">
         <Timer className="w-3 h-3 flex-shrink-0" />
@@ -301,9 +309,9 @@ export function GameCard({ game, lockEntry }: GameCardProps) {
      lockEntry.lock_status === "LOCKED_OUT" ||
      lockEntry.lock_status === "LOCK_TIME_UNAVAILABLE" ||
      lockEntry.lock_status === "LOCK_DATA_UNAVAILABLE" ||
-     // Show PRE_LOCK pill only when a cutoff time is known — otherwise there's
-     // nothing meaningful to display (no "Locks at …" text).
-     (lockEntry.lock_status === "PRE_LOCK" && !!lockEntry.lock_cutoff_ts));
+     // Show PRE_LOCK pill always — shows "Locks at X" when time known, or
+     // "No start time — lock window unknown" when scheduled first pitch is absent.
+     lockEntry.lock_status === "PRE_LOCK");
 
   return (
     <Card className="flex flex-col">

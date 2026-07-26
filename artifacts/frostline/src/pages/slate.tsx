@@ -196,6 +196,23 @@ export default function SlatePage() {
           </div>
         )}
 
+        {/* ── Lock Suppressed Banner — fires when ≥ 50 % of slate games have no start time ── */}
+        {boardStatus && boardStatus.lock_data_unavailable_count > 0 && (
+          <div className="flex items-start gap-3 px-4 py-3 rounded-md border border-warning/40 bg-warning/10 text-warning text-sm">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold">Board Lock Suppressed — Start Times Unavailable</p>
+              <p className="text-warning/80 text-xs mt-1">
+                More than half of today's games have no confirmed start time. The lock window cannot be
+                determined and all new CORE promotions are blocked until start times are published.
+                Individual game cards show a{" "}
+                <span className="font-medium">No start time — lock window unknown</span>{" "}
+                badge for affected games.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ── Board Lock Status Banner ── */}
         {showApproachingBanner && boardStatus?.next_upcoming_cutoff_ts && (
           <div className="flex items-center gap-3 px-4 py-3 rounded-md border border-warning/40 bg-warning/10 text-warning text-sm">
