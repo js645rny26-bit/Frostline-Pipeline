@@ -29,8 +29,12 @@
  *  v7 (2026-07-25): MONOTONICITY sheet — edge-tier hit-rate analysis from module15.
  *      REPLAY_RESULTS extended with Market_Line + Edge_BLEND_PARK_PITCHER columns (cols AE–AE).
  *  v8 (2026-07-25): SURVIVAL_GATE_REPLAY sheet — retroactive survival gate analysis from module18.
+ *  v9 (2026-07-26): SURVIVAL_GATE_REPLAY cols 26–27 added — Away_Offense_Source and
+ *      Home_Offense_Source read from SHADOW_HISTORY. Notes shifted to col 28. REPLAY_COLS = 29.
+ *      module11 SlateBoardEntry carries away_offense_source / home_offense_source;
+ *      warns when a CORE Over uses a non-BLENDED offense projection.
  */
-export const WORKBOOK_SCHEMA_VERSION = 8;
+export const WORKBOOK_SCHEMA_VERSION = 9;
 
 export interface ColumnDef {
   name: string;
@@ -1012,7 +1016,9 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Weather_Multiplier",    index: 23, type: "number", width: 130, format: "0.0000", filledBy: "MODULE_18", readOnly: true, exampleValue: "1.031" },
       { name: "Park_Source",           index: 24, type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, exampleValue: "VENUE_FACTOR_USED" },
       { name: "Marginal_Flag",         index: 25, type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, description: "MARGINAL when verdict is within 0.15 of a threshold. NO_MULTIPLIER_DATA when SHADOW_HISTORY absent.", exampleValue: "MARGINAL" },
-      { name: "Notes",                 index: 26, type: "string", width: 220, filledBy: "MODULE_18", readOnly: true, exampleValue: "SHADOW_HISTORY_ABSENT" },
+      { name: "Away_Offense_Source",   index: 26, type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, description: "Source of the away team's offensive rate read from SHADOW_HISTORY col 9. BLENDED | L30_ONLY | L10_ONLY | LEAGUE_AVG_FALLBACK. Blank for pre-v9 rows.", exampleValue: "BLENDED" },
+      { name: "Home_Offense_Source",   index: 27, type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, description: "Source of the home team's offensive rate read from SHADOW_HISTORY col 10. Same values as Away_Offense_Source.", exampleValue: "L30_ONLY" },
+      { name: "Notes",                 index: 28, type: "string", width: 220, filledBy: "MODULE_18", readOnly: true, description: "Semicolon-separated flags: SHADOW_HISTORY_ABSENT | NO_OUTCOME | FALLBACK_OFFENSE_SOURCE", exampleValue: "FALLBACK_OFFENSE_SOURCE" },
     ],
   },
 

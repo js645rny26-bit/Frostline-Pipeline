@@ -54,6 +54,17 @@ export interface SlateBoardEntry {
   // ── Starter quality derivatives ──
   away_starter_quality: number | null;
   home_starter_quality: number | null;
+  // ── Offense source transparency fields ──
+  /**
+   * Source of the away team's offensive rate used in projection.
+   * BLENDED = L30 + L10 blend (highest confidence).
+   * L30_ONLY | L10_ONLY = single-source (moderate confidence).
+   * LEAGUE_AVG_FALLBACK = no team data available (lowest confidence).
+   * Non-null for any game processed by module09; empty string when unavailable.
+   */
+  away_offense_source: string;
+  /** Source of the home team's offensive rate. Same values as away_offense_source. */
+  home_offense_source: string;
   // ── Over survival gate audit fields (non-null for OVER games with a market line) ──
   /** starter_attack_runs + bullpen_continuation_runs: total runs on baseball grounds only, no park/weather. */
   baseball_only_projection: number | null;
@@ -1244,6 +1255,28 @@ export async function extractOutputBoards(
           )
         : EMPTY_PROPS;
 
+      const awayOffSrc = gs.away_offense_source_status ?? "";
+      const homeOffSrc = gs.home_offense_source_status ?? "";
+
+      // Warn when a CORE Over's projection is backed by a fallback offense source.
+      // Fallback data carries more uncertainty; the operator should weigh the thesis accordingly.
+      if (decision === "CORE" && direction === "OVER") {
+        const awayFallback = awayOffSrc && awayOffSrc !== "BLENDED";
+        const homeFallback = homeOffSrc && homeOffSrc !== "BLENDED";
+        if (awayFallback || homeFallback) {
+          logger.warn(
+            {
+              game:              gs.game_id,
+              away_team:         gs.away_team,
+              home_team:         gs.home_team,
+              away_offense_source: awayOffSrc,
+              home_offense_source: homeOffSrc,
+            },
+            "MODULE_11: CORE Over offense projection uses fallback source (not BLENDED) — higher uncertainty",
+          );
+        }
+      }
+
       const entry: SlateBoardEntry = {
         legacy_game_id:  gs.game_id,
         away_team:       gs.away_team,
@@ -1264,6 +1297,8 @@ export async function extractOutputBoards(
         side_decision:          sideDecision,
         away_starter_quality:   gs.away_starter_quality ?? null,
         home_starter_quality:   gs.home_starter_quality ?? null,
+        away_offense_source:    awayOffSrc,
+        home_offense_source:    homeOffSrc,
         baseball_only_projection:   survivalBaseballOnly,
         environment_run_adjustment: survivalEnvAdj,
         survival_floor:             survivalFloor,

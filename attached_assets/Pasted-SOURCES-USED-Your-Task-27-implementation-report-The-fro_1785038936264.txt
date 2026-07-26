@@ -1,0 +1,71 @@
+SOURCES USED
+
+* Your Task #27 implementation report
+* The frozen fallback-source warning requirement
+* Existing module 11 and module 18 responsibilities
+
+REFRESH CHECK
+
+I did not inspect the revised repository or execute the compiler independently. No live workbook publication was confirmed in this turn.
+
+Assessment
+
+Task #27 is correct at the code level.
+
+It now covers both required surfaces:
+
+Live board provenance
+
+module11_outputExtraction.ts carries:
+
+* away_offense_source
+* home_offense_source
+
+from GAME_SUMMARY into the board entry and emits a warning only when:
+
+Decision = CORE
+Direction = OVER
+Either offense source ≠ BLENDED
+
+That is the right scope. It surfaces degraded source quality when it could affect an actionable Over without turning source provenance into a new authorization rule.
+
+Naming the specific team and source is materially better than a generic warning.
+
+Historical replay provenance
+
+module18_survivalGateReplay.ts now records both offense-source fields and appends:
+
+FALLBACK_OFFENSE_SOURCE
+
+when either side is not BLENDED.
+
+That makes future survival-gate postmortems capable of separating:
+
+Projection failure with full offense inputs
+from
+Projection failure using L30-only, L10-only, or league-average fallback
+
+That is exactly the diagnostic value Task #27 was supposed to add.
+
+One schema integrity condition
+
+Because SURVIVAL_GATE_REPLAY expanded from 27 to 29 columns, the corresponding workbook schema and live row-one header must also become 29 columns.
+
+The report confirms:
+
+REPLAY_HEADER = 29
+REPLAY_COLS = 29
+
+but does not mention workbookSchema.ts or SCHEMA_REFERENCE.
+
+That is not a request for another feature. It is the existing schema-parity requirement. Historical rows may remain blank in the two new fields until replayed, which is acceptable.
+
+Status
+
+Task #27 code logic:       ACCEPTED
+Decision logic changed:    NO
+Authorization changed:     NO
+Live workbook verified:    NO
+Engine freeze:             STANDS
+
+No additional fallback-source logic is warranted.

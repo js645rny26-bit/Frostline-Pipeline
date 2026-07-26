@@ -135,6 +135,8 @@ const SH_HOME               = 3;
 const SH_AWAY_PITCHER       = 4;
 const SH_HOME_PITCHER       = 5;
 const SH_REPAIRED_TOTAL     = 6;
+const SH_AWAY_OFFENSE_SOURCE = 9;   // Away_Offense_Source (BLENDED | L30_ONLY | L10_ONLY | LEAGUE_AVG_FALLBACK)
+const SH_HOME_OFFENSE_SOURCE = 10;  // Home_Offense_Source
 const SH_AWAY_L30           = 11;
 const SH_HOME_L30           = 12;
 const SH_AWAY_OFF_RATE      = 15;
@@ -153,7 +155,7 @@ const SO_ACTUAL   = 5;
 
 // ─── Output sheet ─────────────────────────────────────────────────────────────
 const REPLAY_SHEET = "SURVIVAL_GATE_REPLAY";
-const REPLAY_COLS  = 27;
+const REPLAY_COLS  = 29;
 
 const REPLAY_HEADER: string[] = [
   "Date",
@@ -182,6 +184,8 @@ const REPLAY_HEADER: string[] = [
   "Weather_Multiplier",
   "Park_Source",
   "Marginal_Flag",             // MARGINAL if verdict within ±0.15 of a threshold
+  "Away_Offense_Source",       // BLENDED | L30_ONLY | L10_ONLY | LEAGUE_AVG_FALLBACK
+  "Home_Offense_Source",
   "Notes",
 ];
 
@@ -224,6 +228,8 @@ export interface SurvivalReplayRow {
   weather_multiplier: number | null;
   park_source: string;
   marginal_flag: string;
+  away_offense_source: string;
+  home_offense_source: string;
   notes: string;
 }
 
@@ -422,6 +428,8 @@ export async function runSurvivalGateReplay(
     park_source: string;
     away_l30: number | null; home_l30: number | null;
     away_off_rate: number | null; home_off_rate: number | null;
+    away_offense_source: string;
+    home_offense_source: string;
   }>();
 
   for (const row of shRows) {
@@ -430,17 +438,19 @@ export async function runSurvivalGateReplay(
     if (!date || !gameId) continue;
     const key = `${date}|${gameId}`;
     shMap.set(key, {
-      away_pitcher:   parseStr(row[SH_AWAY_PITCHER]),
-      home_pitcher:   parseStr(row[SH_HOME_PITCHER]),
-      repaired_total: parseNum(row[SH_REPAIRED_TOTAL]),
-      park_mult:      parseNum(row[SH_PARK_MULT]),
-      weather_mult:   parseNum(row[SH_WEATHER_MULT]),
-      repaired_mult:  parseNum(row[SH_REPAIRED_MULT]),
-      park_source:    parseStr(row[SH_PARK_SOURCE]),
-      away_l30:       parseNum(row[SH_AWAY_L30]),
-      home_l30:       parseNum(row[SH_HOME_L30]),
-      away_off_rate:  parseNum(row[SH_AWAY_OFF_RATE]),
-      home_off_rate:  parseNum(row[SH_HOME_OFF_RATE]),
+      away_pitcher:        parseStr(row[SH_AWAY_PITCHER]),
+      home_pitcher:        parseStr(row[SH_HOME_PITCHER]),
+      repaired_total:      parseNum(row[SH_REPAIRED_TOTAL]),
+      park_mult:           parseNum(row[SH_PARK_MULT]),
+      weather_mult:        parseNum(row[SH_WEATHER_MULT]),
+      repaired_mult:       parseNum(row[SH_REPAIRED_MULT]),
+      park_source:         parseStr(row[SH_PARK_SOURCE]),
+      away_l30:            parseNum(row[SH_AWAY_L30]),
+      home_l30:            parseNum(row[SH_HOME_L30]),
+      away_off_rate:       parseNum(row[SH_AWAY_OFF_RATE]),
+      home_off_rate:       parseNum(row[SH_HOME_OFF_RATE]),
+      away_offense_source: parseStr(row[SH_AWAY_OFFENSE_SOURCE]),
+      home_offense_source: parseStr(row[SH_HOME_OFFENSE_SOURCE]),
     });
   }
 
@@ -566,6 +576,14 @@ export async function runSurvivalGateReplay(
       replayedDecision = "NOT_OVER";
     }
 
+    const awayOffSrc = sh?.away_offense_source ?? "";
+    const homeOffSrc = sh?.home_offense_source ?? "";
+    // Flag when either team's offense projection used a fallback rather than BLENDED data.
+    const fallbackOffenseNote =
+      (awayOffSrc && awayOffSrc !== "BLENDED") || (homeOffSrc && homeOffSrc !== "BLENDED")
+        ? "FALLBACK_OFFENSE_SOURCE"
+        : "";
+
     replayRows.push({
       date:              vl.date,
       game_id:           vl.game_id,
@@ -593,9 +611,12 @@ export async function runSurvivalGateReplay(
       weather_multiplier:    sh?.weather_mult ?? null,
       park_source:           sh?.park_source ?? "",
       marginal_flag:         marginalFlag,
+      away_offense_source:   awayOffSrc,
+      home_offense_source:   homeOffSrc,
       notes: [
         sh ? "" : "SHADOW_HISTORY_ABSENT",
         actual === null ? "NO_OUTCOME" : "",
+        fallbackOffenseNote,
       ].filter(Boolean).join("; "),
     });
   }
@@ -696,6 +717,8 @@ export async function runSurvivalGateReplay(
         r.weather_multiplier       ?? "",
         r.park_source,
         r.marginal_flag,
+        r.away_offense_source,
+        r.home_offense_source,
         r.notes,
       ];
 
