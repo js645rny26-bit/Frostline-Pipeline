@@ -1,0 +1,74 @@
+SOURCES USED
+
+* Your revised #63 Statcast Game Preview Pipeline Integration specification
+* The live workbook finding that only DAILY_MATCHUPS.Statcast_Last_Updated is currently visible
+* Frostline’s commissioning and canonical-workbook rules
+
+REFRESH CHECK
+
+No code, endpoint, or workbook execution occurred in this turn. This is a final scope review before Phase 0 begins.
+
+Verdict
+
+Approved for Phase 0 execution after three small wording corrections.
+
+The execution stop is now strong enough to prevent an uncertain feasibility investigation from becoming an uncontrolled production build.
+
+1. Fix the Outcome B dependency wording
+
+This currently says:
+
+Outcome B — Ingestion commissioned (requires Outcome A verdict: FEASIBLE or FEASIBLE_WITH_LIMITATIONS)
+
+Outcome A is the “not feasible” outcome, so replace it with:
+
+Outcome B — Ingestion commissioned (requires a Phase 0 verdict of FEASIBLE or FEASIBLE_WITH_LIMITATIONS)
+
+2. Split the Phase 0 acceptance standard by verdict
+
+The present acceptance language requires:
+
+three real sample payloads collected
+
+That cannot be mandatory when the correct result is NOT_RELIABLY_FEASIBLE.
+
+Use:
+
+For FEASIBLE or FEASIBLE_WITH_LIMITATIONS
+
+Three real structured sample payloads collected
+Repeatable requests demonstrated across multiple gamePk values
+Official source ownership confirmed
+Pregame availability assessed
+Edge-case behavior assessed
+Rate-limit and failure behavior assessed
+
+For NOT_RELIABLY_FEASIBLE
+
+Official source candidates investigated
+Request patterns and responses documented
+Reason structured pregame payloads could not be obtained documented
+Authentication, blocking, instability, or missing-data limitations recorded
+No production scraper or ingestion code built
+
+This prevents Replit from forcing a weak source merely to satisfy the three-payload requirement.
+
+3. Permit disposable investigation code only
+
+“Before any code is written” may prevent basic endpoint testing. Clarify:
+
+Disposable local investigation scripts may be used to test endpoints and inspect payloads. They must not be wired into the pipeline, committed as production ingestion code, modify the canonical workbook, or alter projection behavior during Phase 0.
+
+Final authorization state
+
+#63 specification:               APPROVED WITH WORDING FIXES
+Authorized execution:            PHASE 0 ONLY
+Production pipeline code:         NOT AUTHORIZED
+Canonical workbook changes:       NOT AUTHORIZED
+Schema changes:                   NOT AUTHORIZED
+Projection changes:               NO
+Authorization changes:            NO
+Lock behavior changes:             NO
+Engine status:                     NO CORE — RESEARCH-ONLY
+
+After those edits, Phase 0 can start exactly as scoped.
