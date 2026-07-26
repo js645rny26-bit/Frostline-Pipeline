@@ -161,6 +161,12 @@ function LockStatusBadge({ lockEntry }: { lockEntry: BoardStatusEntry }) {
 
   if (lock_status === "LOCK_TIME_UNAVAILABLE") {
     // No scheduled start time — lock window unknown; CORE promotion disabled.
+    // Smoke-test note (#47): this branch fires when module11 cannot compute a
+    // lock cutoff because the game has no Scheduled_First_Pitch in SLATE_INPUT.
+    // The board-status route reads lock_status directly from BOARD_LOCK_STATE
+    // col E and passes it here; lock_cutoff_ts is blank for these games.
+    // The PRE_LOCK branch above (lines ~97-105) is a defensive fallback for
+    // the unlikely case where lock_status=PRE_LOCK but lock_cutoff_ts is blank.
     return (
       <span className="flex items-center gap-1 text-muted-foreground border border-border bg-muted/30 px-2 py-0.5 rounded text-[11px] font-medium">
         <LockOpen className="w-3 h-3" />

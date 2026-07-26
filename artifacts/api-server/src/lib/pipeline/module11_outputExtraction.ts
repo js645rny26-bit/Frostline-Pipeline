@@ -598,6 +598,22 @@ function parseBLSRow(row: unknown[]): BLSRecord {
 }
 
 /**
+ * Compute the absolute millisecond shift between two ISO UTC first-pitch
+ * timestamps (e.g. from BOARD_LOCK_STATE and the current normalized game).
+ *
+ * Returns 0 when either timestamp is blank, non-parseable, or would produce
+ * a NaN — fail-closed so that missing/corrupt data never triggers a spurious
+ * reschedule reset.
+ *
+ * Exported for unit testing the 30-minute reschedule boundary.
+ */
+export function detectFPShift(storedFP: string, currentFP: string): number {
+  const storedMs  = storedFP  ? new Date(storedFP).getTime()  : NaN;
+  const currentMs = currentFP ? new Date(currentFP).getTime() : NaN;
+  return !isNaN(storedMs) && !isNaN(currentMs) ? Math.abs(currentMs - storedMs) : 0;
+}
+
+/**
  * Result returned by buildGameLockCutoffs.
  *
  * Consumers must inspect lockDataStatus and missingGameIds rather than
@@ -986,11 +1002,7 @@ export async function extractOutputBoards(
       // late-grace window and is treated as a material reschedule that requires
       // replaying the lock under the new cutoff.
       // Invalid / missing timestamps produce a shift of 0 (fail closed → no reset).
-      const storedFPMs  = storedScheduledFP  ? new Date(storedScheduledFP).getTime()  : NaN;
-      const currentFPMs = currentScheduledFP ? new Date(currentScheduledFP).getTime() : NaN;
-      const fpShiftMs   = !isNaN(storedFPMs) && !isNaN(currentFPMs)
-        ? Math.abs(currentFPMs - storedFPMs)
-        : 0;
+      const fpShiftMs = detectFPShift(storedScheduledFP, currentScheduledFP);
       const isRescheduled =
         existingBLS !== undefined &&
         storedScheduledFP !== "" &&
@@ -1020,6 +1032,29 @@ export async function extractOutputBoards(
             storedStatus: existingBLS!.lock_status,
           },
           "MODULE_11: Game first-pitch time changed by > 30 min — discarding stale lock state and replaying under new cutoff",
+        );
+      } else if (
+        existingBLS !== undefined &&
+        storedScheduledFP !== "" &&
+        fpShiftMs > 0 &&
+        fpShiftMs < BOARD_LOCK_LATE_GRACE_MS &&
+        !lockTimeMissingIds.has(gs.game_id)
+      ) {
+        // ── Minor time correction — reschedule suppressed (#45) ──────────────
+        // The first-pitch time shifted but by less than BOARD_LOCK_LATE_GRACE_MS
+        // (30 min). This is treated as a gate-time adjustment (e.g. a broadcast
+        // window correction) rather than a material reschedule.  The stored lock
+        // state is preserved; the new cutoff is computed from the updated time.
+        logger.info(
+          {
+            game:             gs.game_id,
+            storedFP:         storedScheduledFP,
+            currentFP:        currentScheduledFP,
+            shiftMinutes:     Math.round(fpShiftMs / 60000),
+            thresholdMinutes: BOARD_LOCK_LATE_GRACE_MS / 60000,
+            storedStatus:     existingBLS.lock_status,
+          },
+          "MODULE_11: First-pitch time adjusted by < 30 min — minor correction, lock state preserved",
         );
       }
 
@@ -1444,7 +1479,14 @@ export async function extractOutputBoards(
     });
 
     // ── Write BOARD_LOCK_STATE — authoritative per-game lock records ──────────
-    // Apply in-place updates then append new rows; old-day rows stay untouched.
+    // Lock-integrity note (#41): this write is already fully atomic.
+    //   The per-game loop above only builds in-memory accumulators:
+    //     blsRowUpdates — Map<rowIndex, updatedRow> for existing rows
+    //     blsNewRows    — unknown[][] for rows being appended today for the first time
+    //   No Sheets API call is made inside the per-game loop.  The single
+    //   writeRange below covers all changed and new rows in one Sheets API
+    //   call, eliminating any partial-write window: either all rows land
+    //   successfully or none do and the catch logs the error.
     {
       for (const [rowIdx, updatedRow] of blsRowUpdates) {
         blsDataRows[rowIdx] = updatedRow;

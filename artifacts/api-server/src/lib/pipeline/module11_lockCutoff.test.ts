@@ -18,8 +18,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildGameLockCutoffs } from "./module11_outputExtraction.js";
-import { BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH } from "./config.js";
+import { buildGameLockCutoffs, detectFPShift } from "./module11_outputExtraction.js";
+import { BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH, BOARD_LOCK_LATE_GRACE_MS } from "./config.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -284,5 +284,93 @@ describe("buildGameLockCutoffs — edge cases", () => {
     assert.equal(lockDataStatus, "UNAVAILABLE");
     assert.equal(cutoffs.size, 0);
     assert.ok(missingGameIds.has("G1"));
+  });
+});
+
+// ─── detectFPShift — 30-minute reschedule boundary (#45) ─────────────────────
+//
+// detectFPShift computes the absolute millisecond shift between two ISO UTC
+// first-pitch timestamps.  It is the pure-math component of the reschedule
+// detection in module11's per-game loop.
+//
+// The reschedule condition in the loop is:
+//   fpShiftMs >= BOARD_LOCK_LATE_GRACE_MS (30 * 60 * 1000 ms)
+//
+// Contract:
+//   • Exactly 30 min shift  → IS a reschedule (>= threshold, boundary inclusive)
+//   • 29 min 59 s shift     → NOT a reschedule (below threshold)
+//   • 31 min shift          → IS a reschedule (above threshold)
+//   • Either timestamp blank/invalid → shift = 0 → NOT a reschedule (fail-closed)
+//   • Identical timestamps  → shift = 0 → NOT a reschedule
+//
+// These tests pin both the constant value (BOARD_LOCK_LATE_GRACE_MS = 30 min)
+// and the boundary direction (>= inclusive) so any change to either breaks
+// the tests immediately.
+
+const BASE_FP = "2026-07-26T17:05:00Z";
+
+describe("detectFPShift — reschedule boundary (30-minute threshold)", () => {
+  it("BOARD_LOCK_LATE_GRACE_MS is exactly 30 minutes", () => {
+    assert.equal(BOARD_LOCK_LATE_GRACE_MS, 30 * 60 * 1000,
+      "BOARD_LOCK_LATE_GRACE_MS must be 30 * 60 * 1000 ms — if changed, update all reschedule threshold docs");
+  });
+
+  it("shift of exactly 30 min: detectFPShift = 1 800 000 ms → meets threshold (boundary inclusive)", () => {
+    const shifted = new Date(new Date(BASE_FP).getTime() + 30 * 60 * 1000).toISOString();
+    const shift = detectFPShift(BASE_FP, shifted);
+    assert.equal(shift, 30 * 60 * 1000, "30-min shift must equal BOARD_LOCK_LATE_GRACE_MS");
+    assert.ok(shift >= BOARD_LOCK_LATE_GRACE_MS,
+      "exactly 30 min MUST trigger reschedule (>= is inclusive at the boundary)");
+  });
+
+  it("shift of 29 min 59 s: detectFPShift < threshold → reschedule suppressed (minor correction)", () => {
+    const shifted = new Date(new Date(BASE_FP).getTime() + (30 * 60 * 1000 - 1000)).toISOString();
+    const shift = detectFPShift(BASE_FP, shifted);
+    assert.equal(shift, 29 * 60 * 1000 + 59 * 1000, "29 min 59 s shift must be < BOARD_LOCK_LATE_GRACE_MS");
+    assert.ok(shift < BOARD_LOCK_LATE_GRACE_MS,
+      "29 min 59 s must NOT trigger reschedule — treated as a minor gate-time correction");
+  });
+
+  it("shift of 31 min: detectFPShift > threshold → reschedule fires", () => {
+    const shifted = new Date(new Date(BASE_FP).getTime() + 31 * 60 * 1000).toISOString();
+    const shift = detectFPShift(BASE_FP, shifted);
+    assert.ok(shift > BOARD_LOCK_LATE_GRACE_MS,
+      "31-min shift must exceed BOARD_LOCK_LATE_GRACE_MS and trigger a reschedule");
+  });
+
+  it("shift is direction-agnostic: earlier or later by the same amount gives same shift", () => {
+    const later   = new Date(new Date(BASE_FP).getTime() + 45 * 60 * 1000).toISOString();
+    const earlier = new Date(new Date(BASE_FP).getTime() - 45 * 60 * 1000).toISOString();
+    assert.equal(detectFPShift(BASE_FP, later), detectFPShift(BASE_FP, earlier),
+      "detectFPShift uses Math.abs — direction (earlier/later) does not affect the result");
+  });
+
+  it("blank stored FP → shift = 0 (fail-closed: no spurious reschedule)", () => {
+    const shift = detectFPShift("", BASE_FP);
+    assert.equal(shift, 0, "blank stored FP must yield 0 — no BLS record means no reschedule");
+  });
+
+  it("blank current FP → shift = 0 (fail-closed: no spurious reschedule)", () => {
+    const shift = detectFPShift(BASE_FP, "");
+    assert.equal(shift, 0, "blank current FP must yield 0 — postponed games handled separately");
+  });
+
+  it("both blank → shift = 0", () => {
+    assert.equal(detectFPShift("", ""), 0);
+  });
+
+  it("invalid stored FP string → shift = 0", () => {
+    const shift = detectFPShift("not-a-date", BASE_FP);
+    assert.equal(shift, 0, "unparseable stored FP must not trigger a reschedule");
+  });
+
+  it("invalid current FP string → shift = 0", () => {
+    const shift = detectFPShift(BASE_FP, "garbage");
+    assert.equal(shift, 0, "unparseable current FP must not trigger a reschedule");
+  });
+
+  it("identical timestamps → shift = 0 (no-op case)", () => {
+    assert.equal(detectFPShift(BASE_FP, BASE_FP), 0,
+      "same timestamp must produce 0 — time was not changed");
   });
 });
