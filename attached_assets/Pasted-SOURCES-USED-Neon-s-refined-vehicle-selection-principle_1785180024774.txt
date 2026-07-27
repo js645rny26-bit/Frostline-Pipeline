@@ -1,0 +1,231 @@
+SOURCES USED
+
+* Neon’s refined vehicle-selection principle
+* SEA–TEX live script as the motivating example
+* Existing Frostline vehicle-capture, price-blind ranking, and reroute doctrine
+
+REFRESH CHECK
+
+This is a doctrine clarification and bounded logic audit, not a projection recalibration. It should not alter today’s board, historical outcomes, thresholds, or authorization state.
+
+Send Replit this:
+
+⸻
+
+Frostline Vehicle Viability Doctrine Patch
+
+Audit the current vehicle-selection logic against the doctrine below. Make only the minimum changes necessary to remove any static assumptions that one market type is inherently safer than another.
+
+Core doctrine
+
+No wagering vehicle is inherently safer, more stable, or preferable by market type alone.
+
+A vehicle becomes viable only after it independently clears the standards and gates specific to that vehicle. Only vehicles that clear their own gates may enter comparative selection.
+
+After viability is established, rank the surviving vehicles price-blind according to:
+
+1. coverage of the most common game scripts
+2. number and severity of failure modes
+3. conversion burden
+4. timing dependence
+5. starter leash or workload dependence
+6. plate-appearance dependence
+7. bullpen and game-state dependence
+8. stability of the underlying baseball truth
+
+Select the vehicle that captures the greatest share of realistic common scripts. Reroute only when that vehicle is unavailable.
+
+Price may affect execution size or whether Neon chooses to wager, but price must never change the truth ranking or preferred vehicle.
+
+Prohibited assumptions
+
+Remove or prevent logic equivalent to:
+
+* derivatives are inherently safer than full-game markets
+* team totals are inherently safer than game totals
+* starter props are inherently safer than sides or totals
+* main markets are inherently safer than derivatives
+* full-game totals are automatically preferable because they remove team allocation risk
+* one vehicle class should always be checked or preferred first
+
+There must be no universal vehicle hierarchy.
+
+Vehicle-specific viability standards
+
+Full-game Over
+
+Must show:
+
+* sufficient aggregate run-band separation
+* multiple credible scoring paths, or one highly durable path with continuation
+* starter and bullpen states that allow scoring to persist
+* limited dependence on one exact team supplying all runs
+* acceptable survival across common allocation outcomes
+
+A full-game Over may outrank a team total when either offense can carry the scoring or when the model is confident in total pressure but uncertain about run allocation.
+
+Full-game Under
+
+Must show:
+
+* suppression from both starter windows
+* bullpen bridge support from both teams
+* limited late-inning chaos, walk, homer, and defensive risk
+* survival against one starter underperforming modestly
+* no dependence on a single dominant pitcher carrying the entire thesis
+
+Team Total Over
+
+Must show:
+
+* clear offensive ownership by one team
+* stable lineup access and conversion depth
+* a vulnerable opposing starter and/or bullpen continuation path
+* limited dependence on the opposing team contributing
+* enough scoring routes to survive one failed component
+
+A team total may outrank a full-game Over when the scoring pressure is genuinely one-sided and the opposing offense faces a credible suppression chain.
+
+Team Total Under
+
+Must show:
+
+* suppression against that specific offense through both starter and bullpen phases
+* no major lineup, platoon, park, or late-game matchup escape path
+* limited risk from short starter leash exposing a weaker bullpen
+
+First-Five Total or Team Total
+
+Must show:
+
+* the thesis is concentrated in the starter window
+* bullpen involvement would dilute or add unnecessary variance
+* the required early conversion burden is realistic
+* starter workload and expected innings support the chosen window
+
+Starter Outs Under
+
+Must show:
+
+* traffic or pitch-count stress
+* credible early-hook probability
+* leash sensitivity
+* multiple non-run-dependent failure paths
+* the offense can pressure the starter even if run conversion is imperfect
+
+Starter Earned Runs Over
+
+Must show:
+
+* actual run-conversion quality, not traffic alone
+* stable damage and sequencing paths
+* sufficient starter exposure before removal
+* inherited-runner and scoring-rule risks are acceptable
+
+Starter Hits Allowed Over
+
+Must show:
+
+* contact access is the dominant edge
+* the thesis does not primarily rely on walks, homers, or early removal
+* enough expected batters faced exist
+* batted-ball and lineup contact quality are stable
+
+Moneyline or Run Line
+
+Must show:
+
+* scoring advantage translates into win or margin probability
+* bullpen and late-game state support the side
+* the thesis is not merely total pressure with uncertain run ownership
+* required margin conversion is realistic
+
+Required selection process
+
+For every game:
+
+1. Establish price-blind game truth and run bands.
+2. Identify the most likely game scripts.
+3. Generate all coherent major vehicles.
+4. Test each vehicle against its own viability gates.
+5. Eliminate vehicles that fail their specific requirements.
+6. Compare only the surviving vehicles.
+7. Select the vehicle with the broadest common-script capture and lowest relevant dependency burden.
+8. Reroute only if the preferred surviving vehicle is unavailable.
+9. Return CORE or NO_CORE only. Every NO_CORE must name its blocker.
+
+SEA–TEX regression example
+
+Do not hard-code this game. Use it only as a conceptual regression case.
+
+Underlying truth:
+
+* aggregate scoring pressure existed
+* the workbook leaned Over
+* uncertainty remained over which team would supply the scoring
+* a full-game Over captured both Seattle-led and Texas-led scoring scripts
+* a Seattle team total introduced an unnecessary team-allocation failure condition
+* Texas supplied the early eruption instead
+
+Expected principle:
+
+When aggregate scoring truth is stronger than team-specific scoring ownership, the full-game total should outrank the team total, provided the full-game total clears its own projection, continuation, and survival gates.
+
+Required regression tests
+
+Add or confirm tests covering:
+
+1. Either-side eruption
+    * Both teams possess credible scoring paths.
+    * Full-game Over clears.
+    * One team total has narrower script capture.
+    * Full-game Over ranks first.
+2. One-sided offensive ownership
+    * One offense owns the pressure.
+    * Opposing offense faces a strong suppression chain.
+    * Team Total Over ranks ahead of Full-Game Over.
+3. Traffic without dependable conversion
+    * Starter faces walks, pitch stress, and hook risk.
+    * Outs Under ranks ahead of ER Over and Hits Allowed Over.
+4. Contact-dominant starter fade
+    * Stable contact access is the primary edge.
+    * Hits Allowed Over may outrank Outs Under or ER Over.
+5. Full-game Under burden
+    * One suppression chain is weak.
+    * Full-game Under fails even when one starter is elite.
+6. Price blindness
+    * Changing market prices does not change game truth or vehicle ranking.
+7. Unavailable preferred vehicle
+    * Preferred vehicle is absent.
+    * Engine reroutes only to the next highest-ranked vehicle that independently passed its gates.
+8. No viable vehicle
+    * All vehicles fail their own gates.
+    * Output remains NO_CORE with the controlling blocker.
+    * No vehicle is promoted merely to force a selection.
+
+Boundaries
+
+* Do not change projection formulas.
+* Do not change existing edge thresholds.
+* Do not change CORE scarcity calibration.
+* Do not alter today’s board or historical postmortems.
+* Do not introduce a universal “safety score” based on vehicle type.
+* Do not add new workbook versions.
+* Do not publish until the logic audit, regression tests, and TypeScript compilation pass.
+
+Report:
+
+1. where the current implementation already follows this doctrine
+2. every identified contradiction
+3. the exact minimal edits made
+4. regression-test results
+5. confirmation that projections, price-blind truth, and authorization thresholds were unchanged
+
+⸻
+
+Patch type:                  VEHICLE DOCTRINE CLARIFICATION
+Projection changes:          NONE
+Threshold changes:           NONE
+Authorization changes:       NONE
+Required action:             AUDIT, MINIMAL REPAIR, REGRESSION TEST
+Engine state:                NO CORE — RESEARCH-ONLY
