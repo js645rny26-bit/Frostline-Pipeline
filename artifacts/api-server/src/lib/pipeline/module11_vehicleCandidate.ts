@@ -5,28 +5,28 @@
  * workbook schema, or any live pipeline output. All functions are pure and
  * side-effect-free.
  *
- * Implements the three-phase vehicle-selection doctrine:
+ * Implements the four-phase vehicle-selection doctrine:
  *
- *   Phase 1  evaluateVehicleViability  — structural / evaluability check
- *   Phase 2  rankViableVehicles        — attribute-only ordering, no type hierarchy
- *   Phase 3  authorizeSelectedVehicle  — CORE/NO_CORE gates on the already-selected vehicle
+ *   Phase 1  evaluateVehicleCandidate  — evaluability / structural check
+ *   Phase 2  rankViableVehicles        — attribute-only price-blind ordering
+ *   Phase 3  authorizeSelectedVehicle  — CORE/NO_CORE gates on the selected vehicle
  *
- * Vehicle type must not appear in the Phase 2 comparator. The comparator
- * reads evaluated candidate attributes exclusively. When two candidates are
- * identical on all nine criteria the comparator returns 0, preserving the
- * stable input order that Node's Array.prototype.sort guarantees.
+ * Doctrine constraints (enforced mechanically):
  *
- * Doctrine references
- * ───────────────────
- * "Vehicle labels do not determine safety or preference. Evaluated
- *  game-specific attributes do."
+ *   • Vehicle type determines which gates apply; it never creates preference,
+ *     safety, or tiebreak priority.
+ *   • Ranking uses only evaluated candidate attributes (scriptCapture,
+ *     failureModeBurden, conversionBurden, timingDependence, workloadDependence,
+ *     plateAppearanceDependence, bullpenDependence, runAllocationDependence,
+ *     stability, dataCompleteness). Odds and juice are excluded.
+ *   • A vehicle may be structurally VIABLE and still receive NO_CORE from
+ *     authorization (Phase 3). Viability and authorization are separate.
+ *   • Missing data freezes only the vehicles that depend on it.
+ *   • True ties preserve stable input order (no hidden vehicle-type tiebreaker).
  *
- * "A vehicle can be structurally viable, the best price-blind expression of
- *  game truth, and still NO CORE because separation, monotonicity, lineup
- *  confirmation, or another authorization requirement fails."
- *
- * "Until a vehicle-specific projection exists: NOT_EVALUABLE —
- *  VEHICLE_PROJECTION_UNAVAILABLE."
+ * Operational preservation:
+ *   The existing GAME_TOTAL seed in module10_slateInput.ts is not touched.
+ *   rankViableVehicles() is not wired to live Candidate_Vehicle or SLATE_BOARD.
  */
 
 import type { GameEligibilityContext } from "./module11_outputExtraction.js";
@@ -35,14 +35,14 @@ import type { GameEligibilityContext } from "./module11_outputExtraction.js";
 
 /**
  * All known vehicle types in the pipeline.
- * "GAME_TOTAL" is the legacy/default seed from module10 (treated as a full-game
- * total but without an explicit direction; preserved for operational continuity).
+ * "GAME_TOTAL" is the legacy operational seed from module10 (treated as a
+ * full-game total without an explicit direction; preserved for continuity).
  * "TBD" signals no vehicle has been selected yet.
  */
 export type VehicleType =
   | "FULL_GAME_OVER"
   | "FULL_GAME_UNDER"
-  | "GAME_TOTAL"          // legacy operational seed — treated as full-game total
+  | "GAME_TOTAL"            // legacy operational seed — treated as full-game total
   | "TEAM_TOTAL_OVER"
   | "TEAM_TOTAL_UNDER"
   | "MONEYLINE"
@@ -52,21 +52,47 @@ export type VehicleType =
   | "STARTER_HITS_OVER"
   | "TBD";
 
-/** Structural evaluability of a vehicle candidate. */
-export type VehicleViability =
-  | "VIABLE"           // passes all structural checks; eligible for ranking and authorization
-  | "NOT_VIABLE"       // structural gate failure (e.g. explicit operator kill flag)
-  | "NOT_EVALUABLE"    // cannot be evaluated with currently available data / projections
-  | "UNAVAILABLE";     // market not present (no line, no odds)
+/**
+ * Four-state evaluation result for a vehicle candidate.
+ *
+ *   VIABLE       — required data is present; vehicle clears its own gates.
+ *   NOT_VIABLE   — required data is present but a vehicle-specific gate fails.
+ *   NOT_EVALUABLE — required projection, target, workload, market, or context
+ *                   is missing; cannot assess this vehicle now.
+ *   UNAVAILABLE  — vehicle was validly preferred but is not currently offered
+ *                   (no live market, no line posted).
+ *
+ * Missing data must freeze only the affected vehicle, not siblings.
+ */
+export type VehicleEvaluationStatus =
+  | "VIABLE"
+  | "NOT_VIABLE"
+  | "NOT_EVALUABLE"
+  | "UNAVAILABLE";
 
-// ─── Classification sets (internal — vehicle type determines which gates apply,
-//     never which vehicle is preferred) ──────────────────────────────────────
+// ─── Classification sets (internal) ────────────────────────────────────────
+// Vehicle type determines which gates apply. It never determines preference.
 
-/** Full-game total vehicles: use the full-game projected total vs. market total. */
 const FULL_GAME_TOTAL_VEHICLES = new Set<VehicleType>([
   "FULL_GAME_OVER",
   "FULL_GAME_UNDER",
   "GAME_TOTAL",
+]);
+
+const TEAM_TOTAL_VEHICLES = new Set<VehicleType>([
+  "TEAM_TOTAL_OVER",
+  "TEAM_TOTAL_UNDER",
+]);
+
+const SIDE_VEHICLES = new Set<VehicleType>([
+  "MONEYLINE",
+  "RUN_LINE",
+]);
+
+const STARTER_PROP_VEHICLES = new Set<VehicleType>([
+  "STARTER_OUTS_UNDER",
+  "STARTER_ER_OVER",
+  "STARTER_HITS_OVER",
 ]);
 
 /** Non-conventional starter roles for which workload identity matters. */
@@ -79,38 +105,22 @@ const NON_CONVENTIONAL_ROLES = new Set<string>([
   "RELIEF_ARM_LISTED_AS_STARTER",
 ]);
 
-/** Vehicle types that require a team-run projection (not yet available). */
-const TEAM_TOTAL_VEHICLES = new Set<VehicleType>([
-  "TEAM_TOTAL_OVER",
-  "TEAM_TOTAL_UNDER",
-]);
-
-/** Vehicle types that require a side/spread projection (not yet available). */
-const SIDE_VEHICLES = new Set<VehicleType>([
-  "MONEYLINE",
-  "RUN_LINE",
-]);
-
-/** Vehicle types that require a starter-specific projection (not yet available). */
-const STARTER_PROP_VEHICLES = new Set<VehicleType>([
-  "STARTER_OUTS_UNDER",
-  "STARTER_ER_OVER",
-  "STARTER_HITS_OVER",
-]);
-
 // ─── Candidate contract ────────────────────────────────────────────────────
 
 /**
- * A single vehicle candidate entering the three-phase selection pipeline.
+ * A single vehicle candidate entering the evaluation and ranking pipeline.
  *
- * Identity fields (vehicleType, targetSide, targetTeam, targetPlayerId) are
- * caller-supplied and must be set before evaluation.
+ * Identity fields (vehicleType, targetSide, targetTeam, targetPlayerId,
+ * targetPlayerName) are caller-supplied.
  *
- * Data completeness and doctrine-criterion scores are populated by the caller
- * from available pipeline signals. Fields may be undefined when data is not
- * yet available; the comparator treats undefined as 0 (neutral).
+ * Doctrine ranking attributes (scriptCapture through dataCompleteness) are
+ * populated by the caller from available pipeline signals. Undefined fields
+ * are treated as 0 (neutral) by the comparator.
  *
- * viability and viabilityBlocker are written by evaluateVehicleViability.
+ * evaluationStatus and blocker are written by evaluateVehicleCandidate.
+ *
+ * marketOdds is a transparency field only — it is explicitly excluded from
+ * the comparator. Odds and juice must not influence vehicle selection.
  */
 export interface VehicleCandidate {
   // ── Identity ──────────────────────────────────────────────────────────────
@@ -119,8 +129,10 @@ export interface VehicleCandidate {
   targetSide?: "AWAY" | "HOME";
   /** Team abbreviation when the vehicle is team-specific. */
   targetTeam?: string;
-  /** MLB player ID when the vehicle is a player prop. */
+  /** MLB player ID for player-prop vehicles. */
   targetPlayerId?: number;
+  /** Display name for player-prop vehicles (transparency only). */
+  targetPlayerName?: string;
 
   // ── Market and projection ─────────────────────────────────────────────────
   /**
@@ -132,23 +144,23 @@ export interface VehicleCandidate {
   /** Market line for this vehicle's specific line type. */
   marketLine?: number;
   /**
-   * Whether a live market exists for this vehicle.
+   * American-odds representation of the market price (transparency field).
+   * EXPLICITLY EXCLUDED from the comparator — odds and juice must not affect
+   * vehicle selection or ranking.
+   */
+  marketOdds?: number;
+  /**
+   * Whether a live market currently exists for this vehicle.
    * UNAVAILABLE → not evaluable regardless of data completeness.
    */
   availability: "AVAILABLE" | "UNAVAILABLE";
-  /**
-   * Fraction of required input data that is present, 0.0–1.0.
-   * 1.0 = all required pipeline signals present.
-   * Used for tiebreaking between otherwise equal candidates.
-   */
-  dataCompleteness: number;
 
   // ── Doctrine ranking attributes (all optional — 0 when absent) ────────────
   /**
    * How strongly this vehicle captures the game's dominant scoring script.
    * Higher = better expression of game truth.
    */
-  scriptCaptureScore?: number;
+  scriptCapture?: number;
   /**
    * Aggregate burden of this vehicle's failure modes (model error, line-move
    * sensitivity, unexpected events). Lower = more robust.
@@ -187,25 +199,48 @@ export interface VehicleCandidate {
    * Historical and structural stability of this vehicle's signals.
    * Higher = more consistent across similar contexts.
    */
-  stabilityScore?: number;
+  stability?: number;
+  /**
+   * Fraction of required input data that is present, 0.0–1.0.
+   * 1.0 = all required pipeline signals are present.
+   */
+  dataCompleteness?: number;
 
-  // ── Viability result (written by evaluateVehicleViability) ───────────────
-  viability: VehicleViability;
-  /** Machine-readable reason code when viability !== VIABLE. */
-  viabilityBlocker?: string;
+  // ── Evaluation result (written by evaluateVehicleCandidate) ──────────────
+  evaluationStatus: VehicleEvaluationStatus;
+  /** Machine-readable reason code when evaluationStatus !== VIABLE. */
+  blocker?: string;
+}
+
+// ─── Rank result ───────────────────────────────────────────────────────────
+
+/**
+ * Result of rankViableVehicles.
+ *
+ * ranked       — VIABLE candidates in doctrine priority order. Empty when
+ *                no viable candidate exists.
+ * controllingBlockers — When ranked is empty, the blocker strings from every
+ *                non-viable candidate, for diagnosis. Empty when ranked is
+ *                non-empty.
+ */
+export interface RankViableResult {
+  ranked: VehicleCandidate[];
+  controllingBlockers: string[];
 }
 
 // ─── Authorization result ──────────────────────────────────────────────────
 
 /**
  * Output of authorizeSelectedVehicle — CORE/NO_CORE gates applied to the
- * already-selected vehicle.
- *
- * This is Phase 3 only. Viability (Phase 1) and ranking (Phase 2) are complete
- * before this is called.
+ * already-selected vehicle. This is Phase 3 only.
  */
 export interface AuthorizationResult {
-  /** CORE = authorized bet candidate. NO_CORE = blocked. NOT_EVALUABLE = viability gate failed before authorization. PENDING = no projection or market line. */
+  /**
+   * CORE          = authorized bet candidate.
+   * NO_CORE       = blocked by an authorization gate.
+   * NOT_EVALUABLE = viability gate failed; authorization was not reached.
+   * PENDING       = no projection or market line to evaluate.
+   */
   decision: "CORE" | "NO_CORE" | "NOT_EVALUABLE" | "PENDING";
   direction: "OVER" | "UNDER" | "NONE";
   /** Named reason when decision !== CORE. Empty string for CORE. */
@@ -214,24 +249,30 @@ export interface AuthorizationResult {
   roi: number;
 }
 
-// ─── Phase 1: Viability evaluation ────────────────────────────────────────
+// ─── Phase 1: Candidate evaluation ────────────────────────────────────────
 
 /**
- * Evaluate whether a candidate is structurally viable for this game context.
+ * Evaluate whether a candidate is structurally evaluable and viable for
+ * this game context.
  *
- * Returns a copy of the candidate with viability and viabilityBlocker set.
- * Does NOT apply CORE authorization gates — that is Phase 3.
+ * Returns a shallow copy of the candidate with evaluationStatus and blocker
+ * set. Does NOT apply CORE authorization gates — that is Phase 3.
  *
  * Decision tree:
  *   1. UNAVAILABLE market → UNAVAILABLE
- *   2. Vehicle requires a projection type not yet implemented → NOT_EVALUABLE
- *   3. TBD (no vehicle specified) → NOT_EVALUABLE
- *   4. Full-game Under with unresolved opener/bulk workload → NOT_EVALUABLE
- *      (Known opener/bulk chain with workload present → VIABLE; burdens elevated by caller)
- *   5. Full-game Over or GAME_TOTAL → VIABLE
- *   6. Unknown vehicle type → NOT_EVALUABLE
+ *   2. Vehicle requires a projection type not yet commissioned → NOT_EVALUABLE
+ *      (TEAM_TOTAL_*, MONEYLINE, RUN_LINE, STARTER_*, TBD)
+ *   3. FULL_GAME_UNDER with unresolved opener/bulk workload → NOT_EVALUABLE
+ *      Known opener/bulk chain (innings present) → VIABLE (caller elevates burdens)
+ *   4. FULL_GAME_OVER / FULL_GAME_UNDER (workload resolved) / GAME_TOTAL → VIABLE
+ *   5. Unknown vehicle type → NOT_EVALUABLE
+ *
+ * Missing workload freezes only workload-dependent vehicles (full-game Under).
+ * Missing team-total projection freezes only team-total vehicles.
+ * Missing starter-prop projection freezes only starter-prop vehicles.
+ * Sibling vehicles are unaffected.
  */
-export function evaluateVehicleViability(
+export function evaluateVehicleCandidate(
   candidate: VehicleCandidate,
   context: GameEligibilityContext,
 ): VehicleCandidate {
@@ -239,92 +280,106 @@ export function evaluateVehicleViability(
 
   // ── 1. Market availability ──────────────────────────────────────────────
   if (candidate.availability === "UNAVAILABLE") {
-    result.viability = "UNAVAILABLE";
-    result.viabilityBlocker = "MARKET_UNAVAILABLE";
+    result.evaluationStatus = "UNAVAILABLE";
+    result.blocker = "MARKET_UNAVAILABLE";
     return result;
   }
 
   // ── 2. Projection type support ──────────────────────────────────────────
-  // Currently only a full-game-total projection exists.
+  // Only the full-game-total projection is currently commissioned.
   // Team totals, sides, and starter props require vehicle-specific projections
-  // that have not yet been commissioned. Evaluated honestly as NOT_EVALUABLE.
+  // that do not yet exist. Each is frozen independently; siblings unaffected.
   if (
     TEAM_TOTAL_VEHICLES.has(candidate.vehicleType) ||
     SIDE_VEHICLES.has(candidate.vehicleType) ||
     STARTER_PROP_VEHICLES.has(candidate.vehicleType)
   ) {
-    result.viability = "NOT_EVALUABLE";
-    result.viabilityBlocker = "VEHICLE_PROJECTION_UNAVAILABLE";
+    result.evaluationStatus = "NOT_EVALUABLE";
+    result.blocker = "VEHICLE_PROJECTION_UNAVAILABLE";
     return result;
   }
 
-  // ── 3. TBD / unspecified vehicle ────────────────────────────────────────
   if (candidate.vehicleType === "TBD") {
-    result.viability = "NOT_EVALUABLE";
-    result.viabilityBlocker = "VEHICLE_NOT_SPECIFIED";
+    result.evaluationStatus = "NOT_EVALUABLE";
+    result.blocker = "VEHICLE_NOT_SPECIFIED";
     return result;
   }
 
-  // ── 4. Full-game total structural checks ────────────────────────────────
+  // ── 3. Full-game total structural checks ────────────────────────────────
   if (FULL_GAME_TOTAL_VEHICLES.has(candidate.vehicleType)) {
     if (candidate.vehicleType === "FULL_GAME_UNDER") {
-      // Known opener/bulk chain: VIABLE (caller elevates burden scores).
-      // Unresolved opener/bulk identity or workload: NOT_EVALUABLE.
-      // Role label alone does NOT veto — workload unknowability does.
+      // An opener/bulk/piggyback designation is NOT an automatic Under veto.
+      // If the chain's workload (expected innings) is known: evaluate normally.
+      // Caller is responsible for elevating workloadDependence and bullpenDependence
+      // scores on the candidate to reflect the broader dependency burden.
+      // If the chain is unresolved (innings null): NOT_EVALUABLE for this vehicle.
       const awayNonConventional = NON_CONVENTIONAL_ROLES.has(context.awayPitcherRole);
       const homeNonConventional = NON_CONVENTIONAL_ROLES.has(context.homePitcherRole);
       const awayWorkloadUnknown = awayNonConventional && context.awayExpectedInnings === null;
       const homeWorkloadUnknown = homeNonConventional && context.homeExpectedInnings === null;
       if (awayWorkloadUnknown || homeWorkloadUnknown) {
-        result.viability = "NOT_EVALUABLE";
-        result.viabilityBlocker = "UNRESOLVED_OPENER_WORKLOAD";
+        result.evaluationStatus = "NOT_EVALUABLE";
+        result.blocker = "UNRESOLVED_OPENER_WORKLOAD";
         return result;
       }
     }
-    result.viability = "VIABLE";
+    result.evaluationStatus = "VIABLE";
     return result;
   }
 
-  // ── 5. Unknown vehicle type ─────────────────────────────────────────────
-  result.viability = "NOT_EVALUABLE";
-  result.viabilityBlocker = "UNKNOWN_VEHICLE_TYPE";
+  // ── 4. Unknown vehicle type ─────────────────────────────────────────────
+  result.evaluationStatus = "NOT_EVALUABLE";
+  result.blocker = "UNKNOWN_VEHICLE_TYPE";
   return result;
 }
 
 // ─── Phase 2: Attribute-only ranking ──────────────────────────────────────
 
 /**
- * Rank VIABLE candidates by doctrine criteria. Non-VIABLE candidates are
- * filtered out and do not appear in the result.
+ * Rank VIABLE candidates by doctrine criteria.
  *
- * Comparator reads evaluated candidate attributes exclusively. Vehicle type
- * is never used as a preference criterion or tiebreaker.
+ * Non-VIABLE candidates are excluded from ranked output. Their blockers are
+ * collected into controllingBlockers for diagnosis when no viable vehicle
+ * survives.
+ *
+ * Comparator reads evaluated candidate attributes exclusively.
+ * Vehicle type is never used as a preference criterion or tiebreaker.
+ * Odds and juice (marketOdds) are excluded.
  *
  * Criteria (in priority order):
- *   1. scriptCaptureScore      DESC  (higher = better expression of game truth)
- *   2. failureModeBurden       ASC   (lower = more robust)
- *   3. conversionBurden        ASC
- *   4. timingDependence        ASC
- *   5. workloadDependence      ASC
- *   6. plateAppearanceDependence ASC
- *   7. bullpenDependence       ASC
- *   8. runAllocationDependence ASC
- *   9. stabilityScore          DESC  (higher = more consistent)
+ *   1. scriptCapture              DESC  (higher = better expression of game truth)
+ *   2. failureModeBurden          ASC   (lower = more robust)
+ *   3. conversionBurden           ASC
+ *   4. timingDependence           ASC
+ *   5. workloadDependence         ASC
+ *   6. plateAppearanceDependence  ASC
+ *   7. bullpenDependence          ASC
+ *   8. runAllocationDependence    ASC
+ *   9. stability                  DESC  (higher = more consistent)
+ *  10. dataCompleteness           DESC  (higher = more data present)
  *
- * True tie on all nine criteria: returns 0. Node's sort is stable (V8 ≥ 7.0),
- * so input order is preserved for equal candidates.
+ * True tie on all ten criteria: returns 0. Node's Array.prototype.sort is
+ * stable (V8 ≥ 7.0), so input order is preserved for equal candidates.
+ * No vehicle-type tiebreaker is applied.
  */
-export function rankViableVehicles(candidates: VehicleCandidate[]): VehicleCandidate[] {
-  return candidates
-    .filter(c => c.viability === "VIABLE")
-    .sort(compareCandidateAttributes);
+export function rankViableVehicles(candidates: VehicleCandidate[]): RankViableResult {
+  const viable     = candidates.filter(c => c.evaluationStatus === "VIABLE");
+  const nonViable  = candidates.filter(c => c.evaluationStatus !== "VIABLE");
+
+  const controllingBlockers: string[] = viable.length === 0
+    ? nonViable.map(c => c.blocker ?? c.evaluationStatus).filter(Boolean)
+    : [];
+
+  const ranked = [...viable].sort(compareCandidateAttributes);
+
+  return { ranked, controllingBlockers };
 }
 
 function compareCandidateAttributes(a: VehicleCandidate, b: VehicleCandidate): number {
-  // 1. scriptCaptureScore DESC
-  const scsA = a.scriptCaptureScore ?? 0;
-  const scsB = b.scriptCaptureScore ?? 0;
-  if (scsA !== scsB) return scsB - scsA;
+  // 1. scriptCapture DESC
+  const scA = a.scriptCapture ?? 0;
+  const scB = b.scriptCapture ?? 0;
+  if (scA !== scB) return scB - scA;
 
   // 2. failureModeBurden ASC
   const fmbA = a.failureModeBurden ?? 0;
@@ -361,31 +416,38 @@ function compareCandidateAttributes(a: VehicleCandidate, b: VehicleCandidate): n
   const radB = b.runAllocationDependence ?? 0;
   if (radA !== radB) return radA - radB;
 
-  // 9. stabilityScore DESC
-  const ssA = a.stabilityScore ?? 0;
-  const ssB = b.stabilityScore ?? 0;
+  // 9. stability DESC
+  const ssA = a.stability ?? 0;
+  const ssB = b.stability ?? 0;
   if (ssA !== ssB) return ssB - ssA;
 
-  // True tie — return 0 to preserve stable input order. No vehicle-type tiebreaker.
+  // 10. dataCompleteness DESC
+  const dcA = a.dataCompleteness ?? 0;
+  const dcB = b.dataCompleteness ?? 0;
+  if (dcA !== dcB) return dcB - dcA;
+
+  // True tie — return 0 to preserve stable input order. No vehicle-type comparison.
   return 0;
 }
 
 // ─── Phase 3: Authorization ────────────────────────────────────────────────
 
-/** Separation threshold matching module11 computeDecision (1.5 runs). */
+/** Separation threshold matching module11_outputExtraction CORE_THRESHOLD. */
 const AUTH_CORE_THRESHOLD = 1.5;
 
 /**
  * Apply CORE/NO_CORE authorization gates to an already-selected vehicle.
  *
- * Precondition: this is called AFTER evaluateVehicleViability (Phase 1) and
- * rankViableVehicles (Phase 2) have run. Viability is already established.
- * This function applies authorization gates only — it does not re-evaluate
- * structural viability.
+ * Precondition: called AFTER evaluateVehicleCandidate (Phase 1) and
+ * rankViableVehicles (Phase 2) have completed. The selected vehicle is
+ * the top entry of ranked.
+ *
+ * The best vehicle remains identifiable even when authorization returns NO_CORE.
+ * Do not use authorization status to filter or re-rank candidates.
  *
  * Gate order (matches computeDecision in module11_outputExtraction):
- *   1. Viability guard — returns NOT_EVALUABLE for non-VIABLE candidates.
- *   2. Data guard — returns PENDING if projection or market line is absent.
+ *   1. Viability guard   — NOT_EVALUABLE for non-VIABLE evaluationStatus.
+ *   2. Data guard        — PENDING if projection or marketLine is absent.
  *   3. UNRESOLVED_STARTER
  *   4. MISSING_EXPECTED_INNINGS
  *   5. BULLPEN_DATA_UNAVAILABLE
@@ -397,11 +459,11 @@ export function authorizeSelectedVehicle(
   context: GameEligibilityContext,
 ): AuthorizationResult {
   // ── 1. Viability guard ──────────────────────────────────────────────────
-  if (selected.viability !== "VIABLE") {
+  if (selected.evaluationStatus !== "VIABLE") {
     return {
       decision:    "NOT_EVALUABLE",
       direction:   "NONE",
-      coreBlocker: selected.viabilityBlocker ?? "NOT_VIABLE",
+      coreBlocker: selected.blocker ?? selected.evaluationStatus,
       confidence:  0,
       roi:         0,
     };

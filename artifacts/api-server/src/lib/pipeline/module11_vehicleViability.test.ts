@@ -1,40 +1,59 @@
 /**
- * module11 vehicle candidate shadow architecture — unit tests
+ * module11 vehicle candidate shadow architecture — regression suite
  *
- * Tests the three-phase doctrine pipeline implemented in module11_vehicleCandidate.ts.
- * This module is SHADOW-ONLY; none of these tests touch live pipeline outputs.
+ * Tests the four-phase doctrine pipeline in module11_vehicleCandidate.ts.
+ * SHADOW-ONLY: no live pipeline outputs are touched by these tests.
  *
- * Functions under test (no Google Sheets I/O):
- *   evaluateVehicleViability  — Phase 1: structural / evaluability check
- *   rankViableVehicles        — Phase 2: attribute-only ordering
+ * Functions under test:
+ *   evaluateVehicleCandidate  — Phase 1: evaluability / structural check
+ *   rankViableVehicles        — Phase 2: attribute-only price-blind ordering
  *   authorizeSelectedVehicle  — Phase 3: CORE/NO_CORE authorization gates
  *
- * Test catalogue
- * ──────────────
- * Doctrine scenarios (8)
- *   S1  Either-side eruption: FG-Over wins over TT-Over when script capture is stronger
- *   S2  Run-allocation confidence: TT-Over wins over FG-Over when allocation is cleaner
- *   S3  Known opener/bulk chain: FG-Under is VIABLE when workload is known
- *   S4  Unknown opener/bulk workload: FG-Under becomes NOT_EVALUABLE
- *   S5  Starter prop with no projection: STARTER_OUTS_UNDER → NOT_EVALUABLE
- *   S6  Multi-candidate ranking by attributes
- *   S7  No viable candidates: rankViableVehicles returns empty array
- *   S8  Single viable candidate: selected unconditionally
+ * 14 required regression tests
+ * ─────────────────────────────
+ *  1  Either-side eruption       FG-Over ranks first via explicit script-capture and
+ *                                 allocation-dependence attributes.
+ *  2  One-sided ownership        TT-Over ranks first via one-sided offensive ownership
+ *                                 and lower run-allocation dependence.
+ *  3  Traffic without conversion  Outs-Under ranks first via pitch stress / hook pathway
+ *                                 attributes, not its vehicle label.
+ *  4  Contact-dominant fade      Hits-Allowed-Over ranks first via contact-access
+ *                                 attributes, not its vehicle label.
+ *  5  Full-game Under burden     Unresolved suppression chain → NOT_EVALUABLE;
+ *                                 opener label alone is insufficient.
+ *  6  Price blindness            Changing odds / juice does not alter viability,
+ *                                 ranking, or the selected vehicle.
+ *  7  Unavailable preferred      Highest-ranked viable candidate is UNAVAILABLE;
+ *                                 reroute occurs to next independently viable candidate.
+ *  8  No viable vehicle          Returns empty ranked + controllingBlockers; does not
+ *                                 force selection.
+ *  9  Identical attributes       Vehicle type alone cannot affect ranking.
+ * 10  Viable but NO CORE         Best vehicle is selected first; authorization returns
+ *                                 NO_CORE with the applicable blocker.
+ * 11  Unknown workload isolation  Starter prop → NOT_EVALUABLE; full-game total remains
+ *                                 independently evaluable.
+ * 12  Unsupported projection     Moneyline / team total / starter prop cannot reuse
+ *                                 a full-game-total projection.
+ * 13  Known opener/bulk chain    Full-Game Under is NOT auto-rejected by role label.
+ * 14  No operational drift       computeDecision and overSurvivalCheck outputs are
+ *                                 byte-for-byte identical to their pre-shadow baselines.
  *
- * Mandatory additional tests (6)
- *   A1  Identical attributes, different vehicle labels → same rank, input order preserved
- *   A2  Viable but NO CORE → vehicle selected, authorization returns NO_CORE with blocker
- *   A3  Unknown workload isolation: STARTER_OUTS_UNDER NOT_EVALUABLE, FG-Over VIABLE
- *   A4  Known opener/bulk chain: FG-Under not auto-rejected by role label alone
- *   A5  Unsupported projection type: MONEYLINE → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE
- *   A6  No live-output drift: computeDecision results are byte-for-byte unchanged
+ * Design note on tests 2–4
+ * ─────────────────────────
+ * TEAM_TOTAL_OVER, STARTER_OUTS_UNDER, and STARTER_HITS_OVER are currently
+ * NOT_EVALUABLE (no vehicle-specific projection exists yet). Tests 2–4 target
+ * the Phase 2 comparator directly: candidates are pre-built with
+ * evaluationStatus = "VIABLE" to represent the future state when those
+ * projections are commissioned. This isolates the ranking logic from the
+ * current evaluability constraint and proves that attribute values — not
+ * vehicle labels — determine rank.
  */
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  evaluateVehicleViability,
+  evaluateVehicleCandidate,
   rankViableVehicles,
   authorizeSelectedVehicle,
   type VehicleCandidate,
@@ -48,212 +67,195 @@ import {
 
 // ─── Shared fixtures ───────────────────────────────────────────────────────
 
-/** Fully-eligible game context: conventional starters, innings known, bullpen present. */
 const CONVENTIONAL_CTX: GameEligibilityContext = {
-  awayPitcherRole:      "CONVENTIONAL_STARTER",
-  homePitcherRole:      "CONVENTIONAL_STARTER",
-  awayExpectedInnings:  6.0,
-  homeExpectedInnings:  6.0,
-  bullpenAvailable:     true,
+  awayPitcherRole:     "CONVENTIONAL_STARTER",
+  homePitcherRole:     "CONVENTIONAL_STARTER",
+  awayExpectedInnings: 6.0,
+  homeExpectedInnings: 6.0,
+  bullpenAvailable:    true,
 };
 
-/** Helper to build a minimal VIABLE FULL_GAME_OVER candidate. */
-function fgOverCandidate(overrides: Partial<VehicleCandidate> = {}): VehicleCandidate {
+/** Minimal VIABLE FULL_GAME_OVER candidate with projection above threshold. */
+function fgOver(overrides: Partial<VehicleCandidate> = {}): VehicleCandidate {
   return {
-    vehicleType:   "FULL_GAME_OVER",
-    availability:  "AVAILABLE",
-    dataCompleteness: 1.0,
-    projection:    10.5,
-    marketLine:    8.5,
-    viability:     "VIABLE",
+    vehicleType:      "FULL_GAME_OVER",
+    availability:     "AVAILABLE",
+    evaluationStatus: "VIABLE",
+    projection:       10.5,
+    marketLine:       8.5,
     ...overrides,
   };
 }
 
-/** Helper to build a minimal VIABLE FULL_GAME_UNDER candidate. */
-function fgUnderCandidate(overrides: Partial<VehicleCandidate> = {}): VehicleCandidate {
+/** Minimal VIABLE FULL_GAME_UNDER candidate with projection below threshold. */
+function fgUnder(overrides: Partial<VehicleCandidate> = {}): VehicleCandidate {
   return {
-    vehicleType:   "FULL_GAME_UNDER",
-    availability:  "AVAILABLE",
-    dataCompleteness: 1.0,
-    projection:    6.5,
-    marketLine:    8.5,
-    viability:     "VIABLE",
+    vehicleType:      "FULL_GAME_UNDER",
+    availability:     "AVAILABLE",
+    evaluationStatus: "VIABLE",
+    projection:       6.5,
+    marketLine:       8.5,
     ...overrides,
   };
 }
 
-// ─── Doctrine scenario S1 ──────────────────────────────────────────────────
-// Either-side eruption: FG-Over wins over TT-Over when its script capture is
-// stronger and its run-allocation dependence is lower.
-//
-// Supplying explicit attribute values so the test proves the comparator reads
-// those values, not the vehicle type.
+// ─── Test 1: Either-side eruption ─────────────────────────────────────────
 
-describe("S1: Either-side eruption — FG-Over ranks above TT-Over via attributes", () => {
-  it("FG-Over (high script capture, low allocation dependence) ranks first", () => {
-    const fgOver: VehicleCandidate = {
-      vehicleType:          "FULL_GAME_OVER",
-      availability:         "AVAILABLE",
-      dataCompleteness:     1.0,
-      viability:            "VIABLE",
-      scriptCaptureScore:   0.90,   // strong aggregate run script
-      runAllocationDependence: 0.15, // low — whole-game total, no split needed
-      failureModeBurden:    0.20,
-    };
+describe("T1: Either-side eruption — FG-Over ranks first via attributes", () => {
+  it("Higher scriptCapture + lower runAllocationDependence wins regardless of vehicle label", () => {
+    // Both candidates are FULL_GAME_OVER to confirm type is not the deciding factor.
+    const strongAggregateScript = fgOver({
+      scriptCapture:          0.90,  // strong: both sides driving runs
+      runAllocationDependence: 0.15, // low: whole-game total, no team split needed
+      failureModeBurden:       0.20,
+    });
 
-    // TEAM_TOTAL_OVER is NOT_EVALUABLE under current projection availability,
-    // so we use FULL_GAME_OVER as a stand-in with weaker attributes to test
-    // the comparator directly.
-    const narrowerOver: VehicleCandidate = {
-      vehicleType:          "FULL_GAME_OVER",
-      availability:         "AVAILABLE",
-      dataCompleteness:     0.8,
-      viability:            "VIABLE",
-      scriptCaptureScore:   0.60,   // weaker script capture
-      runAllocationDependence: 0.55, // higher — depends on team split
-      failureModeBurden:    0.35,
-    };
+    const weakerScript = fgOver({
+      scriptCapture:          0.60,  // weaker aggregate capture
+      runAllocationDependence: 0.55, // higher: result depends on split clarity
+      failureModeBurden:       0.35,
+    });
 
-    const ranked = rankViableVehicles([narrowerOver, fgOver]);
+    const { ranked } = rankViableVehicles([weakerScript, strongAggregateScript]);
 
     assert.strictEqual(ranked.length, 2);
-    assert.strictEqual(ranked[0].scriptCaptureScore, 0.90,
-      "Higher scriptCaptureScore candidate must rank first");
-    assert.strictEqual(ranked[1].scriptCaptureScore, 0.60,
-      "Lower scriptCaptureScore candidate must rank second");
-    // Confirm: rank did not use vehicle type as a criterion
+    assert.strictEqual(ranked[0].scriptCapture, 0.90,
+      "Higher scriptCapture must rank first");
+    assert.strictEqual(ranked[1].scriptCapture, 0.60,
+      "Lower scriptCapture must rank second");
     assert.strictEqual(ranked[0].vehicleType, ranked[1].vehicleType,
-      "Both candidates share the same vehicleType — rank came from attributes only");
+      "Same vehicle type in both positions — rank came purely from attributes");
   });
 });
 
-// ─── Doctrine scenario S2 ──────────────────────────────────────────────────
-// Run-allocation confidence: a candidate with cleaner run-allocation can rank
-// above one with a higher scriptCaptureScore when their scripts tie and the
-// allocation-dependent one is demonstrably weaker.
-//
-// Here both candidates tie on scriptCaptureScore; the one with lower
-// runAllocationDependence wins on criterion 8.
+// ─── Test 2: One-sided ownership ──────────────────────────────────────────
 
-describe("S2: Run-allocation confidence — allocation-clean candidate wins tie", () => {
-  it("Lower runAllocationDependence wins when all higher criteria are tied", () => {
-    const allocationClean: VehicleCandidate = {
-      vehicleType:              "FULL_GAME_OVER",
-      availability:             "AVAILABLE",
-      dataCompleteness:         1.0,
-      viability:                "VIABLE",
-      scriptCaptureScore:       0.75,
-      failureModeBurden:        0.25,
-      conversionBurden:         0.30,
-      timingDependence:         0.20,
-      workloadDependence:       0.20,
-      plateAppearanceDependence: 0.15,
-      bullpenDependence:        0.25,
-      runAllocationDependence:  0.20,  // clean
+describe("T2: One-sided ownership — TT-Over ranks first via ownership attributes", () => {
+  it("Team-total candidate with stronger one-sided ownership ranks above full-game candidate", () => {
+    // Projections are hypothetical (pre-commissioning) — evaluationStatus pre-set to
+    // VIABLE to isolate the comparator from current evaluability constraints.
+    const teamTotalOwnership: VehicleCandidate = {
+      vehicleType:            "TEAM_TOTAL_OVER",
+      targetSide:             "AWAY",
+      targetTeam:             "SEA",
+      availability:           "AVAILABLE",
+      evaluationStatus:       "VIABLE",
+      scriptCapture:          0.85,  // strong: away team owns the offensive script
+      runAllocationDependence: 0.25, // low: only one team's allocation matters
+      failureModeBurden:      0.22,
     };
 
-    const allocationDependent: VehicleCandidate = {
-      vehicleType:              "FULL_GAME_OVER",
-      availability:             "AVAILABLE",
-      dataCompleteness:         1.0,
-      viability:                "VIABLE",
-      scriptCaptureScore:       0.75,  // tied
-      failureModeBurden:        0.25,  // tied
-      conversionBurden:         0.30,  // tied
-      timingDependence:         0.20,  // tied
-      workloadDependence:       0.20,  // tied
-      plateAppearanceDependence: 0.15, // tied
-      bullpenDependence:        0.25,  // tied
-      runAllocationDependence:  0.65,  // higher — depends on team split clarity
-    };
+    const fullGameDiffuse = fgOver({
+      scriptCapture:          0.65,  // weaker: script is split, both teams uncertain
+      runAllocationDependence: 0.60, // high: depends on how both teams allocate
+      failureModeBurden:      0.30,
+    });
 
-    const ranked = rankViableVehicles([allocationDependent, allocationClean]);
+    const { ranked } = rankViableVehicles([fullGameDiffuse, teamTotalOwnership]);
 
     assert.strictEqual(ranked.length, 2);
-    assert.strictEqual(ranked[0].runAllocationDependence, 0.20,
-      "Lower runAllocationDependence must rank first when higher criteria are tied");
-    assert.strictEqual(ranked[1].runAllocationDependence, 0.65);
+    assert.strictEqual(ranked[0].scriptCapture, 0.85,
+      "One-sided ownership (higher scriptCapture) must rank first");
+    assert.strictEqual(ranked[0].vehicleType, "TEAM_TOTAL_OVER",
+      "Team-total wins because of attributes, not because of its label");
   });
 });
 
-// ─── Doctrine scenario S3 ──────────────────────────────────────────────────
-// Known opener/bulk chain: Full-Game Under is VIABLE when the opener's workload
-// (expected innings) is known, even though the role is non-conventional.
+// ─── Test 3: Traffic without conversion ──────────────────────────────────
 
-describe("S3: Known opener/bulk chain — FG-Under is VIABLE when innings are known", () => {
-  it("FULL_GAME_UNDER with OPENER role + known innings → VIABLE", () => {
+describe("T3: Traffic without conversion — Outs-Under ranks first via pitch-stress attributes", () => {
+  it("Outs-Under candidate with strong pitch-stress attributes ranks above FG-Over with weak conversion path", () => {
+    // Pre-set VIABLE to test the comparator (no starter projection exists yet).
+    const outsUnderPitchStress: VehicleCandidate = {
+      vehicleType:        "STARTER_OUTS_UNDER",
+      targetSide:         "AWAY",
+      availability:       "AVAILABLE",
+      evaluationStatus:   "VIABLE",
+      scriptCapture:      0.80,  // high: pitch-stress hook is the dominant path
+      conversionBurden:   0.20,  // low: outs don't require run conversion
+      failureModeBurden:  0.18,
+    };
+
+    const fgOverWeakConversion = fgOver({
+      scriptCapture:    0.55,  // lower: script predicts traffic but conversion is uncertain
+      conversionBurden: 0.70,  // high: traffic must convert to runs to win
+      failureModeBurden: 0.45,
+    });
+
+    const { ranked } = rankViableVehicles([fgOverWeakConversion, outsUnderPitchStress]);
+
+    assert.strictEqual(ranked.length, 2);
+    assert.strictEqual(ranked[0].vehicleType, "STARTER_OUTS_UNDER",
+      "Outs-Under ranks first because its pitch-stress attributes are superior");
+    assert.strictEqual(ranked[0].scriptCapture, 0.80);
+    assert.strictEqual(ranked[0].conversionBurden, 0.20);
+  });
+});
+
+// ─── Test 4: Contact-dominant fade ───────────────────────────────────────
+
+describe("T4: Contact-dominant fade — Hits-Allowed-Over ranks first via contact-access attributes", () => {
+  it("Hits-Allowed-Over with strong contact-access attributes ranks above FG-Under with weak suppression", () => {
+    // Pre-set VIABLE (no starter projection yet).
+    const hitsAllowedContactStrong: VehicleCandidate = {
+      vehicleType:            "STARTER_HITS_OVER",
+      targetSide:             "HOME",
+      availability:           "AVAILABLE",
+      evaluationStatus:       "VIABLE",
+      scriptCapture:          0.82,  // high: contact-access path is dominant
+      conversionBurden:       0.15,  // very low: hits are the direct output
+      runAllocationDependence: 0.10, // not dependent on cross-team allocation
+      failureModeBurden:       0.20,
+    };
+
+    const fgUnderWeakSuppression = fgUnder({
+      scriptCapture:          0.50,  // lower: suppression script is not dominant
+      conversionBurden:       0.55,  // high: requires both starters to be effective
+      runAllocationDependence: 0.45,
+      failureModeBurden:       0.40,
+    });
+
+    const { ranked } = rankViableVehicles([fgUnderWeakSuppression, hitsAllowedContactStrong]);
+
+    assert.strictEqual(ranked.length, 2);
+    assert.strictEqual(ranked[0].vehicleType, "STARTER_HITS_OVER",
+      "Hits-Allowed-Over ranks first because contact-access attributes are superior");
+    assert.strictEqual(ranked[0].scriptCapture, 0.82);
+  });
+});
+
+// ─── Test 5: Full-game Under burden ──────────────────────────────────────
+
+describe("T5: Full-game Under burden — unresolved suppression chain → NOT_EVALUABLE", () => {
+  it("OPENER with null expectedInnings → NOT_EVALUABLE UNRESOLVED_OPENER_WORKLOAD", () => {
     const ctx: GameEligibilityContext = {
       awayPitcherRole:     "OPENER",
       homePitcherRole:     "CONVENTIONAL_STARTER",
-      awayExpectedInnings: 1.2,   // known — opener workload is resolved
+      awayExpectedInnings: null,   // chain identity unresolved
       homeExpectedInnings: 6.0,
       bullpenAvailable:    true,
     };
 
-    const candidate = fgUnderCandidate();
-    const result = evaluateVehicleViability(candidate, ctx);
-
-    assert.strictEqual(result.viability, "VIABLE",
-      "Known opener workload must not veto FG-Under — role label alone is insufficient");
-    assert.strictEqual(result.viabilityBlocker, undefined,
-      "No viabilityBlocker for VIABLE candidates");
+    const result = evaluateVehicleCandidate(fgUnder(), ctx);
+    assert.strictEqual(result.evaluationStatus, "NOT_EVALUABLE");
+    assert.strictEqual(result.blocker, "UNRESOLVED_OPENER_WORKLOAD");
   });
 
-  it("FULL_GAME_UNDER with BULK role + known innings → VIABLE", () => {
-    const ctx: GameEligibilityContext = {
-      awayPitcherRole:     "CONVENTIONAL_STARTER",
-      homePitcherRole:     "BULK",
-      awayExpectedInnings: 6.0,
-      homeExpectedInnings: 3.0,   // known — bulk pitcher innings resolved
-      bullpenAvailable:    true,
-    };
-
-    const candidate = fgUnderCandidate();
-    const result = evaluateVehicleViability(candidate, ctx);
-
-    assert.strictEqual(result.viability, "VIABLE");
-  });
-});
-
-// ─── Doctrine scenario S4 ──────────────────────────────────────────────────
-// Unknown opener/bulk workload: FG-Under becomes NOT_EVALUABLE when the
-// opener or bulk pitcher's workload cannot be assessed (expectedInnings null).
-
-describe("S4: Unknown opener/bulk workload — FG-Under → NOT_EVALUABLE", () => {
-  it("FULL_GAME_UNDER with OPENER + null innings → NOT_EVALUABLE UNRESOLVED_OPENER_WORKLOAD", () => {
+  it("OPENER label alone with known innings does NOT freeze FG-Under", () => {
     const ctx: GameEligibilityContext = {
       awayPitcherRole:     "OPENER",
       homePitcherRole:     "CONVENTIONAL_STARTER",
-      awayExpectedInnings: null,   // workload unknown — cannot evaluate
+      awayExpectedInnings: 1.2,   // workload is known
       homeExpectedInnings: 6.0,
       bullpenAvailable:    true,
     };
 
-    const candidate = fgUnderCandidate();
-    const result = evaluateVehicleViability(candidate, ctx);
-
-    assert.strictEqual(result.viability, "NOT_EVALUABLE");
-    assert.strictEqual(result.viabilityBlocker, "UNRESOLVED_OPENER_WORKLOAD");
+    const result = evaluateVehicleCandidate(fgUnder(), ctx);
+    assert.strictEqual(result.evaluationStatus, "VIABLE",
+      "Role label alone is not a veto — known innings make the chain evaluable");
   });
 
-  it("FULL_GAME_UNDER with PIGGYBACK_PRIMARY + null innings → NOT_EVALUABLE", () => {
-    const ctx: GameEligibilityContext = {
-      awayPitcherRole:     "CONVENTIONAL_STARTER",
-      homePitcherRole:     "PIGGYBACK_PRIMARY",
-      awayExpectedInnings: 6.0,
-      homeExpectedInnings: null,
-      bullpenAvailable:    true,
-    };
-
-    const candidate = fgUnderCandidate();
-    const result = evaluateVehicleViability(candidate, ctx);
-
-    assert.strictEqual(result.viability, "NOT_EVALUABLE");
-    assert.strictEqual(result.viabilityBlocker, "UNRESOLVED_OPENER_WORKLOAD");
-  });
-
-  it("FULL_GAME_OVER with OPENER + null innings → still VIABLE (not Under-specific)", () => {
+  it("FG-Over in the same game is VIABLE regardless of the away opener", () => {
     const ctx: GameEligibilityContext = {
       awayPitcherRole:     "OPENER",
       homePitcherRole:     "CONVENTIONAL_STARTER",
@@ -262,159 +264,139 @@ describe("S4: Unknown opener/bulk workload — FG-Under → NOT_EVALUABLE", () =
       bullpenAvailable:    true,
     };
 
-    // Opener check only applies to Under (workload matters most for run suppression).
-    const candidate = fgOverCandidate();
-    const result = evaluateVehicleViability(candidate, ctx);
-
-    assert.strictEqual(result.viability, "VIABLE",
-      "Opener workload check does not apply to FULL_GAME_OVER");
+    const result = evaluateVehicleCandidate(fgOver(), ctx);
+    assert.strictEqual(result.evaluationStatus, "VIABLE",
+      "Opener workload check is Under-specific; FG-Over is unaffected");
   });
 });
 
-// ─── Doctrine scenario S5 ──────────────────────────────────────────────────
-// Starter prop with no supporting projection: STARTER_OUTS_UNDER requires a
-// starter-specific outs projection that does not yet exist.
+// ─── Test 6: Price blindness ──────────────────────────────────────────────
 
-describe("S5: Starter prop — NOT_EVALUABLE when projection unavailable", () => {
-  it("STARTER_OUTS_UNDER → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE", () => {
-    const candidate: VehicleCandidate = {
-      vehicleType:      "STARTER_OUTS_UNDER",
-      targetSide:       "AWAY",
-      availability:     "AVAILABLE",
-      dataCompleteness: 0.0,
-      viability:        "VIABLE",   // caller-supplied; evaluator will overwrite
-    };
+describe("T6: Price blindness — odds and juice do not affect ranking or selection", () => {
+  it("Changing marketOdds on the leading candidate does not alter rank", () => {
+    const candidateA = fgOver({
+      scriptCapture:  0.80,
+      failureModeBurden: 0.20,
+      marketOdds:     -110,
+    });
 
-    const result = evaluateVehicleViability(candidate, CONVENTIONAL_CTX);
+    const candidateB = fgOver({
+      scriptCapture:  0.60,
+      failureModeBurden: 0.30,
+      marketOdds:     +130,  // better payout but irrelevant to rank
+    });
 
-    assert.strictEqual(result.viability, "NOT_EVALUABLE");
-    assert.strictEqual(result.viabilityBlocker, "VEHICLE_PROJECTION_UNAVAILABLE");
+    const { ranked: ranked1 } = rankViableVehicles([candidateA, candidateB]);
+    assert.strictEqual(ranked1[0].scriptCapture, 0.80,
+      "Candidate A ranks first regardless of odds");
+
+    // Now give candidate A extreme juice and re-rank
+    const candidateABadOdds = { ...candidateA, marketOdds: +500 };
+    const { ranked: ranked2 } = rankViableVehicles([candidateABadOdds, candidateB]);
+    assert.strictEqual(ranked2[0].scriptCapture, 0.80,
+      "Rank is unchanged even when odds swing to +500");
   });
 
-  it("STARTER_ER_OVER → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE", () => {
-    const candidate: VehicleCandidate = {
-      vehicleType:      "STARTER_ER_OVER",
-      targetSide:       "HOME",
-      availability:     "AVAILABLE",
-      dataCompleteness: 0.0,
-      viability:        "VIABLE",
-    };
-
-    const result = evaluateVehicleViability(candidate, CONVENTIONAL_CTX);
-
-    assert.strictEqual(result.viability, "NOT_EVALUABLE");
-    assert.strictEqual(result.viabilityBlocker, "VEHICLE_PROJECTION_UNAVAILABLE");
+  it("Evaluability is unchanged by marketOdds value", () => {
+    const steep = { ...fgOver(), marketOdds: -350 };
+    const flat  = { ...fgOver(), marketOdds: -102 };
+    assert.strictEqual(evaluateVehicleCandidate(steep, CONVENTIONAL_CTX).evaluationStatus, "VIABLE");
+    assert.strictEqual(evaluateVehicleCandidate(flat,  CONVENTIONAL_CTX).evaluationStatus, "VIABLE");
   });
-});
 
-// ─── Doctrine scenario S6 ──────────────────────────────────────────────────
-// Multi-candidate ranking: three viable candidates with different attribute
-// profiles are sorted in the correct doctrine order.
-
-describe("S6: Multi-candidate ranking by evaluated attributes", () => {
-  it("Three VIABLE candidates ranked in correct attribute order", () => {
-    const lowCapture: VehicleCandidate = {
-      vehicleType:        "FULL_GAME_OVER",
-      availability:       "AVAILABLE",
-      dataCompleteness:   0.9,
-      viability:          "VIABLE",
-      scriptCaptureScore: 0.40,
-      failureModeBurden:  0.20,
-    };
-
-    const highCapture: VehicleCandidate = {
-      vehicleType:        "FULL_GAME_OVER",
-      availability:       "AVAILABLE",
-      dataCompleteness:   1.0,
-      viability:          "VIABLE",
-      scriptCaptureScore: 0.85,
-      failureModeBurden:  0.25,
-    };
-
-    const midCapture: VehicleCandidate = {
-      vehicleType:        "FULL_GAME_UNDER",
-      availability:       "AVAILABLE",
-      dataCompleteness:   0.95,
-      viability:          "VIABLE",
-      scriptCaptureScore: 0.65,
-      failureModeBurden:  0.15,
-    };
-
-    const ranked = rankViableVehicles([lowCapture, highCapture, midCapture]);
-
-    assert.strictEqual(ranked.length, 3);
-    assert.strictEqual(ranked[0].scriptCaptureScore, 0.85, "Highest script capture first");
-    assert.strictEqual(ranked[1].scriptCaptureScore, 0.65, "Mid script capture second");
-    assert.strictEqual(ranked[2].scriptCaptureScore, 0.40, "Lowest script capture third");
+  it("Authorization is unchanged by marketOdds value", () => {
+    const candidate = fgOver({ marketOdds: -150 });
+    const authA = authorizeSelectedVehicle(candidate, CONVENTIONAL_CTX);
+    const authB = authorizeSelectedVehicle({ ...candidate, marketOdds: +120 }, CONVENTIONAL_CTX);
+    assert.strictEqual(authA.decision, authB.decision);
+    assert.strictEqual(authA.coreBlocker, authB.coreBlocker);
   });
 });
 
-// ─── Doctrine scenario S7 ──────────────────────────────────────────────────
-// No viable candidates: rankViableVehicles returns an empty array.
+// ─── Test 7: Unavailable preferred vehicle ────────────────────────────────
 
-describe("S7: No viable candidates — empty ranked array", () => {
-  it("All NOT_EVALUABLE/UNAVAILABLE → empty result from rankViableVehicles", () => {
+describe("T7: Unavailable preferred vehicle — reroute to next independently viable candidate", () => {
+  it("UNAVAILABLE best-ranked candidate is excluded; next viable is selected", () => {
+    const bestByAttributes: VehicleCandidate = {
+      vehicleType:      "FULL_GAME_OVER",
+      availability:     "UNAVAILABLE",    // market not offered
+      evaluationStatus: "UNAVAILABLE",
+      blocker:          "MARKET_UNAVAILABLE",
+      scriptCapture:    0.95,             // would have ranked first
+      failureModeBurden: 0.10,
+    };
+
+    const nextBest = fgOver({
+      scriptCapture:    0.70,
+      failureModeBurden: 0.25,
+    });
+
+    const { ranked, controllingBlockers } = rankViableVehicles([bestByAttributes, nextBest]);
+
+    assert.strictEqual(ranked.length, 1,
+      "UNAVAILABLE candidate must be filtered from ranked output");
+    assert.strictEqual(ranked[0].scriptCapture, 0.70,
+      "Next independently viable candidate is selected");
+    assert.strictEqual(controllingBlockers.length, 0,
+      "controllingBlockers is empty when at least one viable candidate exists");
+  });
+
+  it("Reroute does not occur by CORE status — UNAVAILABLE is the only reroute trigger", () => {
+    // A candidate that is VIABLE but will receive NO_CORE from authorization
+    // must still appear in ranked (reroute happens only for UNAVAILABLE, not NO_CORE).
+    const viableNoCoreCandidate = fgOver({
+      projection: 9.0,  // variance = 0.5 — will be NO_CORE on authorization
+      marketLine: 8.5,
+      scriptCapture: 0.80,
+    });
+
+    const { ranked } = rankViableVehicles([viableNoCoreCandidate]);
+
+    assert.strictEqual(ranked.length, 1,
+      "VIABLE candidate must appear in ranked even if it will receive NO_CORE");
+    const auth = authorizeSelectedVehicle(ranked[0], CONVENTIONAL_CTX);
+    assert.strictEqual(auth.decision, "NO_CORE",
+      "Authorization returns NO_CORE after ranking, not during");
+  });
+});
+
+// ─── Test 8: No viable vehicle ───────────────────────────────────────────
+
+describe("T8: No viable vehicle — returns empty ranked + controllingBlockers", () => {
+  it("All non-viable candidates: empty ranked, blockers collected, no forced selection", () => {
     const moneyline: VehicleCandidate = {
       vehicleType:      "MONEYLINE",
       availability:     "AVAILABLE",
-      dataCompleteness: 0.0,
-      viability:        "NOT_EVALUABLE",
-      viabilityBlocker: "VEHICLE_PROJECTION_UNAVAILABLE",
+      evaluationStatus: "NOT_EVALUABLE",
+      blocker:          "VEHICLE_PROJECTION_UNAVAILABLE",
     };
 
     const unavailable: VehicleCandidate = {
       vehicleType:      "FULL_GAME_OVER",
       availability:     "UNAVAILABLE",
-      dataCompleteness: 0.0,
-      viability:        "UNAVAILABLE",
-      viabilityBlocker: "MARKET_UNAVAILABLE",
+      evaluationStatus: "UNAVAILABLE",
+      blocker:          "MARKET_UNAVAILABLE",
     };
 
-    const ranked = rankViableVehicles([moneyline, unavailable]);
+    const { ranked, controllingBlockers } = rankViableVehicles([moneyline, unavailable]);
 
     assert.strictEqual(ranked.length, 0,
-      "No viable candidates — ranked list must be empty");
+      "No viable candidates — ranked must be empty");
+    assert.ok(controllingBlockers.includes("VEHICLE_PROJECTION_UNAVAILABLE"),
+      "MONEYLINE blocker must appear in controllingBlockers");
+    assert.ok(controllingBlockers.includes("MARKET_UNAVAILABLE"),
+      "UNAVAILABLE market blocker must appear in controllingBlockers");
   });
 });
 
-// ─── Doctrine scenario S8 ──────────────────────────────────────────────────
-// Single viable candidate among others that are not: selected unconditionally.
+// ─── Test 9: Identical attributes, different vehicle labels ───────────────
 
-describe("S8: Single viable candidate among non-viable siblings", () => {
-  it("One VIABLE among NOT_EVALUABLE siblings → that candidate is selected", () => {
-    const viable: VehicleCandidate = fgOverCandidate({
-      scriptCaptureScore:   0.70,
-      runAllocationDependence: 0.25,
-    });
-
-    const notEvaluable: VehicleCandidate = {
-      vehicleType:      "STARTER_OUTS_UNDER",
-      availability:     "AVAILABLE",
-      dataCompleteness: 0.0,
-      viability:        "NOT_EVALUABLE",
-      viabilityBlocker: "VEHICLE_PROJECTION_UNAVAILABLE",
-    };
-
-    const ranked = rankViableVehicles([notEvaluable, viable]);
-
-    assert.strictEqual(ranked.length, 1);
-    assert.strictEqual(ranked[0].vehicleType, "FULL_GAME_OVER",
-      "The single viable candidate is returned");
-  });
-});
-
-// ─── Mandatory A1 ─────────────────────────────────────────────────────────
-// Identical attributes, different vehicle labels: rank must not change.
-// Input order must be preserved (stable sort guarantee).
-
-describe("A1: Identical attributes, different vehicle labels → stable input order", () => {
-  it("Two candidates with identical attributes preserve input order regardless of type", () => {
-    const first: VehicleCandidate = {
-      vehicleType:              "FULL_GAME_OVER",
+describe("T9: Identical attributes, different labels — vehicle type cannot affect ranking", () => {
+  it("True tie on all criteria: input order preserved, type is irrelevant", () => {
+    const attrs: Partial<VehicleCandidate> = {
       availability:             "AVAILABLE",
-      dataCompleteness:         1.0,
-      viability:                "VIABLE",
-      scriptCaptureScore:       0.70,
+      evaluationStatus:         "VIABLE",
+      scriptCapture:            0.70,
       failureModeBurden:        0.25,
       conversionBurden:         0.30,
       timingDependence:         0.20,
@@ -422,119 +404,66 @@ describe("A1: Identical attributes, different vehicle labels → stable input or
       plateAppearanceDependence: 0.15,
       bullpenDependence:        0.20,
       runAllocationDependence:  0.30,
-      stabilityScore:           0.80,
+      stability:                0.80,
+      dataCompleteness:         1.0,
     };
 
-    const second: VehicleCandidate = {
-      ...first,
-      vehicleType: "FULL_GAME_UNDER",   // only difference — different label, same attributes
-    };
+    const first:  VehicleCandidate = { ...attrs, vehicleType: "FULL_GAME_OVER",  availability: "AVAILABLE", evaluationStatus: "VIABLE" };
+    const second: VehicleCandidate = { ...attrs, vehicleType: "FULL_GAME_UNDER", availability: "AVAILABLE", evaluationStatus: "VIABLE" };
 
-    const ranked = rankViableVehicles([first, second]);
+    const { ranked: fwd } = rankViableVehicles([first, second]);
+    assert.strictEqual(fwd[0].vehicleType, "FULL_GAME_OVER",
+      "First input comes first on a true tie");
 
-    assert.strictEqual(ranked.length, 2);
-    assert.strictEqual(ranked[0].vehicleType, "FULL_GAME_OVER",
-      "First input must remain first when all attributes are identical");
-    assert.strictEqual(ranked[1].vehicleType, "FULL_GAME_UNDER",
-      "Second input must remain second when all attributes are identical");
-  });
-
-  it("Reversing input order changes result order (no hidden type preference)", () => {
-    const candidateA: VehicleCandidate = {
-      vehicleType:   "FULL_GAME_UNDER",
-      availability:  "AVAILABLE",
-      dataCompleteness: 1.0,
-      viability:     "VIABLE",
-      scriptCaptureScore: 0.55,
-    };
-
-    const candidateB: VehicleCandidate = {
-      ...candidateA,
-      vehicleType: "FULL_GAME_OVER",
-    };
-
-    const ranked1 = rankViableVehicles([candidateA, candidateB]);
-    const ranked2 = rankViableVehicles([candidateB, candidateA]);
-
-    assert.strictEqual(ranked1[0].vehicleType, "FULL_GAME_UNDER",
-      "First input wins tie when A comes first");
-    assert.strictEqual(ranked2[0].vehicleType, "FULL_GAME_OVER",
-      "First input wins tie when B comes first — no type hierarchy");
+    const { ranked: rev } = rankViableVehicles([second, first]);
+    assert.strictEqual(rev[0].vehicleType, "FULL_GAME_UNDER",
+      "Reversing input reverses output — no hidden type preference");
   });
 });
 
-// ─── Mandatory A2 ─────────────────────────────────────────────────────────
-// Viable but NO CORE: the vehicle is selected (Phase 2 complete), but
-// authorizeSelectedVehicle returns NO_CORE with a specific blocker.
-// Viability must remain VIABLE — authorization result is separate.
+// ─── Test 10: Viable but NO CORE ─────────────────────────────────────────
 
-describe("A2: Viable but NO CORE — vehicle selected, authorization returns NO_CORE", () => {
-  it("Candidate below separation threshold: VIABLE but NO_CORE INSUFFICIENT_PROJECTION_SEPARATION", () => {
-    const candidate = fgOverCandidate({
+describe("T10: Viable but NO CORE — best vehicle selected first, authorization returns NO_CORE", () => {
+  it("Candidate below separation threshold: VIABLE → ranked → NO_CORE INSUFFICIENT_PROJECTION_SEPARATION", () => {
+    const candidate = fgOver({
       projection: 9.0,
       marketLine: 8.5,   // variance = 0.5, below 1.5 threshold
-      scriptCaptureScore: 0.70,
+      scriptCapture: 0.70,
     });
 
-    // Phase 1 — viability
-    const evaluated = evaluateVehicleViability(candidate, CONVENTIONAL_CTX);
-    assert.strictEqual(evaluated.viability, "VIABLE",
-      "Insufficient edge does not affect structural viability");
+    const evaluated = evaluateVehicleCandidate(candidate, CONVENTIONAL_CTX);
+    assert.strictEqual(evaluated.evaluationStatus, "VIABLE",
+      "Insufficient edge does not affect structural evaluability");
 
-    // Phase 2 — ranking (single candidate, rank is trivial)
-    const ranked = rankViableVehicles([evaluated]);
-    assert.strictEqual(ranked.length, 1, "Vehicle is ranked (not filtered out)");
+    const { ranked } = rankViableVehicles([evaluated]);
+    assert.strictEqual(ranked.length, 1, "Vehicle appears in ranked output");
 
-    // Phase 3 — authorization
     const auth = authorizeSelectedVehicle(ranked[0], CONVENTIONAL_CTX);
     assert.strictEqual(auth.decision, "NO_CORE");
-    assert.strictEqual(auth.coreBlocker, "INSUFFICIENT_PROJECTION_SEPARATION",
-      "Phase 3 gate must report the separation failure");
+    assert.strictEqual(auth.coreBlocker, "INSUFFICIENT_PROJECTION_SEPARATION");
   });
 
-  it("Candidate with UNRESOLVED pitcher: VIABLE but NO_CORE UNRESOLVED_STARTER", () => {
-    const candidate = fgOverCandidate({
-      projection: 11.5,
-      marketLine: 8.5,   // variance = 3.0, well above threshold
-    });
-
+  it("Unresolved pitcher: VIABLE → ranked → NO_CORE UNRESOLVED_STARTER", () => {
+    const candidate = fgOver({ projection: 12.0, marketLine: 8.5 });
     const unresolvedCtx: GameEligibilityContext = {
-      awayPitcherRole:     "UNRESOLVED",
-      homePitcherRole:     "CONVENTIONAL_STARTER",
-      awayExpectedInnings: 6.0,
-      homeExpectedInnings: 6.0,
-      bullpenAvailable:    true,
+      ...CONVENTIONAL_CTX,
+      awayPitcherRole: "UNRESOLVED",
     };
 
-    const evaluated = evaluateVehicleViability(candidate, unresolvedCtx);
-    // FULL_GAME_OVER with conventional context: VIABLE regardless of authorization gates
-    assert.strictEqual(evaluated.viability, "VIABLE");
+    const evaluated = evaluateVehicleCandidate(candidate, unresolvedCtx);
+    assert.strictEqual(evaluated.evaluationStatus, "VIABLE");
 
-    const auth = authorizeSelectedVehicle(evaluated, unresolvedCtx);
+    const { ranked } = rankViableVehicles([evaluated]);
+    const auth = authorizeSelectedVehicle(ranked[0], unresolvedCtx);
     assert.strictEqual(auth.decision, "NO_CORE");
     assert.strictEqual(auth.coreBlocker, "UNRESOLVED_STARTER");
   });
 });
 
-// ─── Mandatory A3 ─────────────────────────────────────────────────────────
-// Unknown workload isolation: STARTER_OUTS_UNDER becomes NOT_EVALUABLE while
-// the full-game-total vehicle in the same game remains independently VIABLE.
+// ─── Test 11: Unknown workload isolation ─────────────────────────────────
 
-describe("A3: Unknown workload isolation — STARTER_OUTS_UNDER NOT_EVALUABLE; FG-Over VIABLE", () => {
-  it("Both candidates evaluated in the same game context; only starter prop fails", () => {
-    const starterProp: VehicleCandidate = {
-      vehicleType:      "STARTER_OUTS_UNDER",
-      targetSide:       "AWAY",
-      availability:     "AVAILABLE",
-      dataCompleteness: 0.0,
-      viability:        "VIABLE",   // will be overwritten
-    };
-
-    const fgOver: VehicleCandidate = fgOverCandidate({
-      scriptCaptureScore: 0.70,
-    });
-
-    // Context: away starter has unknown workload (opener, innings null)
+describe("T11: Unknown workload isolation — starter prop frozen; full-game total unaffected", () => {
+  it("STARTER_OUTS_UNDER NOT_EVALUABLE and FG-Over VIABLE in the same context", () => {
     const ctx: GameEligibilityContext = {
       awayPitcherRole:     "OPENER",
       homePitcherRole:     "CONVENTIONAL_STARTER",
@@ -543,46 +472,128 @@ describe("A3: Unknown workload isolation — STARTER_OUTS_UNDER NOT_EVALUABLE; F
       bullpenAvailable:    true,
     };
 
-    const evalProp  = evaluateVehicleViability(starterProp, ctx);
-    const evalFgOver = evaluateVehicleViability(fgOver, ctx);
+    const starterProp: VehicleCandidate = {
+      vehicleType:      "STARTER_OUTS_UNDER",
+      targetSide:       "AWAY",
+      availability:     "AVAILABLE",
+      evaluationStatus: "VIABLE",   // overwritten by evaluateVehicleCandidate
+    };
 
-    assert.strictEqual(evalProp.viability, "NOT_EVALUABLE",
-      "STARTER_OUTS_UNDER: no projection available → NOT_EVALUABLE");
-    assert.strictEqual(evalProp.viabilityBlocker, "VEHICLE_PROJECTION_UNAVAILABLE",
-      "Starter prop fails on projection type, not workload");
+    const fg = fgOver();
 
-    assert.strictEqual(evalFgOver.viability, "VIABLE",
-      "FG-Over is independently evaluable; opener check does not apply");
+    const evalProp = evaluateVehicleCandidate(starterProp, ctx);
+    const evalFg   = evaluateVehicleCandidate(fg, ctx);
 
-    // Only FG-Over survives into Phase 2
-    const ranked = rankViableVehicles([evalProp, evalFgOver]);
+    assert.strictEqual(evalProp.evaluationStatus, "NOT_EVALUABLE",
+      "STARTER_OUTS_UNDER: no projection available → NOT_EVALUABLE (independent of workload check)");
+    assert.strictEqual(evalProp.blocker, "VEHICLE_PROJECTION_UNAVAILABLE");
+
+    assert.strictEqual(evalFg.evaluationStatus, "VIABLE",
+      "FG-Over is independently evaluable; opener workload check does not apply to Over");
+
+    const { ranked, controllingBlockers } = rankViableVehicles([evalProp, evalFg]);
     assert.strictEqual(ranked.length, 1);
     assert.strictEqual(ranked[0].vehicleType, "FULL_GAME_OVER");
+    assert.strictEqual(controllingBlockers.length, 0,
+      "controllingBlockers is empty while at least one viable candidate exists");
   });
 });
 
-// ─── Mandatory A4 ─────────────────────────────────────────────────────────
-// Known opener/bulk chain: Full-Game Under is not auto-rejected solely
-// because of pitcher role label. Only unresolved workload blocks it.
+// ─── Test 12: Unsupported projection protection ───────────────────────────
 
-describe("A4: Known opener/bulk chain — FG-Under not auto-rejected by role label", () => {
+describe("T12: Unsupported projection — non-FG vehicles cannot reuse full-game-total logic", () => {
+  it("MONEYLINE → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE", () => {
+    const c: VehicleCandidate = {
+      vehicleType:      "MONEYLINE",
+      targetSide:       "AWAY",
+      availability:     "AVAILABLE",
+      evaluationStatus: "VIABLE",
+      projection:       10.5,   // full-game projection present but semantically wrong
+      marketLine:       -150,   // American odds — incompatible with total projection
+    };
+    const result = evaluateVehicleCandidate(c, CONVENTIONAL_CTX);
+    assert.strictEqual(result.evaluationStatus, "NOT_EVALUABLE");
+    assert.strictEqual(result.blocker, "VEHICLE_PROJECTION_UNAVAILABLE");
+  });
+
+  it("RUN_LINE → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE", () => {
+    const c: VehicleCandidate = {
+      vehicleType: "RUN_LINE", targetSide: "HOME",
+      availability: "AVAILABLE", evaluationStatus: "VIABLE",
+    };
+    const r = evaluateVehicleCandidate(c, CONVENTIONAL_CTX);
+    assert.strictEqual(r.evaluationStatus, "NOT_EVALUABLE");
+    assert.strictEqual(r.blocker, "VEHICLE_PROJECTION_UNAVAILABLE");
+  });
+
+  it("TEAM_TOTAL_OVER → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE", () => {
+    const c: VehicleCandidate = {
+      vehicleType: "TEAM_TOTAL_OVER", targetSide: "AWAY",
+      availability: "AVAILABLE", evaluationStatus: "VIABLE",
+    };
+    const r = evaluateVehicleCandidate(c, CONVENTIONAL_CTX);
+    assert.strictEqual(r.evaluationStatus, "NOT_EVALUABLE");
+    assert.strictEqual(r.blocker, "VEHICLE_PROJECTION_UNAVAILABLE");
+  });
+
+  it("TEAM_TOTAL_UNDER → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE", () => {
+    const c: VehicleCandidate = {
+      vehicleType: "TEAM_TOTAL_UNDER", targetSide: "HOME",
+      availability: "AVAILABLE", evaluationStatus: "VIABLE",
+    };
+    const r = evaluateVehicleCandidate(c, CONVENTIONAL_CTX);
+    assert.strictEqual(r.evaluationStatus, "NOT_EVALUABLE");
+    assert.strictEqual(r.blocker, "VEHICLE_PROJECTION_UNAVAILABLE");
+  });
+
+  it("STARTER_ER_OVER → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE", () => {
+    const c: VehicleCandidate = {
+      vehicleType: "STARTER_ER_OVER", targetSide: "HOME",
+      availability: "AVAILABLE", evaluationStatus: "VIABLE",
+    };
+    const r = evaluateVehicleCandidate(c, CONVENTIONAL_CTX);
+    assert.strictEqual(r.evaluationStatus, "NOT_EVALUABLE");
+    assert.strictEqual(r.blocker, "VEHICLE_PROJECTION_UNAVAILABLE");
+  });
+});
+
+// ─── Test 13: Known opener/bulk chain ────────────────────────────────────
+
+describe("T13: Known opener/bulk chain — FG-Under not auto-rejected by role designation", () => {
+  it("OPENER + known innings: FG-Under is VIABLE", () => {
+    const ctx: GameEligibilityContext = {
+      awayPitcherRole:     "OPENER",
+      homePitcherRole:     "CONVENTIONAL_STARTER",
+      awayExpectedInnings: 1.2,
+      homeExpectedInnings: 6.0,
+      bullpenAvailable:    true,
+    };
+    assert.strictEqual(evaluateVehicleCandidate(fgUnder(), ctx).evaluationStatus, "VIABLE");
+  });
+
+  it("BULK + known innings: FG-Under is VIABLE", () => {
+    const ctx: GameEligibilityContext = {
+      awayPitcherRole:     "CONVENTIONAL_STARTER",
+      homePitcherRole:     "BULK",
+      awayExpectedInnings: 6.0,
+      homeExpectedInnings: 3.0,
+      bullpenAvailable:    true,
+    };
+    assert.strictEqual(evaluateVehicleCandidate(fgUnder(), ctx).evaluationStatus, "VIABLE");
+  });
+
   it("Both OPENER + BULK with known innings: FG-Under is VIABLE", () => {
     const ctx: GameEligibilityContext = {
       awayPitcherRole:     "OPENER",
       homePitcherRole:     "BULK",
-      awayExpectedInnings: 1.2,   // opener innings known
-      homeExpectedInnings: 3.0,   // bulk innings known
+      awayExpectedInnings: 1.2,
+      homeExpectedInnings: 3.0,
       bullpenAvailable:    true,
     };
-
-    const candidate = fgUnderCandidate();
-    const result = evaluateVehicleViability(candidate, ctx);
-
-    assert.strictEqual(result.viability, "VIABLE",
-      "Both non-conventional roles with known innings must be VIABLE, not auto-blocked");
+    assert.strictEqual(evaluateVehicleCandidate(fgUnder(), ctx).evaluationStatus, "VIABLE");
   });
 
-  it("PIGGYBACK_SECONDARY with known innings: FG-Under is VIABLE", () => {
+  it("PIGGYBACK_SECONDARY + known innings: FG-Under is VIABLE", () => {
     const ctx: GameEligibilityContext = {
       awayPitcherRole:     "CONVENTIONAL_STARTER",
       homePitcherRole:     "PIGGYBACK_SECONDARY",
@@ -590,136 +601,58 @@ describe("A4: Known opener/bulk chain — FG-Under not auto-rejected by role lab
       homeExpectedInnings: 3.0,
       bullpenAvailable:    true,
     };
-
-    const candidate = fgUnderCandidate();
-    const result = evaluateVehicleViability(candidate, ctx);
-
-    assert.strictEqual(result.viability, "VIABLE",
-      "PIGGYBACK_SECONDARY with known innings must not be auto-blocked");
+    assert.strictEqual(evaluateVehicleCandidate(fgUnder(), ctx).evaluationStatus, "VIABLE");
   });
 });
 
-// ─── Mandatory A5 ─────────────────────────────────────────────────────────
-// Unsupported projection type: MONEYLINE cannot use the full-game-total
-// projection and must return NOT_EVALUABLE regardless of projection presence.
+// ─── Test 14: No operational drift ───────────────────────────────────────
 
-describe("A5: Unsupported projection type — MONEYLINE → NOT_EVALUABLE", () => {
-  it("MONEYLINE with AVAILABLE market → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE", () => {
-    const candidate: VehicleCandidate = {
-      vehicleType:      "MONEYLINE",
-      targetSide:       "AWAY",
-      availability:     "AVAILABLE",
-      dataCompleteness: 0.5,
-      projection:       10.5,    // full-game projection present but semantically wrong
-      marketLine:       -150,    // American odds — incompatible with total projection
-      viability:        "VIABLE",
-    };
-
-    const result = evaluateVehicleViability(candidate, CONVENTIONAL_CTX);
-
-    assert.strictEqual(result.viability, "NOT_EVALUABLE",
-      "MONEYLINE cannot be evaluated through a full-game-total projection");
-    assert.strictEqual(result.viabilityBlocker, "VEHICLE_PROJECTION_UNAVAILABLE");
+describe("T14: No operational drift — live pipeline outputs are unchanged by shadow architecture", () => {
+  it("computeDecision CORE: projection well above line", () => {
+    const r = computeDecision(10.5, 8.5, "GAME_TOTAL", CONVENTIONAL_CTX);
+    assert.strictEqual(r.decision, "CORE");
+    assert.strictEqual(r.direction, "OVER");
+    assert.strictEqual(r.coreBlocker, "");
+    assert.strictEqual(r.confidence, 0.71);
+    assert.strictEqual(r.roi, 0.1);
   });
 
-  it("RUN_LINE → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE", () => {
-    const candidate: VehicleCandidate = {
-      vehicleType:      "RUN_LINE",
-      targetSide:       "HOME",
-      availability:     "AVAILABLE",
-      dataCompleteness: 0.5,
-      viability:        "VIABLE",
-    };
-
-    const result = evaluateVehicleViability(candidate, CONVENTIONAL_CTX);
-
-    assert.strictEqual(result.viability, "NOT_EVALUABLE");
-    assert.strictEqual(result.viabilityBlocker, "VEHICLE_PROJECTION_UNAVAILABLE");
+  it("computeDecision NO_CORE: insufficient separation", () => {
+    const r = computeDecision(9.0, 8.5, "GAME_TOTAL", CONVENTIONAL_CTX);
+    assert.strictEqual(r.decision, "NO_CORE");
+    assert.strictEqual(r.coreBlocker, "INSUFFICIENT_PROJECTION_SEPARATION");
   });
 
-  it("TEAM_TOTAL_OVER → NOT_EVALUABLE VEHICLE_PROJECTION_UNAVAILABLE", () => {
-    const candidate: VehicleCandidate = {
-      vehicleType:      "TEAM_TOTAL_OVER",
-      targetSide:       "AWAY",
-      availability:     "AVAILABLE",
-      dataCompleteness: 0.5,
-      viability:        "VIABLE",
-    };
-
-    const result = evaluateVehicleViability(candidate, CONVENTIONAL_CTX);
-
-    assert.strictEqual(result.viability, "NOT_EVALUABLE");
-    assert.strictEqual(result.viabilityBlocker, "VEHICLE_PROJECTION_UNAVAILABLE");
-  });
-});
-
-// ─── Mandatory A6 ─────────────────────────────────────────────────────────
-// No live-output drift: the shadow module does not change the behaviour of
-// computeDecision or overSurvivalCheck from module11_outputExtraction.
-// These are the functions that drive live SLATE_BOARD and ACTIVE_BOARD.
-// Results here are the reference baseline; any future regression proves drift.
-
-describe("A6: No live-output drift — module11 computeDecision baseline unchanged", () => {
-  it("computeDecision: CORE for projection well above line", () => {
-    const result = computeDecision(10.5, 8.5, "GAME_TOTAL", CONVENTIONAL_CTX);
-    assert.strictEqual(result.decision, "CORE");
-    assert.strictEqual(result.direction, "OVER");
-    assert.strictEqual(result.coreBlocker, "");
+  it("computeDecision NO_CORE: unresolved starter", () => {
+    const ctx: GameEligibilityContext = { ...CONVENTIONAL_CTX, awayPitcherRole: "UNRESOLVED" };
+    const r = computeDecision(12.0, 8.5, "GAME_TOTAL", ctx);
+    assert.strictEqual(r.decision, "NO_CORE");
+    assert.strictEqual(r.coreBlocker, "UNRESOLVED_STARTER");
   });
 
-  it("computeDecision: NO_CORE INSUFFICIENT_PROJECTION_SEPARATION for small variance", () => {
-    const result = computeDecision(9.0, 8.5, "GAME_TOTAL", CONVENTIONAL_CTX);
-    assert.strictEqual(result.decision, "NO_CORE");
-    assert.strictEqual(result.coreBlocker, "INSUFFICIENT_PROJECTION_SEPARATION");
+  it("computeDecision PENDING: null market line", () => {
+    const r = computeDecision(10.5, null, "GAME_TOTAL", CONVENTIONAL_CTX);
+    assert.strictEqual(r.decision, "PENDING");
+    assert.strictEqual(r.coreBlocker, "NO_MARKET_LINE");
   });
 
-  it("computeDecision: NO_CORE UNRESOLVED_STARTER for unresolved pitcher", () => {
-    const ctx: GameEligibilityContext = {
-      ...CONVENTIONAL_CTX,
-      awayPitcherRole: "UNRESOLVED",
-    };
-    const result = computeDecision(12.0, 8.5, "GAME_TOTAL", ctx);
-    assert.strictEqual(result.decision, "NO_CORE");
-    assert.strictEqual(result.coreBlocker, "UNRESOLVED_STARTER");
+  it("overSurvivalCheck FAIL ENVIRONMENT_DEPENDENT_OVER: env lifts otherwise-suppressed game", () => {
+    // baseball_only (6.0) < market (8.5) → env manufactured the Over
+    const r = overSurvivalCheck(3.5, 2.5, 0, 0, 6.0, 3.0, 8.5);
+    assert.strictEqual(r.survival_check, "FAIL");
+    assert.strictEqual(r.survival_failure_reason, "ENVIRONMENT_DEPENDENT_OVER");
   });
 
-  it("computeDecision: PENDING for null market line", () => {
-    const result = computeDecision(10.5, null, "GAME_TOTAL", CONVENTIONAL_CTX);
-    assert.strictEqual(result.decision, "PENDING");
-    assert.strictEqual(result.coreBlocker, "NO_MARKET_LINE");
-  });
+  it("authorizeSelectedVehicle CORE matches computeDecision CORE exactly", () => {
+    const candidate = fgOver({ projection: 10.5, marketLine: 8.5 });
+    const evaluated  = evaluateVehicleCandidate(candidate, CONVENTIONAL_CTX);
+    const auth       = authorizeSelectedVehicle(evaluated, CONVENTIONAL_CTX);
+    const legacy     = computeDecision(10.5, 8.5, "GAME_TOTAL", CONVENTIONAL_CTX);
 
-  it("overSurvivalCheck: FAIL ENVIRONMENT_DEPENDENT_OVER when env lifts Under-eligible game", () => {
-    // baseball_only = 6.0, environment = 3.0, market = 8.5
-    // baseball_only (6.0) < market (8.5) → environment manufactured the Over
-    const result = overSurvivalCheck(
-      3.5, // starterAttack
-      2.5, // bullpen
-      0,   // traffic
-      0,   // HR/XBH
-      6.0, // baseball_only
-      3.0, // environment
-      8.5, // market line
-    );
-    assert.strictEqual(result.survival_check, "FAIL");
-    assert.strictEqual(result.survival_failure_reason, "ENVIRONMENT_DEPENDENT_OVER");
-  });
-
-  it("authorizeSelectedVehicle CORE result matches computeDecision CORE result", () => {
-    const candidate = fgOverCandidate({
-      projection: 10.5,
-      marketLine: 8.5,
-    });
-
-    const evaluated = evaluateVehicleViability(candidate, CONVENTIONAL_CTX);
-    const auth      = authorizeSelectedVehicle(evaluated, CONVENTIONAL_CTX);
-    const legacy    = computeDecision(10.5, 8.5, "GAME_TOTAL", CONVENTIONAL_CTX);
-
-    assert.strictEqual(auth.decision, legacy.decision,
-      "Shadow authorization must produce the same decision as the live function");
-    assert.strictEqual(auth.direction, legacy.direction);
+    assert.strictEqual(auth.decision,    legacy.decision);
+    assert.strictEqual(auth.direction,   legacy.direction);
     assert.strictEqual(auth.coreBlocker, legacy.coreBlocker);
-    assert.strictEqual(auth.confidence, legacy.confidence);
-    assert.strictEqual(auth.roi, legacy.roi);
+    assert.strictEqual(auth.confidence,  legacy.confidence);
+    assert.strictEqual(auth.roi,         legacy.roi);
   });
 });

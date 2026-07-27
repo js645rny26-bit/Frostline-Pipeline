@@ -1,0 +1,334 @@
+SOURCES USED
+
+* The complete Task #72 specification you pasted
+* Frostline’s refined vehicle doctrine
+* The SEA–TEX live result as a concrete script-capture example
+
+REFRESH CHECK
+
+Task #72 has identified the correct architectural problem, but its proposed solution is still not safe to execute as written.
+
+Audit diagnosis:             ACCEPTED
+Implementation plan:         REQUIRES REDLINE
+Live pipeline modification:  NOT APPROVED
+Correct next scope:          SHADOW VEHICLE ARCHITECTURE
+
+The central contradiction remains:
+
+The task claims to remove intrinsic vehicle preference, then proposes ranking candidates using a deterministic vehicle-type ordering.
+
+That would encode the very hierarchy we are trying to eliminate.
+
+Exact redlines
+
+1. Do not change GAME_TOTAL to TBD yet
+
+The task says full automated selection remains out of scope. Therefore, removing the current default before a commissioned replacement exists would make the next pipeline refresh dependent on manual vehicle entry.
+
+Replace:
+
+Candidate_Vehicle default seed changed from GAME_TOTAL to TBD.
+
+With:
+
+Preserve the existing GAME_TOTAL operational seed during Task #72. Mark it internally as a legacy fallback if useful. Task #72 must not change live vehicle output until the replacement comparative system has passed replay and shadow validation.
+
+⸻
+
+2. Do not define viability through decision === CORE
+
+Replace:
+
+The function eliminates non-viable candidates (decision !== CORE).
+
+With:
+
+Vehicle viability, comparative ranking, and CORE authorization are separate stages. A vehicle may be structurally viable and remain the best expression of game truth while receiving NO_CORE from later authorization gates.
+
+Required sequence:
+
+Candidate generation
+→ vehicle-specific evaluability
+→ vehicle-specific viability
+→ comparative price-blind ranking
+→ selected vehicle
+→ CORE authorization
+
+Not:
+
+CORE authorization
+→ delete every NO_CORE candidate
+→ rank remaining vehicles
+
+⸻
+
+3. Remove all vehicle-type ranking
+
+Delete:
+
+“The ranking uses the vehicle-type ordering implied by the doctrine.”
+
+There is no permissible vehicle-type ordering.
+
+Replace it with:
+
+Ranking must use explicit, game-specific candidate attributes. Vehicle type determines which gates apply, but it may never itself create preference, safety, or tiebreak priority.
+
+Minimum comparison attributes:
+
+scriptCapture
+failureModeBurden
+conversionBurden
+timingDependence
+workloadDependence
+plateAppearanceDependence
+bullpenDependence
+runAllocationDependence
+stability
+dataCompleteness
+
+When candidates are identical across all evaluated attributes, preserve stable input order or return a tie. Do not resolve the tie through vehicle labels.
+
+⸻
+
+4. Replace the binary viability result
+
+The proposed result:
+
+{ viable: true } | { viable: false; blocker: string }
+
+is insufficient.
+
+Use:
+
+type VehicleEvaluationStatus =
+  | "VIABLE"
+  | "NOT_VIABLE"
+  | "NOT_EVALUABLE"
+  | "UNAVAILABLE";
+
+Definitions:
+
+* VIABLE: required data exists and the vehicle clears its own gates.
+* NOT_VIABLE: required data exists, but a vehicle-specific gate fails.
+* NOT_EVALUABLE: required projection, target, workload, market, or context is missing.
+* UNAVAILABLE: the vehicle was validly preferred but is not offered.
+
+Missing data must freeze only the affected vehicle.
+
+⸻
+
+5. Remove the blanket opener/bulk Under veto
+
+Delete:
+
+FULL_GAME_UNDER blocks if either starter is an OPENER/BULK/PIGGYBACK.
+
+Replace with:
+
+An opener, bulk, or piggyback designation is not an automatic Full-Game Under veto. If the chain’s participants, expected innings, quality, and bullpen bridge are known, evaluate the vehicle normally with increased dependency burden. If the chain is unresolved, return NOT_EVALUABLE for vehicles dependent on that suppression chain.
+
+The doctrine rejects intrinsic assumptions about vehicle types and pitcher-role labels.
+
+⸻
+
+6. Add target identity to the candidate contract
+
+A string such as STARTER_OUTS_UNDER does not identify which pitcher is being evaluated.
+
+The contract needs:
+
+interface VehicleCandidate {
+  vehicleType: VehicleType;
+  targetSide?: "AWAY" | "HOME";
+  targetTeam?: string;
+  targetPlayerId?: number;
+  targetPlayerName?: string;
+  projection?: number;
+  marketLine?: number;
+  availability: "AVAILABLE" | "UNAVAILABLE";
+  evaluationStatus: VehicleEvaluationStatus;
+  blocker?: string;
+  scriptCapture?: number;
+  failureModeBurden?: number;
+  conversionBurden?: number;
+  timingDependence?: number;
+  workloadDependence?: number;
+  plateAppearanceDependence?: number;
+  bullpenDependence?: number;
+  runAllocationDependence?: number;
+  stability?: number;
+  dataCompleteness?: number;
+}
+
+Exact names may differ, but the subject and projection must be explicit.
+
+⸻
+
+7. Do not evaluate every vehicle using full-game-total logic
+
+The current computeDecision reportedly compares projected game total with market game total.
+
+That cannot authorize:
+
+* team totals
+* moneylines
+* run lines
+* starter outs
+* starter earned runs
+* starter hits allowed
+
+Until the relevant projection exists, return:
+
+NOT_EVALUABLE — VEHICLE_PROJECTION_UNAVAILABLE
+
+Do not let those vehicles inherit the full-game-total calculation merely because they pass structural checks.
+
+⸻
+
+Corrected Task #72 scope
+
+Send Replit this replacement scope:
+
+⸻
+
+#72 — Vehicle Doctrine Shadow Architecture
+
+Purpose
+
+Establish a testable architecture separating:
+
+1. vehicle evaluability
+2. vehicle-specific viability
+3. comparative price-blind ranking
+4. final CORE authorization
+
+Do not modify live vehicle selection or current workbook outputs during this task.
+
+Preserve operational behavior
+
+* Keep the existing GAME_TOTAL seed operational.
+* Do not change today’s board.
+* Do not change future SLATE_BOARD output.
+* Do not change projections, thresholds, calibration, lock logic, survival logic, monotonicity, schema, or workbook sheets.
+* The new architecture runs in code/tests or shadow output only.
+
+Add VehicleCandidate
+
+Create a typed candidate contract containing:
+
+* vehicle type
+* target team, side, pitcher, or player where applicable
+* vehicle-specific projection
+* vehicle-specific market line
+* availability
+* data completeness
+* viability/evaluability state
+* named blocker
+* the eight doctrine-ranking attributes
+
+Add evaluateVehicleCandidate(candidate, context)
+
+Return one of:
+
+* VIABLE
+* NOT_VIABLE
+* NOT_EVALUABLE
+* UNAVAILABLE
+
+Rules:
+
+* Missing workload freezes workload-dependent vehicles only.
+* Missing team-total projection freezes that team total only.
+* Missing starter-prop projection freezes that starter prop only.
+* Known opener/bulk chains are evaluated normally.
+* Unresolved opener/bulk chains freeze only dependent vehicles.
+* No vehicle class receives automatic preference or rejection.
+
+Add rankViableVehicles(candidates)
+
+* Rank only candidates with status VIABLE.
+* Use candidate attributes, not vehicle labels.
+* Do not use odds or juice.
+* Do not use CORE status.
+* Do not silently promote unavailable or non-evaluable vehicles.
+* If no candidate is viable, return NO_VIABLE_VEHICLE with the controlling blockers.
+* When candidates are tied across all criteria, preserve stable input order or return a tie.
+
+Keep authorization separate
+
+Create or preserve a separate function:
+
+authorizeSelectedVehicle(selectedCandidate, context)
+
+The best vehicle may still return NO_CORE because of:
+
+* projection separation
+* monotonicity
+* lineup state
+* unresolved context
+* another authorization blocker
+
+The selected vehicle must remain identifiable even when authorization returns NO_CORE.
+
+Required regression tests
+
+1. Either-side eruption
+    Full-Game Over ranks first because explicit script-capture and allocation-dependence attributes are superior.
+2. One-sided ownership
+    Team Total Over ranks first because explicit one-sided offensive ownership and suppression-chain attributes are superior.
+3. Traffic without conversion
+    Outs Under ranks first because pitch stress and hook pathways are strong while run conversion is weak.
+4. Contact-dominant fade
+    Hits Allowed Over ranks first because contact access is the dominant supported path.
+5. Full-game Under burden
+    One unresolved suppression chain makes Full-Game Under NOT_EVALUABLE; an opener label alone does not.
+6. Price blindness
+    Changing odds or juice metadata does not change candidate viability, ranking, or selected vehicle.
+7. Unavailable preferred vehicle
+    The highest-ranked viable candidate is unavailable; reroute occurs only to the next independently viable candidate.
+8. No viable vehicle
+    Return NO_VIABLE_VEHICLE with blockers. Do not force selection.
+9. Identical attributes, different labels
+    Vehicle type alone cannot affect ranking.
+10. Viable but NO CORE
+    The best vehicle is selected first, then authorization returns NO_CORE with the applicable blocker.
+11. Unknown workload isolation
+    Starter prop becomes NOT_EVALUABLE; unrelated total vehicles remain independently evaluable.
+12. Unsupported projection protection
+    Moneyline, team total, or starter prop cannot reuse a full-game-total projection.
+13. Known opener/bulk chain
+    Full-Game Under is not automatically rejected solely by role designation.
+14. No operational drift
+    Existing live pipeline outputs remain unchanged while the shadow architecture executes.
+
+Deliverables
+
+Report:
+
+1. files added or modified
+2. candidate contract
+3. evaluation states and blocker vocabulary
+4. ranking inputs and comparator logic
+5. regression results
+6. TypeScript compilation result
+7. proof that operational outputs remained unchanged
+8. missing data dependencies required before live comparative selection can be commissioned
+
+Completion boundary
+
+Task #72 is complete after the shadow architecture and regression suite pass.
+
+Do not connect rankViableVehicles() to live Candidate_Vehicle or SLATE_BOARD in this task.
+
+⸻
+
+Final disposition
+
+Problem identification:          CORRECT
+Current #72 implementation plan: REJECT AS WRITTEN
+Required rewrite:                YES
+Shadow architecture:             APPROVED
+Live vehicle automation:         NOT YET COMMISSIONED
+
+SEA–TEX gave us the correct lesson. A full-game Over won because it captured both scoring allocations in that specific game. The regression must encode the underlying attributes that made it superior, not hardcode “Full-Game Over beats Team Total Over.”
