@@ -1098,14 +1098,12 @@ export async function extractOutputBoards(
           logger.warn({ game: gs.game_id }, "MODULE_11: CORE blocked — LOCK_TIME_UNAVAILABLE (no scheduled_utc_time)");
         }
       } else if (!gameLocked) {
-        // Before this game's own cutoff — no restriction.
-        // Capture a prospective decision snapshot even while PRE_LOCK.
-        // If the NEXT publish fires after the cutoff but beyond the late-grace
-        // window, this stored rawDecision becomes the best available evidence of
-        // the pre-cutoff state — avoiding UNKNOWN_LATE_FIRST_RUN when the
-        // decision was actually known before the deadline.
+        // Before this game's own cutoff — no restriction on decision.
+        // Pre_Lock_Decision must remain blank while Lock_Status = PRE_LOCK.
+        // It is written exactly once on the first publish at or after Lock_Cutoff_TS
+        // (the isFirstLock branch below), using the fully-authorized rawDecision.
         lockStatus      = "PRE_LOCK";
-        preLockDecision = rawDecision;  // prospective snapshot; overwritten on actual lock
+        preLockDecision = "";
       } else if (persistedLockStatus === "LOCKED_OUT") {
         if (latePromotionAuth) {
           // Named baseball exception: operator supplied a reason and authorized.
@@ -1128,48 +1126,24 @@ export async function extractOutputBoards(
       } else {
         // First publish at or after this game's cutoff (covers first-ever lock
         // AND the replayed-lock path after a reschedule).
-        // If the first lock fires significantly after the cutoff there is no valid
-        // pre-cutoff decision snapshot — default LOCKED_OUT rather than retroactively
-        // stamping the current (post-cutoff) decision as "pre-lock."
+        // Pre_Lock_Decision was blank during PRE_LOCK — no stored snapshot exists.
+        // Stamp the fully-authorized rawDecision (all blockers already applied).
         isFirstLock = true;
         const msLate = nowMs - (gameLockCutoff?.getTime() ?? nowMs);
         if (msLate > BOARD_LOCK_LATE_GRACE_MS) {
-          // A stored snapshot is usable when: non-blank, looks like a real
-          // decision (CORE | NO_CORE), and is not a prior UNKNOWN sentinel.
-          const storedSnapshot  = effectiveBLS?.pre_lock_decision ?? "";
-          const snapshotUsable  =
-            storedSnapshot !== "" &&
-            !storedSnapshot.startsWith("UNKNOWN") &&
-            storedSnapshot !== "PENDING";
-
-          if (snapshotUsable) {
-            // A prior PRE_LOCK publish captured a prospective decision snapshot
-            // before the cutoff passed.  Use it in place of UNKNOWN_LATE_FIRST_RUN
-            // so the record reflects the actual pre-cutoff board state.
-            preLockDecision = storedSnapshot;
-            lockStatus      = storedSnapshot === "CORE" ? "LOCKED_IN" : "LOCKED_OUT";
-            logger.info(
-              {
-                game:         gs.game_id,
-                storedSnapshot,
-                minutesLate:  Math.round(msLate / 60000),
-              },
-              "MODULE_11: Board lock fired late — using prospective PRE_LOCK snapshot instead of UNKNOWN",
-            );
-          } else {
-            lockStatus      = "LOCKED_OUT";
-            // Distinguish a plain late first-run from a rescheduled-to-earlier case.
-            preLockDecision = isRescheduled ? "UNKNOWN_RESCHEDULED" : "UNKNOWN_LATE_FIRST_RUN";
-            logger.warn(
-              {
-                game:         gs.game_id,
-                cutoff:       gameLockCutoff?.toISOString(),
-                minutesLate:  Math.round(msLate / 60000),
-                rescheduled:  isRescheduled,
-              },
-              "MODULE_11: Board lock fired late — no valid pre-cutoff snapshot, defaulting LOCKED_OUT",
-            );
-          }
+          // Lock fired after the late-grace window.  Pre_Lock_Decision was blank;
+          // stamp the current fully-authorized decision rather than an UNKNOWN sentinel.
+          preLockDecision = rawDecision;
+          lockStatus      = rawDecision === "CORE" ? "LOCKED_IN" : "LOCKED_OUT";
+          logger.warn(
+            {
+              game:        gs.game_id,
+              cutoff:      gameLockCutoff?.toISOString(),
+              minutesLate: Math.round(msLate / 60000),
+              rescheduled: isRescheduled,
+            },
+            "MODULE_11: Board lock fired late — stamping final authorized decision as Pre_Lock_Decision",
+          );
         } else if (rawDecision === "CORE") {
           preLockDecision = rawDecision;
           lockStatus      = "LOCKED_IN";
