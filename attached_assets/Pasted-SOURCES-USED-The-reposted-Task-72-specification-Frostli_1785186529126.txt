@@ -1,0 +1,122 @@
+SOURCES USED
+
+* The reposted Task #72 specification
+* Frostline’s vehicle-viability doctrine
+* The established commissioning order and price-blind selection rules
+
+REFRESH CHECK
+
+This is the same unrevised #72 plan. The rejected architecture is still present, so it should not be executed.
+
+#72 status:               NOT APPROVED
+Audit diagnosis:          VALID
+Implementation design:    STILL CONTRADICTS DOCTRINE
+Required action:          REWRITE BEFORE CODING
+
+The blocking language is still there
+
+1. It removes the functioning vehicle seed without replacing it
+
+Candidate_Vehicle default seed changed from GAME_TOTAL to TBD
+
+Automated selection is explicitly out of scope. Therefore, this would leave future pipeline runs dependent on manual vehicle entry and could produce broad TBD/NO_CORE output.
+
+Keep the current operational seed until the replacement is commissioned in shadow.
+
+2. It ranks by vehicle type
+
+“The ranking uses the vehicle-type ordering implied by the doctrine”
+
+There is no vehicle-type ordering in the doctrine. That sentence directly violates the doctrine.
+
+Vehicles must rank by game-specific attributes such as:
+
+* common-script capture
+* failure-mode burden
+* conversion burden
+* timing dependence
+* workload dependence
+* bullpen dependence
+* run-allocation dependence
+* stability and data completeness
+
+Vehicle labels cannot be used as a preference or tiebreaker.
+
+3. It treats CORE as the definition of viability
+
+“eliminates non-viable candidates (decision !== CORE)”
+
+A vehicle may be:
+
+* viable
+* the best expression of the game
+* still NO_CORE because an authorization gate fails
+
+The sequence must be:
+
+Evaluate viability
+→ rank viable vehicles
+→ select best vehicle
+→ apply CORE authorization
+
+Not:
+
+Apply CORE authorization
+→ delete NO_CORE vehicles
+→ rank what remains
+
+4. It hard-vetoes Full-Game Unders against opener/bulk structures
+
+FULL_GAME_UNDER blocks if either starter is an OPENER/BULK/PIGGYBACK
+
+That is too absolute. A known opener/bulk chain may still support an Under.
+
+Correct rule:
+
+Known chain with workload and quality:
+Evaluate normally with added dependency burden.
+Unresolved chain:
+NOT_EVALUABLE for affected vehicles.
+
+5. It allows unsupported vehicles through full-game-total gates
+
+The current decision function reportedly evaluates projected game total against market game total. That cannot validly evaluate:
+
+* moneylines
+* run lines
+* team totals
+* starter outs
+* starter earned runs
+* starter hits allowed
+
+Those vehicles need their own projection and market semantics. Until those exist:
+
+NOT_EVALUABLE — VEHICLE_PROJECTION_UNAVAILABLE
+
+6. The proposed candidate does not identify its subject
+
+STARTER_OUTS_UNDER does not identify which starter. TEAM_TOTAL_OVER does not identify which team.
+
+Every candidate needs a target such as:
+
+targetSide?: "AWAY" | "HOME";
+targetTeam?: string;
+targetPlayerId?: number;
+
+Required replacement
+
+Task #72 should be rewritten as a shadow-only architecture task that:
+
+1. preserves current live outputs
+2. creates an explicit VehicleCandidate contract
+3. separates VIABLE, NOT_VIABLE, NOT_EVALUABLE, and UNAVAILABLE
+4. ranks by candidate attributes rather than vehicle type
+5. keeps vehicle selection separate from CORE authorization
+6. proves no operational board drift
+7. does not connect the new ranker to SLATE_BOARD yet
+
+The decisive rejection remains this sentence:
+
+“The ranking uses the vehicle-type ordering implied by the doctrine.”
+
+Delete that entire concept. The doctrine permits vehicle-specific gates, but never a universal vehicle-type hierarchy.
