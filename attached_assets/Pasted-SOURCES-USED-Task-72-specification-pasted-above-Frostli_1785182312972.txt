@@ -1,0 +1,408 @@
+SOURCES USED
+
+* Task #72 specification pasted above
+* Frostline’s refined vehicle-viability doctrine
+* Existing pipeline order: game truth → script capture → vehicle capture → CORE scarcity → market
+* Replit’s reported audit of module10_slateInput.ts and module11_outputExtraction.ts
+
+REFRESH CHECK
+
+This is still a proposal review. No code changes, tests, or workbook effects have been independently inspected.
+
+#72 verdict
+
+Audit finding:          ACCEPT
+Task implementation:    DO NOT APPROVE AS WRITTEN
+Primary issue:          It replaces one vehicle hierarchy with another
+Secondary issue:        It conflates vehicle viability with CORE authorization
+
+The task correctly finds that the current engine does not perform real comparative vehicle selection. But the proposed implementation does not actually implement the doctrine. It mostly creates vehicle-type rules and a hardcoded type-ranking function.
+
+BLOCKING
+
+1. rankVehicles() explicitly violates the doctrine
+
+The plan says:
+
+“The ranking uses the vehicle-type ordering implied by the doctrine … as a deterministic tiebreaker.”
+
+There is no vehicle-type ordering implied by the doctrine.
+
+The doctrine says the opposite:
+
+Vehicle labels do not determine safety or preference. Evaluated game-specific attributes do.
+
+A deterministic type order such as:
+
+FULL_GAME_OVER > TEAM_TOTAL_OVER
+TEAM_TOTAL_OVER > FULL_GAME_OVER
+OUTS_UNDER > ER_OVER
+
+is simply a universal hierarchy hidden inside a comparator.
+
+The SEA–TEX example does not prove Full-Game Over should always rank ahead of Team Total Over. It proves it should rank ahead when aggregate scoring pressure is stronger than run-allocation confidence.
+
+The candidate structure proposed here contains only:
+
+{
+  vehicle,
+  decision,
+  coreBlocker
+}
+
+That gives the ranker no information about:
+
+* script capture
+* conversion burden
+* run-allocation dependence
+* timing dependence
+* workload dependence
+* bullpen dependence
+* failure modes
+* stability
+
+Therefore, it can only rank by vehicle label. That is doctrinally invalid.
+
+⸻
+
+2. Viability is being conflated with CORE authorization
+
+The plan eliminates every candidate where:
+
+decision !== "CORE"
+
+That is wrong architecturally.
+
+A vehicle can be:
+
+* structurally viable
+* the best price-blind expression of game truth
+* still NO CORE because separation, monotonicity, lineup confirmation, or another authorization requirement fails
+
+Frostline must still identify the best vehicle even when the final result is NO CORE.
+
+Correct sequence:
+
+1. Determine candidate viability.
+2. Rank viable candidates.
+3. Select the best vehicle.
+4. Apply CORE authorization gates to that selected vehicle.
+5. Return CORE or NO CORE with blocker.
+
+The proposal instead does:
+
+1. Authorize every candidate.
+2. Delete every NO CORE candidate.
+3. Rank only CORE candidates.
+
+That puts CORE scarcity before vehicle selection and breaks the intended pipeline.
+
+⸻
+
+3. Changing the default from GAME_TOTAL to TBD would degrade the live pipeline
+
+The task says automated vehicle selection remains out of scope, while simultaneously removing the only existing default vehicle.
+
+That creates this likely future behavior:
+
+Candidate_Vehicle = TBD
+computeDecision = NO_CORE
+
+unless an operator manually fills the field for every game before every run.
+
+Even if today’s already-published board is untouched, the next refresh could become an all-TBD board. That is an operational change, not merely removal of an implicit preference.
+
+The correct transition is:
+
+* preserve the current operational seed temporarily
+* mark it explicitly as a legacy/default intake value
+* build the new selection logic in shadow
+* remove the default only when the replacement is commissioned
+
+No functioning path should be removed before its replacement exists.
+
+⸻
+
+4. The opener/bulk Full-Game Under veto is too absolute
+
+The proposed rule:
+
+Full-Game Under blocks if either starter is an OPENER/BULK/PIGGYBACK.
+
+That converts pitcher role into an intrinsic vehicle veto.
+
+A known opener/bulk chain can support a Full-Game Under when:
+
+* the opener is competent
+* the bulk pitcher is identified
+* expected combined innings are known
+* the bullpen bridge is strong
+* the run environment remains suppressive
+
+The correct distinction is:
+
+Known opener/bulk chain:
+Evaluate normally with broader dependency burden.
+Unresolved opener/bulk identity or workload:
+NOT_EVALUABLE for affected vehicles.
+
+Role label alone cannot invalidate the vehicle.
+
+⸻
+
+5. Side and prop vehicles cannot use the current total-based decision logic
+
+The audit says computeDecision currently relies on projected total versus market total.
+
+That framework cannot meaningfully authorize:
+
+* MONEYLINE
+* RUN_LINE
+* TEAM_TOTAL
+* STARTER_OUTS_UNDER
+* STARTER_ER_OVER
+* STARTER_HITS_OVER
+
+Each requires a different projection and market-line semantic.
+
+Examples:
+
+Moneyline:
+Projected win probability versus implied probability
+Run line:
+Projected margin distribution versus spread
+Team total:
+Projected team runs versus team-total line
+Starter outs:
+Projected outs versus outs line
+Starter ER:
+Projected earned runs versus ER line
+
+Allowing those vehicles to “pass to universal gates” means they would be evaluated through gates built for a full-game total. That would be mechanically invalid.
+
+Until vehicle-specific projections exist, these vehicles must be:
+
+NOT_EVALUABLE — VEHICLE_PROJECTION_UNAVAILABLE
+
+not treated as eligible under the full-game-total calculation.
+
+⸻
+
+6. The function cannot identify the relevant team or starter
+
+This signature is insufficient:
+
+checkVehicleViability(vehicle: string, ctx: GameEligibilityContext)
+
+For these vehicles, the engine must know the target:
+
+* Away Team Total Over
+* Home Team Total Under
+* Away Starter Outs Under
+* Home Starter ER Over
+* specific player prop
+
+STARTER_OUTS_UNDER alone does not identify which starter’s workload should be checked.
+
+The candidate must include subject identity, such as:
+
+targetSide: "AWAY" | "HOME" | null
+targetPlayerId?: number
+targetTeam?: string
+
+Without that, the viability check is ambiguous.
+
+⸻
+
+7. Several proposed tests would be tautological rather than evidentiary
+
+Tests 1–4 fabricate only vehicle labels and decisions, then expect a specific vehicle to win. That tests the hardcoded hierarchy, not the doctrine.
+
+For example, “either-side eruption” needs explicit candidate attributes showing:
+
+Full-Game Over script capture: high
+Team Total Over script capture: narrower
+Full-Game Over allocation dependence: low
+Team Total Over allocation dependence: high
+
+Without those inputs, the test merely asserts:
+
+expect(FULL_GAME_OVER).toRankAbove(TEAM_TOTAL_OVER)
+
+which is exactly the static assumption we are trying to prevent.
+
+The price-blindness test is similarly weak if neither function accepts odds in the first place. It would prove only that an unused fabricated field has no effect.
+
+⸻
+
+8. “Unavailable preferred vehicle” has no availability representation
+
+The proposed candidate contract contains no:
+
+available
+marketPresent
+projectionPresent
+
+field.
+
+An unavailable vehicle is not the same as a vehicle that failed CORE authorization.
+
+It needs a distinct state:
+
+VIABLE
+NOT_VIABLE
+NOT_EVALUABLE
+UNAVAILABLE
+
+or a separate availability field.
+
+Rerouting should occur only when the best viable vehicle is actually unavailable, not because it returned NO CORE.
+
+NON-BLOCKING BUT IMPORTANT
+
+Blocker selection needs a defined rule
+
+The task says that when no candidate survives, it returns the blocker from the “highest-ranked candidate.”
+
+But nonviable candidates cannot be truthfully ranked with the proposed data.
+
+The controlling blocker should come from:
+
+* the best price-blind candidate before authorization, or
+* an explicit blocker-precedence system
+
+It should not be selected by a hidden vehicle-type order.
+
+Team totals receiving no additional checks means the patch is incomplete
+
+The proposal acknowledges that team-allocation analysis is unavailable. That is honest, but it means #72 cannot claim to implement full vehicle doctrine.
+
+It can implement:
+
+foundational candidate-state and comparison infrastructure
+
+It cannot yet implement:
+
+completed automated vehicle selection
+
+Existing price blindness should remain untouched
+
+The audit finding that computeDecision does not use odds is good and should be preserved. No dispute there.
+
+Corrected scope for #72
+
+Task #72 should be reduced to a shadow architecture patch, not a live selection patch.
+
+Required changes
+
+1. Preserve the current live seed
+
+Do not change GAME_TOTAL to TBD in the operational pipeline yet.
+
+Optionally rename or annotate it internally as:
+
+LEGACY_DEFAULT_GAME_TOTAL
+
+but do not break current board generation.
+
+2. Create a real candidate contract
+
+type VehicleViability =
+  | "VIABLE"
+  | "NOT_VIABLE"
+  | "NOT_EVALUABLE"
+  | "UNAVAILABLE";
+interface VehicleCandidate {
+  vehicleType: VehicleType;
+  targetSide?: "AWAY" | "HOME";
+  targetTeam?: string;
+  targetPlayerId?: number;
+  projection?: number;
+  marketLine?: number;
+  availability: "AVAILABLE" | "UNAVAILABLE";
+  dataCompleteness: number;
+  scriptCaptureScore?: number;
+  failureModeBurden?: number;
+  conversionBurden?: number;
+  timingDependence?: number;
+  workloadDependence?: number;
+  plateAppearanceDependence?: number;
+  bullpenDependence?: number;
+  runAllocationDependence?: number;
+  stabilityScore?: number;
+  viability: VehicleViability;
+  viabilityBlocker?: string;
+}
+
+Exact field names can differ, but the information must exist.
+
+3. Separate viability, ranking, and authorization
+
+evaluateVehicleViability(candidate, context)
+rankViableVehicles(candidates)
+authorizeSelectedVehicle(selectedCandidate, context)
+
+Do not use decision === CORE as the definition of viability.
+
+4. Do not rank by vehicle type
+
+The comparator must use evaluated candidate attributes only.
+
+Vehicle type may be used to determine which gates apply, but never as a preference or tiebreaker.
+
+When two candidates are truly identical on every criterion, return an explicit tie or preserve stable input order. Do not invent a safety hierarchy.
+
+5. Treat unsupported vehicle calculations honestly
+
+Until a vehicle-specific projection exists:
+
+NOT_EVALUABLE — VEHICLE_PROJECTION_UNAVAILABLE
+
+This applies especially to sides and starter props if only a full-game-total projection exists.
+
+6. Run shadow-only
+
+The new functions may produce a shadow comparison report or test output, but must not change:
+
+* SLATE_BOARD
+* current candidate vehicle
+* CORE counts
+* active board
+* lock state
+* schema
+* historical outputs
+
+Proper #72 regression suite
+
+The eight scenarios remain useful, but each test must supply the attributes that justify the result.
+
+Additional mandatory tests:
+
+1. Identical attributes, different vehicle labels
+    Changing only the vehicle type must not change rank.
+2. Viable but NO CORE
+    The best vehicle is still selected, then receives NO CORE from authorization.
+3. Unknown workload isolation
+    Starter prop becomes NOT_EVALUABLE; full-game total remains independently evaluable.
+4. Known opener/bulk chain
+    Full-Game Under is not automatically rejected solely because of role label.
+5. Unsupported projection type
+    Moneyline or starter prop cannot use the full-game-total projection.
+6. No live-output drift
+    Existing board output is byte-for-byte or field-for-field unchanged by shadow execution.
+
+Exact decision
+
+#72 audit diagnosis:             VALID
+Remove live GAME_TOTAL default:  REJECT
+Blanket opener Under veto:       REJECT
+CORE-based vehicle ranking:      REJECT
+Vehicle-type comparator:         REJECT
+Shadow candidate architecture:   APPROVE
+Live comparative selection:      OUT OF SCOPE UNTIL COMMISSIONED
+
+The decisive flaw is this sentence:
+
+“The ranking uses the vehicle-type ordering implied by the doctrine.”
+
+That must be removed completely. There is no permissible vehicle-type ordering.
