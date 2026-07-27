@@ -1,0 +1,86 @@
+SOURCES USED
+
+* Your complete July 26 Statcast and box-score dump
+* The preserved July 26 Frostline board projections, markets, directions, blockers, and lock states
+* Current Phase 4 commissioning state
+
+REFRESH CHECK
+
+* 15 of 15 games final
+* July 26 board produced 0 CORE / 15 NO CORE
+* Tomorrow’s successful pregame Statcast ingestion path is still awaiting validation
+* No workbook or model change was made in this turn
+
+Yes, feed it to Replit
+
+But feed it as a frozen replay/postmortem dataset, not as a request to immediately change coefficients.
+
+This slate is valuable for three reasons:
+
+1. It establishes the pre-Statcast-shadow baseline.
+2. It verifies whether the existing replay and postmortem tables actually accept a complete slate cleanly.
+3. It preserves the exact failure modes before tomorrow’s Statcast shadow data exists.
+
+Send this:
+
+Ingest the following as the finalized July 26, 2026 Frostline postmortem and Phase 4B baseline replay.
+
+This is an archival, replay, and diagnostic operation only.
+
+Do not change projection formulas, coefficients, thresholds, authorization, survival gates, vehicle selection, or locks based on this single slate. Do not create a new task number.
+
+Use the existing canonical replay/postmortem architecture and write only to the appropriate historical/replay tables. Preserve the original pregame projection, market, direction, decision, blocker, and lock state.
+
+Record these finalized game totals:
+
+Game_ID	Projection	Market	Direction	Actual Total	Truth Grade	Projection Error
+20260726_CLE_TBR	7.06	7.0	OVER	1	MISS	-6.06
+20260726_ARI_WSN	11.66	9.5	OVER	17	HIT	+5.34
+20260726_CHC_PIT	12.52	8.0	OVER	15	HIT	+2.48
+20260726_TOR_BOS	7.24	8.5	UNDER	7	HIT	-0.24
+20260726_ATL_BAL	8.83	8.5	OVER	5	MISS	-3.83
+20260726_KCR_DET	8.52	7.5	OVER	9	HIT	+0.48
+20260726_LAD_NYM	7.99	9.0	UNDER	11	MISS	+3.01
+20260726_SDP_MIA	9.53	9.0	OVER	8	MISS	-1.53
+20260726_OAK_MIN	9.65	9.5	OVER	19	HIT	+9.35
+20260726_HOU_CHW	12.78	9.0	OVER	15	HIT	+2.22
+20260726_COL_MIL	8.78	8.5	OVER	13	HIT	+4.22
+20260726_CIN_STL	8.51	8.0	OVER	8	PUSH	-0.51
+20260726_SEA_TEX	6.67	7.5	UNDER	10	MISS	+3.33
+20260726_LAA_SFG	7.37	8.5	UNDER	7	HIT	-0.37
+20260726_NYY_PHI	5.67	7.5	UNDER	15	MISS	+9.33
+
+Slate summary:
+
+* Truth-direction record: 8 HIT / 6 MISS / 1 PUSH
+* Mean absolute projection error: 3.49 runs
+* RMSE: 4.52 runs
+* Mean signed error, Actual minus Projection: +1.81 runs
+* Projected slate runs: 132.78
+* Actual slate runs: 160
+* CORE count: 0
+* Authorization contamination: none
+
+Tag the primary diagnostic modes:
+
+* FALSE_OFFENSE_ALLOWANCE: CLE–TBR
+* FALSE_OVER_ENVIRONMENT: ATL–BAL
+* BULLPEN_CONTINUATION_UNDERMODELED: LAD–NYM, SEA–TEX
+* EXPLOSIVE_TAIL_COMPRESSED: OAK–MIN
+* ONE_SIDED_STAFF_DETONATION_MISSED: NYY–PHI
+* STRONG_OVER_CAPTURE: ARI–WSN, CHC–PIT, HOU–CHW, COL–MIL
+* STRONG_UNDER_CAPTURE: TOR–BOS, LAA–SFG
+
+Grade game truth separately from ticket result. Since all decisions were NO CORE, ticket result should remain NO_AUTHORIZED_EXPOSURE.
+
+After ingestion, report only:
+
+1. destination sheets used
+2. rows written or updated
+3. duplicate/idempotency result
+4. calculated aggregate metrics
+5. any schema or dependency failure
+
+Stop after the verification report. Do not propose or implement model changes.
+
+That gives Replit real evidence without letting one dramatic slate trigger another uncontrolled rebuild.

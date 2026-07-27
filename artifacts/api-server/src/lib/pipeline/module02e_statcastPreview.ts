@@ -415,6 +415,27 @@ async function fetchOneGame(game: NormalizedGame): Promise<StatcastPreviewGameRe
     };
   }
 
+  // ── 4b. Detect live/completed-game page format ────────────────────────────
+  // When a game is live or completed, the Savant preview page restructures the
+  // var teams object: hitterPlusRows and pitcherPlusRows become numeric counts
+  // (not arrays) and Statcast stats are absent from the payload.  Attempting to
+  // call .map() on a number crashes the hitter aggregation step.
+  // Return NOT_PUBLISHED — the source is reachable but pregame stats are not
+  // available in this page format.
+  if (
+    typeof awayRaw["hitterPlusRows"] === "number" ||
+    typeof homeRaw["hitterPlusRows"] === "number"
+  ) {
+    return {
+      ...base,
+      preview_availability: "NOT_PUBLISHED",
+      fetch_status: "success",
+      payload_hash: payloadHash,
+      raw_payload_path: rawPayloadPath,
+      parse_error: "Live/completed-game page format detected — pregame Statcast stats not available in this structure",
+    };
+  }
+
   const hasLineupAway = awayRaw["hasLineup"] === true;
   const hasLineupHome = homeRaw["hasLineup"] === true;
   const hasProbableAway = awayRaw["hasProbable"] === true;
@@ -494,9 +515,22 @@ async function fetchOneGame(game: NormalizedGame): Promise<StatcastPreviewGameRe
 
   // ── 7. Extract hitter aggregates (qualified hitters only) ─────────────────
   function aggregateHitters(side: Record<string, unknown>) {
-    // hitterRows is the primary key; fall back to 'hitters' or 'roster'
-    const rawList =
-      (side["hitterRows"] ?? side["hitters"] ?? side["roster"] ?? []) as unknown[];
+    // hitterRows is the primary key; fall back to 'hitters' or 'roster'.
+    // Guard: the value MUST be an array before calling .map().  Some page
+    // variants serve a keyed object (flatten via Object.values) or a number
+    // count (treat as empty).  Without this guard, a non-array crashes here
+    // and escapes fetchOneGame entirely — the outer .catch() then mislabels
+    // the failure as http_error / SOURCE_UNAVAILABLE.
+    const rawValue = side["hitterRows"] ?? side["hitters"] ?? side["roster"];
+    let rawList: unknown[];
+    if (Array.isArray(rawValue)) {
+      rawList = rawValue;
+    } else if (rawValue !== null && rawValue !== undefined && typeof rawValue === "object") {
+      // Keyed-object format (e.g. {playerId: {...}, ...}) — flatten to values.
+      rawList = Object.values(rawValue as Record<string, unknown>);
+    } else {
+      rawList = [];
+    }
     const all = rawList
       .map(extractPlayerStats)
       .filter((s): s is StatcastPlayerStats => s !== null);
@@ -512,8 +546,24 @@ async function fetchOneGame(game: NormalizedGame): Promise<StatcastPreviewGameRe
     };
   }
 
-  const awayHitters = aggregateHitters(awayRaw);
-  const homeHitters = aggregateHitters(homeRaw);
+  // Wrap aggregation in a catch so any unexpected structural error is classified
+  // as PARSE_FAILED / parse_error rather than escaping to the outer batch handler
+  // which would mislabel it as http_error / SOURCE_UNAVAILABLE.
+  let awayHitters: ReturnType<typeof aggregateHitters>;
+  let homeHitters: ReturnType<typeof aggregateHitters>;
+  try {
+    awayHitters = aggregateHitters(awayRaw);
+    homeHitters = aggregateHitters(homeRaw);
+  } catch (err) {
+    return {
+      ...base,
+      preview_availability: "PARSE_FAILED",
+      fetch_status: "parse_error",
+      payload_hash: payloadHash,
+      raw_payload_path: rawPayloadPath,
+      parse_error: `Hitter aggregation failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 
   if (awayHitters.total === 0) warnings.push("No hitter rows found for away team");
   if (homeHitters.total === 0) warnings.push("No hitter rows found for home team");

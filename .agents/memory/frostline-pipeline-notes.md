@@ -54,7 +54,34 @@ description: Non-obvious decisions, traps, and structural facts about the Frostl
 - Schema v13. After any schema bump, run `GET /api/pipeline/repair-headers` to sync the live workbook.
 - Excluded signals: pitcher K%/BB% (reserved for FanGraphs stub-replacement), hitter xwOBA (overlaps module02d lineup factor). See `docs/statcast-shadow-mapping.md`.
 
+## Statcast preview page — two distinct page formats (critical)
+- **Pregame format** (before first pitch): `var teams` has `hitterRows` as an array, `pitcher`/`startingPitcher` keys, embedded Statcast stats. `preview_availability: "AVAILABLE"`.
+- **Live/completed-game format** (after first pitch): `hitterPlusRows` and `pitcherPlusRows` become **numbers** (counts), `hitterRows`/`pitcher` keys absent, no Statcast stats. Parser now detects this via `typeof awayRaw["hitterPlusRows"] === "number"` and returns `preview_availability: "NOT_PUBLISHED"` / `fetch_status: "success"`.
+- First-pitch time for earliest games is ~12:35 ET. Any publish after that for that game will hit the live format.
+- Raw payloads saved per run: `artifacts/api-server/artifacts/statcast-preview/YYYY-MM-DD/{gamePk}/{ts}.json`.
+- `aggregateHitters()` has an `Array.isArray` guard as defense-in-depth — non-array values fall through `Object.values()` rather than crashing `.map()`.
+
+## MONOTONICITY sheet — pre-existing absence
+- Sheet defined in workbookSchema.ts but never created in the canonical workbook.
+- Every `GET /api/pipeline/regression?write_sheets=true` returns `status: "partial"` with error `"Monotonicity sheet write failed: Sheet \"MONOTONICITY\" not found in workbook"`.
+- REGRESSION_REPORT is still written correctly; only the edge-tier monotonicity analysis is skipped.
+- Fix: add `ensureSheet` call in module15 before the MONOTONICITY write (same pattern as module08b / module09s). Task #71 tracks this.
+
+## Phase 4 commissioning — completed July 26 2026
+- Canonical workbook now has 28 tabs (STATCAST_GAME_PREVIEW + STATCAST_SHADOW_AUDIT added).
+- Schema v13. `Preview_Used_In_Projection = "NO"` enforced in all output rows.
+- Phase 5 gated on morning-run evidence of `available ≥ 1` in module02e. Task #70 tracks this.
+
+## July 26 2026 postmortem baseline
+- 15 games final. All NO_CORE (all locked by first-pitch cutoff at time of run). 0 authorized exposure.
+- Truth-direction: 8 HIT / 6 MISS / 1 PUSH. MAE 3.49, RMSE 4.52, signed error +1.81 (underprojection).
+- REPLAY_METRICS (module13): BLEND_PARK_PITCHER best variant, MAE 3.426, bias −1.770 — all variants show negative bias (actual > projection).
+- Settlement idempotent: games already in SHADOW_OUTCOMES before explicit settle call.
+- Diagnostic modes recorded in uploaded baseline doc (attached_assets/Pasted-SOURCES-USED-*).
+
 ## Commissioning verification
 - `POST /api/pipeline/publish` → expect `pipeline_status: success`, 0 errors.
-- `GET /api/pipeline/repair-headers` → expect status success/partial (MONOTONICITY missing is acceptable — it's created lazily on first regression run).
-- Lock distribution check: count LOCKED_IN vs LOCKED_OUT in slate_board.
+- `GET /api/pipeline/repair-headers` → expect `sheets_repaired: 28`; only MONOTONICITY in errors is acceptable.
+- `GET /api/pipeline/settle?date=YYYY-MM-DD` → chains module14 (SHADOW_OUTCOMES) + module18 (SURVIVAL_GATE_REPLAY). Idempotent.
+- `GET /api/pipeline/regression?write_sheets=true` → `partial` until MONOTONICITY sheet is created (task #71).
+- Quota trap: running repair-headers immediately before publish exhausts the Sheets write-per-minute quota. Space them ≥60s apart.
