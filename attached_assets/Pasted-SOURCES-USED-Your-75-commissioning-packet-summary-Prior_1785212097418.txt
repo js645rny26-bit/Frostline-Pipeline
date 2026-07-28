@@ -1,0 +1,112 @@
+SOURCES USED
+
+* Your #75 commissioning packet summary
+* Prior direct inspection of the canonical workbook
+* July 27 GAME_INTEGRATION and GAME_SUMMARY values
+* Frostline commissioning doctrine
+
+REFRESH CHECK
+
+The direct workbook read supports the most important correction: July 27 lineup factors were not constant placeholders. They varied materially across teams. The underlying module lineage, reconciliations, and source-code behavior remain report-based, because I have not independently opened the Replit source or .local/tasks/task-75-splits-lineage-audit.md.
+
+#75 disposition
+
+Audit deliverable:             ACCEPTED
+Audit-only scope respected:    YES
+Projection changes made:       NONE REPORTED
+Current lineup factor:         OPERATIONAL
+Exact matchup split layer:     NOT COMMISSIONED
+Engine state:                  NO CORE — RESEARCH-ONLY
+
+The fact that only 5 of 9 acceptance criteria were met does not mean the audit failed. Those nine criteria were designed to determine what was actually operational. The audit successfully proved that four required capabilities are missing.
+
+Critical correction accepted
+
+The earlier conclusion that Lineup_Factor was merely a placeholder was incorrect.
+
+The more precise state is:
+
+Lineup names/order
+→ bat-side scrape
+→ in-memory roster/name resolution
+→ season OPS + platoon adjustment
+→ variable Lineup_Factor
+→ GAME_INTEGRATION
+→ GAME_SUMMARY
+
+That path appears operational.
+
+The blank Player_ID and split columns in TODAY_LINEUPS are therefore display and lineage gaps, not proof that every hitter fails to resolve internally.
+
+That distinction must be preserved.
+
+What #75 definitively established
+
+Operational
+
+* L10 actual runs per game
+* aggregate L30 offensive rate
+* lineup names and order
+* batter-side information
+* in-memory player matching sufficient to produce variable lineup factors
+* season OPS plus a platoon adjustment
+* lineup-factor propagation into projections
+* park-factor propagation
+
+Still absent
+
+* player Season vs LHP/RHP wRC+
+* player L30 wRC+
+* team Season vs LHP/RHP
+* team L30 vs LHP/RHP
+* team L14 vs LHP/RHP
+* any functional L14 offensive layer
+* populated PLAYER_INTEGRATION
+* workbook-visible player IDs
+* explicit status codes replacing silent blanks
+
+Still broken
+
+* Statcast preview availability classification
+
+Important analytical implication
+
+The engine is not completely blind to lineup composition or platoon orientation. It already performs a basic confirmed-lineup adjustment.
+
+But that adjustment is substantially shallower than Frostline requires:
+
+Current:
+season OPS
++ batter-side platoon adjustment
++ lineup order/composition
+Required:
+Season/L30/L14 production vs exact pitcher handedness
++ contact
++ damage
++ conversion
++ confirmed-lineup aggregation
+
+So the starter-tunneling problem cannot be blamed on a wholly inactive lineup layer. The more accurate diagnosis is:
+
+The lineup layer functions, but it lacks the matchup-specific temporal depth needed to counterbalance aggressive starter-quality and recent-team-form signals.
+
+That is a better and more actionable finding.
+
+Next directive
+
+Run #76 now as the final separate audit
+
+It should remain:
+
+* audit-only
+* shadow-only
+* zero projection influence
+* zero authorization influence
+* focused strictly on why visibly published pregame Statcast data becomes Available: 0
+
+After #76, stop auditing and move to one bounded repair program for the missing split lineage. No projection coefficients or vehicle thresholds should change before Category A data is flowing and reconciled end to end.
+
+#75: ACCEPTED AND CLOSED
+Split layer: NOT COMMISSIONED
+#76: RUN NEXT
+Projection recalibration: PROHIBITED
