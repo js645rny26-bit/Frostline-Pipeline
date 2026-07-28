@@ -1,0 +1,72 @@
+SOURCES USED
+
+* Your data-readiness summary
+* Direct canonical-workbook audit findings
+* Frostline commissioning doctrine
+
+REFRESH CHECK
+
+The current state is correctly mapped:
+
+#75  Splits and Data-Lineage Commissioning Audit
+#76  Statcast false-negative parser audit
+
+Run #75 first
+
+It is the higher-priority dependency because the missing split layer directly affects daily game truth, dynamic team identity, and projection calibration.
+
+The order is:
+
+#75 audit existing pipeline
+→ identify exact breakpoints
+→ verify raw source availability
+→ prove or disprove joins and downstream lineage
+→ accept findings
+→ only then authorize bounded repair work
+
+No projection coefficients, starter-quality formulas, vehicle rules, or calibration thresholds should change during #75.
+
+#75 acceptance packet must contain
+
+1. Raw Season/L30/L14 team splits versus RHP and LHP for all 30 teams, with source timestamps.
+2. Current lineup player-ID resolution count:
+    * resolved
+    * unresolved
+    * duplicate/ambiguous
+3. Population audit for:
+    * TODAY_LINEUPS
+    * PLAYER_INTEGRATION
+    * the raw player-stat spine
+4. Exact module/function lineage from scrape to workbook cell.
+5. Explicit status for every blank:
+    * NO_SAMPLE
+    * UNRESOLVED_PLAYER
+    * SOURCE_MISSING
+    * JOIN_FAILED
+    * never silent null
+6. Proof that confirmed-lineup changes alter Lineup_Factor.
+7. Three complete reconciliations:
+
+raw source
+→ normalized record
+→ player/team join
+→ lineup factor
+→ GAME_INTEGRATION
+→ GAME_SUMMARY
+
+8. Failure-path proof that missing critical split data produces PARTIAL_SUCCESS or a named warning.
+9. A final classification of every layer:
+
+OPERATIONAL
+BROKEN
+ABSENT
+PRESENT_BUT_DISCONNECTED
+
+Required disposition
+
+#75: RUN NOW
+#76: HOLD AS NEXT SEPARATE AUDIT
+Projection changes: PROHIBITED UNTIL #75 IS ACCEPTED
+Engine state: NO CORE — RESEARCH-ONLY
+
+After #75 is accepted, we will know whether the repair is primarily a scraper failure, normalization failure, player-ID join failure, workbook-write failure, or downstream integration failure instead of guessing and changing formulas around missing inputs.
