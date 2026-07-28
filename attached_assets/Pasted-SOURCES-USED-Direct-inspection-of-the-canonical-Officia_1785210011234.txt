@@ -1,0 +1,259 @@
+SOURCES USED
+
+* Direct inspection of the canonical Official Frostline Engine
+* RUN_LOG
+* TODAY_LINEUPS
+* TEAM_FORM_INPUT
+* DAILY_MATCHUPS
+* GAME_INTEGRATION
+* GAME_SUMMARY
+* PLAYER_INTEGRATION
+* SCHEMA_REFERENCE
+* STATCAST_GAME_PREVIEW
+
+REFRESH CHECK
+
+Latest workbook publication inspected:
+
+Run timestamp:       2026-07-27T21:54:05Z
+Pipeline status:     SUCCESS
+Games:               12
+Lineup rows:         216
+Team-form rows:      30
+Bullpen rows:        258
+Starter resolution:  24/24
+
+Verdict
+
+No, the splits pipeline is not fully resolved.
+
+Some aggregate offensive scraping is functioning, but the critical handedness, player-level, and short-window split layers are either absent or not integrated.
+
+The current pipeline’s SUCCESS status is therefore broader than the actual data readiness. It confirms that Module 08 wrote its expected row counts, but it does not confirm that the split fields themselves were populated and used.
+
+What is currently working
+
+Team-level recent offense
+
+The projection engine is receiving:
+
+* Fangraphs aggregate L30 wRC+, converted into a runs-per-nine estimate
+* Actual L10 runs scored per game
+* A blended offensive rate using approximately:
+    * 65% L30
+    * 35% L10
+
+Every current game shows Offense_Source_Status = BLENDED.
+
+So this path is real:
+
+Aggregate team L30 offense
++ actual team L10 scoring
+→ Offense_Rate_Used
+→ game projection
+
+That is not fake or empty.
+
+Other ingestion that is populated
+
+The workbook also currently contains meaningful data for:
+
+* official lineup names and batting order
+* starter ERA, FIP, and K%
+* starter role and expected workload
+* recent starter outing information
+* bullpen usage and rest
+* weather
+* park factors
+* market totals
+* plate umpires
+
+Those scraping lanes appear operational at the workbook-output level.
+
+What is not working
+
+1. Player handedness splits are completely blank
+
+The current TODAY_LINEUPS contains 216 hitters.
+
+For those lineup rows, these columns are blank:
+
+* vs_LHP_wRC_plus
+* vs_RHP_wRC_plus
+* Last_30_Days_wRC_plus
+
+The Player_ID field is also blank throughout the current lineup population.
+
+That means the official lineups are being scraped, but they are not being joined to the player-stat spine.
+
+Lineup identity:        PRESENT
+Player IDs:             MISSING
+Player handedness data: MISSING
+Player L30 data:        MISSING
+
+⸻
+
+2. PLAYER_INTEGRATION is empty
+
+The sheet contains its header row but no player rows.
+
+Therefore none of these intended calculations are being produced:
+
+* batter versus pitcher handedness wRC+
+* batter L30 wRC+
+* adjusted batter quality
+* player projection integration
+
+This is not merely a display issue. The downstream player integration layer currently has no populated records.
+
+⸻
+
+3. The lineup factor is still a placeholder
+
+The schema explicitly states:
+
+Lineup_Factor is currently a placeholder because per-player batting cross-reference has not yet been implemented.
+
+The current lineup factors hover around 1.00, but they are not a genuine calculation from the nine confirmed hitters’ handedness and recent-form profiles.
+
+Therefore:
+
+Confirmed lineup names affect structure
+but confirmed lineup quality is not truly modeled
+
+This is a major unresolved dependency.
+
+⸻
+
+4. The required team split system is not represented
+
+Our required offense split layer is:
+
+Season vs RHP/LHP
+L30 vs RHP/LHP
+L14 vs RHP/LHP
+
+The canonical workbook currently exposes:
+
+* aggregate L30 offense
+* aggregate L10 scoring
+* L10 wOBA
+* a lineup platoon-advantage percentage
+
+It does not expose:
+
+* Season team wRC+ versus RHP
+* Season team wRC+ versus LHP
+* L30 team wRC+ versus RHP
+* L30 team wRC+ versus LHP
+* L14 team wRC+ versus RHP
+* L14 team wRC+ versus LHP
+
+The Away_Platoon_Adv and Home_Platoon_Adv fields only indicate the share of hitters holding the platoon advantage. They do not tell us whether those hitters or that team are actually productive against that handedness.
+
+So the system currently knows something like:
+
+Six of nine hitters have the handedness edge.
+
+It does not reliably know:
+
+This exact lineup has a 121 wRC+ against right-handed pitching over the last 30 days.
+
+That is a substantial distinction.
+
+⸻
+
+5. L14 is absent
+
+I found no current workbook field, audit field, input sheet, or source-status column for the required L14 offense modifier.
+
+Therefore L14 is not merely uncertain. It is not visibly present in the operational data path.
+
+⸻
+
+6. Statcast scraping remains unresolved
+
+The latest RUN_LOG reports:
+
+Expected games:   12
+Available:         0
+Parsed:            0
+Missing:          12
+Failed:             0
+
+We already proved SEA–TEX had usable pregame Statcast data while the parser labeled it unavailable.
+
+Therefore Statcast still has a known false-negative ingestion problem. It remains shadow-only and has zero projection influence, which is the correct safety behavior, but the scrape itself is not commissioned.
+
+Current data-readiness matrix
+
+Data layer	Status
+Schedule and game identity	Working
+Probable starters	Working
+Starter season ERA/FIP/K%	Working
+Starter recent outing/workload	Working
+Official lineup names/order	Working
+Player IDs in lineups	Not working
+Player vs LHP/RHP splits	Not working
+Player L30 splits	Not working
+Player integration	Not working
+Team aggregate L30 offense	Working
+Team actual L10 scoring	Working
+Team Season vs handedness	Not present
+Team L30 vs handedness	Not present
+Team L14 vs handedness	Not present
+Bullpen usage	Working
+Weather	Working
+Park factors	Working with known venue-alias risk
+Statcast preview	Not commissioned / false negatives remain
+
+Why this matters to the current failures
+
+This missing data can directly contribute to the projection errors we just saw.
+
+The engine is currently combining:
+
+aggregate recent team offense
++ starter FIP-derived quality
++ park/weather
++ basic lineup factor
+
+But it is not properly calculating:
+
+exact confirmed lineup
+× opposing pitcher handedness
+× Season/L30/L14 split strength
+× individual contact/damage profiles
+
+That creates conditions for Starter Classification Collapse:
+
+* a weak starter factor can heavily inflate a team projection
+* the engine lacks enough exact lineup-matchup information to restrain it
+* recent aggregate offense is translated into expected runs without sufficiently proving matchup-specific contact and conversion
+
+ARI–PIT and TOR–WSN are consistent with that vulnerability.
+
+Required next step
+
+The next action should be one bounded Splits and Data-Lineage Commissioning Audit, before changing projection formulas again.
+
+It must prove:
+
+1. Raw Season, L30, and L14 team splits versus RHP and LHP were fetched for all 30 teams.
+2. All current lineup hitters were resolved to player IDs.
+3. Each hitter received the appropriate versus-handedness and L30 values, or an explicit NO_SAMPLE status rather than a silent blank.
+4. PLAYER_INTEGRATION populated from those joined records.
+5. Lineup factors changed when lineups changed.
+6. The values visibly flowed into GAME_INTEGRATION and GAME_SUMMARY.
+7. Three games were manually reconciled from raw source value to workbook output.
+8. A missing split scrape caused PARTIAL_SUCCESS or a named warning, not an unconditional SUCCESS.
+9. Statcast was audited separately and was not allowed to masquerade as published-but-unavailable.
+
+Current splits status:   NOT COMMISSIONED
+Aggregate team form:     OPERATIONAL
+Player split integration:ABSENT
+L14 layer:               ABSENT
+Statcast ingestion:      UNRESOLVED
+Engine state:            NO CORE — RESEARCH-ONLY
+
+You were right not to let this slide. The workbook currently contains enough populated data to look complete, while the exact matchup split layer we depend on for dynamic team identity is still missing.
