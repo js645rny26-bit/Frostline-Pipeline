@@ -22,8 +22,12 @@ export interface WeatherData {
   precipitation_probability_pct: number | null;
   /** Contextualized wind direction relative to the field, e.g. "Out to CF", "In from Left", "Cross (R to L)" */
   wind_context:               string | null;
-  /** True if stadium has a closed/retractable roof */
+  /** True only when WeatherMLB reports the roof closed. */
   roof:                       boolean;
+  /** True while WeatherMLB reports the roof decision pending. */
+  roof_pending?:              boolean;
+  /** Preserved roof state for environment certainty and weather activation. */
+  roof_status?:               "CLOSED" | "PENDING" | "OPEN_OR_OUTDOOR" | "UNKNOWN";
   data_quality:               string;
 }
 
@@ -52,6 +56,8 @@ function defaultWeather(): WeatherData {
     precipitation_probability_pct: 10,
     wind_context:                 null,
     roof:                         false,
+    roof_pending:                 false,
+    roof_status:                  "UNKNOWN",
     data_quality:                 "fallback",
   };
 }
@@ -145,8 +151,14 @@ export async function fetchWeatherForecasts(manifest: GameScheduleResult): Promi
     }
 
     successCount++;
-    const w   = site.weather;
-    const hasRoof = !!(site.roof || site.roofPending);
+    const w = site.weather;
+    const roofClosed = site.roof === true;
+    const roofPending = site.roofPending === true;
+    const roofStatus = roofPending
+      ? "PENDING"
+      : roofClosed
+        ? "CLOSED"
+        : "OPEN_OR_OUTDOOR";
 
     return {
       gamePk: game.gamePk,
@@ -159,7 +171,9 @@ export async function fetchWeatherForecasts(manifest: GameScheduleResult): Promi
         wind_direction_degrees:       w.windDir ?? null,
         precipitation_probability_pct: w.maxPrecipChance ?? null,
         wind_context:                 site.wind?.text ?? null,
-        roof:                         hasRoof,
+        roof:                         roofClosed,
+        roof_pending:                 roofPending,
+        roof_status:                  roofStatus,
         data_quality:                 "good",
       },
     };

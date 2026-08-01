@@ -57,6 +57,8 @@ const DEFAULT_WEATHER: WeatherData = {
   precipitation_probability_pct: 10,
   wind_context: null,
   roof: false,
+  roof_pending: false,
+  roof_status: "UNKNOWN",
   data_quality: "fallback",
 };
 

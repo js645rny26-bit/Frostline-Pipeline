@@ -14,7 +14,8 @@ import type { NormalizationResult, NormalizedGame } from "./module06_normalizati
 import type { FangraphsResult } from "./module05_fangraphs.js";
 import { STADIUM_COORDS, resolveVenueName } from "./config.js";
 import type { BullpenResult } from "./module04b_bullpenUsage.js";
-import { type StartingNineResult, type StartingNineGame, buildStartingNineMap, pctToMultiplier } from "./module04c_startingNine.js";
+import { type StartingNineResult, type StartingNineGame, buildStartingNineMap } from "./module04c_startingNine.js";
+import { resolveEnvironmentFactors } from "./module09_environment.js";
 import { type StarterOutingResult, type StarterOuting } from "./module04d_starterPrevOuting.js";
 import type { UmpireResult } from "./module04e_umpires.js";
 import type { PitcherSeasonStatsResult, PitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
@@ -278,21 +279,26 @@ function buildRunEnvironmentRows(
 ): unknown[][] {
   return games.map((g) => {
     const e = g.environment;
-    const venueKey    = resolveVenueName(g.venue.name);
+    const venueKey = resolveVenueName(g.venue.name);
     const elevationFt = venueKey ? (STADIUM_COORDS[venueKey]?.elevation_ft ?? 0) : 0;
-    const snGame      = sn.get(g.legacy_game_id);
-    const pf          = snGame?.park_factors;
+    const snGame = sn.get(g.legacy_game_id);
+    const pf = snGame?.park_factors ?? null;
+    const environment = resolveEnvironmentFactors(
+      e,
+      pf,
+      pf ? "VENUE_FACTOR_USED" : "MISSING_PARK_DATA",
+    );
 
-    // HR factor: average of LHB and RHB park factors
-    const hrFactor = pf
-      ? pctToMultiplier(Math.round((pf.hr_l_pct + pf.hr_r_pct) / 2))
-      : 1.0;
-    // Run multiplier: overall runs park factor
-    const runMultiplier = pf ? pctToMultiplier(pf.runs_pct) : 1.0;
-
-    const noteParts: string[] = [];
-    if (e.roof)    noteParts.push("DOME/RETRACTABLE");
-    if (e.wind_context) noteParts.push(`Wind: ${e.wind_context}`);
+    const noteParts: string[] = [
+      `Roof: ${environment.roof_status}`,
+      `Wind: ${e.wind_context ?? environment.wind_disposition}`,
+      `Weather_Source: ${environment.weather_source_status}`,
+      `Weather_Run: ${environment.weather_multiplier}`,
+      `Weather_HR: ${environment.weather_hr_multiplier}`,
+      `Environment_Certainty: ${environment.environment_certainty}`,
+      `Weather_Vehicle_Status: ${environment.weather_vehicle_status}`,
+      `Park_Source: ${environment.park_source_status}`,
+    ];
     if (!venueKey) noteParts.push(`Unresolved venue: "${g.venue.name}" — elevation defaulted to 0`);
     if (!pf)       noteParts.push("Park factors: not available");
 
@@ -307,8 +313,8 @@ function buildRunEnvironmentRows(
       e.precipitation_probability_pct !== null
         ? e.precipitation_probability_pct / 100 : "",                     // H: Precipitation_Pct (0–1)
       e.humidity_pct !== null ? e.humidity_pct / 100 : "",                // I: Humidity_Pct (0–1)
-      hrFactor,                                                            // J: Home_Run_Factor
-      runMultiplier,                                                       // K: Run_Multiplier
+      environment.combined_hr_factor,                                      // J: Home_Run_Factor
+      environment.combined_multiplier,                                     // K: Run_Multiplier
       noteParts.join(" | "),                                               // L: Notes
     ];
   });

@@ -38,6 +38,7 @@ import type { BatterSeasonStats } from "./module02c_batterSeasonStats.js";
 import { MIN_BATTER_PA } from "./module02c_batterSeasonStats.js";
 import type { StatcastBatterStats } from "./module02d_statcastBatters.js";
 import { MIN_STATCAST_PA } from "./module02d_statcastBatters.js";
+import { resolveEnvironmentFactors } from "./module09_environment.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -540,35 +541,14 @@ function resolveRunMultiplier(
   parkFactor: ParkFactors | null,
   parkSource?: ParkSourceStatus,
 ): RunMultiplierResolution {
-  // ── Park baseline ──
-  let park_runs_pct: number | null = null;
-  let park_multiplier = 1.0;
-  let park_source_status: ParkSourceStatus = "MISSING_PARK_DATA";
-
-  if (parkFactor !== null) {
-    park_runs_pct     = parkFactor.runs_pct;
-    // Clamp park multiplier to ±15% — prevents extreme venue outliers from
-    // dominating when the weather modifier is also active.
-    park_multiplier   = parseFloat(Math.max(0.85, Math.min(1.15, 1 + parkFactor.runs_pct / 100)).toFixed(4));
-    park_source_status = parkSource ?? "VENUE_FACTOR_USED";
-  }
-
-  // ── Weather adjustment ──
-  let w = 1.0;
-  const temp = env.temperature_f;
-  const wind = env.wind_speed_mph;
-  const rain = env.precipitation_probability_pct;
-  if (temp !== null) w += (temp - 72) * 0.001;  // +0.1% per °F above 72 baseline
-  if (wind !== null) w += wind * 0.002;           // wind marginally helps offense
-  if (rain !== null && rain > 30) w -= 0.05;      // rain suppresses scoring
-  const weather_multiplier = parseFloat(Math.max(0.90, Math.min(1.15, w)).toFixed(4));
-
-  // ── Combined ──
-  const combined_multiplier = parseFloat(
-    Math.max(0.85, Math.min(1.30, park_multiplier * weather_multiplier)).toFixed(4),
-  );
-
-  return { park_runs_pct, park_multiplier, weather_multiplier, combined_multiplier, park_source_status };
+  const resolved = resolveEnvironmentFactors(env, parkFactor, parkSource);
+  return {
+    park_runs_pct: resolved.park_runs_pct,
+    park_multiplier: resolved.park_multiplier,
+    weather_multiplier: resolved.weather_multiplier,
+    combined_multiplier: resolved.combined_multiplier,
+    park_source_status: resolved.park_source_status,
+  };
 }
 
 /**
