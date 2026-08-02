@@ -143,8 +143,8 @@ function simulateLockGate(params: {
 describe("Lock gate — LOCK_TIME_UNAVAILABLE (missing individual game time)", () => {
   // Slate: 3 games, only 1 is untimed (33 % < 50 % → PARTIAL, not UNAVAILABLE).
   // The untimed game would be CORE on the model numbers alone.
-  const timedA   = makeGame("TIMED_A", "2026-07-26T17:05:00Z");
-  const timedB   = makeGame("TIMED_B", "2026-07-26T20:10:00Z");
+  const timedA   = makeGame("TIMED_A", "2099-07-26T17:05:00Z");
+  const timedB   = makeGame("TIMED_B", "2099-07-26T20:10:00Z");
   const untimed  = makeGame("UNTIMED", null);
   const slate    = [timedA, timedB, untimed];
 
