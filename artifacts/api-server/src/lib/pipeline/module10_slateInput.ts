@@ -34,9 +34,9 @@ export interface Module10Result {
 
 // SLATE_INPUT column indices (0-based)
 // A=0: Game_ID, B=1: Date, C=2: Matchup, D=3: Target, E=4: Opposing_Starter
-// F=5: Truth_Family, G=6: Event_Score, H=7: Run_Conversion, I=8: Early_Conversion
-// J=9: Contact_Quality, K=10: Truth_Score, L=11: Vehicle_Score
-// M=12: Confirmation_Gate, N=13: Execution_Status
+// F=5: Truth_Family, G=6: Truth_Score, H=7: Vehicle_Score, I=8: Stability_Score
+// J=9: Composite_Score, K=10: Confirmation_Gate, L=11: Score_Decision
+// M=12: Score_Blockers, N=13: Execution_Status
 // O=14: Candidate_Vehicle, P=15: Line, Q=16: Odds, R=17: Market_Available
 // S=18: Kill_Flag, T=19: Notes, U=20: Owner, V=21: Manual_Kill_Override, W=22: Model_Freeze_Reason
 // ── Pipeline-maintained pregame lock fields (X–AB) ──────────────────────────
@@ -45,8 +45,8 @@ export interface Module10Result {
 // AB=27: Pregame_Line_Locked_TS
 const OPERATOR_FIELD_INDICES = [14, 15, 16, 17, 18, 19, 20, 21, 22]; // O–W (operator-owned)
 const MODEL_FIELDS = [
-  "Truth_Family", "Event_Score", "Run_Conversion", "Early_Conversion",
-  "Contact_Quality", "Truth_Score", "Vehicle_Score", "Confirmation_Gate", "Execution_Status",
+  "Truth_Family", "Truth_Score", "Vehicle_Score", "Stability_Score",
+  "Composite_Score", "Confirmation_Gate", "Score_Decision", "Score_Blockers", "Execution_Status",
 ];
 const OPERATOR_FIELDS = [
   "Candidate_Vehicle", "Line", "Odds", "Market_Available",
@@ -88,7 +88,7 @@ function rowToObject(row: unknown[]): Record<number, unknown> {
 }
 
 function buildModelDefaults() {
-  return ["TBD", 0, 0, 0, "unknown", 0, 0, false, "pending"];
+  return ["PENDING", "", "", "", "", false, "PENDING", "AWAITING_MODULE_11", "pending"];
 }
 
 function buildOperatorDefaults(gameId: string, line?: MarketLine) {
@@ -164,8 +164,8 @@ export async function seedSlateInput(
   // ── SLATE_INPUT column headers (written every publish to stay in sync) ──────
   const SLATE_INPUT_HEADERS = [
     "Game_ID", "Date", "Matchup", "Target", "Opposing_Starter",
-    "Truth_Family", "Event_Score", "Run_Conversion", "Early_Conversion",
-    "Contact_Quality", "Truth_Score", "Vehicle_Score", "Confirmation_Gate", "Execution_Status",
+    "Truth_Family", "Truth_Score", "Vehicle_Score", "Stability_Score",
+    "Composite_Score", "Confirmation_Gate", "Score_Decision", "Score_Blockers", "Execution_Status",
     "Candidate_Vehicle", "Line", "Odds", "Market_Available",
     "Kill_Flag", "Notes", "Owner", "Manual_Kill_Override", "Model_Freeze_Reason",
     "Market_Phase", "Authoritative_Pregame_Total", "Authoritative_Over_Odds",

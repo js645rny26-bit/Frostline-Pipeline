@@ -25,7 +25,7 @@
  *   approved for development but not yet commissioned.
  */
 
-import { clearRange, expandSheetColumns, writeRange, WORKBOOK_ID } from "../sheets/client.js";
+import { clearRange, expandSheetColumns, readRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { NormalizationResult, NormalizedGame } from "./module06_normalization.js";
 import type { FangraphsResult } from "./module05_fangraphs.js";
@@ -38,7 +38,14 @@ import type { BatterSeasonStats } from "./module02c_batterSeasonStats.js";
 import { MIN_BATTER_PA } from "./module02c_batterSeasonStats.js";
 import type { StatcastBatterStats } from "./module02d_statcastBatters.js";
 import { MIN_STATCAST_PA } from "./module02d_statcastBatters.js";
-import { resolveEnvironmentFactors } from "./module09_environment.js";
+import {
+  resolveEnvironmentFactors,
+  type EnvironmentCertainty,
+  type RoofStatus,
+  type WeatherVehicleStatus,
+  type WindDisposition,
+} from "./module09_environment.js";
+import { validateEnvironmentLineage, validateProjectionLineage } from "./module09_lineageValidation.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -194,6 +201,12 @@ export interface RunMultiplierResolution {
   /** park_multiplier × weather_multiplier, clamped to [0.85, 1.30]. */
   combined_multiplier: number;
   park_source_status: ParkSourceStatus;
+  home_run_factor: number;
+  weather_source_status: "LIVE" | "FALLBACK_NEUTRAL";
+  roof_status: RoofStatus;
+  wind_disposition: WindDisposition;
+  environment_certainty: EnvironmentCertainty;
+  weather_vehicle_status: WeatherVehicleStatus;
 }
 
 // ─── Helper functions ─────────────────────────────────────────────────────────
@@ -548,6 +561,12 @@ function resolveRunMultiplier(
     weather_multiplier: resolved.weather_multiplier,
     combined_multiplier: resolved.combined_multiplier,
     park_source_status: resolved.park_source_status,
+    home_run_factor: resolved.combined_hr_factor,
+    weather_source_status: resolved.weather_source_status,
+    roof_status: resolved.roof_status,
+    wind_disposition: resolved.wind_disposition,
+    environment_certainty: resolved.environment_certainty,
+    weather_vehicle_status: resolved.weather_vehicle_status,
   };
 }
 
@@ -642,6 +661,12 @@ export interface GameSummaryRow {
   weather_multiplier: number;
   combined_run_multiplier: number;
   park_source_status: ParkSourceStatus;
+  home_run_factor: number;
+  weather_source_status: "LIVE" | "FALLBACK_NEUTRAL";
+  roof_status: RoofStatus;
+  wind_disposition: WindDisposition;
+  environment_certainty: EnvironmentCertainty;
+  weather_vehicle_status: WeatherVehicleStatus;
   // ── Lineup strength (Step 2 commissioning) ──
   away_lineup_factor: number;
   home_lineup_factor: number;
@@ -982,6 +1007,12 @@ export async function verifyRecalculation(
       weather_multiplier:    runMult.weather_multiplier,
       combined_run_multiplier: cappedMult,
       park_source_status:    runMult.park_source_status,
+      home_run_factor:       runMult.home_run_factor,
+      weather_source_status: runMult.weather_source_status,
+      roof_status:           runMult.roof_status,
+      wind_disposition:      runMult.wind_disposition,
+      environment_certainty: runMult.environment_certainty,
+      weather_vehicle_status: runMult.weather_vehicle_status,
       // Lineup strength audit
       away_lineup_factor:       awayLineup.factor,
       home_lineup_factor:       homeLineup.factor,
@@ -1047,10 +1078,78 @@ export async function verifyRecalculation(
       parseFloat((projAway - projHome).toFixed(2)),     // AF: Projected_Run_Diff
       parseFloat(awayQual.toFixed(4)),                  // AG: Away_Starter_Quality
       parseFloat(homeQual.toFixed(4)),                  // AH: Home_Starter_Quality
+      // â”€â”€ Environment, component, and lineup lineage (AIâ€“BC) â”€â”€
+      runMult.home_run_factor,                          // AI: Home_Run_Factor
+      runMult.weather_source_status,                    // AJ: Weather_Source_Status
+      runMult.roof_status,                              // AK: Roof_Status
+      runMult.wind_disposition,                         // AL: Wind_Disposition
+      runMult.environment_certainty,                    // AM: Environment_Certainty
+      runMult.weather_vehicle_status,                   // AN: Weather_Vehicle_Status
+      starterAttackRuns,                                // AO: Starter_Attack_Runs
+      bullpenContinuationRuns,                          // AP: Bullpen_Continuation_Runs
+      baselineOffRuns,                                  // AQ: Baseline_Offense_Runs
+      trafficConversionRuns,                            // AR: Traffic_Conversion_Runs
+      hrXbhDamageRuns,                                  // AS: HR_XBH_Damage_Runs
+      baseballOnlyProj,                                 // AT: Baseball_Only_Projection
+      envRunAdj,                                        // AU: Environment_Run_Adjustment
+      awayLineup.status,                                // AV: Away_Lineup_Status
+      homeLineup.status,                                // AW: Home_Lineup_Status
+      awayLineup.lineup_status ?? "",                  // AX: Away_Lineup_Source
+      homeLineup.lineup_status ?? "",                  // AY: Home_Lineup_Source
+      awayLineup.coverage,                              // AZ: Away_Lineup_Coverage
+      homeLineup.coverage,                              // BA: Home_Lineup_Coverage
+      awayLineup.xwoba_coverage,                        // BB: Away_Lineup_xwOBA_Coverage
+      homeLineup.xwoba_coverage,                        // BC: Home_Lineup_xwOBA_Coverage
     ]);
   }
 
   // ── Write GAME_INTEGRATION (27 cols A–AA) ──
+  const summaryByGame = new Map(gameSummaryRows.map((row) => [row.game_id, row]));
+  const playerIntegrationRows: unknown[][] = [];
+  for (const game of normalized.games) {
+    const startingNine = lineupMap.get(game.legacy_game_id);
+    const summary = summaryByGame.get(game.legacy_game_id);
+    if (!startingNine || !summary) continue;
+
+    for (const side of ["away", "home"] as const) {
+      const lineup = side === "away" ? startingNine.away_lineup : startingNine.home_lineup;
+      const team = side === "away" ? game.away_team.team_abbr : game.home_team.team_abbr;
+      const opposingPitcher = side === "away" ? game.home_pitcher : game.away_pitcher;
+      const opposingHand = pitcherStatsMap.get(opposingPitcher.player_id ?? 0)?.hand ?? "";
+
+      for (const player of lineup) {
+        const playerId = lineupNameToIdMap.get(normalizeNameForMatch(player.name));
+        const batter = playerId === undefined ? undefined : batterStatsMap.get(playerId);
+        const notes = [
+          `lineup=${startingNine.lineup_status}`,
+          batter?.ops == null ? "season_ops=unavailable" : `season_ops=${batter.ops.toFixed(3)}`,
+          "wRC_plus=unavailable",
+          "salary=unavailable",
+          "projected_fpts=unavailable",
+        ].join("; ");
+
+        playerIntegrationRows.push([
+          game.date,
+          game.legacy_game_id,
+          team ?? "",
+          player.name,
+          playerId ?? "",
+          player.position,
+          player.batting_order,
+          opposingPitcher.name ?? "",
+          opposingHand,
+          "",
+          "",
+          summary.combined_run_multiplier,
+          "",
+          "",
+          "",
+          notes,
+        ]);
+      }
+    }
+  }
+
   let giStatus: "verified" | "error" = "verified";
   const giErrors: string[] = [];
   try {
@@ -1083,11 +1182,11 @@ export async function verifyRecalculation(
     logger.error({ err: msg }, "MODULE_09: GAME_INTEGRATION write failed");
   }
 
-  // ── Write GAME_SUMMARY (34 cols A–AH) ──
+  // ── Write GAME_SUMMARY (55 cols A–BC) ──
   let gsStatus: "verified" | "error" = "verified";
   const gsErrors: string[] = [];
   try {
-    await expandSheetColumns(workbookId, "GAME_SUMMARY", 34).catch((err: unknown) => {
+    await expandSheetColumns(workbookId, "GAME_SUMMARY", 55).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_09: Could not expand GAME_SUMMARY columns");
     });
     // Write updated/new headers
@@ -1112,11 +1211,79 @@ export async function verifyRecalculation(
       "Away_Starter_Quality",            // AG
       "Home_Starter_Quality",            // AH
     ]]).catch(() => {});
-    await clearRange(workbookId, "GAME_SUMMARY!A2:AH100");
+    await writeRange(workbookId, "GAME_SUMMARY!AI1:BC1", [[
+      "Home_Run_Factor",
+      "Weather_Source_Status",
+      "Roof_Status",
+      "Wind_Disposition",
+      "Environment_Certainty",
+      "Weather_Vehicle_Status",
+      "Starter_Attack_Runs",
+      "Bullpen_Continuation_Runs",
+      "Baseline_Offense_Runs",
+      "Traffic_Conversion_Runs",
+      "HR_XBH_Damage_Runs",
+      "Baseball_Only_Projection",
+      "Environment_Run_Adjustment",
+      "Away_Lineup_Status",
+      "Home_Lineup_Status",
+      "Away_Lineup_Source",
+      "Home_Lineup_Source",
+      "Away_Lineup_Coverage",
+      "Home_Lineup_Coverage",
+      "Away_Lineup_xwOBA_Coverage",
+      "Home_Lineup_xwOBA_Coverage",
+    ]]).catch(() => {});
+    await clearRange(workbookId, "GAME_SUMMARY!A2:BC100");
     if (gsRows.length > 0) {
-      await writeRange(workbookId, `GAME_SUMMARY!A2:AH${1 + gsRows.length}`, gsRows);
+      await writeRange(workbookId, `GAME_SUMMARY!A2:BC${1 + gsRows.length}`, gsRows);
     }
     logger.info({ rows: gsRows.length }, "MODULE_09: GAME_SUMMARY written");
+
+    await clearRange(workbookId, "PLAYER_INTEGRATION!A2:P1000");
+    if (playerIntegrationRows.length > 0) {
+      await writeRange(
+        workbookId,
+        `PLAYER_INTEGRATION!A2:P${1 + playerIntegrationRows.length}`,
+        playerIntegrationRows,
+      );
+    }
+    logger.info({ rows: playerIntegrationRows.length }, "MODULE_09: PLAYER_INTEGRATION written");
+
+    const effectiveMultipliers = gameSummaryRows.map((row) => [row.combined_run_multiplier]);
+    if (effectiveMultipliers.length > 0) {
+      await writeRange(workbookId, `RUN_ENVIRONMENT!K2:K${1 + effectiveMultipliers.length}`, effectiveMultipliers);
+      await writeRange(
+        workbookId,
+        `DAILY_MATCHUPS!U2:V${1 + gameSummaryRows.length}`,
+        gameSummaryRows.map((row) => [row.home_run_factor, row.combined_run_multiplier]),
+      );
+    }
+
+    const [giReadback, gsReadback, environmentReadback] = await Promise.all([
+      readRange(workbookId, "GAME_INTEGRATION!A2:B200"),
+      readRange(workbookId, "GAME_SUMMARY!A2:B100"),
+      readRange(workbookId, "RUN_ENVIRONMENT!A2:L100"),
+    ]);
+    const expectedGameIds = normalized.games.map((game) => game.legacy_game_id);
+    const projectionLineage = validateProjectionLineage(
+      normalized.games[0]?.date ?? "",
+      expectedGameIds,
+      giReadback.values ?? [],
+      gsReadback.values ?? [],
+    );
+    const environmentLineage = validateEnvironmentLineage(
+      normalized.games[0]?.date ?? "",
+      gameSummaryRows.map((row) => ({
+        game_id: row.game_id,
+        run_multiplier: row.combined_run_multiplier,
+        home_run_factor: row.home_run_factor,
+      })),
+      environmentReadback.values ?? [],
+    );
+    if (projectionLineage.status === "FAIL" || environmentLineage.status === "FAIL") {
+      throw new Error([...projectionLineage.errors, ...environmentLineage.errors].join("; "));
+    }
   } catch (err: unknown) {
     gsStatus = "error";
     const msg = err instanceof Error ? err.message : String(err);

@@ -1,7 +1,6 @@
 /**
  * Module 08: Google Sheets Feed Writer
- * Writes normalized data to 5 input sheets in the canonical workbook.
- * Workbook: 1FY2FgpFbr2pSmFF-0Gowh-HXW3z5QOnj2ujpcTQQRB4
+ * Writes normalized data to 5 input sheets in the explicitly selected workbook.
  */
 
 import {
@@ -16,6 +15,7 @@ import { STADIUM_COORDS, resolveVenueName } from "./config.js";
 import type { BullpenResult } from "./module04b_bullpenUsage.js";
 import { type StartingNineResult, type StartingNineGame, buildStartingNineMap } from "./module04c_startingNine.js";
 import { resolveEnvironmentFactors } from "./module09_environment.js";
+import { getSeasonalParkFactor } from "./module04d_parkFactors.js";
 import { type StarterOutingResult, type StarterOuting } from "./module04d_starterPrevOuting.js";
 import type { UmpireResult } from "./module04e_umpires.js";
 import type { PitcherSeasonStatsResult, PitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
@@ -88,6 +88,16 @@ function buildDailyMatchupsRows(
     const homeStats  = g.home_pitcher.player_id ? pitcherStats.get(g.home_pitcher.player_id) : undefined;
     const moveData   = movement.get(g.legacy_game_id);
     const snGame     = sn.get(g.legacy_game_id);
+    const parkFactors = snGame?.park_factors ?? getSeasonalParkFactor(g.home_team.team_abbr ?? "") ?? null;
+    const environment = resolveEnvironmentFactors(
+      g.environment,
+      parkFactors,
+      snGame?.park_factors
+        ? "VENUE_FACTOR_USED"
+        : parkFactors
+          ? "SEASONAL_FACTOR_USED"
+          : "MISSING_PARK_DATA",
+    );
     return [
       g.date,                                                          // A: Date
       g.legacy_game_id,                                                // B: Game_ID
@@ -110,8 +120,8 @@ function buildDailyMatchupsRows(
         ? g.environment.precipitation_probability_pct / 100 : "",     // R: Precipitation_Pct (0–1)
       g.environment.data_quality === "fallback" ? "CLIMATOLOGY" : "LIVE_WX", // S: Weather_Source
       g.venue.name ?? "",                                              // T: Stadium
-      1.0,                                                             // U: Park_Factor_HR (stub)
-      4.75,                                                            // V: Run_Environment (stub)
+      environment.combined_hr_factor,                                  // U: Park_Factor_HR (park + conservative weather)
+      environment.combined_multiplier,                                 // V: Run_Multiplier (Module 09 later mirrors its effective capped value)
       now,                                                             // W: FanGraphs_Last_Updated
       now,                                                             // X: Pipeline_Last_Updated
       "",                                                              // Y: Notes
@@ -282,11 +292,15 @@ function buildRunEnvironmentRows(
     const venueKey = resolveVenueName(g.venue.name);
     const elevationFt = venueKey ? (STADIUM_COORDS[venueKey]?.elevation_ft ?? 0) : 0;
     const snGame = sn.get(g.legacy_game_id);
-    const pf = snGame?.park_factors ?? null;
+    const pf = snGame?.park_factors ?? getSeasonalParkFactor(g.home_team.team_abbr ?? "") ?? null;
     const environment = resolveEnvironmentFactors(
       e,
       pf,
-      pf ? "VENUE_FACTOR_USED" : "MISSING_PARK_DATA",
+      snGame?.park_factors
+        ? "VENUE_FACTOR_USED"
+        : pf
+          ? "SEASONAL_FACTOR_USED"
+          : "MISSING_PARK_DATA",
     );
 
     const noteParts: string[] = [
@@ -379,6 +393,10 @@ export async function writeGoogleSheetsFeed(
 
   const snMap = buildStartingNineMap(startingNineData ?? { status: "failure", date: runDate, games: [], games_parsed: 0, games_matched: 0, errors: [] });
   const statsMap = pitcherSeasonStats?.stats ?? new Map<number, PitcherSeasonStats>();
+
+  await writeRange(workbookId, "DAILY_MATCHUPS!U1:V1", [["Home_Run_Factor", "Run_Multiplier"]]).catch((err: unknown) => {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_08: Could not write DAILY_MATCHUPS environment headers");
+  });
 
   // 1. DAILY_MATCHUPS — 47 cols A–AU, starts row 2
   // Write v2 extension headers (Z–AU, indices 25–46) on every publish so

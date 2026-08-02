@@ -389,7 +389,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_09_shadow: shadowSkipped,
       module_09s_statcast_shadow: { status: "skipped", write_timestamp_utc: new Date().toISOString(), rows_computed: 0, rows_written: 0, errors: ["Skipped: Module 08 failed"], shadow_rows: [] },
       module_10: { status: "failure", seeding_timestamp_utc: new Date().toISOString(), games_seeded: { new_games: 0, updated_games: 0, total_games: 0 }, rows_written: 0, seed_results: [], errors: [{ module: "10", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
-      module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, no_core_count: 0, core_auth_status: "DISABLED_MONOTONICITY_NOT_COMPUTED", monotonicity_verdict: null, monotonicity_override_active: false, error: "Skipped: Module 08 failed" },
+      module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, no_core_count: 0, core_auth_status: "DISABLED_MONOTONICITY_NOT_COMPUTED", monotonicity_verdict: null, monotonicity_override_active: false, publication_validation: { status: "FAIL", expected_games: 0, board_games: 0, slate_input_games: 0, active_games: 0, errors: ["Skipped: Module 08 failed"] }, error: "Skipped: Module 08 failed" },
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       module_17: { status: "failure", date, publish_ts: new Date().toISOString(), rows_written: 0, rows_skipped: 0, errors: ["Skipped: Module 08 failed"] },
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
@@ -436,7 +436,16 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     statcastBatterStats?.stats ?? new Map(),
   );
   if (mod09.status === "error") {
-    logger.warn({ status: mod09.status }, "Full pipeline: Module 09 computation error — continuing");
+    const mod09Errors = [
+      ...mod09.checks.game_integration.formula_errors,
+      ...mod09.checks.game_summary.formula_errors,
+    ];
+    allErrors.push({
+      module: "09_recalculation",
+      error: mod09Errors.join("; ") || "Module 09 projection lineage validation failed",
+      timestamp: new Date().toISOString(),
+    });
+    logger.error({ errors: mod09Errors }, "Full pipeline: Module 09 failed semantic write validation");
   }
 
   // Module 09s: Statcast shadow audit — per-game xwOBA shadow projection.
@@ -526,7 +535,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   const overallStatus =
     mod10.status === "failure"
       ? "failure"
-      : mod11.status === "failure" || mod11.slate_board.length === 0
+      : mod09.status === "error" || mod11.status === "failure" || mod11.slate_board.length === 0
         ? "partial_success"
         : mod08.status === "partial_failure"
           ? "partial_success"

@@ -11,6 +11,14 @@ import type { GameSummaryRow } from "./module09_recalculation.js";
 import { computePropComparison, type RotowirePropsResult } from "./module05e_rotowireProps.js";
 import { BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH, BOARD_LOCK_LATE_GRACE_MS } from "./config.js";
 import type { NormalizedGame } from "./module06_normalization.js";
+import {
+  resolveDecisionScores,
+  type DecisionScoreResolution,
+} from "./module11_decisionScoring.js";
+import {
+  validateCurrentSlatePublication,
+  type PublicationValidationResult,
+} from "./module11_publicationValidation.js";
 
 export interface SlateBoardEntry {
   legacy_game_id: string;
@@ -91,6 +99,20 @@ export interface SlateBoardEntry {
    * Empty string for PASS or N_A.
    */
   survival_failure_reason: string;
+  truth_family: DecisionScoreResolution["truth_family"];
+  truth_score: number;
+  vehicle_score: number;
+  stability_score: number;
+  composite_score: number;
+  confirmation_gate: boolean;
+  score_decision: DecisionScoreResolution["score_decision"];
+  score_blockers: string[];
+  truth_components: string;
+  vehicle_components: string;
+  stability_components: string;
+  environment_certainty: string;
+  run_id: string;
+  model_version: string;
 }
 
 export interface ActiveBoardEntry {
@@ -136,6 +158,7 @@ export interface Module11Result {
    * parseable, and Date matches the active slate date (auto-expires after that slate).
    */
   monotonicity_override_active: boolean;
+  publication_validation: PublicationValidationResult;
   error?: string;
 }
 
@@ -720,10 +743,20 @@ export async function extractOutputBoards(
     core_auth_status: "ENABLED",
     monotonicity_verdict: null,
     monotonicity_override_active: false,
+    publication_validation: {
+      status: "FAIL",
+      expected_games: gameSummary.length,
+      board_games: 0,
+      slate_input_games: 0,
+      active_games: 0,
+      errors: ["Publication validation has not run"],
+    },
   };
 
   try {
     const nowMs = Date.now();
+    const calculatedTs = new Date(nowMs).toISOString();
+    const runId = `RUN_${calculatedTs.replace(/[-:.TZ]/g, "")}`;
 
     // ── Per-game lock cutoffs (each game locks independently) ─────────────────
     const gameLockCutoffResult = buildGameLockCutoffs(normalizedGames);
@@ -901,6 +934,7 @@ export async function extractOutputBoards(
 
     // ── Compute SLATE_BOARD — 22 cols A–V, starts row 2 ──
     const sbRows: unknown[][] = [];
+    const scoreUpdates = new Map<string, DecisionScoreResolution>();
 
     for (const gs of gameSummary) {
       const market  = marketMap.get(gs.game_id) ?? {
@@ -1327,6 +1361,39 @@ export async function extractOutputBoards(
         }
       }
 
+      const scores = resolveDecisionScores({
+        evidence: {
+          game_id: gs.game_id,
+          date: gs.date,
+          away_pitcher_role: gs.away_pitcher_role,
+          home_pitcher_role: gs.home_pitcher_role,
+          away_expected_innings: gs.away_expected_innings,
+          home_expected_innings: gs.home_expected_innings,
+          bullpen_available: gs.bullpen_available,
+          away_offense_source_status: awayOffSrc,
+          home_offense_source_status: homeOffSrc,
+          park_source_status: gs.park_source_status,
+          away_lineup_status: gs.away_lineup_status,
+          home_lineup_status: gs.home_lineup_status,
+          away_lineup_source: gs.away_lineup_source,
+          home_lineup_source: gs.home_lineup_source,
+          weather_source_status: gs.weather_source_status,
+          environment_certainty: gs.environment_certainty,
+          weather_vehicle_status: gs.weather_vehicle_status,
+        },
+        projected_total: gs.projected_total_runs,
+        market_line: market.line,
+        direction,
+        final_decision: decision,
+        core_blocker: coreBlocker,
+        survival_check: survivalCheck,
+        survival_failure_reason: survivalFailureReason,
+        lock_status: lockStatus,
+        calculated_ts: calculatedTs,
+        run_id: runId,
+      });
+      scoreUpdates.set(gs.game_id, scores);
+
       const entry: SlateBoardEntry = {
         legacy_game_id:  gs.game_id,
         away_team:       gs.away_team,
@@ -1355,6 +1422,20 @@ export async function extractOutputBoards(
         survival_floor_edge:        survivalFloorEdge,
         survival_check:             survivalCheck,
         survival_failure_reason:    survivalFailureReason,
+        truth_family:               scores.truth_family,
+        truth_score:                scores.truth_score,
+        vehicle_score:              scores.vehicle_score,
+        stability_score:            scores.stability_score,
+        composite_score:            scores.composite_score,
+        confirmation_gate:          scores.confirmation_gate,
+        score_decision:             scores.score_decision,
+        score_blockers:             scores.score_blockers,
+        truth_components:           scores.truth_components,
+        vehicle_components:         scores.vehicle_components,
+        stability_components:       scores.stability_components,
+        environment_certainty:      gs.environment_certainty,
+        run_id:                     scores.run_id,
+        model_version:              scores.model_version,
         starter_k_market_signal:         propSignals.starter_k_market_signal,
         starter_er_market_signal:        propSignals.starter_er_market_signal,
         lineup_tb_coverage_pct:          propSignals.lineup_tb_coverage_pct,
@@ -1402,11 +1483,26 @@ export async function extractOutputBoards(
         survivalCheck,                                // AF: Survival_Check (PASS | FAIL | N_A)
         survivalFailureReason,                        // AG: Survival_Failure_Reason
         lockStatus,                                   // AH: Lock_Status (PRE_LOCK | LOCKED_IN | LOCKED_OUT)
+        scores.truth_family,                          // AI: Truth_Family
+        scores.truth_score,                           // AJ: Truth_Score
+        scores.vehicle_score,                         // AK: Vehicle_Score
+        scores.stability_score,                       // AL: Stability_Score
+        scores.composite_score,                       // AM: Composite_Score
+        scores.confirmation_gate,                     // AN: Confirmation_Gate
+        scores.execution_status,                      // AO: Execution_Status
+        scores.score_decision,                        // AP: Score_Decision
+        scores.score_blockers.join("; "),             // AQ: Score_Blockers
+        scores.truth_components,                      // AR: Truth_Components
+        scores.vehicle_components,                    // AS: Vehicle_Components
+        scores.stability_components,                  // AT: Stability_Components
+        gs.environment_certainty,                     // AU: Environment_Certainty
+        scores.run_id,                                // AV: Run_ID
+        scores.model_version,                         // AW: Model_Version
       ]);
     }
 
-    // ── Ensure SLATE_BOARD has 34 columns (A–AH) for lock_status field ──
-    await expandSheetColumns(workbookId, "SLATE_BOARD", 34).catch((err: unknown) => {
+    // ── Ensure SLATE_BOARD has 49 columns (A–AW) for score and lineage fields ──
+    await expandSheetColumns(workbookId, "SLATE_BOARD", 49).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not expand SLATE_BOARD columns — continuing");
     });
 
@@ -1428,9 +1524,29 @@ export async function extractOutputBoards(
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write step-5/survival/lock headers — continuing");
     });
 
-    await clearRange(workbookId, "SLATE_BOARD!A2:AH100");
+    await writeRange(workbookId, "SLATE_BOARD!AI1:AW1", [[
+      "Truth_Family",
+      "Truth_Score",
+      "Vehicle_Score",
+      "Stability_Score",
+      "Composite_Score",
+      "Confirmation_Gate",
+      "Execution_Status",
+      "Score_Decision",
+      "Score_Blockers",
+      "Truth_Components",
+      "Vehicle_Components",
+      "Stability_Components",
+      "Environment_Certainty",
+      "Run_ID",
+      "Model_Version",
+    ]]).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write score-lineage headers");
+    });
+
+    await clearRange(workbookId, "SLATE_BOARD!A2:AW100");
     if (sbRows.length > 0) {
-      await writeRange(workbookId, `SLATE_BOARD!A2:AH${1 + sbRows.length}`, sbRows);
+      await writeRange(workbookId, `SLATE_BOARD!A2:AW${1 + sbRows.length}`, sbRows);
     }
     logger.info(
       { rows: sbRows.length, core: output.core_count, noCore: output.no_core_count },
@@ -1502,6 +1618,29 @@ export async function extractOutputBoards(
     }
 
     // ── Compute ACTIVE_BOARD_SNAPSHOT — CORE games only, 16 cols A–P ──
+    const slateInputScoreRows = slateInputGameIds.map((gameId) => {
+      const score = scoreUpdates.get(gameId);
+      if (!score) throw new Error(`SLATE_INPUT score bridge missing Game_ID ${gameId || "BLANK"}`);
+      return [
+        score.truth_family,
+        score.truth_score,
+        score.vehicle_score,
+        score.stability_score,
+        score.composite_score,
+        score.confirmation_gate,
+        score.score_decision,
+        score.score_blockers.join("; "),
+        score.execution_status,
+      ];
+    });
+    if (slateInputScoreRows.length > 0) {
+      await writeRange(
+        workbookId,
+        `SLATE_INPUT!F2:N${1 + slateInputScoreRows.length}`,
+        slateInputScoreRows,
+      );
+    }
+
     const abRows: unknown[][] = [];
     const now = new Date().toISOString();
 
@@ -1549,6 +1688,23 @@ export async function extractOutputBoards(
       await writeRange(workbookId, `ACTIVE_BOARD_SNAPSHOT!A2:P${1 + abRows.length}`, abRows);
     }
     logger.info({ rows: abRows.length }, "MODULE_11: ACTIVE_BOARD_SNAPSHOT written");
+
+    const [boardReadback, slateInputReadback, activeReadback] = await Promise.all([
+      readRange(workbookId, "SLATE_BOARD!A2:AW100"),
+      readRange(workbookId, "SLATE_INPUT!A2:N100"),
+      readRange(workbookId, "ACTIVE_BOARD_SNAPSHOT!A2:P100"),
+    ]);
+    output.publication_validation = validateCurrentSlatePublication({
+      date: slateDate,
+      expected_game_ids: gameSummary.map((game) => game.game_id),
+      expected_active_game_ids: output.active_board_snapshot.map((game) => game.game_id),
+      slate_board_rows: boardReadback.values ?? [],
+      slate_input_rows: slateInputReadback.values ?? [],
+      active_board_rows: activeReadback.values ?? [],
+    });
+    if (output.publication_validation.status === "FAIL") {
+      throw new Error(`Semantic publication validation failed: ${output.publication_validation.errors.join("; ")}`);
+    }
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

@@ -262,7 +262,8 @@ export async function repairWorkbookSchemaReference(
       + "v10 (2026-07-26): DAILY_MATCHUPS col X renamed Pipeline_Last_Updated; module02_statcast.ts renamed to module02_pitcherWorkload.ts. "
       + "v11 (2026-07-26): STATCAST_GAME_PREVIEW sheet added — per-game Baseball Savant preview ingestion (55 cols). "
       + "v12 (2026-07-26): RUN_LOG cols 30–37 — Statcast_Preview_Status/Games_Expected/Available/Parsed/Missing/Failed/Stale_Count/Identity_Mismatch_Count. "
-      + "v13 (2026-07-26): STATCAST_SHADOW_AUDIT sheet (23 cols) — per-game shadow projection via pitcher xwOBA-allowed (Phase 3). Preview_Used_In_Projection = NO; no CORE impact."],
+      + "v13 (2026-07-26): STATCAST_SHADOW_AUDIT sheet (23 cols) — per-game shadow projection via pitcher xwOBA-allowed (Phase 3). Preview_Used_In_Projection = NO; no CORE impact. "
+      + "v14 (2026-08-02): Shared environment identity, projection component lineage, populated PLAYER_INTEGRATION, auditable three-score bridge, and semantic current-slate publication validation."],
     ["Workbook_Purpose",    "Frostline Pipeline — MLB totals projection and CORE pick authorization."],
     ["Operator_Columns",    "Cells highlighted amber are operator-editable. All other cells are pipeline-maintained — do not edit."],
     ["CORE_Definition",     "CORE = authorized bet. NO_CORE = blocked by eligibility or survival gate. Requires: projection separation ≥ 1.5 AND survival gate PASS."],
