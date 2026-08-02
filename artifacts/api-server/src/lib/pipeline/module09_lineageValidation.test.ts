@@ -39,6 +39,20 @@ test("RUN_ENVIRONMENT must match Module 09 HR and effective run factors", () => 
   assert.equal(result.status, "PASS");
 });
 
+test("formatted three-decimal environment readback preserves four-decimal lineage", () => {
+  const row = Array<unknown>(12).fill("");
+  row[0] = "2026-08-02";
+  row[1] = "G1";
+  row[9] = 0.964;
+  row[10] = 0.932;
+  const result = validateEnvironmentLineage(
+    "2026-08-02",
+    [{ game_id: "G1", home_run_factor: 0.9635, run_multiplier: 0.9318 }],
+    [row],
+  );
+  assert.equal(result.status, "PASS");
+});
+
 test("environment multiplier mismatches fail closed", () => {
   const row = Array<unknown>(12).fill("");
   row[0] = "2026-08-02";

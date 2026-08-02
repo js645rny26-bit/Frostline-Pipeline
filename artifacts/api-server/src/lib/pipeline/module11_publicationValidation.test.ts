@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateCurrentSlatePublication } from "./module11_publicationValidation.js";
+import {
+  validateCurrentSlatePublication,
+  validateCurrentSlatePublicationWithRetry,
+} from "./module11_publicationValidation.js";
 
 function boardRow(date: string, id: string): unknown[] {
   const row = Array<unknown>(49).fill("");
@@ -90,5 +93,62 @@ test("missing scores and lineage identifiers fail closed", () => {
   assert.equal(result.status, "FAIL");
   assert.ok(result.errors.some((error) => error.includes("incomplete score values")));
   assert.ok(result.errors.some((error) => error.includes("missing Run_ID")));
+  assert.ok(result.errors.some((error) => error.includes("incomplete score bridge")));
+});
+
+test("publication validation retries a transient pre-write readback", async () => {
+  let reads = 0;
+  const delays: number[] = [];
+  const result = await validateCurrentSlatePublicationWithRetry(
+    {
+      date: "2026-08-02",
+      expected_game_ids: ["G1"],
+      expected_active_game_ids: [],
+    },
+    async () => {
+      reads++;
+      const staleSlate = slateRow("2026-08-02", "G1");
+      staleSlate[8] = "";
+      return {
+        slate_board_rows: [boardRow("2026-08-02", "G1")],
+        slate_input_rows: [reads === 1 ? staleSlate : slateRow("2026-08-02", "G1")],
+        active_board_rows: [],
+      };
+    },
+    {
+      max_attempts: 3,
+      initial_delay_ms: 25,
+      sleep: async (milliseconds) => { delays.push(milliseconds); },
+    },
+  );
+
+  assert.equal(result.status, "PASS");
+  assert.equal(reads, 2);
+  assert.deepEqual(delays, [25]);
+});
+
+test("publication validation remains fail-closed after retry exhaustion", async () => {
+  let reads = 0;
+  const result = await validateCurrentSlatePublicationWithRetry(
+    {
+      date: "2026-08-02",
+      expected_game_ids: ["G1"],
+      expected_active_game_ids: [],
+    },
+    async () => {
+      reads++;
+      const staleSlate = slateRow("2026-08-02", "G1");
+      staleSlate[9] = "";
+      return {
+        slate_board_rows: [boardRow("2026-08-02", "G1")],
+        slate_input_rows: [staleSlate],
+        active_board_rows: [],
+      };
+    },
+    { max_attempts: 3, initial_delay_ms: 0, sleep: async () => {} },
+  );
+
+  assert.equal(result.status, "FAIL");
+  assert.equal(reads, 3);
   assert.ok(result.errors.some((error) => error.includes("incomplete score bridge")));
 });

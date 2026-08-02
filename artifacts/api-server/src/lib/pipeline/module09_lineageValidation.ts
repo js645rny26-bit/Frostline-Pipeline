@@ -49,7 +49,10 @@ export function validateEnvironmentLineage(
   date: string,
   expected: Array<{ game_id: string; run_multiplier: number; home_run_factor: number }>,
   runEnvironmentRows: unknown[][],
-  tolerance = 0.0001,
+  // RUN_ENVIRONMENT displays factors to three decimal places. Sheets returns
+  // formatted values by default, so an authoritative 4-decimal resolver value
+  // can legitimately differ from its readback by at most half a thousandth.
+  tolerance = 0.00051,
 ): LineageValidationResult {
   const errors: string[] = [];
   const rows = dataRows(runEnvironmentRows, 1); // A=Date, B=Game_ID, J=HR, K=Run

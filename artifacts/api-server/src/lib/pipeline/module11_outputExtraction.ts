@@ -16,7 +16,7 @@ import {
   type DecisionScoreResolution,
 } from "./module11_decisionScoring.js";
 import {
-  validateCurrentSlatePublication,
+  validateCurrentSlatePublicationWithRetry,
   type PublicationValidationResult,
 } from "./module11_publicationValidation.js";
 
@@ -1689,18 +1689,21 @@ export async function extractOutputBoards(
     }
     logger.info({ rows: abRows.length }, "MODULE_11: ACTIVE_BOARD_SNAPSHOT written");
 
-    const [boardReadback, slateInputReadback, activeReadback] = await Promise.all([
-      readRange(workbookId, "SLATE_BOARD!A2:AW100"),
-      readRange(workbookId, "SLATE_INPUT!A2:N100"),
-      readRange(workbookId, "ACTIVE_BOARD_SNAPSHOT!A2:P100"),
-    ]);
-    output.publication_validation = validateCurrentSlatePublication({
+    output.publication_validation = await validateCurrentSlatePublicationWithRetry({
       date: slateDate,
       expected_game_ids: gameSummary.map((game) => game.game_id),
       expected_active_game_ids: output.active_board_snapshot.map((game) => game.game_id),
-      slate_board_rows: boardReadback.values ?? [],
-      slate_input_rows: slateInputReadback.values ?? [],
-      active_board_rows: activeReadback.values ?? [],
+    }, async () => {
+      const [boardReadback, slateInputReadback, activeReadback] = await Promise.all([
+        readRange(workbookId, "SLATE_BOARD!A2:AW100"),
+        readRange(workbookId, "SLATE_INPUT!A2:N100"),
+        readRange(workbookId, "ACTIVE_BOARD_SNAPSHOT!A2:P100"),
+      ]);
+      return {
+        slate_board_rows: boardReadback.values ?? [],
+        slate_input_rows: slateInputReadback.values ?? [],
+        active_board_rows: activeReadback.values ?? [],
+      };
     });
     if (output.publication_validation.status === "FAIL") {
       throw new Error(`Semantic publication validation failed: ${output.publication_validation.errors.join("; ")}`);

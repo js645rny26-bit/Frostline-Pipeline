@@ -34,6 +34,11 @@ const OUTCOMES_SHEET     = "SHADOW_OUTCOMES";
 const LOG_COLS           = 14;
 const POSTMORTEM_COLS    = 17;
 
+export interface ContiguousVehicleLogUpdate {
+  start_data_row_index: number;
+  rows: unknown[][];
+}
+
 // ─── Sheet headers ─────────────────────────────────────────────────────────────
 
 const LOG_HEADER: string[] = [
@@ -162,6 +167,25 @@ function gameIdDateMatchesDate(gameId: string, date: string): boolean {
   return gameId.slice(0, 8) === expectedPrefix;
 }
 
+/** Collapse adjacent in-place updates into the fewest Sheets write requests. */
+export function groupContiguousVehicleLogUpdates(
+  rowUpdates: ReadonlyMap<number, unknown[]>,
+): ContiguousVehicleLogUpdate[] {
+  const sorted = [...rowUpdates.entries()].sort(([left], [right]) => left - right);
+  const groups: ContiguousVehicleLogUpdate[] = [];
+
+  for (const [dataRowIndex, row] of sorted) {
+    const current = groups[groups.length - 1];
+    if (current && dataRowIndex === current.start_data_row_index + current.rows.length) {
+      current.rows.push(row);
+    } else {
+      groups.push({ start_data_row_index: dataRowIndex, rows: [row] });
+    }
+  }
+
+  return groups;
+}
+
 // ─── Phase 1: log vehicles from a publish run ─────────────────────────────────
 
 export async function logVehicles(
@@ -266,11 +290,18 @@ export async function logVehicles(
       existingRowCount = 1;
     }
 
-    // In-place updates for existing rows (canonical snapshot = latest decision)
-    for (const [dataRowIdx, updatedRow] of rowUpdates) {
-      const sheetRow = dataRowIdx + 2; // +1 for header, +1 for 1-based sheet rows
-      await writeRange(wbId, `${VEHICLE_LOG_SHEET}!A${sheetRow}:N${sheetRow}`, [updatedRow]);
-      rowsWritten++;
+    // In-place updates for existing rows (canonical snapshot = latest decision).
+    // Adjacent rows are written as one range so a full slate does not consume
+    // one Google Sheets write-quota unit per game.
+    for (const group of groupContiguousVehicleLogUpdates(rowUpdates)) {
+      const startSheetRow = group.start_data_row_index + 2; // +1 header, +1 for 1-based rows
+      const endSheetRow = startSheetRow + group.rows.length - 1;
+      await writeRange(
+        wbId,
+        `${VEHICLE_LOG_SHEET}!A${startSheetRow}:N${endSheetRow}`,
+        group.rows,
+      );
+      rowsWritten += group.rows.length;
     }
 
     // Append new rows not previously in the log

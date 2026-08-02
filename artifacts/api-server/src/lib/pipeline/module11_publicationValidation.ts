@@ -18,6 +18,22 @@ export interface PublicationValidationResult {
   errors: string[];
 }
 
+type PublicationReadback = Pick<
+  PublicationValidationInput,
+  "slate_board_rows" | "slate_input_rows" | "active_board_rows"
+>;
+
+type PublicationValidationIdentity = Pick<
+  PublicationValidationInput,
+  "date" | "expected_game_ids" | "expected_active_game_ids"
+>;
+
+export interface PublicationValidationRetryOptions {
+  max_attempts?: number;
+  initial_delay_ms?: number;
+  sleep?: (milliseconds: number) => Promise<void>;
+}
+
 function text(value: unknown): string {
   return value == null ? "" : String(value).trim();
 }
@@ -114,4 +130,29 @@ export function validateCurrentSlatePublication(input: PublicationValidationInpu
     active_games: activeRows.length,
     errors,
   };
+}
+
+/**
+ * Sheets may briefly return the pre-write value snapshot immediately after a
+ * successful values.update call. Re-read a bounded number of times and still
+ * fail closed if the workbook never reaches the intended semantic state.
+ */
+export async function validateCurrentSlatePublicationWithRetry(
+  identity: PublicationValidationIdentity,
+  loadReadback: () => Promise<PublicationReadback>,
+  options: PublicationValidationRetryOptions = {},
+): Promise<PublicationValidationResult> {
+  const maxAttempts = Math.max(1, options.max_attempts ?? 4);
+  const initialDelayMs = Math.max(0, options.initial_delay_ms ?? 250);
+  const sleep = options.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  let result: PublicationValidationResult | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const rows = await loadReadback();
+    result = validateCurrentSlatePublication({ ...identity, ...rows });
+    if (result.status === "PASS" || attempt === maxAttempts) return result;
+    await sleep(initialDelayMs * (2 ** (attempt - 1)));
+  }
+
+  throw new Error("Publication validation produced no result");
 }
