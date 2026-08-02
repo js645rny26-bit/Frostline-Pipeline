@@ -90,7 +90,7 @@ jobs:
 
           for attempt in {1..30}; do
             if curl --silent --fail \
-              http://127.0.0.1:3000/api/health >/dev/null; then
+              http://127.0.0.1:3000/api/healthz >/dev/null; then
               ready=1
               break
             fi
