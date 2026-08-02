@@ -120,6 +120,11 @@ jobs:
           cat frostline-commissioning-report.json
 
           if [ "$publish_status" -ne 0 ]; then
+            diagnostic="$(node -e 'const fs = require("fs"); const result = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); console.log(JSON.stringify({ pipeline_status: result.pipeline_status ?? "unknown", errors: result.errors ?? [result.error ?? "no response error"] }));' frostline-commissioning-report.json)"
+            diagnostic="${diagnostic//'%'/'%25'}"
+            diagnostic="${diagnostic//$'\r'/'%0D'}"
+            diagnostic="${diagnostic//$'\n'/'%0A'}"
+            echo "::error title=Isolated commissioning publish failed::$diagnostic"
             echo "Isolated commissioning publish failed; API server log follows."
             cat frostline-api-server.log
             exit "$publish_status"
