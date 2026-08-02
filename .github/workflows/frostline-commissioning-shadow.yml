@@ -55,6 +55,9 @@ jobs:
           service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
           create_credentials_file: true
           token_format: access_token
+          access_token_scopes: |
+            https://www.googleapis.com/auth/spreadsheets
+            https://www.googleapis.com/auth/drive.file
 
       - name: Export short-lived Google access token
         run: |
