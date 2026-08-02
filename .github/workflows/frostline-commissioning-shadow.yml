@@ -61,7 +61,7 @@ jobs:
           echo "FROSTLINE_GOOGLE_ACCESS_TOKEN=${{ steps.google-auth.outputs.access_token }}" >> "$GITHUB_ENV"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Run typecheck
         run: pnpm run typecheck
