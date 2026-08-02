@@ -17,24 +17,35 @@ jobs:
   commissioning-shadow:
     if: github.ref == 'refs/heads/commissioning/bridge-repair-2026-08-01'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     env:
+      PORT: 3000
       FROSTLINE_SHEETS_BACKEND: google
       FROSTLINE_WORKBOOK_ID: 1KPYzbSawLIrOcckn5EXxO4vH5eABOhMIibhCgpF-oNs
-      # Configuration values only; neither is a long-lived credential.
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.FROSTLINE_GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_SERVICE_ACCOUNT: ${{ vars.FROSTLINE_GCP_SERVICE_ACCOUNT }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out selected branch
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
+      - name: Initialize report files
+        run: |
+          : > frostline-api-server.log
+          echo '{"status":"NOT_RUN"}' > frostline-commissioning-report.json
 
       - name: Authenticate Google ADC through GitHub OIDC
         id: google-auth
@@ -45,29 +56,68 @@ jobs:
           create_credentials_file: true
           token_format: access_token
 
-      - name: Export short-lived Google access token for the Sheets REST transport
-        run: echo "FROSTLINE_GOOGLE_ACCESS_TOKEN=${{ steps.google-auth.outputs.access_token }}" >> "$GITHUB_ENV"
+      - name: Export short-lived Google access token
+        run: |
+          echo "FROSTLINE_GOOGLE_ACCESS_TOKEN=${{ steps.google-auth.outputs.access_token }}" >> "$GITHUB_ENV"
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run typecheck
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run typecheck
+        run: pnpm run typecheck
+
       - name: Run complete API-server test suite
         working-directory: artifacts/api-server
-        run: find src -name '*.test.ts' -print0 | xargs -0 node --import tsx/esm --test
-      - run: pnpm --filter @workspace/api-server run build
+        run: |
+          find src -name '*.test.ts' -print0 |
+            xargs -0 node --import tsx/esm --test
+
+      - name: Build API server
+        run: pnpm --filter @workspace/api-server run build
 
       - name: Run isolated commissioning shadow
         shell: bash
         run: |
-          pnpm --filter @workspace/api-server start > frostline-api-server.log 2>&1 &
+          set -euo pipefail
+
+          pnpm --filter @workspace/api-server start \
+            > frostline-api-server.log 2>&1 &
+          server_pid=$!
+
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          ready=0
+
           for attempt in {1..30}; do
-            if curl --silent --fail http://127.0.0.1:3000/api/health >/dev/null; then break; fi
+            if curl --silent --fail \
+              http://127.0.0.1:3000/api/health >/dev/null; then
+              ready=1
+              break
+            fi
+
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              break
+            fi
+
             sleep 1
           done
-          curl --silent --show-error --fail-with-body --request POST \
+
+          if [ "$ready" -ne 1 ]; then
+            echo "API server did not become ready."
+            cat frostline-api-server.log
+            exit 1
+          fi
+
+          curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --request POST \
             "http://127.0.0.1:3000/api/pipeline/publish?date=${{ inputs.date }}&workbook_id=${FROSTLINE_WORKBOOK_ID}" \
             --output frostline-commissioning-report.json
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload commissioning evidence
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: frostline-commissioning-report-${{ inputs.date }}
