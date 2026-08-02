@@ -184,8 +184,29 @@ async function driveRequest(path: string, options?: RequestOptions): Promise<unk
 
 export interface SheetValues { values?: unknown[][]; }
 
+export interface SpreadsheetSheetProperties {
+  sheetId: number;
+  title: string;
+}
+
 export async function readRange(workbookId: string, range: string): Promise<SheetValues> {
   return sheetsRequest(`/v4/spreadsheets/${workbookId}/values/${encodeURIComponent(range)}`) as Promise<SheetValues>;
+}
+
+/** Returns the stable numeric IDs needed by Sheets batchUpdate grid ranges. */
+export async function getSpreadsheetSheetProperties(
+  workbookId: string,
+): Promise<SpreadsheetSheetProperties[]> {
+  const response = await sheetsRequest(
+    `/v4/spreadsheets/${workbookId}?fields=sheets.properties(sheetId,title)`,
+  ) as { sheets?: Array<{ properties?: Partial<SpreadsheetSheetProperties> }> };
+
+  return (response.sheets ?? []).flatMap((sheet) => {
+    const { sheetId, title } = sheet.properties ?? {};
+    return typeof sheetId === "number" && typeof title === "string"
+      ? [{ sheetId, title }]
+      : [];
+  });
 }
 
 export async function clearRange(workbookId: string, range: string): Promise<void> {

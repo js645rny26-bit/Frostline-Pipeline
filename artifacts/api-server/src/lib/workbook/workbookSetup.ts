@@ -11,7 +11,14 @@
  * Drive v3 is not available).
  */
 
-import { createSpreadsheet, batchUpdate, clearRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
+import {
+  createSpreadsheet,
+  batchUpdate,
+  clearRange,
+  getSpreadsheetSheetProperties,
+  writeRange,
+  WORKBOOK_ID,
+} from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import {
   WORKBOOK_SCHEMA,
@@ -104,7 +111,7 @@ function buildSheetCreatePayload(sheet: SheetDef) {
 
 // ─── Build batchUpdate requests for number formats ───────────────────────────
 
-function buildNumberFormatRequests(
+export function buildNumberFormatRequests(
   sheetId: number,
   sheet: SheetDef,
   totalRows = 999,
@@ -132,6 +139,32 @@ function buildNumberFormatRequests(
     });
   }
   return requests;
+}
+
+/**
+ * Reapply the declared number formats to selected tabs in an existing workbook.
+ * This repairs legacy formatting without recreating tabs or touching values.
+ */
+export async function applySchemaNumberFormats(
+  workbookId: string,
+  sheetNames: string[],
+  totalRows = 999,
+): Promise<void> {
+  const requested = new Set(sheetNames);
+  const schemaByName = new Map(WORKBOOK_SCHEMA.map((sheet) => [sheet.name, sheet]));
+  const properties = await getSpreadsheetSheetProperties(workbookId);
+  const requests: unknown[] = [];
+
+  for (const property of properties) {
+    if (!requested.has(property.title)) continue;
+    const schema = schemaByName.get(property.title);
+    if (!schema) throw new Error(`No workbook schema found for sheet ${property.title}`);
+    requests.push(...buildNumberFormatRequests(property.sheetId, schema, totalRows));
+  }
+
+  const missing = [...requested].filter((name) => !properties.some((sheet) => sheet.title === name));
+  if (missing.length > 0) throw new Error(`Workbook sheets not found for format repair: ${missing.join(", ")}`);
+  if (requests.length > 0) await batchUpdate(workbookId, requests);
 }
 
 // ─── Main entry point ─────────────────────────────────────────────────────────

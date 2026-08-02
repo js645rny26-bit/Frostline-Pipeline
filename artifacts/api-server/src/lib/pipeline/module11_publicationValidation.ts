@@ -38,6 +38,17 @@ function text(value: unknown): string {
   return value == null ? "" : String(value).trim();
 }
 
+function isNumericCell(value: unknown): boolean {
+  if (typeof value === "number") return Number.isFinite(value);
+  const rendered = text(value).replaceAll(",", "");
+  if (!rendered) return false;
+  // A legacy percent cell can render a valid score of 50 as "5,000.0%".
+  // The format is repaired during publication, but validation must recognize
+  // the numeric readback so it does not misdiagnose present values as missing.
+  const normalized = rendered.endsWith("%") ? rendered.slice(0, -1) : rendered;
+  return Number.isFinite(Number(normalized));
+}
+
 export function normalizeSheetDate(value: unknown): string {
   const raw = text(value);
   if (!raw) return "";
@@ -104,7 +115,7 @@ export function validateCurrentSlatePublication(input: PublicationValidationInpu
   for (const row of boardRows) {
     const id = text(row[1]);
     const scoreValues = row.slice(35, 39); // AJ:AM = Truth, Vehicle, Stability, Composite
-    if (scoreValues.length < 4 || scoreValues.some((value) => value === "" || value === null || value === undefined || Number.isNaN(Number(value)))) {
+    if (scoreValues.length < 4 || scoreValues.some((value) => !isNumericCell(value))) {
       errors.push(`SLATE_BOARD: incomplete score values for ${id}`);
     }
     if (!text(row[41])) errors.push(`SLATE_BOARD: missing Score_Decision for ${id}`); // AP
@@ -116,7 +127,7 @@ export function validateCurrentSlatePublication(input: PublicationValidationInpu
   for (const row of slateRows) {
     const id = text(row[0]);
     const scoreValues = row.slice(6, 10); // G:J
-    if (scoreValues.length < 4 || scoreValues.some((value) => value === "" || value === null || value === undefined || Number.isNaN(Number(value)))) {
+    if (scoreValues.length < 4 || scoreValues.some((value) => !isNumericCell(value))) {
       errors.push(`SLATE_INPUT: incomplete score bridge for ${id}`);
     }
     if (!text(row[11])) errors.push(`SLATE_INPUT: missing Score_Decision for ${id}`); // L

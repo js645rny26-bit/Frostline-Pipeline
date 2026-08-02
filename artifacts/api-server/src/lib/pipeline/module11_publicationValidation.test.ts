@@ -48,6 +48,25 @@ test("semantic publication validation accepts an exact current slate", () => {
   assert.deepEqual(result.errors, []);
 });
 
+test("formatted legacy percentage scores remain numeric during readback", () => {
+  const board = boardRow("2026-08-02", "G1");
+  const slate = slateRow("2026-08-02", "G1");
+  board[37] = "8,333.0%";
+  slate[8] = "8,333.0%";
+
+  const result = validateCurrentSlatePublication({
+    date: "2026-08-02",
+    expected_game_ids: ["G1"],
+    expected_active_game_ids: [],
+    slate_board_rows: [board],
+    slate_input_rows: [slate],
+    active_board_rows: [],
+  });
+
+  assert.equal(result.status, "PASS");
+  assert.deepEqual(result.errors, []);
+});
+
 test("stale board dates fail even when row counts match", () => {
   const result = validateCurrentSlatePublication({
     date: "2026-08-02",

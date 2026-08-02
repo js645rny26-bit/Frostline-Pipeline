@@ -19,6 +19,7 @@ import {
   validateCurrentSlatePublicationWithRetry,
   type PublicationValidationResult,
 } from "./module11_publicationValidation.js";
+import { applySchemaNumberFormats } from "../workbook/workbookSetup.js";
 
 export interface SlateBoardEntry {
   legacy_game_id: string;
@@ -1688,6 +1689,11 @@ export async function extractOutputBoards(
       await writeRange(workbookId, `ACTIVE_BOARD_SNAPSHOT!A2:P${1 + abRows.length}`, abRows);
     }
     logger.info({ rows: abRows.length }, "MODULE_11: ACTIVE_BOARD_SNAPSHOT written");
+
+    // Legacy workbooks may still format 0-100 score columns as percentages,
+    // rendering 50 as 5000% and causing formatted readback to look nonnumeric.
+    // Reapply the authoritative schema formats without altering any values.
+    await applySchemaNumberFormats(workbookId, ["SLATE_INPUT", "SLATE_BOARD"]);
 
     output.publication_validation = await validateCurrentSlatePublicationWithRetry({
       date: slateDate,
