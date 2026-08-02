@@ -1,12 +1,15 @@
 /**
  * Module 13: Historical Replay
- * Runs the 5-variant projection model over a range of completed past dates
- * and computes the 8 primary metrics for each variant.
+ * Runs baseline and candidate projection variants over completed past dates
+ * and computes the primary validation metrics for each variant.
  *
  * Purpose: validate the 65/35 blend weights and park factor integration
  * against ground truth (actual game totals) before canonising parameters.
  *
- * 5 variants (all use neutral weather = 1.0; historical weather is not stored):
+ * Baseline/candidate variants share date-anchored offense, park, and pitcher
+ * inputs.  The candidate additionally uses the shared Module 09 environment
+ * resolver with exact-date historical fixtures. Missing fixtures remain
+ * explicitly neutral; the replay never searches another date for weather.
  *   1. LEGACY          — L30-only offense, no park factor (1.0)
  *   2. L30_PARK        — L30-only offense, park factor applied
  *   3. L10_PARK        — L10-actual offense, park factor applied
@@ -59,6 +62,11 @@ import type { ParkFactors } from "./module04c_startingNine.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
 import type { PitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
+import {
+  resolveHistoricalEnvironment,
+  type HistoricalWeatherFixtures,
+  type HistoricalWeatherStatus,
+} from "./module13_historicalWeather.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -114,6 +122,17 @@ const RESULTS_HEADER: string[] = [
   // ── Market edge columns ──
   "Market_Line",
   "Edge_BLEND_PARK_PITCHER",
+  "Blend_Park_Pitcher_Env_Projected",
+  "Blend_Park_Pitcher_Env_Error",
+  "Environment_Projection_Delta",
+  "Historical_Weather_Status",
+  "Weather_Multiplier",
+  "Combined_Run_Multiplier",
+  "Home_Run_Factor",
+  "Roof_Status",
+  "Wind_Disposition",
+  "Environment_Certainty",
+  "Weather_Vehicle_Status",
   "Replay_Run_TS",
 ];
 
@@ -121,6 +140,7 @@ const METRICS_HEADER: string[] = [
   "Variant", "Games_Count",
   "MAE", "Median_AE", "Bias",
   "Miss_4Plus_Pct", "Overproject_Pct", "Underproject_Pct",
+  "Directional_Accuracy",
   "Replay_Run_TS",
 ];
 
@@ -193,7 +213,9 @@ export type ReplayVariantKey =
   | "L10_PARK"
   | "BLEND"
   | "BLEND_PARK"
-  | "BLEND_PARK_PITCHER";
+  | "BLEND_PARK_PITCHER"
+  /** Candidate: exact shared environment resolver applied to the baseline. */
+  | "BLEND_PARK_PITCHER_ENV";
 
 export interface ReplayGameRow {
   replay_date: string;
@@ -224,6 +246,16 @@ export interface ReplayGameRow {
    * Null when market_line is absent.
    */
   edge_blend_park_pitcher: number | null;
+  /** Candidate minus baseline; every non-zero movement is environment-only. */
+  environment_projection_delta: number | null;
+  historical_weather_status: HistoricalWeatherStatus;
+  weather_multiplier: number;
+  combined_run_multiplier: number;
+  home_run_factor: number;
+  roof_status: string;
+  wind_disposition: string;
+  environment_certainty: string;
+  weather_vehicle_status: string;
 }
 
 export interface CalibrationBand {
@@ -245,6 +277,7 @@ export interface VariantMetrics {
   miss_4plus_pct: number | null;
   overproject_pct: number | null;
   underproject_pct: number | null;
+  directional_accuracy: number | null;
   calibration: CalibrationBand[];
 }
 
@@ -266,6 +299,9 @@ export interface ReplayResult {
   park_source_counts: ParkSourceCounts;
   rows: ReplayGameRow[];
   metrics: VariantMetrics[];
+  /** Rows whose candidate projection moved because of the environment resolver. */
+  environment_moved_games: ReplayGameRow[];
+  historical_weather_counts: Record<HistoricalWeatherStatus, number>;
   errors: string[];
 }
 
@@ -510,6 +546,7 @@ export function computeVariants(
       BLEND:               total(awayBlend,   homeBlend,   1.0),
       BLEND_PARK:          total(awayBlend,   homeBlend,   park_multiplier),
       BLEND_PARK_PITCHER:  blendParkPitcher,
+      BLEND_PARK_PITCHER_ENV: null,
     },
     away_l30: awayL30,
     home_l30: homeL30,
@@ -554,6 +591,7 @@ export function computeMetrics(
       games_count: 0,
       mae: null, median_ae: null, bias: null,
       miss_4plus_pct: null, overproject_pct: null, underproject_pct: null,
+      directional_accuracy: null,
       calibration: [],
     };
   }
@@ -567,6 +605,14 @@ export function computeMetrics(
   const miss4     = parseFloat(((absErrs.filter((e) => e >= 4).length / absErrs.length) * 100).toFixed(1));
   const overPct   = parseFloat(((errs.filter((e) => e > 0).length / errs.length) * 100).toFixed(1));
   const underPct  = parseFloat(((errs.filter((e) => e < 0).length / errs.length) * 100).toFixed(1));
+  const marketEligible = eligible.filter((r) => r.market_line !== null);
+  const directionalAccuracy = marketEligible.length === 0
+    ? null
+    : parseFloat(((marketEligible.filter((r) => {
+      const projectionEdge = r.projections[variant]! - r.market_line!;
+      const actualEdge = r.actual_total - r.market_line!;
+      return projectionEdge !== 0 && actualEdge !== 0 && Math.sign(projectionEdge) === Math.sign(actualEdge);
+    }).length / marketEligible.length) * 100).toFixed(1));
 
   const calibration: CalibrationBand[] = CALIBRATION_BANDS.map((band) => {
     const inBand = eligible.filter((r) => {
@@ -595,6 +641,7 @@ export function computeMetrics(
     miss_4plus_pct:  miss4,
     overproject_pct:  overPct,
     underproject_pct: underPct,
+    directional_accuracy: directionalAccuracy,
     calibration,
   };
 
@@ -610,8 +657,8 @@ async function writeResultsSheet(
 ): Promise<void> {
   // 31 data cols (A–AE): 29 original + Market_Line + Edge_BLEND_PARK_PITCHER + Replay_Run_TS
   await expandSheetColumns(workbookId, REPLAY_RESULTS_SHEET, RESULTS_HEADER.length);
-  await clearRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:AE5000`);
-  await writeRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:AE1`, [RESULTS_HEADER]);
+  await clearRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:AZ5000`);
+  await writeRange(workbookId, `${REPLAY_RESULTS_SHEET}!A1:AZ1`, [RESULTS_HEADER]);
 
   const sheetRows = rows.map((r) => [
     r.replay_date,
@@ -646,13 +693,24 @@ async function writeResultsSheet(
     // ── Market edge columns ──
     r.market_line                     ?? "",
     r.edge_blend_park_pitcher         ?? "",
+    r.projections.BLEND_PARK_PITCHER_ENV ?? "",
+    r.errors.BLEND_PARK_PITCHER_ENV      ?? "",
+    r.environment_projection_delta       ?? "",
+    r.historical_weather_status,
+    r.weather_multiplier,
+    r.combined_run_multiplier,
+    r.home_run_factor,
+    r.roof_status,
+    r.wind_disposition,
+    r.environment_certainty,
+    r.weather_vehicle_status,
     runTs,
   ]);
 
   if (sheetRows.length > 0) {
     await writeRange(
       workbookId,
-      `${REPLAY_RESULTS_SHEET}!A2:AE${1 + sheetRows.length}`,
+      `${REPLAY_RESULTS_SHEET}!A2:AZ${1 + sheetRows.length}`,
       sheetRows,
     );
   }
@@ -664,8 +722,8 @@ async function writeMetricsSheet(
   workbookId: string,
 ): Promise<void> {
   await expandSheetColumns(workbookId, REPLAY_METRICS_SHEET, METRICS_HEADER.length);
-  await clearRange(workbookId, `${REPLAY_METRICS_SHEET}!A1:I20`);
-  await writeRange(workbookId, `${REPLAY_METRICS_SHEET}!A1:I1`, [METRICS_HEADER]);
+  await clearRange(workbookId, `${REPLAY_METRICS_SHEET}!A1:J20`);
+  await writeRange(workbookId, `${REPLAY_METRICS_SHEET}!A1:J1`, [METRICS_HEADER]);
 
   const sheetRows = metrics.map((m) => [
     m.variant,
@@ -676,13 +734,14 @@ async function writeMetricsSheet(
     m.miss_4plus_pct  ?? "",
     m.overproject_pct ?? "",
     m.underproject_pct ?? "",
+    m.directional_accuracy ?? "",
     runTs,
   ]);
 
   if (sheetRows.length > 0) {
     await writeRange(
       workbookId,
-      `${REPLAY_METRICS_SHEET}!A2:I${1 + sheetRows.length}`,
+      `${REPLAY_METRICS_SHEET}!A2:J${1 + sheetRows.length}`,
       sheetRows,
     );
   }
@@ -696,6 +755,7 @@ export async function runHistoricalReplay(
   options: {
     writeSheets?: boolean;
     workbookId?: string;
+    historicalWeatherFixtures?: HistoricalWeatherFixtures;
     /** Override the default 30-date cap. Hard ceiling: 120. */
     maxDates?: number;
   } = {},
@@ -703,6 +763,7 @@ export async function runHistoricalReplay(
   const runTs    = new Date().toISOString();
   const wbId     = options.workbookId ?? WORKBOOK_ID;
   const write    = options.writeSheets ?? false;
+  const weatherFixtures = options.historicalWeatherFixtures;
   const maxDates = Math.min(options.maxDates ?? MAX_DATE_RANGE, 120);
   const errors: string[] = [];
 
@@ -721,6 +782,8 @@ export async function runHistoricalReplay(
       park_source_counts: { venue_factor_used: 0, seasonal_factor_used: 0, missing_park_data: 0 },
       rows: [],
       metrics: [],
+      environment_moved_games: [],
+      historical_weather_counts: { FIXTURE_LIVE: 0, FIXTURE_FALLBACK_NEUTRAL: 0, MISSING_NEUTRAL: 0, INVALID_NEUTRAL: 0 },
       errors: ["No dates in range (check start/end order and MAX_DATE_RANGE cap)"],
     };
   }
@@ -880,9 +943,17 @@ export async function runHistoricalReplay(
         parkFactors,
         awayStarterQual, homeStarterQual,
       );
+      const historicalEnvironment = resolveHistoricalEnvironment(
+        date, gameId, parkFactors, parkSourceStatus, weatherFixtures,
+      );
+      const baselineProjection = computed.projections.BLEND_PARK_PITCHER;
+      const candidateProjection = baselineProjection === null
+        ? null
+        : parseFloat((baselineProjection * historicalEnvironment.environment.weather_multiplier).toFixed(2));
+      computed.projections.BLEND_PARK_PITCHER_ENV = candidateProjection;
 
       const VARIANTS: ReplayVariantKey[] = [
-        "LEGACY", "L30_PARK", "L10_PARK", "BLEND", "BLEND_PARK", "BLEND_PARK_PITCHER",
+        "LEGACY", "L30_PARK", "L10_PARK", "BLEND", "BLEND_PARK", "BLEND_PARK_PITCHER", "BLEND_PARK_PITCHER_ENV",
       ];
       const errs: Record<ReplayVariantKey, number | null> = {} as Record<ReplayVariantKey, number | null>;
       for (const v of VARIANTS) {
@@ -920,15 +991,31 @@ export async function runHistoricalReplay(
         home_starter_quality:    computed.home_starter_quality,
         market_line:             marketLine,
         edge_blend_park_pitcher: edgeBlendParkPitcher,
+        environment_projection_delta: baselineProjection !== null && candidateProjection !== null
+          ? parseFloat((candidateProjection - baselineProjection).toFixed(2))
+          : null,
+        historical_weather_status: historicalEnvironment.weather_status,
+        weather_multiplier: historicalEnvironment.environment.weather_multiplier,
+        combined_run_multiplier: historicalEnvironment.environment.combined_multiplier,
+        home_run_factor: historicalEnvironment.environment.combined_hr_factor,
+        roof_status: historicalEnvironment.environment.roof_status,
+        wind_disposition: historicalEnvironment.environment.wind_disposition,
+        environment_certainty: historicalEnvironment.environment.environment_certainty,
+        weather_vehicle_status: historicalEnvironment.environment.weather_vehicle_status,
       });
     }
   }
 
   // ── Compute metrics per variant ──
   const VARIANT_KEYS: ReplayVariantKey[] = [
-    "LEGACY", "L30_PARK", "L10_PARK", "BLEND", "BLEND_PARK", "BLEND_PARK_PITCHER",
+    "LEGACY", "L30_PARK", "L10_PARK", "BLEND", "BLEND_PARK", "BLEND_PARK_PITCHER", "BLEND_PARK_PITCHER_ENV",
   ];
   const metrics = VARIANT_KEYS.map((v) => computeMetrics(v, allRows, runTs));
+  const environmentMovedGames = allRows.filter((row) => row.environment_projection_delta !== null && row.environment_projection_delta !== 0);
+  const historicalWeatherCounts: Record<HistoricalWeatherStatus, number> = {
+    FIXTURE_LIVE: 0, FIXTURE_FALLBACK_NEUTRAL: 0, MISSING_NEUTRAL: 0, INVALID_NEUTRAL: 0,
+  };
+  for (const row of allRows) historicalWeatherCounts[row.historical_weather_status]++;
 
   logger.info(
     {
@@ -981,6 +1068,8 @@ export async function runHistoricalReplay(
     park_source_counts:   parkSourceCounts,
     rows:                 allRows,
     metrics,
+    environment_moved_games: environmentMovedGames,
+    historical_weather_counts: historicalWeatherCounts,
     errors,
   };
 }
