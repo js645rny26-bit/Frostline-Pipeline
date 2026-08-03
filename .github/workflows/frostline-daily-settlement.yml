@@ -1,0 +1,229 @@
+name: Frostline daily settlement
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: Completed MLB slate date to settle (YYYY-MM-DD)
+        required: true
+        default: "2026-08-02"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  daily-settlement:
+    if: github.ref == 'refs/heads/commissioning/bridge-repair-2026-08-01'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      PORT: 3000
+      SETTLEMENT_DATE: ${{ inputs.date }}
+      FROSTLINE_SHEETS_BACKEND: google
+      FROSTLINE_WORKBOOK_ID: 1KPYzbSawLIrOcckn5EXxO4vH5eABOhMIibhCgpF-oNs
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.FROSTLINE_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.FROSTLINE_GCP_SERVICE_ACCOUNT }}
+
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Initialize evidence files
+        run: |
+          : > frostline-api-server.log
+          echo '{"status":"NOT_RUN"}' > frostline-settlement-report.json
+          echo '{"status":"NOT_RUN"}' > frostline-settlement-readback.json
+          echo '{"status":"NOT_RUN"}' > frostline-settlement-validation.json
+
+      - name: Authenticate Google ADC through GitHub OIDC
+        id: google-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+          token_format: access_token
+          access_token_scopes: |
+            https://www.googleapis.com/auth/spreadsheets
+            https://www.googleapis.com/auth/drive.file
+
+      - name: Export short-lived Google access token
+        run: |
+          echo "FROSTLINE_GOOGLE_ACCESS_TOKEN=${{ steps.google-auth.outputs.access_token }}" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Run typecheck
+        run: pnpm run typecheck
+
+      - name: Run complete API-server test suite
+        working-directory: artifacts/api-server
+        run: |
+          find src -name '*.test.ts' -print0 |
+            xargs -0 node --import tsx/esm --test
+
+      - name: Build API server
+        run: pnpm --filter @workspace/api-server run build
+
+      - name: Run isolated daily settlement
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pnpm --filter @workspace/api-server start \
+            > frostline-api-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          ready=0
+          for attempt in {1..30}; do
+            if curl --silent --fail http://127.0.0.1:3000/api/healthz >/dev/null; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            echo "API server did not become ready."
+            cat frostline-api-server.log
+            exit 1
+          fi
+
+          set +e
+          curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --request GET \
+            "http://127.0.0.1:3000/api/pipeline/settle?date=${SETTLEMENT_DATE}&workbook_id=${FROSTLINE_WORKBOOK_ID}" \
+            --output frostline-settlement-report.json
+          settlement_status=$?
+          set -e
+
+          cat frostline-settlement-report.json
+
+          if [ "$settlement_status" -ne 0 ]; then
+            echo "::error title=Isolated settlement request failed::The settlement endpoint returned a failure."
+            cat frostline-api-server.log
+            exit "$settlement_status"
+          fi
+
+          node <<'NODE'
+          const fs = require("fs");
+          const report = JSON.parse(fs.readFileSync("frostline-settlement-report.json", "utf8"));
+          const failures = [];
+          const settlement = report.settlement ?? {};
+          const replay = report.survival_replay ?? {};
+
+          if (report.status !== "success") failures.push(`status: ${report.status ?? "missing"}`);
+          if (report.date !== process.env.SETTLEMENT_DATE) failures.push(`date: ${report.date ?? "missing"}`);
+          if (report.settlement_status !== "success") failures.push(`settlement_status: ${report.settlement_status ?? "missing"}`);
+          if (report.replay_status !== "success") failures.push(`replay_status: ${report.replay_status ?? "missing"}`);
+          if (!Number.isInteger(settlement.games_found) || settlement.games_found <= 0) {
+            failures.push(`settlement.games_found: ${settlement.games_found ?? "missing"}`);
+          }
+          if (settlement.games_no_actual !== 0) failures.push(`settlement.games_no_actual: ${settlement.games_no_actual ?? "missing"}`);
+          if ((settlement.games_settled ?? 0) + (settlement.games_skipped ?? 0) !== settlement.games_found) {
+            failures.push("not every projected game was newly settled or already settled");
+          }
+          if (!Array.isArray(replay.rows) || replay.rows.length === 0) failures.push("survival_replay.rows is empty");
+          if (Array.isArray(report.errors) && report.errors.length > 0) failures.push(`errors: ${JSON.stringify(report.errors)}`);
+          if (Array.isArray(settlement.errors) && settlement.errors.length > 0) failures.push(`settlement.errors: ${JSON.stringify(settlement.errors)}`);
+          if (Array.isArray(replay.errors) && replay.errors.length > 0) failures.push(`survival_replay.errors: ${JSON.stringify(replay.errors)}`);
+
+          if (failures.length > 0) {
+            console.error(`Settlement semantic gate failed:\n${failures.join("\n")}`);
+            process.exit(1);
+          }
+
+          console.log("Settlement endpoint semantic gate passed.");
+          NODE
+
+      - name: Confirm settlement and replay sheet writes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --get \
+            --header "Authorization: Bearer ${FROSTLINE_GOOGLE_ACCESS_TOKEN}" \
+            --data-urlencode "ranges=SHADOW_OUTCOMES!A:M" \
+            --data-urlencode "ranges=SURVIVAL_GATE_REPLAY!A:AC" \
+            "https://sheets.googleapis.com/v4/spreadsheets/${FROSTLINE_WORKBOOK_ID}/values:batchGet" \
+            --output frostline-settlement-readback.json
+
+          node <<'NODE'
+          const fs = require("fs");
+          const date = process.env.SETTLEMENT_DATE;
+          const endpoint = JSON.parse(fs.readFileSync("frostline-settlement-report.json", "utf8"));
+          const readback = JSON.parse(fs.readFileSync("frostline-settlement-readback.json", "utf8"));
+          const ranges = readback.valueRanges ?? [];
+          const failures = [];
+
+          const rowsForDate = (index) => (ranges[index]?.values ?? [])
+            .slice(1)
+            .filter((row) => String(row[0] ?? "").trim() === date);
+          const outcomes = rowsForDate(0);
+          const replay = rowsForDate(1);
+          const outcomeIds = new Set(outcomes.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
+          const replayIds = new Set(replay.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
+          const expected = endpoint.settlement?.games_found ?? 0;
+
+          if (outcomes.length !== expected) failures.push(`SHADOW_OUTCOMES rows: expected ${expected}, received ${outcomes.length}`);
+          if (outcomeIds.size !== outcomes.length) failures.push("SHADOW_OUTCOMES contains duplicate game IDs for the date");
+          if (replay.length !== expected) failures.push(`SURVIVAL_GATE_REPLAY rows: expected ${expected}, received ${replay.length}`);
+          if (replayIds.size !== replay.length) failures.push("SURVIVAL_GATE_REPLAY contains duplicate game IDs for the date");
+          for (const gameId of outcomeIds) {
+            if (!replayIds.has(gameId)) failures.push(`SURVIVAL_GATE_REPLAY is missing ${gameId}`);
+          }
+
+          const validation = {
+            status: failures.length === 0 ? "PASS" : "FAIL",
+            date,
+            expected_games: expected,
+            shadow_outcomes_rows: outcomes.length,
+            shadow_outcomes_unique_games: outcomeIds.size,
+            survival_gate_replay_rows: replay.length,
+            survival_gate_replay_unique_games: replayIds.size,
+            failures,
+          };
+          fs.writeFileSync("frostline-settlement-validation.json", JSON.stringify(validation, null, 2));
+          console.log(JSON.stringify(validation, null, 2));
+
+          if (failures.length > 0) process.exit(1);
+          NODE
+
+      - name: Upload settlement evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frostline-daily-settlement-${{ inputs.date }}
+          path: |
+            frostline-settlement-report.json
+            frostline-settlement-readback.json
+            frostline-settlement-validation.json
+            frostline-api-server.log
+          if-no-files-found: error
