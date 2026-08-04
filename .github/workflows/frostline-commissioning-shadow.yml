@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: MLB slate date (YYYY-MM-DD)
-        required: true
-        default: "2026-08-01"
+        description: MLB slate date (YYYY-MM-DD); leave blank for today in America/New_York
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -41,6 +41,27 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+
+      - name: Resolve slate date
+        id: slate-date
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          requested_date="${{ inputs.date }}"
+          if [ -z "$requested_date" ]; then
+            slate_date="$(TZ=America/New_York date +%F)"
+          else
+            if [[ ! "$requested_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "::error title=Invalid slate date::Expected YYYY-MM-DD, received '$requested_date'."
+              exit 1
+            fi
+            slate_date="$requested_date"
+          fi
+
+          echo "SLATE_DATE=$slate_date" >> "$GITHUB_ENV"
+          echo "date=$slate_date" >> "$GITHUB_OUTPUT"
+          echo "Publishing Frostline commissioning slate for $slate_date (America/New_York)."
 
       - name: Initialize report files
         run: |
@@ -115,7 +136,7 @@ jobs:
             --show-error \
             --fail-with-body \
             --request POST \
-            "http://127.0.0.1:3000/api/pipeline/publish?date=${{ inputs.date }}&workbook_id=${FROSTLINE_WORKBOOK_ID}" \
+            "http://127.0.0.1:3000/api/pipeline/publish?date=${SLATE_DATE}&workbook_id=${FROSTLINE_WORKBOOK_ID}" \
             --output frostline-commissioning-report.json
           publish_status=$?
           set -e
@@ -164,7 +185,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frostline-commissioning-report-${{ inputs.date }}
+          name: frostline-commissioning-report-${{ steps.slate-date.outputs.date }}
           path: |
             frostline-commissioning-report.json
             frostline-api-server.log
