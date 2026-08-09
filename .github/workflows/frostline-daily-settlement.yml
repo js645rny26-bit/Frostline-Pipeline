@@ -5,8 +5,8 @@ on:
     inputs:
       date:
         description: Completed MLB slate date to settle (YYYY-MM-DD)
-        required: true
-        default: "2026-08-02"
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -49,6 +49,21 @@ jobs:
           echo '{"status":"NOT_RUN"}' > frostline-settlement-report.json
           echo '{"status":"NOT_RUN"}' > frostline-settlement-readback.json
           echo '{"status":"NOT_RUN"}' > frostline-settlement-validation.json
+
+      - name: Resolve settlement date
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved_date="${SETTLEMENT_DATE}"
+          if [ -z "$resolved_date" ]; then
+            resolved_date="$(TZ=America/New_York date --date='yesterday' +%F)"
+          fi
+          if ! [[ "$resolved_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error title=Invalid settlement date::Use YYYY-MM-DD."
+            exit 1
+          fi
+          echo "SETTLEMENT_DATE=$resolved_date" >> "$GITHUB_ENV"
+          echo "Resolved settlement date: $resolved_date"
 
       - name: Authenticate Google ADC through GitHub OIDC
         id: google-auth
@@ -133,22 +148,35 @@ jobs:
           const report = JSON.parse(fs.readFileSync("frostline-settlement-report.json", "utf8"));
           const failures = [];
           const settlement = report.settlement ?? {};
+          const regression = report.regression ?? {};
+          const starterAudit = report.starter_audit ?? {};
+          const postmortem = report.vehicle_postmortem ?? {};
           const replay = report.survival_replay ?? {};
 
           if (report.status !== "success") failures.push(`status: ${report.status ?? "missing"}`);
           if (report.date !== process.env.SETTLEMENT_DATE) failures.push(`date: ${report.date ?? "missing"}`);
           if (report.settlement_status !== "success") failures.push(`settlement_status: ${report.settlement_status ?? "missing"}`);
+          if (report.regression_status !== "success") failures.push(`regression_status: ${report.regression_status ?? "missing"}`);
+          if (report.starter_audit_status !== "success") failures.push(`starter_audit_status: ${report.starter_audit_status ?? "missing"}`);
+          if (report.postmortem_status !== "success") failures.push(`postmortem_status: ${report.postmortem_status ?? "missing"}`);
           if (report.replay_status !== "success") failures.push(`replay_status: ${report.replay_status ?? "missing"}`);
           if (!Number.isInteger(settlement.games_found) || settlement.games_found <= 0) {
             failures.push(`settlement.games_found: ${settlement.games_found ?? "missing"}`);
           }
           if (settlement.games_no_actual !== 0) failures.push(`settlement.games_no_actual: ${settlement.games_no_actual ?? "missing"}`);
-          if ((settlement.games_settled ?? 0) + (settlement.games_skipped ?? 0) !== settlement.games_found) {
-            failures.push("not every projected game was newly settled or already settled");
+          if (settlement.games_provenance_incomplete !== 0) failures.push(`settlement.games_provenance_incomplete: ${settlement.games_provenance_incomplete ?? "missing"}`);
+          if ((settlement.games_settled ?? 0) + (settlement.games_updated ?? 0) + (settlement.games_skipped ?? 0) !== settlement.games_found) {
+            failures.push("not every projected game was settled, provenance-updated, or already complete");
           }
+          if (!Array.isArray(regression.windows) || regression.windows.length !== 4) failures.push("regression.windows must contain 7d, 30d, ytd, and all");
+          if (!Number.isInteger(starterAudit.pitchers_audited) || starterAudit.pitchers_audited <= 0) failures.push(`starter_audit.pitchers_audited: ${starterAudit.pitchers_audited ?? "missing"}`);
+          if ((postmortem.games_no_outcome ?? 0) !== 0) failures.push(`vehicle_postmortem.games_no_outcome: ${postmortem.games_no_outcome ?? "missing"}`);
           if (!Array.isArray(replay.rows) || replay.rows.length === 0) failures.push("survival_replay.rows is empty");
           if (Array.isArray(report.errors) && report.errors.length > 0) failures.push(`errors: ${JSON.stringify(report.errors)}`);
           if (Array.isArray(settlement.errors) && settlement.errors.length > 0) failures.push(`settlement.errors: ${JSON.stringify(settlement.errors)}`);
+          if (Array.isArray(regression.errors) && regression.errors.length > 0) failures.push(`regression.errors: ${JSON.stringify(regression.errors)}`);
+          if (Array.isArray(starterAudit.errors) && starterAudit.errors.length > 0) failures.push(`starter_audit.errors: ${JSON.stringify(starterAudit.errors)}`);
+          if (Array.isArray(postmortem.errors) && postmortem.errors.length > 0) failures.push(`vehicle_postmortem.errors: ${JSON.stringify(postmortem.errors)}`);
           if (Array.isArray(replay.errors) && replay.errors.length > 0) failures.push(`survival_replay.errors: ${JSON.stringify(replay.errors)}`);
 
           if (failures.length > 0) {
@@ -170,7 +198,10 @@ jobs:
             --fail-with-body \
             --get \
             --header "Authorization: Bearer ${FROSTLINE_GOOGLE_ACCESS_TOKEN}" \
-            --data-urlencode "ranges=SHADOW_OUTCOMES!A:M" \
+            --data-urlencode "ranges=SHADOW_OUTCOMES!A:W" \
+            --data-urlencode "ranges=VEHICLE_POSTMORTEM!A:Q" \
+            --data-urlencode "ranges=REGRESSION_REPORT!A:L" \
+            --data-urlencode "ranges=STARTER_AUDIT!A:J" \
             --data-urlencode "ranges=SURVIVAL_GATE_REPLAY!A:AC" \
             "https://sheets.googleapis.com/v4/spreadsheets/${FROSTLINE_WORKBOOK_ID}/values:batchGet" \
             --output frostline-settlement-readback.json
@@ -187,13 +218,33 @@ jobs:
             .slice(1)
             .filter((row) => String(row[0] ?? "").trim() === date);
           const outcomes = rowsForDate(0);
-          const replay = rowsForDate(1);
+          const postmortem = rowsForDate(1);
+          const regression = (ranges[2]?.values ?? []).slice(1).filter((row) => String(row[0] ?? "").trim());
+          const starterAudit = (ranges[3]?.values ?? []).slice(1).filter((row) => String(row[0] ?? "").trim());
+          const replay = rowsForDate(4);
           const outcomeIds = new Set(outcomes.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
+          const postmortemIds = new Set(postmortem.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
           const replayIds = new Set(replay.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
           const expected = endpoint.settlement?.games_found ?? 0;
 
           if (outcomes.length !== expected) failures.push(`SHADOW_OUTCOMES rows: expected ${expected}, received ${outcomes.length}`);
           if (outcomeIds.size !== outcomes.length) failures.push("SHADOW_OUTCOMES contains duplicate game IDs for the date");
+          for (const row of outcomes) {
+            const gameId = String(row[1] ?? "").trim();
+            if (String(row[22] ?? "").trim() !== "COMPLETE") failures.push(`SHADOW_OUTCOMES pitcher provenance is incomplete for ${gameId}`);
+            if (!String(row[14] ?? "").trim() || !String(row[15] ?? "").trim()) failures.push(`SHADOW_OUTCOMES actual starters are missing for ${gameId}`);
+          }
+          if (postmortem.length !== expected) failures.push(`VEHICLE_POSTMORTEM rows: expected ${expected}, received ${postmortem.length}`);
+          if (postmortemIds.size !== postmortem.length) failures.push("VEHICLE_POSTMORTEM contains duplicate game IDs for the date");
+          const expectedWindows = new Set(["7d", "30d", "ytd", "all"]);
+          for (const row of regression) expectedWindows.delete(String(row[0] ?? "").trim());
+          if (expectedWindows.size > 0) failures.push(`REGRESSION_REPORT is missing windows: ${[...expectedWindows].join(", ")}`);
+          const auditedPitchers = new Set(starterAudit.map((row) => String(row[0] ?? "").trim()).filter(Boolean));
+          for (const row of outcomes) {
+            for (const pitcher of [String(row[14] ?? "").trim(), String(row[15] ?? "").trim()]) {
+              if (pitcher && !auditedPitchers.has(pitcher)) failures.push(`STARTER_AUDIT is missing actual starter ${pitcher}`);
+            }
+          }
           if (replay.length !== expected) failures.push(`SURVIVAL_GATE_REPLAY rows: expected ${expected}, received ${replay.length}`);
           if (replayIds.size !== replay.length) failures.push("SURVIVAL_GATE_REPLAY contains duplicate game IDs for the date");
           for (const gameId of outcomeIds) {
@@ -206,6 +257,9 @@ jobs:
             expected_games: expected,
             shadow_outcomes_rows: outcomes.length,
             shadow_outcomes_unique_games: outcomeIds.size,
+            vehicle_postmortem_rows: postmortem.length,
+            regression_report_rows: regression.length,
+            starter_audit_rows: starterAudit.length,
             survival_gate_replay_rows: replay.length,
             survival_gate_replay_unique_games: replayIds.size,
             failures,
@@ -220,7 +274,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frostline-daily-settlement-${{ inputs.date }}
+          name: frostline-daily-settlement-${{ github.run_id }}
           path: |
             frostline-settlement-report.json
             frostline-settlement-readback.json

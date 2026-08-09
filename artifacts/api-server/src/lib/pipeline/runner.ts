@@ -32,8 +32,10 @@ import { extractOutputBoards, type Module11Result } from "./module11_outputExtra
 import { archiveRunBundle, type Module12Result } from "./module12_archival.js";
 import { runShadowValidation, type ShadowValidationResult } from "./module12s_shadowValidation.js";
 import { computeAndWriteStatcastShadow, type StatcastShadowResult } from "./module09s_statcastShadow.js";
-import { logVehicles, type VehicleLogResult } from "./module17_vehiclePostmortem.js";
+import { logVehicles, runPostmortem, type VehicleLogResult, type PostmortemResult } from "./module17_vehiclePostmortem.js";
 import { runShadowSettlement, type SettlementResult } from "./module14_shadowSettlement.js";
+import { runRegressionReport, type RegressionReportResult } from "./module15_regressionReport.js";
+import { runStarterAudit, type StarterAuditResult } from "./module16_starterAudit.js";
 import { runSurvivalGateReplay, type SurvivalReplayResult } from "./module18_survivalGateReplay.js";
 import { WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
@@ -574,13 +576,20 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
 // ─── Daily settlement + survival-gate replay ──────────────────────────────────
 
 export interface DailySettlementResult {
-  /** "success" — both modules OK; "partial_failure" — one module failed; "failure" — both failed. */
+  /** Success requires Modules 14 through 18 to complete successfully. */
   status: "success" | "partial_failure" | "failure";
   date: string;
   settlement_status: SettlementResult["status"];
+  regression_status: RegressionReportResult["status"];
+  starter_audit_status: StarterAuditResult["status"];
+  postmortem_status: PostmortemResult["status"];
   replay_status: SurvivalReplayResult["status"];
   settlement: SettlementResult;
+  regression: RegressionReportResult;
+  starter_audit: StarterAuditResult;
+  vehicle_postmortem: PostmortemResult;
   survival_replay: SurvivalReplayResult;
+  module_statuses: Array<{ module: string; status: string }>;
   /**
    * Block precision: correct_blocks / (correct_blocks + collateral_blocks).
    * Null when the gate blocked no settled OVERs (zero denominator).
@@ -598,12 +607,12 @@ export interface DailySettlementResult {
 }
 
 /**
- * Runs the end-of-day settlement pipeline for a given date:
- *   1. Module 14: Shadow settlement — pairs SHADOW_HISTORY projections with
- *      actual MLB final scores and appends settled rows to SHADOW_OUTCOMES.
- *   2. Module 18: Survival gate replay — retroactively grades every OVER pick
- *      for the same date against the survival gate and appends results to
- *      SURVIVAL_GATE_REPLAY (idempotent: rows for this date are replaced).
+ * Runs the end-of-day settlement feedback loop for a given date:
+ *   1. Module 14 records final scores and actual pitching provenance.
+ *   2. Module 15 refreshes regression and calibration output.
+ *   3. Module 16 audits the actual starters who appeared.
+ *   4. Module 17 grades the frozen vehicle decisions.
+ *   5. Module 18 replays the survival gate.
  *
  * The gate hit-rate (correct_blocks / (correct_blocks + collateral_blocks))
  * is logged and returned so operators can track threshold calibration over time.
@@ -615,7 +624,7 @@ export async function runDailySettlement(
   date: string,
   workbookId: string = WORKBOOK_ID,
 ): Promise<DailySettlementResult> {
-  logger.info({ date, workbookId }, "Daily settlement: starting settlement + survival replay");
+  logger.info({ date, workbookId }, "Daily settlement: starting complete feedback loop");
   const errors: string[] = [];
 
   // Step 1 — Shadow settlement (idempotent: already-settled games are skipped)
@@ -630,9 +639,12 @@ export async function runDailySettlement(
         settlement_timestamp_utc: new Date().toISOString(),
         games_found: 0,
         games_settled: 0,
+        games_updated: 0,
         games_skipped: 0,
         games_no_actual: 0,
+        games_provenance_incomplete: 0,
         rows: [],
+        warnings: [],
         errors: [msg],
       } satisfies SettlementResult;
     },
@@ -645,7 +657,46 @@ export async function runDailySettlement(
     );
   }
 
-  // Step 2 — Survival gate replay for the same date (append mode: idempotent by date)
+  // Steps 2-4 consume the outcome snapshot and write their audit sheets.
+  const regression = await runRegressionReport({ workbookId, writeSheets: true }).catch(
+    (err: unknown): RegressionReportResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`regression: ${msg}`);
+      return {
+        status: "failure", report_timestamp_utc: new Date().toISOString(),
+        total_outcomes: 0, windows: [], monotonicity: null, errors: [msg],
+      };
+    },
+  );
+
+  const starter_audit = await runStarterAudit({
+    workbookId,
+    writeSheets: true,
+    minGames: 1,
+  }).catch((err: unknown): StarterAuditResult => {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`starter_audit: ${msg}`);
+    return {
+      status: "failure", audit_timestamp_utc: new Date().toISOString(),
+      total_settled_games: 0, pitchers_audited: 0, flagged_pitchers: 0,
+      rows: [], errors: [msg],
+    };
+  });
+
+  const vehicle_postmortem = await runPostmortem(date, {
+    workbookId,
+    writeSheets: true,
+  }).catch((err: unknown): PostmortemResult => {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`vehicle_postmortem: ${msg}`);
+    return {
+      status: "failure", graded_date: date, graded_ts: new Date().toISOString(),
+      games_graded: 0, games_no_outcome: 0,
+      core_bets: 0, core_covered: 0, core_missed: 0, core_push: 0,
+      thesis_correct_pct: null, rows: [], errors: [msg],
+    };
+  });
+
   const survival_replay = await runSurvivalGateReplay(date, date, {
     workbookId,
     writeSheets: true,
@@ -685,19 +736,35 @@ export async function runDailySettlement(
   const passed_winners      = survival_replay.core_thesis_correct;
   const total_eligible_settled = survival_replay.total_eligible_settled;
 
-  // Overall status: success only when both modules succeed; failure when both fail.
-  const settleFailed = settlement.status === "failure";
-  const replayFailed = survival_replay.status === "failure";
+  // Overall status is fail-closed: every module must report success.
+  const module_statuses = [
+    { module: "MODULE_14_SHADOW_SETTLEMENT", status: settlement.status },
+    { module: "MODULE_15_REGRESSION_REPORT", status: regression.status },
+    { module: "MODULE_16_STARTER_AUDIT", status: starter_audit.status },
+    { module: "MODULE_17_VEHICLE_POSTMORTEM", status: vehicle_postmortem.status },
+    { module: "MODULE_18_SURVIVAL_GATE_REPLAY", status: survival_replay.status },
+  ];
+  errors.push(...settlement.errors.map((message) => `settlement: ${message}`));
+  errors.push(...regression.errors.map((message) => `regression: ${message}`));
+  errors.push(...starter_audit.errors.map((message) => `starter_audit: ${message}`));
+  errors.push(...vehicle_postmortem.errors.map((message) => `vehicle_postmortem: ${message}`));
+  errors.push(...survival_replay.errors.map((message) => `survival_replay: ${message}`));
+
+  const failedCount = module_statuses.filter((module) => module.status === "failure").length;
+  const incompleteCount = module_statuses.filter((module) => module.status !== "success").length;
   const overallStatus: DailySettlementResult["status"] =
-    settleFailed && replayFailed ? "failure"
-    : settleFailed || replayFailed ? "partial_failure"
-    : "success";
+    incompleteCount === 0 ? "success"
+    : failedCount === module_statuses.length ? "failure"
+    : "partial_failure";
 
   logger.info(
     {
       date,
       overall_status: overallStatus,
       settlement_status: settlement.status,
+      regression_status: regression.status,
+      starter_audit_status: starter_audit.status,
+      postmortem_status: vehicle_postmortem.status,
       replay_status: survival_replay.status,
       gate_hit_rate_pct,
       gate_denominator,
@@ -716,9 +783,16 @@ export async function runDailySettlement(
     status: overallStatus,
     date,
     settlement_status: settlement.status,
+    regression_status: regression.status,
+    starter_audit_status: starter_audit.status,
+    postmortem_status: vehicle_postmortem.status,
     replay_status: survival_replay.status,
     settlement,
+    regression,
+    starter_audit,
+    vehicle_postmortem,
     survival_replay,
+    module_statuses,
     gate_hit_rate_pct,
     passed_losses,
     passed_winners,

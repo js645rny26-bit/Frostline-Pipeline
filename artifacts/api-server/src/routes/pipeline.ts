@@ -120,12 +120,11 @@ router.get("/pipeline/replay", async (req, res): Promise<void> => {
 /**
  * GET /pipeline/settle
  * Settle shadow projections for a given date by pairing them with actual
- * MLB final scores, then automatically run survival gate replay for the
- * same date so the SURVIVAL_GATE_REPLAY sheet accumulates without manual work.
+ * MLB final scores, capture actual pitcher-role provenance, refresh regression
+ * and starter audits, grade vehicle decisions, and run survival-gate replay.
  *
- * Step 1 (Module 14): Appends settled rows to SHADOW_OUTCOMES (idempotent).
- * Step 2 (Module 18): Appends/replaces survival gate replay rows for the date
- *                     in SURVIVAL_GATE_REPLAY (idempotent by date+game_id).
+ * Modules 14-18 form one fail-closed feedback loop. The endpoint returns 500
+ * unless every module reports success.
  *
  * Query params:
  *   date        — YYYY-MM-DD (optional; defaults to yesterday)
@@ -147,9 +146,7 @@ router.get("/pipeline/settle", async (req, res): Promise<void> => {
 
   try {
     const result = await runDailySettlement(settleDate, workbookId);
-    const hasFailure =
-      result.settlement.status === "failure" ||
-      result.survival_replay.status === "failure";
+    const hasFailure = result.status !== "success";
     res.status(hasFailure ? 500 : 200).json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

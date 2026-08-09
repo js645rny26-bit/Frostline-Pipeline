@@ -1,8 +1,9 @@
 /**
  * Module 16: Starter Projection Audit
  *
- * Joins SHADOW_HISTORY (pitcher names per game) with SHADOW_OUTCOMES (settled
- * actual errors) to surface per-pitcher projection accuracy.
+ * Uses actual starters preserved in SHADOW_OUTCOMES (falling back to the last
+ * pregame SHADOW_HISTORY assignment for legacy rows) to surface per-pitcher
+ * projection accuracy.
  *
  * Useful for identifying pitchers whose games are consistently over- or
  * under-projected, indicating model blind spots in the starter ERA/FIP inputs.
@@ -13,7 +14,7 @@
  * Endpoint: GET /api/pipeline/starter-audit[?min_games=N&write_sheets=true]
  */
 
-import { readRange, writeRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
+import { readRange, writeRange, clearRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 
 const HISTORY_SHEET  = "SHADOW_HISTORY";
@@ -33,6 +34,9 @@ const H_HOME_PITCHER = 5;
 const O_GAME_ID = 1;
 const O_ERROR   = 6;
 const O_ABS     = 7;
+const O_DATE    = 0;
+const O_ACTUAL_AWAY_STARTER = 14;
+const O_ACTUAL_HOME_STARTER = 15;
 
 const AUDIT_HEADER = [
   "Pitcher", "N_Games",
@@ -110,19 +114,33 @@ export async function runStarterAudit(
   }
 
   // ── Read SHADOW_OUTCOMES (settled errors) ──
-  type OutcomeEntry = { game_id: string; error: number; abs_error: number };
+  type OutcomeEntry = {
+    game_id: string;
+    date: string;
+    error: number;
+    abs_error: number;
+    actual_away_starter: string;
+    actual_home_starter: string;
+  };
   let outcomes: OutcomeEntry[] = [];
 
   try {
-    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:H5000`);
+    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:W5000`);
     const raw  = (resp.values ?? []) as string[][];
-    outcomes = raw.slice(1)
-      .filter((r) => r[O_GAME_ID])
-      .map((r) => ({
+    const latestByGame = new Map<string, OutcomeEntry>();
+    for (const r of raw.slice(1)) {
+      const gameId = r[O_GAME_ID] ?? "";
+      if (!gameId) continue;
+      latestByGame.set(gameId, {
         game_id:   r[O_GAME_ID] ?? "",
+        date:      r[O_DATE] ?? "",
         error:     parseFloat(r[O_ERROR] ?? "0") || 0,
         abs_error: parseFloat(r[O_ABS]   ?? "0") || 0,
-      }));
+        actual_away_starter: r[O_ACTUAL_AWAY_STARTER] ?? "",
+        actual_home_starter: r[O_ACTUAL_HOME_STARTER] ?? "",
+      });
+    }
+    outcomes = [...latestByGame.values()];
     logger.info({ outcomes: outcomes.length }, "MODULE_16: SHADOW_OUTCOMES loaded");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -153,13 +171,15 @@ export async function runStarterAudit(
 
   for (const outcome of outcomes) {
     const hist = historyMap.get(outcome.game_id);
-    if (!hist) continue;
+    const date = outcome.date || hist?.date || "";
+    const awayPitcher = outcome.actual_away_starter || hist?.away_pitcher || "";
+    const homePitcher = outcome.actual_home_starter || hist?.home_pitcher || "";
 
-    for (const pitcher of [hist.away_pitcher, hist.home_pitcher]) {
+    for (const pitcher of [awayPitcher, homePitcher]) {
       if (!pitcher || SKIP_VALUES.has(pitcher)) continue;
       if (!pitcherMap.has(pitcher)) pitcherMap.set(pitcher, []);
       pitcherMap.get(pitcher)!.push({
-        date:      hist.date,
+        date,
         error:     outcome.error,
         abs_error: outcome.abs_error,
       });
@@ -206,9 +226,10 @@ export async function runStarterAudit(
   const flagged = auditRows.filter((r) => Math.abs(r.bias) > 0.5).length;
 
   // ── Optionally write STARTER_AUDIT sheet ──
-  if (write && auditRows.length > 0) {
+  if (write) {
     try {
       await expandSheetColumns(wbId, AUDIT_SHEET, AUDIT_COLS);
+      await clearRange(wbId, `${AUDIT_SHEET}!A1:J5000`);
       await writeRange(wbId, `${AUDIT_SHEET}!A1:J1`, [AUDIT_HEADER]);
       const sheetRows = auditRows.map((r) => [
         r.pitcher, r.n_games,
@@ -216,7 +237,9 @@ export async function runStarterAudit(
         r.bias_direction,
         r.first_date, r.last_date,
       ]);
-      await writeRange(wbId, `${AUDIT_SHEET}!A2:J${1 + sheetRows.length}`, sheetRows);
+      if (sheetRows.length > 0) {
+        await writeRange(wbId, `${AUDIT_SHEET}!A2:J${1 + sheetRows.length}`, sheetRows);
+      }
       logger.info({ rows: auditRows.length }, "MODULE_16: Starter audit written to sheet");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -51,7 +51,7 @@
  *      GAME_SUMMARY, PLAYER_INTEGRATION, SLATE_INPUT, and SLATE_BOARD gain explicit
  *      source, component, score, Run_ID, model-version, and read-back audit fields.
  */
-export const WORKBOOK_SCHEMA_VERSION = 14;
+export const WORKBOOK_SCHEMA_VERSION = 15;
 
 export interface ColumnDef {
   name: string;
@@ -983,7 +983,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
 
   {
     name: "SHADOW_OUTCOMES",
-    description: "Append-only settlement log. One row per game, written by module14 after games go Final. Idempotent — game_ids already present are skipped.",
+    description: "Settlement log with one row per game. Module14 records the frozen projection, final score, and official pitcher chain; reruns backfill incomplete provenance without duplicating game IDs.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: [
@@ -999,6 +999,17 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Away_Offense_Source",      index: 9,  type: "string", width: 160, filledBy: "MODULE_14", readOnly: true, exampleValue: "BLENDED" },
       { name: "Home_Offense_Source",      index: 10, type: "string", width: 160, filledBy: "MODULE_14", readOnly: true, exampleValue: "L30_ONLY" },
       { name: "Settlement_TS",            index: 11, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-07-25T02:00:00.000Z" },
+      { name: "Projected_Away_Starter",   index: 12, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Last pregame starter snapshot", exampleValue: "Gerrit Cole" },
+      { name: "Projected_Home_Starter",   index: 13, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Last pregame starter snapshot", exampleValue: "Brayan Bello" },
+      { name: "Actual_Away_Starter",      index: 14, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Official MLB boxscore starter", exampleValue: "Gerrit Cole" },
+      { name: "Actual_Home_Starter",      index: 15, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Official MLB boxscore starter", exampleValue: "Brayan Bello" },
+      { name: "Away_Starter_Match_Status", index: 16, type: "string", width: 175, filledBy: "MODULE_14", readOnly: true, description: "MATCH, MISMATCH, or UNRESOLVED", exampleValue: "MATCH" },
+      { name: "Home_Starter_Match_Status", index: 17, type: "string", width: 175, filledBy: "MODULE_14", readOnly: true, description: "MATCH, MISMATCH, or UNRESOLVED", exampleValue: "MATCH" },
+      { name: "Away_Bulk_Pitcher",        index: 18, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Most-used away non-starter by outs recorded", exampleValue: "Nick Burdi" },
+      { name: "Home_Bulk_Pitcher",        index: 19, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Most-used home non-starter by outs recorded", exampleValue: "Josh Winckowski" },
+      { name: "Away_Pitcher_Chain",       index: 20, type: "string", width: 360, filledBy: "MODULE_14", readOnly: true, description: "Official appearance order with innings", exampleValue: "Gerrit Cole (6.0 IP) > Luke Weaver (1.0 IP)" },
+      { name: "Home_Pitcher_Chain",       index: 21, type: "string", width: 360, filledBy: "MODULE_14", readOnly: true, description: "Official appearance order with innings", exampleValue: "Brayan Bello (5.0 IP) > Brennan Bernardino (1.0 IP)" },
+      { name: "Pitcher_Provenance_Status", index: 22, type: "string", width: 190, filledBy: "MODULE_14", readOnly: true, description: "COMPLETE, PARTIAL, or UNAVAILABLE", exampleValue: "COMPLETE" },
     ],
   },
 
