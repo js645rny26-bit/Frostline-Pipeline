@@ -16,6 +16,7 @@
 
 import { readRange, writeRange, clearRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
+import { hasUsablePitcherProvenance } from "./module14_pitcherProvenance.js";
 
 const HISTORY_SHEET  = "SHADOW_HISTORY";
 const OUTCOMES_SHEET = "SHADOW_OUTCOMES";
@@ -37,6 +38,7 @@ const O_ABS     = 7;
 const O_DATE    = 0;
 const O_ACTUAL_AWAY_STARTER = 14;
 const O_ACTUAL_HOME_STARTER = 15;
+const O_PROVENANCE_STATUS = 22;
 
 const AUDIT_HEADER = [
   "Pitcher", "N_Games",
@@ -121,6 +123,7 @@ export async function runStarterAudit(
     abs_error: number;
     actual_away_starter: string;
     actual_home_starter: string;
+    provenance_status: string;
   };
   let outcomes: OutcomeEntry[] = [];
 
@@ -138,6 +141,7 @@ export async function runStarterAudit(
         abs_error: parseFloat(r[O_ABS]   ?? "0") || 0,
         actual_away_starter: r[O_ACTUAL_AWAY_STARTER] ?? "",
         actual_home_starter: r[O_ACTUAL_HOME_STARTER] ?? "",
+        provenance_status: r[O_PROVENANCE_STATUS] ?? "",
       });
     }
     outcomes = [...latestByGame.values()];
@@ -172,8 +176,9 @@ export async function runStarterAudit(
   for (const outcome of outcomes) {
     const hist = historyMap.get(outcome.game_id);
     const date = outcome.date || hist?.date || "";
-    const awayPitcher = outcome.actual_away_starter || hist?.away_pitcher || "";
-    const homePitcher = outcome.actual_home_starter || hist?.home_pitcher || "";
+    const useActual = hasUsablePitcherProvenance(outcome.provenance_status);
+    const awayPitcher = (useActual ? outcome.actual_away_starter : "") || hist?.away_pitcher || "";
+    const homePitcher = (useActual ? outcome.actual_home_starter : "") || hist?.home_pitcher || "";
 
     for (const pitcher of [awayPitcher, homePitcher]) {
       if (!pitcher || SKIP_VALUES.has(pitcher)) continue;

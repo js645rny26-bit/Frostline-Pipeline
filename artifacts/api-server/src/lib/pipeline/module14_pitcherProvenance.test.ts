@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { comparePitcherNames, parseGamePitcherProvenance } from "./module14_pitcherProvenance.js";
+import {
+  comparePitcherNames,
+  hasUsablePitcherProvenance,
+  parseGamePitcherProvenance,
+} from "./module14_pitcherProvenance.js";
 
 function team(
   pitchers: number[],
@@ -80,4 +84,11 @@ test("starter name comparison tolerates accents, punctuation, and suffixes", () 
   assert.equal(comparePitcherNames("José Berríos", "Jose Berrios Jr."), "MATCH");
   assert.equal(comparePitcherNames("Projected Starter", "Different Starter"), "MISMATCH");
   assert.equal(comparePitcherNames("TBD", "Actual Starter"), "UNRESOLVED");
+});
+
+test("legacy outcome-column values cannot masquerade as pitcher provenance", () => {
+  assert.equal(hasUsablePitcherProvenance("COMPLETE"), true);
+  assert.equal(hasUsablePitcherProvenance("PARTIAL"), true);
+  assert.equal(hasUsablePitcherProvenance("REPAIRED_DIFFERS_FROM_PUBLISHED"), false);
+  assert.equal(hasUsablePitcherProvenance(""), false);
 });

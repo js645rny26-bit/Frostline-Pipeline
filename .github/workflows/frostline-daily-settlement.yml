@@ -240,6 +240,10 @@ jobs:
           for (const row of regression) expectedWindows.delete(String(row[0] ?? "").trim());
           if (expectedWindows.size > 0) failures.push(`REGRESSION_REPORT is missing windows: ${[...expectedWindows].join(", ")}`);
           const auditedPitchers = new Set(starterAudit.map((row) => String(row[0] ?? "").trim()).filter(Boolean));
+          const invalidAuditedPitchers = [...auditedPitchers].filter((pitcher) =>
+            /^[-+]?\d+(\.\d+)?$/.test(pitcher) || pitcher === "FROZEN_VEHICLE_LOG"
+          );
+          if (invalidAuditedPitchers.length > 0) failures.push(`STARTER_AUDIT contains invalid pitcher identities: ${invalidAuditedPitchers.join(", ")}`);
           for (const row of outcomes) {
             for (const pitcher of [String(row[14] ?? "").trim(), String(row[15] ?? "").trim()]) {
               if (pitcher && !auditedPitchers.has(pitcher)) failures.push(`STARTER_AUDIT is missing actual starter ${pitcher}`);

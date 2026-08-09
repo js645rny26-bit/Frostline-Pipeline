@@ -22,6 +22,11 @@ export interface GamePitcherProvenance {
   status: PitcherProvenanceStatus;
 }
 
+/** Legacy SHADOW_OUTCOMES rows may have unrelated values in the appended columns. */
+export function hasUsablePitcherProvenance(status: string): boolean {
+  return status === "COMPLETE" || status === "PARTIAL";
+}
+
 interface RawPitchingStats {
   gamesStarted?: number;
   inningsPitched?: string;
