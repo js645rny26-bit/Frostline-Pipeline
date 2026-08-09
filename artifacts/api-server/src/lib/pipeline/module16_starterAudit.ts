@@ -36,9 +36,12 @@ const O_GAME_ID = 1;
 const O_ERROR   = 6;
 const O_ABS     = 7;
 const O_DATE    = 0;
-const O_ACTUAL_AWAY_STARTER = 14;
-const O_ACTUAL_HOME_STARTER = 15;
-const O_PROVENANCE_STATUS = 22;
+const O_FROZEN_ERROR = 13;
+const O_FROZEN_ABS = 14;
+const O_FROZEN_SOURCE = 15;
+const O_ACTUAL_AWAY_STARTER = 24;
+const O_ACTUAL_HOME_STARTER = 25;
+const O_PROVENANCE_STATUS = 32;
 
 const AUDIT_HEADER = [
   "Pitcher", "N_Games",
@@ -128,7 +131,7 @@ export async function runStarterAudit(
   let outcomes: OutcomeEntry[] = [];
 
   try {
-    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:W5000`);
+    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:AG5000`);
     const raw  = (resp.values ?? []) as string[][];
     const latestByGame = new Map<string, OutcomeEntry>();
     for (const r of raw.slice(1)) {
@@ -137,8 +140,8 @@ export async function runStarterAudit(
       latestByGame.set(gameId, {
         game_id:   r[O_GAME_ID] ?? "",
         date:      r[O_DATE] ?? "",
-        error:     parseFloat(r[O_ERROR] ?? "0") || 0,
-        abs_error: parseFloat(r[O_ABS]   ?? "0") || 0,
+        error:     parseFloat((r[O_FROZEN_SOURCE] === "FROZEN_VEHICLE_LOG" ? r[O_FROZEN_ERROR] : r[O_ERROR]) ?? "0") || 0,
+        abs_error: parseFloat((r[O_FROZEN_SOURCE] === "FROZEN_VEHICLE_LOG" ? r[O_FROZEN_ABS] : r[O_ABS]) ?? "0") || 0,
         actual_away_starter: r[O_ACTUAL_AWAY_STARTER] ?? "",
         actual_home_starter: r[O_ACTUAL_HOME_STARTER] ?? "",
         provenance_status: r[O_PROVENANCE_STATUS] ?? "",

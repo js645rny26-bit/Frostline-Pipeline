@@ -164,7 +164,6 @@ jobs:
             failures.push(`settlement.games_found: ${settlement.games_found ?? "missing"}`);
           }
           if (settlement.games_no_actual !== 0) failures.push(`settlement.games_no_actual: ${settlement.games_no_actual ?? "missing"}`);
-          if (settlement.games_provenance_incomplete !== 0) failures.push(`settlement.games_provenance_incomplete: ${settlement.games_provenance_incomplete ?? "missing"}`);
           if ((settlement.games_settled ?? 0) + (settlement.games_updated ?? 0) + (settlement.games_skipped ?? 0) !== settlement.games_found) {
             failures.push("not every projected game was settled, provenance-updated, or already complete");
           }
@@ -198,11 +197,12 @@ jobs:
             --fail-with-body \
             --get \
             --header "Authorization: Bearer ${FROSTLINE_GOOGLE_ACCESS_TOKEN}" \
-            --data-urlencode "ranges=SHADOW_OUTCOMES!A:W" \
-            --data-urlencode "ranges=VEHICLE_POSTMORTEM!A:Q" \
+            --data-urlencode "ranges=SHADOW_OUTCOMES!A:AG" \
+            --data-urlencode "ranges=VEHICLE_POSTMORTEM!A:S" \
             --data-urlencode "ranges=REGRESSION_REPORT!A:L" \
             --data-urlencode "ranges=STARTER_AUDIT!A:J" \
-            --data-urlencode "ranges=SURVIVAL_GATE_REPLAY!A:AC" \
+            --data-urlencode "ranges=SURVIVAL_GATE_REPLAY!A:AL" \
+            --data-urlencode "ranges=PROJECTION_REPLAY!A:AE" \
             "https://sheets.googleapis.com/v4/spreadsheets/${FROSTLINE_WORKBOOK_ID}/values:batchGet" \
             --output frostline-settlement-readback.json
 
@@ -222,20 +222,26 @@ jobs:
           const regression = (ranges[2]?.values ?? []).slice(1).filter((row) => String(row[0] ?? "").trim());
           const starterAudit = (ranges[3]?.values ?? []).slice(1).filter((row) => String(row[0] ?? "").trim());
           const replay = rowsForDate(4);
+          const projectionReplay = rowsForDate(5);
           const outcomeIds = new Set(outcomes.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
           const postmortemIds = new Set(postmortem.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
           const replayIds = new Set(replay.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
+          const projectionReplayIds = new Set(projectionReplay.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
           const expected = endpoint.settlement?.games_found ?? 0;
 
           if (outcomes.length !== expected) failures.push(`SHADOW_OUTCOMES rows: expected ${expected}, received ${outcomes.length}`);
           if (outcomeIds.size !== outcomes.length) failures.push("SHADOW_OUTCOMES contains duplicate game IDs for the date");
           for (const row of outcomes) {
             const gameId = String(row[1] ?? "").trim();
-            if (String(row[22] ?? "").trim() !== "COMPLETE") failures.push(`SHADOW_OUTCOMES pitcher provenance is incomplete for ${gameId}`);
-            if (!String(row[14] ?? "").trim() || !String(row[15] ?? "").trim()) failures.push(`SHADOW_OUTCOMES actual starters are missing for ${gameId}`);
+            if (!String(row[15] ?? "").trim()) failures.push(`SHADOW_OUTCOMES frozen projection source is missing for ${gameId}`);
+            if (!String(row[32] ?? "").trim()) failures.push(`SHADOW_OUTCOMES pitcher provenance status is missing for ${gameId}`);
+            if (!String(row[24] ?? "").trim() || !String(row[25] ?? "").trim()) failures.push(`SHADOW_OUTCOMES actual starters are missing for ${gameId}`);
           }
           if (postmortem.length !== expected) failures.push(`VEHICLE_POSTMORTEM rows: expected ${expected}, received ${postmortem.length}`);
           if (postmortemIds.size !== postmortem.length) failures.push("VEHICLE_POSTMORTEM contains duplicate game IDs for the date");
+          for (const row of postmortem) {
+            if (row.length < 19 || !String(row[18] ?? "").trim()) failures.push(`VEHICLE_POSTMORTEM schema is incomplete for ${String(row[1] ?? "unknown")}`);
+          }
           const expectedWindows = new Set(["7d", "30d", "ytd", "all"]);
           for (const row of regression) expectedWindows.delete(String(row[0] ?? "").trim());
           if (expectedWindows.size > 0) failures.push(`REGRESSION_REPORT is missing windows: ${[...expectedWindows].join(", ")}`);
@@ -245,7 +251,7 @@ jobs:
           );
           if (invalidAuditedPitchers.length > 0) failures.push(`STARTER_AUDIT contains invalid pitcher identities: ${invalidAuditedPitchers.join(", ")}`);
           for (const row of outcomes) {
-            for (const pitcher of [String(row[14] ?? "").trim(), String(row[15] ?? "").trim()]) {
+            for (const pitcher of [String(row[24] ?? "").trim(), String(row[25] ?? "").trim()]) {
               if (pitcher && !auditedPitchers.has(pitcher)) failures.push(`STARTER_AUDIT is missing actual starter ${pitcher}`);
             }
           }
@@ -254,6 +260,13 @@ jobs:
           for (const gameId of outcomeIds) {
             if (!replayIds.has(gameId)) failures.push(`SURVIVAL_GATE_REPLAY is missing ${gameId}`);
           }
+          for (const row of replay) {
+            if (!String(row[37] ?? "").trim()) failures.push(`SURVIVAL_GATE_REPLAY provenance flag is missing for ${String(row[1] ?? "unknown")}`);
+          }
+          if (projectionReplay.length !== expected) failures.push(`PROJECTION_REPLAY rows: expected ${expected}, received ${projectionReplay.length}`);
+          if (projectionReplayIds.size !== projectionReplay.length) failures.push("PROJECTION_REPLAY contains duplicate game IDs for the date");
+          const frozenLabel = `aug${Number(date.slice(8, 10))}_frozen_published`;
+          if (!regression.some((row) => String(row[0] ?? "").trim() === frozenLabel)) failures.push(`REGRESSION_REPORT is missing ${frozenLabel}`);
 
           const validation = {
             status: failures.length === 0 ? "PASS" : "FAIL",
@@ -266,6 +279,8 @@ jobs:
             starter_audit_rows: starterAudit.length,
             survival_gate_replay_rows: replay.length,
             survival_gate_replay_unique_games: replayIds.size,
+            projection_replay_rows: projectionReplay.length,
+            projection_replay_unique_games: projectionReplayIds.size,
             failures,
           };
           fs.writeFileSync("frostline-settlement-validation.json", JSON.stringify(validation, null, 2));

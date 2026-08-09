@@ -32,7 +32,7 @@ const VEHICLE_LOG_SHEET  = "VEHICLE_LOG";
 const POSTMORTEM_SHEET   = "VEHICLE_POSTMORTEM";
 const OUTCOMES_SHEET     = "SHADOW_OUTCOMES";
 const LOG_COLS           = 14;
-const POSTMORTEM_COLS    = 17;
+const POSTMORTEM_COLS    = 19;
 
 export interface ContiguousVehicleLogUpdate {
   start_data_row_index: number;
@@ -48,14 +48,12 @@ const LOG_HEADER: string[] = [
   "Edge_Strength", "Confidence", "Publish_TS",
 ];
 
-const POSTMORTEM_HEADER: string[] = [
+export const POSTMORTEM_HEADER: string[] = [
   "Date", "Game_ID", "Away_Team", "Home_Team",
-  "Vehicle_Type", "Market_Line", "Direction",
-  "Projected_Total", "Actual_Total", "Error",
-  "Final_Decision", "Core_Blocker",
-  "Thesis_Correct", "Ticket_Result",
-  "Away_Offense_Source", "Home_Offense_Source",
-  "Graded_TS",
+  "Active_Vehicle_Label", "Vehicle_Type", "Market_Line", "Decision",
+  "Packet_Projected_Total", "Actual_Total", "Signed_Error", "Abs_Error",
+  "Game_Truth_Grade", "Vehicle_Capture_Grade", "Ticket_Result", "Blocker_Grade",
+  "Failure_Modes", "Exact_Blocker", "Graded_TS",
 ];
 
 // ─── VEHICLE_LOG column indices (0-based) ──────────────────────────────────────
@@ -96,21 +94,23 @@ export interface PostmortemRow {
   game_id: string;
   away_team: string;
   home_team: string;
+  active_vehicle_label: string;
   vehicle_type: string;
   market_line: number | null;
-  direction: "OVER" | "UNDER" | "NONE";
-  projected_total: number;
+  decision: "BET" | "PASS";
+  packet_projected_total: number;
   actual_total: number;
   /** proj − actual (positive = over-projected) */
-  error: number;
-  final_decision: "CORE" | "NO_CORE" | "PENDING";
-  core_blocker: string;
+  signed_error: number;
+  abs_error: number;
   /** null when direction is NONE or no market line available */
-  thesis_correct: boolean | null;
+  game_truth_grade: string;
+  vehicle_capture_grade: string;
   /** COVERED / MISSED / PUSH — only meaningful when final_decision === "CORE" */
-  ticket_result: "COVERED" | "MISSED" | "PUSH" | "NO_BET";
-  away_offense_source: string;
-  home_offense_source: string;
+  ticket_result: string;
+  blocker_grade: string;
+  failure_modes: string;
+  exact_blocker: string;
   graded_ts: string;
 }
 
@@ -137,7 +137,7 @@ function gradeTicket(
   direction: string,
   marketLine: number | null,
   actualTotal: number,
-): { thesis_correct: boolean | null; ticket_result: PostmortemRow["ticket_result"] } {
+): { thesis_correct: boolean | null; ticket_result: "COVERED" | "MISSED" | "PUSH" | "NO_BET" } {
   if (!marketLine || direction === "NONE") {
     return { thesis_correct: null, ticket_result: "NO_BET" };
   }
@@ -146,7 +146,7 @@ function gradeTicket(
     (direction === "OVER" && diff > 0) ||
     (direction === "UNDER" && diff < 0);
 
-  let ticket_result: PostmortemRow["ticket_result"];
+  let ticket_result: "COVERED" | "MISSED" | "PUSH" | "NO_BET";
   if (diff === 0) {
     ticket_result = "PUSH";
   } else if (direction === "OVER") {
@@ -155,6 +155,27 @@ function gradeTicket(
     ticket_result = diff < 0 ? "COVERED" : "MISSED";
   }
   return { thesis_correct, ticket_result };
+}
+
+function activeVehicleLabel(away: string, home: string, direction: string, line: number | null): string {
+  if (direction === "NONE" || line === null) return "—";
+  return `${away}@${home} FG ${direction === "OVER" ? "Over" : "Under"} ${line}`;
+}
+
+function modernVehicleType(direction: string): string {
+  if (direction === "OVER") return "FULL_GAME_OVER";
+  if (direction === "UNDER") return "FULL_GAME_UNDER";
+  return "—";
+}
+
+export function postmortemRowToValues(row: PostmortemRow): unknown[] {
+  return [
+    row.date, row.game_id, row.away_team, row.home_team,
+    row.active_vehicle_label, row.vehicle_type, row.market_line ?? "", row.decision,
+    row.packet_projected_total, row.actual_total, row.signed_error, row.abs_error,
+    row.game_truth_grade, row.vehicle_capture_grade, row.ticket_result, row.blocker_grade,
+    row.failure_modes, row.exact_blocker, row.graded_ts,
+  ];
 }
 
 /**
@@ -375,7 +396,7 @@ export async function runPostmortem(
   }
 
   // ── Read SHADOW_OUTCOMES ──
-  type OutcomeData = { actual_total: number; error: number; away_src: string; home_src: string };
+  type OutcomeData = { actual_total: number };
   const outcomesMap = new Map<string, OutcomeData>();
   try {
     const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:K5000`);
@@ -385,9 +406,6 @@ export async function runPostmortem(
       if (!gid) continue;
       outcomesMap.set(gid, {
         actual_total: parseFloat(r[O_ACTUAL]  ?? "0") || 0,
-        error:        parseFloat(r[O_ERROR]   ?? "0") || 0,
-        away_src:     r[O_AWAY_SRC] ?? "",
-        home_src:     r[O_HOME_SRC] ?? "",
       });
     }
     logger.info({ outcomes: outcomesMap.size }, "MODULE_17: SHADOW_OUTCOMES loaded");
@@ -398,15 +416,16 @@ export async function runPostmortem(
   }
 
   // ── Read existing VEHICLE_POSTMORTEM to avoid duplicates ──
-  let existingPmKeys = new Set<string>();
-  let existingPmCount = 0;
+  const existingPmIndex = new Map<string, number>();
+  let existingPmRows: unknown[][] = [];
   try {
-    const resp = await readRange(wbId, `${POSTMORTEM_SHEET}!A1:B5000`);
-    const all  = (resp.values ?? []) as string[][];
-    existingPmCount = all.length;
-    existingPmKeys = new Set(
-      all.slice(1).map((r) => `${r[0] ?? ""}_${r[1] ?? ""}`).filter((k) => k !== "_"),
-    );
+    const resp = await readRange(wbId, `${POSTMORTEM_SHEET}!A1:S5000`);
+    const all  = (resp.values ?? []) as unknown[][];
+    existingPmRows = all.slice(1);
+    existingPmRows.forEach((r, index) => {
+      const key = `${r[0] ?? ""}_${r[1] ?? ""}`;
+      if (key !== "_") existingPmIndex.set(key, index);
+    });
   } catch {
     logger.warn("MODULE_17: Could not read VEHICLE_POSTMORTEM for dedup — proceeding");
   }
@@ -421,11 +440,9 @@ export async function runPostmortem(
     if (!outcome) { noOutcome++; continue; }
 
     // Idempotency — skip already-graded rows
-    if (existingPmKeys.has(`${date}_${gameId}`)) continue;
-
     const marketLine    = r[L_MARKET_LINE] ? parseFloat(r[L_MARKET_LINE]) : null;
     const direction     = (r[L_DIRECTION]     ?? "NONE") as "OVER" | "UNDER" | "NONE";
-    const finalDecision = (r[L_FINAL_DECISION] ?? "PENDING") as PostmortemRow["final_decision"];
+    const finalDecision = r[L_FINAL_DECISION] ?? "PENDING";
     const vehicleType   = r[L_VEHICLE_TYPE]   ?? "";
 
     // Only grade thesis/ticket for total-line vehicles (GAME_TOTAL, TEAM_TOTAL_*)
@@ -434,37 +451,52 @@ export async function runPostmortem(
       ? gradeTicket(direction, marketLine, outcome.actual_total)
       : { thesis_correct: null, ticket_result: "NO_BET" as const };
 
+    const projected = parseFloat(r[L_PROJ_TOTAL] ?? "0") || 0;
+    const signedError = parseFloat((projected - outcome.actual_total).toFixed(2));
+    const decision: PostmortemRow["decision"] = finalDecision === "CORE" ? "BET" : "PASS";
+    const truthGrade = thesis_correct === null
+      ? "TRUTH_NOT_EVALUABLE"
+      : thesis_correct ? "TRUTH_CONFIRMED" : "TRUTH_FAILED";
+    const failureModes = [
+      Math.abs(signedError) >= 4 ? "PROJECTION_MISS_4PLUS" : "",
+      thesis_correct === false ? "DIRECTION_MISS" : "",
+    ].filter(Boolean).join("; ") || "NO_MATERIAL_DEFECT";
+
     graded.push({
       date,
       game_id:          gameId,
       away_team:        r[L_AWAY] ?? "",
       home_team:        r[L_HOME] ?? "",
-      vehicle_type:     vehicleType,
+      active_vehicle_label: activeVehicleLabel(r[L_AWAY] ?? "", r[L_HOME] ?? "", direction, marketLine),
+      vehicle_type:     modernVehicleType(direction),
       market_line:      marketLine,
-      direction,
-      projected_total:  parseFloat(r[L_PROJ_TOTAL] ?? "0") || 0,
+      decision,
+      packet_projected_total: projected,
       actual_total:     outcome.actual_total,
-      error:            outcome.error,
-      final_decision:   finalDecision,
-      core_blocker:     r[L_CORE_BLOCKER]  ?? "",
-      thesis_correct,
-      ticket_result,
-      away_offense_source: outcome.away_src,
-      home_offense_source: outcome.home_src,
+      signed_error:     signedError,
+      abs_error:        parseFloat(Math.abs(signedError).toFixed(2)),
+      game_truth_grade: truthGrade,
+      vehicle_capture_grade: decision === "BET" ? "AUTHORIZED_VEHICLE" : "NO_AUTHORIZED_VEHICLE",
+      ticket_result: decision === "BET" ? ticket_result : "NO_WAGER_SHADOW",
+      blocker_grade: decision === "BET"
+        ? (ticket_result === "COVERED" ? "EXECUTION_CONFIRMED" : "EXECUTION_FAILED")
+        : "BLOCKER_RECORDED",
+      failure_modes: failureModes,
+      exact_blocker: r[L_CORE_BLOCKER] ?? "",
       graded_ts: ts,
     });
   }
 
   // ── Aggregate stats ──
-  const coreGames   = graded.filter((r) => r.final_decision === "CORE");
+  const coreGames   = graded.filter((r) => r.decision === "BET");
   const coreCovered = coreGames.filter((r) => r.ticket_result === "COVERED").length;
   const coreMissed  = coreGames.filter((r) => r.ticket_result === "MISSED").length;
   const corePush    = coreGames.filter((r) => r.ticket_result === "PUSH").length;
 
-  const thesisObs = graded.filter((r) => r.thesis_correct !== null);
+  const thesisObs = graded.filter((r) => r.game_truth_grade !== "TRUTH_NOT_EVALUABLE");
   const thesisCorrectPct = thesisObs.length > 0
     ? parseFloat(
-        (thesisObs.filter((r) => r.thesis_correct).length / thesisObs.length * 100).toFixed(1),
+        (thesisObs.filter((r) => r.game_truth_grade === "TRUTH_CONFIRMED").length / thesisObs.length * 100).toFixed(1),
       )
     : null;
 
@@ -472,27 +504,19 @@ export async function runPostmortem(
   if (write && graded.length > 0) {
     try {
       await expandSheetColumns(wbId, POSTMORTEM_SHEET, POSTMORTEM_COLS);
-      const needsHeader = existingPmCount === 0;
-      if (needsHeader) {
-        await writeRange(wbId, `${POSTMORTEM_SHEET}!A1:Q1`, [POSTMORTEM_HEADER]);
-        existingPmCount = 1;
+      for (const row of graded) {
+        const values = postmortemRowToValues(row);
+        const key = `${row.date}_${row.game_id}`;
+        const index = existingPmIndex.get(key);
+        if (index === undefined) {
+          existingPmIndex.set(key, existingPmRows.length);
+          existingPmRows.push(values);
+        } else {
+          existingPmRows[index] = values;
+        }
       }
-      const startRow = existingPmCount + 1;
-      const sheetRows = graded.map((r) => [
-        r.date, r.game_id, r.away_team, r.home_team,
-        r.vehicle_type, r.market_line ?? "", r.direction,
-        r.projected_total, r.actual_total, r.error,
-        r.final_decision, r.core_blocker,
-        r.thesis_correct === null ? "" : (r.thesis_correct ? "TRUE" : "FALSE"),
-        r.ticket_result,
-        r.away_offense_source, r.home_offense_source,
-        r.graded_ts,
-      ]);
-      await writeRange(
-        wbId,
-        `${POSTMORTEM_SHEET}!A${startRow}:Q${startRow + sheetRows.length - 1}`,
-        sheetRows,
-      );
+      const sheetRows = [POSTMORTEM_HEADER, ...existingPmRows];
+      await writeRange(wbId, `${POSTMORTEM_SHEET}!A1`, sheetRows);
       logger.info({ written: sheetRows.length }, "MODULE_17: Vehicle postmortem written");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

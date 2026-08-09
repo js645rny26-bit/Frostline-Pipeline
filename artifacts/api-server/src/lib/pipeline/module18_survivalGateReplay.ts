@@ -168,10 +168,17 @@ const SH_PARK_SOURCE        = 21;
 const SO_DATE     = 0;
 const SO_GAME_ID  = 1;
 const SO_ACTUAL   = 5;
+const SO_PROJECTED_AWAY_STARTER = 22;
+const SO_PROJECTED_HOME_STARTER = 23;
+const SO_ACTUAL_AWAY_STARTER = 24;
+const SO_ACTUAL_HOME_STARTER = 25;
+const SO_AWAY_MATCH_STATUS = 26;
+const SO_HOME_MATCH_STATUS = 27;
+const SO_PROVENANCE_STATUS = 32;
 
 // ─── Output sheet ─────────────────────────────────────────────────────────────
 const REPLAY_SHEET = "SURVIVAL_GATE_REPLAY";
-const REPLAY_COLS  = 29;
+const REPLAY_COLS  = 38;
 
 const REPLAY_HEADER: string[] = [
   "Date",
@@ -203,6 +210,10 @@ const REPLAY_HEADER: string[] = [
   "Away_Offense_Source",       // BLENDED | L30_ONLY | L10_ONLY | LEAGUE_AVG_FALLBACK
   "Home_Offense_Source",
   "Notes",
+  "Pregame_Away_Starter", "Pregame_Home_Starter",
+  "Pregame_Away_Opener", "Pregame_Home_Opener",
+  "Pregame_Away_Bulk", "Pregame_Home_Bulk",
+  "Actual_Away_Primary", "Actual_Home_Primary", "Pitcher_Provenance_Flag",
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -247,6 +258,15 @@ export interface SurvivalReplayRow {
   away_offense_source: string;
   home_offense_source: string;
   notes: string;
+  pregame_away_starter: string;
+  pregame_home_starter: string;
+  pregame_away_opener: string;
+  pregame_home_opener: string;
+  pregame_away_bulk: string;
+  pregame_home_bulk: string;
+  actual_away_primary: string;
+  actual_home_primary: string;
+  pitcher_provenance_flag: string;
 }
 
 export interface SurvivalReplayResult {
@@ -301,6 +321,20 @@ function parseNum(v: unknown): number | null {
 
 function parseStr(v: unknown): string {
   return v == null ? "" : String(v).trim();
+}
+
+export function pitcherProvenanceFlag(outcome: {
+  provenance_status: string;
+  away_match_status: string;
+  home_match_status: string;
+} | undefined): string {
+  if (!outcome) return "UNAVAILABLE";
+  if (outcome.provenance_status === "PARTIAL") return "PARTIAL_PREGAME_STARTER_UNRESOLVED";
+  if (outcome.provenance_status !== "COMPLETE") return outcome.provenance_status || "UNAVAILABLE";
+  if (outcome.away_match_status === "MISMATCH" || outcome.home_match_status === "MISMATCH") {
+    return "COMPLETE_STARTER_MISMATCH";
+  }
+  return "COMPLETE_MATCH";
 }
 
 /**
@@ -378,7 +412,7 @@ export async function runSurvivalGateReplay(
   const [vlResp, shResp, soResp] = await Promise.all([
     readRange(wbId, "VEHICLE_LOG!A1:N5000").catch((e: unknown) => { errors.push(`VEHICLE_LOG: ${e instanceof Error ? e.message : String(e)}`); return null; }),
     readRange(wbId, "SHADOW_HISTORY!A1:W5000").catch((e: unknown) => { errors.push(`SHADOW_HISTORY: ${e instanceof Error ? e.message : String(e)}`); return null; }),
-    readRange(wbId, "SHADOW_OUTCOMES!A1:L5000").catch((e: unknown) => { errors.push(`SHADOW_OUTCOMES: ${e instanceof Error ? e.message : String(e)}`); return null; }),
+    readRange(wbId, "SHADOW_OUTCOMES!A1:AG5000").catch((e: unknown) => { errors.push(`SHADOW_OUTCOMES: ${e instanceof Error ? e.message : String(e)}`); return null; }),
   ]);
 
   if (!vlResp || !shResp || !soResp) {
@@ -472,14 +506,32 @@ export async function runSurvivalGateReplay(
 
   // ── Parse SHADOW_OUTCOMES — actual totals by date+game_id ─────────────────
   const soRows = (soResp.values ?? []).slice(1) as unknown[][];
-  const soMap  = new Map<string, number>(); // key → actual_total
+  const soMap = new Map<string, {
+    actual_total: number;
+    projected_away_starter: string;
+    projected_home_starter: string;
+    actual_away_starter: string;
+    actual_home_starter: string;
+    away_match_status: string;
+    home_match_status: string;
+    provenance_status: string;
+  }>();
 
   for (const row of soRows) {
     const date   = parseStr(row[SO_DATE]);
     const gameId = parseStr(row[SO_GAME_ID]);
     const actual = parseNum(row[SO_ACTUAL]);
     if (date && gameId && actual !== null) {
-      soMap.set(`${date}|${gameId}`, actual);
+      soMap.set(`${date}|${gameId}`, {
+        actual_total: actual,
+        projected_away_starter: parseStr(row[SO_PROJECTED_AWAY_STARTER]),
+        projected_home_starter: parseStr(row[SO_PROJECTED_HOME_STARTER]),
+        actual_away_starter: parseStr(row[SO_ACTUAL_AWAY_STARTER]),
+        actual_home_starter: parseStr(row[SO_ACTUAL_HOME_STARTER]),
+        away_match_status: parseStr(row[SO_AWAY_MATCH_STATUS]),
+        home_match_status: parseStr(row[SO_HOME_MATCH_STATUS]),
+        provenance_status: parseStr(row[SO_PROVENANCE_STATUS]),
+      });
     }
   }
 
@@ -488,7 +540,8 @@ export async function runSurvivalGateReplay(
 
   for (const [key, vl] of vlMap) {
     const sh     = shMap.get(key);
-    const actual = soMap.get(key) ?? null;
+    const outcome = soMap.get(key);
+    const actual = outcome?.actual_total ?? null;
 
     // ── Reconstruction: baseball_only_projection ───────────────────────────
     // Use combined multiplier from SHADOW_HISTORY when available.
@@ -643,6 +696,15 @@ export async function runSurvivalGateReplay(
         fallbackOffenseNote,
         highProjectionNote,
       ].filter(Boolean).join("; "),
+      pregame_away_starter: outcome?.projected_away_starter || sh?.away_pitcher || "NOT_CAPTURED_PREGAME",
+      pregame_home_starter: outcome?.projected_home_starter || sh?.home_pitcher || "NOT_CAPTURED_PREGAME",
+      pregame_away_opener: "NOT_CAPTURED_PREGAME",
+      pregame_home_opener: "NOT_CAPTURED_PREGAME",
+      pregame_away_bulk: "NOT_CAPTURED_PREGAME",
+      pregame_home_bulk: "NOT_CAPTURED_PREGAME",
+      actual_away_primary: outcome?.actual_away_starter || "UNAVAILABLE",
+      actual_home_primary: outcome?.actual_home_starter || "UNAVAILABLE",
+      pitcher_provenance_flag: pitcherProvenanceFlag(outcome),
     });
   }
 
@@ -745,6 +807,15 @@ export async function runSurvivalGateReplay(
         r.away_offense_source,
         r.home_offense_source,
         r.notes,
+        r.pregame_away_starter,
+        r.pregame_home_starter,
+        r.pregame_away_opener,
+        r.pregame_home_opener,
+        r.pregame_away_bulk,
+        r.pregame_home_bulk,
+        r.actual_away_primary,
+        r.actual_home_primary,
+        r.pitcher_provenance_flag,
       ];
 
       let sheetRows: unknown[][];
@@ -754,7 +825,7 @@ export async function runSurvivalGateReplay(
         // Read existing sheet content, drop rows whose Date falls within
         // [startDate, endDate] (so re-running for the same date is idempotent),
         // then write header + retained rows + new rows.
-        const existing = await readRange(wbId, `${REPLAY_SHEET}!A1:AA5000`).catch(
+        const existing = await readRange(wbId, `${REPLAY_SHEET}!A1:AL5000`).catch(
           () => null,
         );
         const existingValues = (existing?.values ?? []) as unknown[][];
@@ -765,10 +836,10 @@ export async function runSurvivalGateReplay(
         });
         sheetRows = [REPLAY_HEADER, ...retained, ...replayRows.map(toSheetRow)];
         // Clear and rewrite so row order is deterministic
-        await clearRange(wbId, `${REPLAY_SHEET}!A1:AA5000`);
+        await clearRange(wbId, `${REPLAY_SHEET}!A1:AL5000`);
       } else {
         // ── Full overwrite mode (original behaviour) ─────────────────────────
-        await clearRange(wbId, `${REPLAY_SHEET}!A1:AA5000`);
+        await clearRange(wbId, `${REPLAY_SHEET}!A1:AL5000`);
         sheetRows = [REPLAY_HEADER, ...replayRows.map(toSheetRow)];
       }
 

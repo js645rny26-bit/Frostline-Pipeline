@@ -59,6 +59,9 @@ const O_PROJ   = 4;
 const O_ACTUAL = 5;
 const O_ERROR  = 6;
 const O_ABS    = 7;
+const O_FROZEN_ERROR = 13;
+const O_FROZEN_ABS = 14;
+const O_FROZEN_SOURCE = 15;
 
 // VEHICLE_LOG column indices (0-based)
 // Date | Game_ID | Away_Team | Home_Team | Vehicle_Type | Market_Line | Direction |
@@ -109,7 +112,7 @@ const MONOTONICITY_HEADER = [
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface RegressionWindow {
-  window: "7d" | "30d" | "ytd" | "all";
+  window: string;
   n_games: number;
   mae: number | null;
   median_ae: number | null;
@@ -187,7 +190,7 @@ type OutcomeObs = {
 
 function computeWindow(
   rows: OutcomeObs[],
-  label: RegressionWindow["window"],
+  label: string,
   sinceDate: string | null,
 ): RegressionWindow {
   const subset = sinceDate ? rows.filter((r) => r.date >= sinceDate) : rows;
@@ -221,6 +224,13 @@ function computeWindow(
     over_pct: overPct, under_pct: underPct, miss_4plus_pct: missPct,
     alerts,
   };
+}
+
+function frozenAuditLabel(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return `${date}_frozen_published`;
+  const month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"][Number(match[2]) - 1] ?? match[2];
+  return `${month}${Number(match[3])}_frozen_published`;
 }
 
 // ─── Part B helpers ───────────────────────────────────────────────────────────
@@ -600,20 +610,31 @@ export async function runRegressionReport(
 
   // ── Part A: Read SHADOW_OUTCOMES for regression windows ──
   let outcomeRows: OutcomeObs[] = [];
+  const frozenRowsByDate = new Map<string, OutcomeObs[]>();
   let totalOutcomes = 0;
 
   try {
-    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:H5000`);
+    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:AG5000`);
     const raw  = (resp.values ?? []) as string[][];
     const data = raw.slice(1).filter(
       (r) => r[O_DATE] && r[O_ERROR] !== undefined && r[O_ABS] !== undefined,
     );
     totalOutcomes = data.length;
-    outcomeRows = data.map((r) => ({
-      date:      r[O_DATE]  ?? "",
-      error:     parseFloat(r[O_ERROR] ?? "0") || 0,
-      abs_error: parseFloat(r[O_ABS]   ?? "0") || 0,
-    }));
+    outcomeRows = data.map((r) => {
+      const date = r[O_DATE] ?? "";
+      const hasFrozen = r[O_FROZEN_SOURCE] === "FROZEN_VEHICLE_LOG";
+      const observation = {
+        date,
+        error: parseFloat((hasFrozen ? r[O_FROZEN_ERROR] : r[O_ERROR]) ?? "0") || 0,
+        abs_error: parseFloat((hasFrozen ? r[O_FROZEN_ABS] : r[O_ABS]) ?? "0") || 0,
+      };
+      if (hasFrozen) {
+        const bucket = frozenRowsByDate.get(date) ?? [];
+        bucket.push(observation);
+        frozenRowsByDate.set(date, bucket);
+      }
+      return observation;
+    });
     logger.info({ rows: totalOutcomes }, "MODULE_15: SHADOW_OUTCOMES loaded");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -642,6 +663,9 @@ export async function runRegressionReport(
     computeWindow(outcomeRows, "ytd", ytdStart),
     computeWindow(outcomeRows, "all", null),
   ];
+  const frozenAuditWindows = [...frozenRowsByDate.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, rows]) => computeWindow(rows, frozenAuditLabel(date), null));
 
   const allAlerts = windows.flatMap((w) => w.alerts.map((a) => `${w.window}:${a}`));
   if (allAlerts.length > 0) {
@@ -674,7 +698,7 @@ export async function runRegressionReport(
     // Regression report sheet
     try {
       await expandSheetColumns(wbId, REGRESSION_SHEET, REGRESSION_COLS);
-      const sheetRows = windows.map((w) => [
+      const sheetRows = [...windows, ...frozenAuditWindows].map((w) => [
         w.window, w.n_games,
         w.mae      ?? "", w.median_ae ?? "", w.bias     ?? "",
         w.over_pct ?? "", w.under_pct ?? "", w.miss_4plus_pct ?? "",
@@ -684,6 +708,7 @@ export async function runRegressionReport(
         ts,
       ]);
       await writeRange(wbId, `${REGRESSION_SHEET}!A1:L1`, [REGRESSION_HEADER]);
+      await clearRange(wbId, `${REGRESSION_SHEET}!A2:L5000`);
       await writeRange(wbId, `${REGRESSION_SHEET}!A2:L${1 + sheetRows.length}`, sheetRows);
       logger.info("MODULE_15: Regression report written");
     } catch (err: unknown) {

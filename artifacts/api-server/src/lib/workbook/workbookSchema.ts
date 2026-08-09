@@ -51,7 +51,7 @@
  *      GAME_SUMMARY, PLAYER_INTEGRATION, SLATE_INPUT, and SLATE_BOARD gain explicit
  *      source, component, score, Run_ID, model-version, and read-back audit fields.
  */
-export const WORKBOOK_SCHEMA_VERSION = 15;
+export const WORKBOOK_SCHEMA_VERSION = 17;
 
 export interface ColumnDef {
   name: string;
@@ -73,6 +73,25 @@ export interface SheetDef {
   columns: ColumnDef[];
   frozenRows?: number;
 }
+
+const HISTORICAL_REPLAY_COLUMNS = [
+  "Replay_Date", "Game_ID", "Away_Team", "Home_Team", "Actual_Total",
+  "Legacy_Projected", "L30_Park_Projected", "L10_Park_Projected",
+  "Blend_Projected", "Blend_Park_Projected", "Legacy_Error", "L30_Park_Error",
+  "L10_Park_Error", "Blend_Error", "Blend_Park_Error", "Away_L30_Rate",
+  "Home_L30_Rate", "Away_L10_Rate", "Home_L10_Rate", "Away_Offense_Source",
+  "Home_Offense_Source", "Park_Runs_Pct", "Park_Multiplier", "Park_Source_Status",
+  "Away_Starter_Quality", "Home_Starter_Quality", "Blend_Park_Pitcher_Projected",
+  "Blend_Park_Pitcher_Error", "Market_Line", "Edge_BLEND_PARK_PITCHER",
+  "Blend_Park_Pitcher_Env_Projected", "Blend_Park_Pitcher_Env_Error",
+  "Environment_Projection_Delta", "Historical_Weather_Status", "Weather_Multiplier",
+  "Combined_Run_Multiplier", "Home_Run_Factor", "Roof_Status", "Wind_Disposition",
+  "Environment_Certainty", "Weather_Vehicle_Status", "Replay_Run_TS",
+] as const;
+
+const HISTORICAL_REPLAY_STRING_COLUMNS = new Set([
+  0, 1, 2, 3, 19, 20, 23, 33, 37, 38, 39, 40, 41,
+]);
 
 // Header background colours per section (RGB 0–1)
 export const SECTION_COLORS: Record<SheetDef["section"], { red: number; green: number; blue: number }> = {
@@ -891,7 +910,23 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
 
   {
     name: "REPLAY_RESULTS",
-    description: "Per-game historical replay rows written by module13. One row per completed game. Appended on each replay run (cleared first).",
+    description: "Date-anchored historical baseline-versus-candidate replay written by module13, including the shared environment resolver and explicit historical-weather provenance.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: HISTORICAL_REPLAY_COLUMNS.map((name, index) => ({
+      name,
+      index,
+      type: HISTORICAL_REPLAY_STRING_COLUMNS.has(index) ? "string" as const : "number" as const,
+      width: index === 1 ? 180 : 145,
+      format: HISTORICAL_REPLAY_STRING_COLUMNS.has(index) ? undefined : "0.000",
+      filledBy: "MODULE_13" as const,
+      readOnly: true,
+    })),
+  },
+
+  {
+    name: "PROJECTION_REPLAY",
+    description: "Frozen-published settlement replay. Module14 upserts one row per completed game from VEHICLE_LOG without reconstructing the pregame projection.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: [
@@ -999,17 +1034,27 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Away_Offense_Source",      index: 9,  type: "string", width: 160, filledBy: "MODULE_14", readOnly: true, exampleValue: "BLENDED" },
       { name: "Home_Offense_Source",      index: 10, type: "string", width: 160, filledBy: "MODULE_14", readOnly: true, exampleValue: "L30_ONLY" },
       { name: "Settlement_TS",            index: 11, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-07-25T02:00:00.000Z" },
-      { name: "Projected_Away_Starter",   index: 12, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Last pregame starter snapshot", exampleValue: "Gerrit Cole" },
-      { name: "Projected_Home_Starter",   index: 13, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Last pregame starter snapshot", exampleValue: "Brayan Bello" },
-      { name: "Actual_Away_Starter",      index: 14, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Official MLB boxscore starter", exampleValue: "Gerrit Cole" },
-      { name: "Actual_Home_Starter",      index: 15, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Official MLB boxscore starter", exampleValue: "Brayan Bello" },
-      { name: "Away_Starter_Match_Status", index: 16, type: "string", width: 175, filledBy: "MODULE_14", readOnly: true, description: "MATCH, MISMATCH, or UNRESOLVED", exampleValue: "MATCH" },
-      { name: "Home_Starter_Match_Status", index: 17, type: "string", width: 175, filledBy: "MODULE_14", readOnly: true, description: "MATCH, MISMATCH, or UNRESOLVED", exampleValue: "MATCH" },
-      { name: "Away_Bulk_Pitcher",        index: 18, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Most-used away non-starter by outs recorded", exampleValue: "Nick Burdi" },
-      { name: "Home_Bulk_Pitcher",        index: 19, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Most-used home non-starter by outs recorded", exampleValue: "Josh Winckowski" },
-      { name: "Away_Pitcher_Chain",       index: 20, type: "string", width: 360, filledBy: "MODULE_14", readOnly: true, description: "Official appearance order with innings", exampleValue: "Gerrit Cole (6.0 IP) > Luke Weaver (1.0 IP)" },
-      { name: "Home_Pitcher_Chain",       index: 21, type: "string", width: 360, filledBy: "MODULE_14", readOnly: true, description: "Official appearance order with innings", exampleValue: "Brayan Bello (5.0 IP) > Brennan Bernardino (1.0 IP)" },
-      { name: "Pitcher_Provenance_Status", index: 22, type: "string", width: 190, filledBy: "MODULE_14", readOnly: true, description: "COMPLETE, PARTIAL, or UNAVAILABLE", exampleValue: "COMPLETE" },
+      { name: "Frozen_Published_Total",   index: 12, type: "number", width: 175, format: "0.00", filledBy: "MODULE_14", readOnly: true, description: "Exact packet projection frozen in VEHICLE_LOG before first pitch", exampleValue: "8.45" },
+      { name: "Frozen_Error",             index: 13, type: "number", width: 100, format: "0.00", filledBy: "MODULE_14", readOnly: true, description: "Frozen_Published_Total minus Actual_Total", exampleValue: "1.45" },
+      { name: "Frozen_Abs_Error",         index: 14, type: "number", width: 110, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "1.45" },
+      { name: "Frozen_Projection_Source", index: 15, type: "string", width: 190, filledBy: "MODULE_14", readOnly: true, exampleValue: "FROZEN_VEHICLE_LOG" },
+      { name: "Repaired_Minus_Frozen",    index: 16, type: "number", width: 165, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "0.10" },
+      { name: "Frozen_Market_Line",       index: 17, type: "number", width: 130, format: "0.0", filledBy: "MODULE_14", readOnly: true, exampleValue: "8.5" },
+      { name: "Settlement_Market_Line",   index: 18, type: "number", width: 150, format: "0.0", filledBy: "MODULE_14", readOnly: true, exampleValue: "8.5" },
+      { name: "Frozen_Ticket_Result",     index: 19, type: "string", width: 145, filledBy: "MODULE_14", readOnly: true, exampleValue: "WIN" },
+      { name: "Settlement_Ticket_Result", index: 20, type: "string", width: 165, filledBy: "MODULE_14", readOnly: true, exampleValue: "WIN" },
+      { name: "Projection_Audit_Status",  index: 21, type: "string", width: 230, filledBy: "MODULE_14", readOnly: true, exampleValue: "MATCHES_PUBLISHED" },
+      { name: "Projected_Away_Starter",   index: 22, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Last pregame starter snapshot", exampleValue: "Gerrit Cole" },
+      { name: "Projected_Home_Starter",   index: 23, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Last pregame starter snapshot", exampleValue: "Brayan Bello" },
+      { name: "Actual_Away_Starter",      index: 24, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Official MLB boxscore starter", exampleValue: "Gerrit Cole" },
+      { name: "Actual_Home_Starter",      index: 25, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Official MLB boxscore starter", exampleValue: "Brayan Bello" },
+      { name: "Away_Starter_Match_Status", index: 26, type: "string", width: 175, filledBy: "MODULE_14", readOnly: true, description: "MATCH, MISMATCH, or UNRESOLVED", exampleValue: "MATCH" },
+      { name: "Home_Starter_Match_Status", index: 27, type: "string", width: 175, filledBy: "MODULE_14", readOnly: true, description: "MATCH, MISMATCH, or UNRESOLVED", exampleValue: "MATCH" },
+      { name: "Away_Bulk_Pitcher",        index: 28, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Most-used away non-starter by outs recorded", exampleValue: "Nick Burdi" },
+      { name: "Home_Bulk_Pitcher",        index: 29, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, description: "Most-used home non-starter by outs recorded", exampleValue: "Josh Winckowski" },
+      { name: "Away_Pitcher_Chain",       index: 30, type: "string", width: 360, filledBy: "MODULE_14", readOnly: true, description: "Official appearance order with innings", exampleValue: "Gerrit Cole (6.0 IP) > Luke Weaver (1.0 IP)" },
+      { name: "Home_Pitcher_Chain",       index: 31, type: "string", width: 360, filledBy: "MODULE_14", readOnly: true, description: "Official appearance order with innings", exampleValue: "Brayan Bello (5.0 IP) > Brennan Bernardino (1.0 IP)" },
+      { name: "Pitcher_Provenance_Status", index: 32, type: "string", width: 190, filledBy: "MODULE_14", readOnly: true, description: "COMPLETE, PARTIAL, or UNAVAILABLE", exampleValue: "COMPLETE" },
     ],
   },
 
@@ -1110,19 +1155,21 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Game_ID",            index: 1,  type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-24_NYY@BOS" },
       { name: "Away_Team",          index: 2,  type: "string", width: 80,  filledBy: "MODULE_17", readOnly: true, exampleValue: "NYY" },
       { name: "Home_Team",          index: 3,  type: "string", width: 80,  filledBy: "MODULE_17", readOnly: true, exampleValue: "BOS" },
-      { name: "Vehicle_Type",       index: 4,  type: "string", width: 130, filledBy: "MODULE_17", readOnly: true, exampleValue: "GAME_TOTAL" },
-      { name: "Market_Line",        index: 5,  type: "number", width: 90,  format: "0.0",  filledBy: "MODULE_17", readOnly: true, exampleValue: "8.5" },
-      { name: "Direction",          index: 6,  type: "string", width: 90,  filledBy: "MODULE_17", readOnly: true, exampleValue: "UNDER" },
-      { name: "Projected_Total",    index: 7,  type: "number", width: 130, format: "0.00", filledBy: "MODULE_17", readOnly: true, exampleValue: "6.88" },
-      { name: "Actual_Total",       index: 8,  type: "number", width: 100, format: "0",    filledBy: "MODULE_17", readOnly: true, exampleValue: "7" },
-      { name: "Error",              index: 9,  type: "number", width: 90,  format: "0.00", filledBy: "MODULE_17", readOnly: true, description: "Projected − Actual", exampleValue: "-0.12" },
-      { name: "Final_Decision",     index: 10, type: "string", width: 100, filledBy: "MODULE_17", readOnly: true, exampleValue: "NO_CORE" },
-      { name: "Core_Blocker",       index: 11, type: "string", width: 220, filledBy: "MODULE_17", readOnly: true, exampleValue: "INSUFFICIENT_PROJECTION_SEPARATION" },
-      { name: "Thesis_Correct",     index: 12, type: "string", width: 110, filledBy: "MODULE_17", readOnly: true, description: "YES | NO | PUSH — was the projected direction correct vs actual vs market line?", exampleValue: "YES" },
-      { name: "Ticket_Result",      index: 13, type: "string", width: 110, filledBy: "MODULE_17", readOnly: true, description: "COVERED | MISSED | PUSH | NO_BET — graded only for CORE bets.", exampleValue: "NO_BET" },
-      { name: "Away_Offense_Source",index: 14, type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "BLENDED" },
-      { name: "Home_Offense_Source",index: 15, type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "L30_ONLY" },
-      { name: "Graded_TS",          index: 16, type: "string", width: 200, filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-25T08:30:00.000Z" },
+      { name: "Active_Vehicle_Label", index: 4, type: "string", width: 220, filledBy: "MODULE_17", readOnly: true, exampleValue: "NYY@BOS FG Under 8.5" },
+      { name: "Vehicle_Type", index: 5, type: "string", width: 150, filledBy: "MODULE_17", readOnly: true, exampleValue: "FULL_GAME_UNDER" },
+      { name: "Market_Line", index: 6, type: "number", width: 90, format: "0.0", filledBy: "MODULE_17", readOnly: true, exampleValue: "8.5" },
+      { name: "Decision", index: 7, type: "string", width: 90, filledBy: "MODULE_17", readOnly: true, description: "BET or PASS", exampleValue: "PASS" },
+      { name: "Packet_Projected_Total", index: 8, type: "number", width: 175, format: "0.00", filledBy: "MODULE_17", readOnly: true, exampleValue: "6.88" },
+      { name: "Actual_Total", index: 9, type: "number", width: 100, format: "0", filledBy: "MODULE_17", readOnly: true, exampleValue: "7" },
+      { name: "Signed_Error", index: 10, type: "number", width: 100, format: "0.00", filledBy: "MODULE_17", readOnly: true, description: "Frozen packet projection minus actual", exampleValue: "-0.12" },
+      { name: "Abs_Error", index: 11, type: "number", width: 90, format: "0.00", filledBy: "MODULE_17", readOnly: true, exampleValue: "0.12" },
+      { name: "Game_Truth_Grade", index: 12, type: "string", width: 175, filledBy: "MODULE_17", readOnly: true, exampleValue: "TRUTH_CONFIRMED" },
+      { name: "Vehicle_Capture_Grade", index: 13, type: "string", width: 190, filledBy: "MODULE_17", readOnly: true, exampleValue: "NO_AUTHORIZED_VEHICLE" },
+      { name: "Ticket_Result", index: 14, type: "string", width: 145, filledBy: "MODULE_17", readOnly: true, exampleValue: "NO_WAGER_SHADOW" },
+      { name: "Blocker_Grade", index: 15, type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "BLOCKER_RECORDED" },
+      { name: "Failure_Modes", index: 16, type: "string", width: 240, filledBy: "MODULE_17", readOnly: true, exampleValue: "DIRECTION_MISS" },
+      { name: "Exact_Blocker", index: 17, type: "string", width: 280, filledBy: "MODULE_17", readOnly: true, exampleValue: "INSUFFICIENT_PROJECTION_SEPARATION" },
+      { name: "Graded_TS", index: 18, type: "string", width: 200, filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-25T08:30:00.000Z" },
     ],
   },
 
@@ -1161,6 +1208,15 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Away_Offense_Source",   index: 26, type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, description: "Source of the away team's offensive rate read from SHADOW_HISTORY col 9. BLENDED | L30_ONLY | L10_ONLY | LEAGUE_AVG_FALLBACK. Blank for pre-v9 rows.", exampleValue: "BLENDED" },
       { name: "Home_Offense_Source",   index: 27, type: "string", width: 160, filledBy: "MODULE_18", readOnly: true, description: "Source of the home team's offensive rate read from SHADOW_HISTORY col 10. Same values as Away_Offense_Source.", exampleValue: "L30_ONLY" },
       { name: "Notes",                 index: 28, type: "string", width: 220, filledBy: "MODULE_18", readOnly: true, description: "Semicolon-separated flags: SHADOW_HISTORY_ABSENT | NO_OUTCOME | FALLBACK_OFFENSE_SOURCE", exampleValue: "FALLBACK_OFFENSE_SOURCE" },
+      { name: "Pregame_Away_Starter",  index: 29, type: "string", width: 180, filledBy: "MODULE_18", readOnly: true, exampleValue: "Gerrit Cole" },
+      { name: "Pregame_Home_Starter",  index: 30, type: "string", width: 180, filledBy: "MODULE_18", readOnly: true, exampleValue: "Brayan Bello" },
+      { name: "Pregame_Away_Opener",   index: 31, type: "string", width: 190, filledBy: "MODULE_18", readOnly: true, description: "Explicit NOT_CAPTURED_PREGAME when no date-anchored role record exists", exampleValue: "NOT_CAPTURED_PREGAME" },
+      { name: "Pregame_Home_Opener",   index: 32, type: "string", width: 190, filledBy: "MODULE_18", readOnly: true, exampleValue: "NOT_CAPTURED_PREGAME" },
+      { name: "Pregame_Away_Bulk",     index: 33, type: "string", width: 190, filledBy: "MODULE_18", readOnly: true, exampleValue: "NOT_CAPTURED_PREGAME" },
+      { name: "Pregame_Home_Bulk",     index: 34, type: "string", width: 190, filledBy: "MODULE_18", readOnly: true, exampleValue: "NOT_CAPTURED_PREGAME" },
+      { name: "Actual_Away_Primary",   index: 35, type: "string", width: 180, filledBy: "MODULE_18", readOnly: true, exampleValue: "Gerrit Cole" },
+      { name: "Actual_Home_Primary",   index: 36, type: "string", width: 180, filledBy: "MODULE_18", readOnly: true, exampleValue: "Brayan Bello" },
+      { name: "Pitcher_Provenance_Flag", index: 37, type: "string", width: 230, filledBy: "MODULE_18", readOnly: true, exampleValue: "COMPLETE_MATCH" },
     ],
   },
 

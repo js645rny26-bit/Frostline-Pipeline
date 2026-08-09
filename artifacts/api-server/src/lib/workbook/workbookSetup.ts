@@ -296,10 +296,13 @@ export async function repairWorkbookSchemaReference(
       + "v11 (2026-07-26): STATCAST_GAME_PREVIEW sheet added — per-game Baseball Savant preview ingestion (55 cols). "
       + "v12 (2026-07-26): RUN_LOG cols 30–37 — Statcast_Preview_Status/Games_Expected/Available/Parsed/Missing/Failed/Stale_Count/Identity_Mismatch_Count. "
       + "v13 (2026-07-26): STATCAST_SHADOW_AUDIT sheet (23 cols) — per-game shadow projection via pitcher xwOBA-allowed (Phase 3). Preview_Used_In_Projection = NO; no CORE impact. "
-      + "v14 (2026-08-02): Shared environment identity, projection component lineage, populated PLAYER_INTEGRATION, auditable three-score bridge, and semantic current-slate publication validation."],
-    ["Workbook_Purpose",    "Frostline Pipeline — MLB totals projection and CORE pick authorization."],
+      + "v14 (2026-08-02): Shared environment identity, projection component lineage, populated PLAYER_INTEGRATION, auditable three-score bridge, and semantic current-slate publication validation. "
+      + "v15 (2026-07-30): DA-1.1.0 BET/PASS doctrine migration and candidate-score ledger. "
+      + "v16 (2026-08-08): Settlement pitcher-chain provenance and independent daily settlement workflow. "
+      + "v17 (2026-08-09): Combined frozen-publication and pitcher-provenance outcome schema; aligned 19-column vehicle postmortems; replay provenance; frozen-published regression and projection replay."],
+    ["Workbook_Purpose",    "Frostline Pipeline — MLB totals projection and DA-1.1.0 BET/PASS decision publication."],
     ["Operator_Columns",    "Cells highlighted amber are operator-editable. All other cells are pipeline-maintained — do not edit."],
-    ["CORE_Definition",     "CORE = authorized bet. NO_CORE = blocked by eligibility or survival gate. Requires: projection separation ≥ 1.5 AND survival gate PASS."],
+    ["Decision_Doctrine",   "Decision vocabulary is BET | PASS. CORE / NO_CORE remain historical compatibility values in legacy ledgers only."],
     ["Lock_Rules",          "Each game locks independently BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH (default 2 h) before its own first pitch. LOCKED_OUT games cannot be promoted to CORE without a named Late_Change_Reason."],
     ["Schema_Reference",    "See SCHEMA_REFERENCE tab for column-by-column definitions, types, and fill sources."],
     ["Last_Repair_TS",      new Date().toISOString()],

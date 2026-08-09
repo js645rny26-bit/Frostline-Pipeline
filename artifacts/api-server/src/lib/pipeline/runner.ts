@@ -38,6 +38,10 @@ import { runRegressionReport, type RegressionReportResult } from "./module15_reg
 import { runStarterAudit, type StarterAuditResult } from "./module16_starterAudit.js";
 import { runSurvivalGateReplay, type SurvivalReplayResult } from "./module18_survivalGateReplay.js";
 import { WORKBOOK_ID } from "../sheets/client.js";
+import {
+  repairWorkbookSchemaReference,
+  type RepairSchemaResult,
+} from "../workbook/workbookSetup.js";
 import { logger } from "../../lib/logger.js";
 
 export interface ModuleStatus {
@@ -584,11 +588,13 @@ export interface DailySettlementResult {
   starter_audit_status: StarterAuditResult["status"];
   postmortem_status: PostmortemResult["status"];
   replay_status: SurvivalReplayResult["status"];
+  schema_documentation_status: "success" | "failure";
   settlement: SettlementResult;
   regression: RegressionReportResult;
   starter_audit: StarterAuditResult;
   vehicle_postmortem: PostmortemResult;
   survival_replay: SurvivalReplayResult;
+  schema_documentation: RepairSchemaResult;
   module_statuses: Array<{ module: string; status: string }>;
   /**
    * Block precision: correct_blocks / (correct_blocks + collateral_blocks).
@@ -613,6 +619,7 @@ export interface DailySettlementResult {
  *   3. Module 16 audits the actual starters who appeared.
  *   4. Module 17 grades the frozen vehicle decisions.
  *   5. Module 18 replays the survival gate.
+ *   6. The schema reference and README are synchronized to the runtime schema.
  *
  * The gate hit-rate (correct_blocks / (correct_blocks + collateral_blocks))
  * is logged and returned so operators can track threshold calibration over time.
@@ -727,6 +734,21 @@ export async function runDailySettlement(
     } satisfies SurvivalReplayResult;
   });
 
+  const schema_documentation = await repairWorkbookSchemaReference(workbookId).catch(
+    (err: unknown): RepairSchemaResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`schema_documentation: ${msg}`);
+      return {
+        workbook_id: workbookId,
+        schema_reference_rows: 0,
+        readme_rows: 0,
+        errors: [{ step: "schema_documentation", error: msg }],
+      };
+    },
+  );
+  const schema_documentation_status =
+    schema_documentation.errors.length === 0 ? "success" as const : "failure" as const;
+
   // Derive top-level summary fields from the replay result.
   const gate_denominator    = survival_replay.gate_denominator;
   const gate_hit_rate_pct   = gate_denominator !== null
@@ -743,12 +765,16 @@ export async function runDailySettlement(
     { module: "MODULE_16_STARTER_AUDIT", status: starter_audit.status },
     { module: "MODULE_17_VEHICLE_POSTMORTEM", status: vehicle_postmortem.status },
     { module: "MODULE_18_SURVIVAL_GATE_REPLAY", status: survival_replay.status },
+    { module: "WORKBOOK_SCHEMA_DOCUMENTATION", status: schema_documentation_status },
   ];
   errors.push(...settlement.errors.map((message) => `settlement: ${message}`));
   errors.push(...regression.errors.map((message) => `regression: ${message}`));
   errors.push(...starter_audit.errors.map((message) => `starter_audit: ${message}`));
   errors.push(...vehicle_postmortem.errors.map((message) => `vehicle_postmortem: ${message}`));
   errors.push(...survival_replay.errors.map((message) => `survival_replay: ${message}`));
+  errors.push(...schema_documentation.errors.map(
+    ({ step, error }) => `schema_documentation:${step}: ${error}`,
+  ));
 
   const failedCount = module_statuses.filter((module) => module.status === "failure").length;
   const incompleteCount = module_statuses.filter((module) => module.status !== "success").length;
@@ -766,6 +792,7 @@ export async function runDailySettlement(
       starter_audit_status: starter_audit.status,
       postmortem_status: vehicle_postmortem.status,
       replay_status: survival_replay.status,
+      schema_documentation_status,
       gate_hit_rate_pct,
       gate_denominator,
       passed_losses,
@@ -787,11 +814,13 @@ export async function runDailySettlement(
     starter_audit_status: starter_audit.status,
     postmortem_status: vehicle_postmortem.status,
     replay_status: survival_replay.status,
+    schema_documentation_status,
     settlement,
     regression,
     starter_audit,
     vehicle_postmortem,
     survival_replay,
+    schema_documentation,
     module_statuses,
     gate_hit_rate_pct,
     passed_losses,
