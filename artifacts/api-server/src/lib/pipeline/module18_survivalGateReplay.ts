@@ -80,6 +80,7 @@
 
 import { readRange, writeRange, clearRange, expandSheetColumns, addSheet, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
+import { gradeDirectionalOutcome } from "./module14_settlementGrading.js";
 
 // ─── Constants (must stay in sync with module11 / module09) ──────────────────
 const OVER_BASEBALL_ONLY_EDGE_THRESHOLD  = 1.25;
@@ -240,7 +241,7 @@ export interface SurvivalReplayRow {
   variance: number | null;
   direction: string;
   actual_total: number | null;
-  thesis_correct: boolean | null;
+  thesis_correct: boolean | "PUSH" | null;
   original_decision: string;
   original_blocker: string;
   replayed_decision: ReplayDecision;
@@ -335,6 +336,27 @@ export function pitcherProvenanceFlag(outcome: {
     return "COMPLETE_STARTER_MISMATCH";
   }
   return "COMPLETE_MATCH";
+}
+
+export function gradeReplayThesis(
+  direction: string,
+  marketLine: number | null,
+  actualTotal: number | null,
+): boolean | "PUSH" | null {
+  const outcome = gradeDirectionalOutcome(direction, marketLine, actualTotal);
+  if (outcome === "NOT_EVALUABLE") return null;
+  if (outcome === "PUSH") return "PUSH";
+  return outcome === "WIN";
+}
+
+export function summarizeThesisOutcomes(
+  rows: Array<Pick<SurvivalReplayRow, "thesis_correct">>,
+): { wins: number; losses: number; pushes: number } {
+  return {
+    wins: rows.filter((row) => row.thesis_correct === true).length,
+    losses: rows.filter((row) => row.thesis_correct === false).length,
+    pushes: rows.filter((row) => row.thesis_correct === "PUSH").length,
+  };
 }
 
 /**
@@ -572,11 +594,7 @@ export async function runSurvivalGateReplay(
       : null;
 
     // ── Thesis correctness ─────────────────────────────────────────────────
-    let thesisCorrect: boolean | null = null;
-    if (actual !== null && line !== null && vl.direction !== "NONE") {
-      const diff = actual - line;
-      thesisCorrect = vl.direction === "OVER" ? diff > 0 : diff < 0;
-    }
+    const thesisCorrect = gradeReplayThesis(vl.direction, line, actual);
 
     // ── Determine replayed decision ────────────────────────────────────────
     let replayedDecision: ReplayDecision;
@@ -735,11 +753,13 @@ export async function runSurvivalGateReplay(
     r.replayed_decision === "BLOCKED" && r.replay_blocker !== "PRIOR_GATE",
   );
 
-  const core_thesis_correct = coreRows.filter((r) => r.thesis_correct === true).length;
+  const coreGrades = summarizeThesisOutcomes(coreRows);
+  const blockedGrades = summarizeThesisOutcomes(survivalBlocked);
+  const core_thesis_correct = coreGrades.wins;
   // CORE picks that passed the gate but lost — the gate's missed blocks.
-  const passed_losses       = coreRows.filter((r) => r.thesis_correct === false).length;
-  const correct_blocks      = survivalBlocked.filter((r) => r.thesis_correct === false).length;
-  const collateral_blocks   = survivalBlocked.filter((r) => r.thesis_correct === true).length;
+  const passed_losses       = coreGrades.losses;
+  const correct_blocks      = blockedGrades.losses;
+  const collateral_blocks   = blockedGrades.wins;
 
   // Denominator: only survival-gate-blocked overs with settled outcomes.
   // Null when no settled survival-blocked overs exist (avoids misleading 0% or 100%).
@@ -789,7 +809,9 @@ export async function runSurvivalGateReplay(
         r.variance        ?? "",
         r.direction,
         r.actual_total    ?? "",
-        r.thesis_correct  === null ? "" : r.thesis_correct ? "TRUE" : "FALSE",
+        r.thesis_correct === null ? ""
+          : r.thesis_correct === "PUSH" ? "PUSH"
+          : r.thesis_correct ? "TRUE" : "FALSE",
         r.original_decision,
         r.original_blocker,
         r.replayed_decision,

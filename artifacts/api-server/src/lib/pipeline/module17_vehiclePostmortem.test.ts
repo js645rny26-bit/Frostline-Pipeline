@@ -2,9 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   groupContiguousVehicleLogUpdates,
+  gradeTicket,
   postmortemRowToValues,
   type PostmortemRow,
 } from "./module17_vehiclePostmortem.js";
+
+test("vehicle postmortem preserves Over and Under pushes", () => {
+  assert.deepEqual(gradeTicket("OVER", 9, 9), {
+    thesis_correct: "PUSH",
+    ticket_result: "PUSH",
+  });
+  assert.deepEqual(gradeTicket("UNDER", 9, 9), {
+    thesis_correct: "PUSH",
+    ticket_result: "PUSH",
+  });
+});
 
 test("vehicle log updates are grouped into minimal contiguous writes", () => {
   const updates = new Map<number, unknown[]>([

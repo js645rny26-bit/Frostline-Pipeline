@@ -26,6 +26,7 @@
 
 import { readRange, writeRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
+import { gradeDirectionalOutcome } from "./module14_settlementGrading.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
 
 const VEHICLE_LOG_SHEET  = "VEHICLE_LOG";
@@ -133,28 +134,21 @@ export interface PostmortemResult {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function gradeTicket(
+export function gradeTicket(
   direction: string,
   marketLine: number | null,
   actualTotal: number,
-): { thesis_correct: boolean | null; ticket_result: "COVERED" | "MISSED" | "PUSH" | "NO_BET" } {
-  if (!marketLine || direction === "NONE") {
-    return { thesis_correct: null, ticket_result: "NO_BET" };
-  }
-  const diff = actualTotal - marketLine;
-  const thesis_correct =
-    (direction === "OVER" && diff > 0) ||
-    (direction === "UNDER" && diff < 0);
-
-  let ticket_result: "COVERED" | "MISSED" | "PUSH" | "NO_BET";
-  if (diff === 0) {
-    ticket_result = "PUSH";
-  } else if (direction === "OVER") {
-    ticket_result = diff > 0 ? "COVERED" : "MISSED";
-  } else {
-    ticket_result = diff < 0 ? "COVERED" : "MISSED";
-  }
-  return { thesis_correct, ticket_result };
+): {
+  thesis_correct: boolean | "PUSH" | null;
+  ticket_result: "COVERED" | "MISSED" | "PUSH" | "NO_BET";
+} {
+  const outcome = gradeDirectionalOutcome(direction, marketLine, actualTotal);
+  if (outcome === "NOT_EVALUABLE") return { thesis_correct: null, ticket_result: "NO_BET" };
+  if (outcome === "PUSH") return { thesis_correct: "PUSH", ticket_result: "PUSH" };
+  return {
+    thesis_correct: outcome === "WIN",
+    ticket_result: outcome === "WIN" ? "COVERED" : "MISSED",
+  };
 }
 
 function activeVehicleLabel(away: string, home: string, direction: string, line: number | null): string {
@@ -456,7 +450,9 @@ export async function runPostmortem(
     const decision: PostmortemRow["decision"] = finalDecision === "CORE" ? "BET" : "PASS";
     const truthGrade = thesis_correct === null
       ? "TRUTH_NOT_EVALUABLE"
-      : thesis_correct ? "TRUTH_CONFIRMED" : "TRUTH_FAILED";
+      : thesis_correct === "PUSH"
+        ? "TRUTH_PUSH"
+        : thesis_correct ? "TRUTH_CONFIRMED" : "TRUTH_FAILED";
     const failureModes = [
       Math.abs(signedError) >= 4 ? "PROJECTION_MISS_4PLUS" : "",
       thesis_correct === false ? "DIRECTION_MISS" : "",
@@ -493,7 +489,9 @@ export async function runPostmortem(
   const coreMissed  = coreGames.filter((r) => r.ticket_result === "MISSED").length;
   const corePush    = coreGames.filter((r) => r.ticket_result === "PUSH").length;
 
-  const thesisObs = graded.filter((r) => r.game_truth_grade !== "TRUTH_NOT_EVALUABLE");
+  const thesisObs = graded.filter((r) =>
+    r.game_truth_grade === "TRUTH_CONFIRMED" || r.game_truth_grade === "TRUTH_FAILED",
+  );
   const thesisCorrectPct = thesisObs.length > 0
     ? parseFloat(
         (thesisObs.filter((r) => r.game_truth_grade === "TRUTH_CONFIRMED").length / thesisObs.length * 100).toFixed(1),

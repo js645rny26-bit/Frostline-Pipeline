@@ -51,7 +51,7 @@
  *      GAME_SUMMARY, PLAYER_INTEGRATION, SLATE_INPUT, and SLATE_BOARD gain explicit
  *      source, component, score, Run_ID, model-version, and read-back audit fields.
  */
-export const WORKBOOK_SCHEMA_VERSION = 17;
+export const WORKBOOK_SCHEMA_VERSION = 18;
 
 export interface ColumnDef {
   name: string;
@@ -1163,7 +1163,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Actual_Total", index: 9, type: "number", width: 100, format: "0", filledBy: "MODULE_17", readOnly: true, exampleValue: "7" },
       { name: "Signed_Error", index: 10, type: "number", width: 100, format: "0.00", filledBy: "MODULE_17", readOnly: true, description: "Frozen packet projection minus actual", exampleValue: "-0.12" },
       { name: "Abs_Error", index: 11, type: "number", width: 90, format: "0.00", filledBy: "MODULE_17", readOnly: true, exampleValue: "0.12" },
-      { name: "Game_Truth_Grade", index: 12, type: "string", width: 175, filledBy: "MODULE_17", readOnly: true, exampleValue: "TRUTH_CONFIRMED" },
+      { name: "Game_Truth_Grade", index: 12, type: "string", width: 175, filledBy: "MODULE_17", readOnly: true, description: "TRUTH_CONFIRMED | TRUTH_FAILED | TRUTH_PUSH | TRUTH_NOT_EVALUABLE", exampleValue: "TRUTH_PUSH" },
       { name: "Vehicle_Capture_Grade", index: 13, type: "string", width: 190, filledBy: "MODULE_17", readOnly: true, exampleValue: "NO_AUTHORIZED_VEHICLE" },
       { name: "Ticket_Result", index: 14, type: "string", width: 145, filledBy: "MODULE_17", readOnly: true, exampleValue: "NO_WAGER_SHADOW" },
       { name: "Blocker_Grade", index: 15, type: "string", width: 160, filledBy: "MODULE_17", readOnly: true, exampleValue: "BLOCKER_RECORDED" },
@@ -1190,7 +1190,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Variance",              index: 8,  type: "number", width: 90,  format: "0.00", filledBy: "MODULE_18", readOnly: true, description: "Projected − Market", exampleValue: "0.97" },
       { name: "Direction",             index: 9,  type: "string", width: 80,  filledBy: "MODULE_18", readOnly: true, exampleValue: "OVER" },
       { name: "Actual_Total",          index: 10, type: "number", width: 90,  format: "0",   filledBy: "MODULE_18", readOnly: true, exampleValue: "2" },
-      { name: "Thesis_Correct",        index: 11, type: "string", width: 110, filledBy: "MODULE_18", readOnly: true, description: "TRUE | FALSE | blank when no outcome yet", exampleValue: "FALSE" },
+      { name: "Thesis_Correct",        index: 11, type: "string", width: 110, filledBy: "MODULE_18", readOnly: true, description: "TRUE | FALSE | PUSH | blank when not evaluable. PUSH is excluded from win/loss and gate-performance denominators.", exampleValue: "PUSH" },
       { name: "Original_Decision",     index: 12, type: "string", width: 110, filledBy: "MODULE_18", readOnly: true, description: "CORE | NO_CORE | PENDING at time of publish", exampleValue: "NO_CORE" },
       { name: "Original_Blocker",      index: 13, type: "string", width: 220, filledBy: "MODULE_18", readOnly: true, exampleValue: "INSUFFICIENT_PROJECTION_SEPARATION" },
       { name: "Replayed_Decision",     index: 14, type: "string", width: 110, filledBy: "MODULE_18", readOnly: true, description: "CORE | BLOCKED | PENDING | NOT_OVER under survival gate", exampleValue: "BLOCKED" },

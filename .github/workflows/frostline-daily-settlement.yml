@@ -227,6 +227,8 @@ jobs:
           const postmortemIds = new Set(postmortem.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
           const replayIds = new Set(replay.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
           const projectionReplayIds = new Set(projectionReplay.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
+          const postmortemByGame = new Map(postmortem.map((row) => [String(row[1] ?? "").trim(), row]));
+          const replayByGame = new Map(replay.map((row) => [String(row[1] ?? "").trim(), row]));
           const expected = endpoint.settlement?.games_found ?? 0;
 
           if (outcomes.length !== expected) failures.push(`SHADOW_OUTCOMES rows: expected ${expected}, received ${outcomes.length}`);
@@ -262,6 +264,21 @@ jobs:
           }
           for (const row of replay) {
             if (!String(row[37] ?? "").trim()) failures.push(`SURVIVAL_GATE_REPLAY provenance flag is missing for ${String(row[1] ?? "unknown")}`);
+          }
+          for (const row of outcomes) {
+            if (String(row[19] ?? "").trim() !== "PUSH") continue;
+            const gameId = String(row[1] ?? "").trim();
+            const postmortemRow = postmortemByGame.get(gameId);
+            const replayRow = replayByGame.get(gameId);
+            if (String(postmortemRow?.[12] ?? "").trim() !== "TRUTH_PUSH") {
+              failures.push(`VEHICLE_POSTMORTEM did not preserve PUSH truth for ${gameId}`);
+            }
+            if (String(postmortemRow?.[16] ?? "").includes("DIRECTION_MISS")) {
+              failures.push(`VEHICLE_POSTMORTEM incorrectly marked PUSH as DIRECTION_MISS for ${gameId}`);
+            }
+            if (String(replayRow?.[11] ?? "").trim() !== "PUSH") {
+              failures.push(`SURVIVAL_GATE_REPLAY did not preserve PUSH for ${gameId}`);
+            }
           }
           if (projectionReplay.length !== expected) failures.push(`PROJECTION_REPLAY rows: expected ${expected}, received ${projectionReplay.length}`);
           if (projectionReplayIds.size !== projectionReplay.length) failures.push("PROJECTION_REPLAY contains duplicate game IDs for the date");
