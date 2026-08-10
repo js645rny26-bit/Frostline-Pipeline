@@ -31,6 +31,8 @@ import type { SettlementRow } from "./module14_shadowSettlement.js";
 
 export const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
 export const DECISION_AUDIT_COLS = 50;
+/** August 10 is the first live slate whose pregame publish includes Module 20. */
+export const DECISION_AUDIT_REQUIRED_FROM_DATE = "2026-08-10";
 
 export const DECISION_AUDIT_HEADER = [
   "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
@@ -173,6 +175,7 @@ export interface DecisionAuditWriteResult {
   rows_frozen: number;
   rows_settled: number;
   duplicates_removed: number;
+  warnings: string[];
   errors: string[];
 }
 
@@ -193,6 +196,17 @@ function padRow(raw: unknown[]): unknown[] {
 
 function rowKey(date: unknown, gameId: unknown): string {
   return `${String(date ?? "")}_${String(gameId ?? "")}`;
+}
+
+export function classifyMissingDecisionAuditRows(
+  date: string,
+  unmatchedKeys: string[],
+): { warnings: string[]; errors: string[] } {
+  if (unmatchedKeys.length === 0) return { warnings: [], errors: [] };
+  const message = `Missing frozen decision-audit rows for ${unmatchedKeys.length} settled game(s): ${unmatchedKeys.join(", ")}`;
+  return date < DECISION_AUDIT_REQUIRED_FROM_DATE
+    ? { warnings: [`LEGACY_PREGAME_AUDIT_GAP: ${message}`], errors: [] }
+    : { warnings: [], errors: [message] };
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -642,6 +656,7 @@ export async function logDecisionAuditPregame(
   options: { workbookId?: string } = {},
 ): Promise<DecisionAuditWriteResult> {
   const workbookId = options.workbookId ?? WORKBOOK_ID;
+  const warnings: string[] = [];
   const errors: string[] = [];
   try {
     await ensureDecisionAuditSheet(workbookId);
@@ -662,7 +677,7 @@ export async function logDecisionAuditPregame(
       status: errors.length === 0 ? "success" : "partial", phase: "pregame", date,
       rows_written: mutation.rowsWritten, rows_updated: mutation.rowsUpdated,
       rows_frozen: mutation.rowsFrozen, rows_settled: 0,
-      duplicates_removed: mutation.duplicatesRemoved, errors,
+      duplicates_removed: mutation.duplicatesRemoved, warnings, errors,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -671,7 +686,7 @@ export async function logDecisionAuditPregame(
     return {
       status: "failure", phase: "pregame", date,
       rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
-      duplicates_removed: 0, errors,
+      duplicates_removed: 0, warnings, errors,
     };
   }
 }
@@ -682,6 +697,7 @@ export async function settleDecisionAuditLog(
   options: { workbookId?: string } = {},
 ): Promise<DecisionAuditWriteResult> {
   const workbookId = options.workbookId ?? WORKBOOK_ID;
+  const warnings: string[] = [];
   const errors: string[] = [];
   try {
     await ensureDecisionAuditSheet(workbookId);
@@ -693,15 +709,18 @@ export async function settleDecisionAuditLog(
       row[DECISION_AUDIT_INDEX.GAME_ID],
     )));
     const unmatched = [...expectedKeys].filter((key) => !existingKeys.has(key));
-    if (unmatched.length > 0) {
-      errors.push(`Missing frozen decision-audit rows for ${unmatched.length} settled game(s): ${unmatched.join(", ")}`);
-    }
+    // Historical slates were published before Module 20 existed. Preserve the
+    // explicit replay gap without breaking their already-valid Module 14-18
+    // settlement chain. August 10 onward remains fail-closed.
+    const missingClassification = classifyMissingDecisionAuditRows(date, unmatched);
+    warnings.push(...missingClassification.warnings);
+    errors.push(...missingClassification.errors);
     await writeAuditRows(workbookId, mutation.rows, existing.length);
     return {
       status: errors.length === 0 ? "success" : "partial", phase: "settlement", date,
       rows_written: 0, rows_updated: mutation.rowsUpdated,
       rows_frozen: 0, rows_settled: mutation.rowsSettled,
-      duplicates_removed: mutation.duplicatesRemoved, errors,
+      duplicates_removed: mutation.duplicatesRemoved, warnings, errors,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -710,7 +729,7 @@ export async function settleDecisionAuditLog(
     return {
       status: "failure", phase: "settlement", date,
       rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
-      duplicates_removed: 0, errors,
+      duplicates_removed: 0, warnings, errors,
     };
   }
 }

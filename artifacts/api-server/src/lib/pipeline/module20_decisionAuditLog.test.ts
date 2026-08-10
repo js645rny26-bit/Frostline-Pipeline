@@ -4,6 +4,8 @@ import {
   DECISION_AUDIT_COLS,
   DECISION_AUDIT_HEADER,
   DECISION_AUDIT_INDEX as C,
+  DECISION_AUDIT_REQUIRED_FROM_DATE,
+  classifyMissingDecisionAuditRows,
   gradeAuditTruth,
   settleDecisionAuditRows,
   upsertDecisionAuditPregameRows,
@@ -217,6 +219,17 @@ test("settlement does not manufacture a missing pregame audit row", () => {
   assert.equal(settled.rows.length, 0);
   assert.equal(settled.rowsSettled, 0);
   assert.equal(settled.rowsUpdated, 0);
+});
+
+test("legacy audit gaps warn while live Module 20 gaps fail closed", () => {
+  assert.equal(DECISION_AUDIT_REQUIRED_FROM_DATE, "2026-08-10");
+  const legacy = classifyMissingDecisionAuditRows("2026-08-09", ["2026-08-09_GAME"]);
+  assert.equal(legacy.errors.length, 0);
+  assert.match(legacy.warnings[0]!, /LEGACY_PREGAME_AUDIT_GAP/);
+
+  const live = classifyMissingDecisionAuditRows("2026-08-10", ["2026-08-10_GAME"]);
+  assert.equal(live.warnings.length, 0);
+  assert.match(live.errors[0]!, /Missing frozen decision-audit rows/);
 });
 
 test("pushes remain neutral in truth, ticket, and authorization grading", () => {

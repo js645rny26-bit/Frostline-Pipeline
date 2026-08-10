@@ -405,7 +405,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, no_core_count: 0, core_auth_status: "DISABLED_MONOTONICITY_NOT_COMPUTED", monotonicity_verdict: null, monotonicity_override_active: false, publication_validation: { status: "FAIL", expected_games: 0, board_games: 0, slate_input_games: 0, active_games: 0, errors: ["Skipped: Module 08 failed"] }, error: "Skipped: Module 08 failed" },
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       module_17: { status: "failure", date, publish_ts: new Date().toISOString(), rows_written: 0, rows_skipped: 0, errors: ["Skipped: Module 08 failed"] },
-      module_20_decision_audit: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, duplicates_removed: 0, errors: ["Skipped: Module 08 failed"] },
+      module_20_decision_audit: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, duplicates_removed: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
     };
@@ -550,7 +550,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     return {
       status: "failure", phase: "pregame", date,
       rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
-      duplicates_removed: 0, errors: [msg],
+      duplicates_removed: 0, warnings: [], errors: [msg],
     };
   });
   if (mod20.status !== "success") {
@@ -709,7 +709,7 @@ export async function runDailySettlement(
       return {
         status: "failure", phase: "settlement", date,
         rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
-        duplicates_removed: 0, errors: [msg],
+        duplicates_removed: 0, warnings: [], errors: [msg],
       };
     },
   );
