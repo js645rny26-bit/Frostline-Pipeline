@@ -49,6 +49,8 @@ test("frozen projection replay serializes the packet projection, not repaired pr
     away_team: "OAK",
     home_team: "BOS",
     repaired_projected_total: 9.29,
+    actual_away_runs: 8,
+    actual_home_runs: 6,
     actual_total: 14,
     error: -4.71,
     abs_error: 4.71,

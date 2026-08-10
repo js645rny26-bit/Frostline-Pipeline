@@ -76,6 +76,10 @@ export interface SettlementRow {
   away_team: string;
   home_team: string;
   repaired_projected_total: number;
+  /** Official final away score. Used by DECISION_AUDIT_LOG allocation grading. */
+  actual_away_runs: number;
+  /** Official final home score. Used by DECISION_AUDIT_LOG allocation grading. */
+  actual_home_runs: number;
   actual_total: number;
   error: number;
   abs_error: number;
@@ -132,6 +136,8 @@ interface MlbGame {
 
 interface FinalGame {
   game_pk: number;
+  actual_away_runs: number;
+  actual_home_runs: number;
   actual_total: number;
   provenance: GamePitcherProvenance;
 }
@@ -174,7 +180,13 @@ async function fetchFinalGames(date: string, warnings: string[]): Promise<Map<st
     `${MLB_API}/schedule?sportId=1&date=${date}&gameType=R&hydrate=linescore`,
   ) as { dates?: Array<{ games?: MlbGame[] }> };
 
-  const finals: Array<{ key: string; game_pk: number; actual_total: number }> = [];
+  const finals: Array<{
+    key: string;
+    game_pk: number;
+    actual_away_runs: number;
+    actual_home_runs: number;
+    actual_total: number;
+  }> = [];
   for (const day of schedule.dates ?? []) {
     for (const game of day.games ?? []) {
       if (game.status?.abstractGameState !== "Final") continue;
@@ -183,7 +195,13 @@ async function fetchFinalGames(date: string, warnings: string[]): Promise<Map<st
       const away = teamNameToAbbr(game.teams?.away?.team?.name ?? "");
       const home = teamNameToAbbr(game.teams?.home?.team?.name ?? "");
       if (awayScore === undefined || homeScore === undefined || !away || !home || !game.gamePk) continue;
-      finals.push({ key: `${away}_${home}`, game_pk: game.gamePk, actual_total: awayScore + homeScore });
+      finals.push({
+        key: `${away}_${home}`,
+        game_pk: game.gamePk,
+        actual_away_runs: awayScore,
+        actual_home_runs: homeScore,
+        actual_total: awayScore + homeScore,
+      });
     }
   }
 
@@ -200,6 +218,8 @@ async function fetchFinalGames(date: string, warnings: string[]): Promise<Map<st
 
   return new Map(resolved.map((game) => [game.key, {
     game_pk: game.game_pk,
+    actual_away_runs: game.actual_away_runs,
+    actual_home_runs: game.actual_home_runs,
     actual_total: game.actual_total,
     provenance: game.provenance,
   }]));
@@ -454,6 +474,8 @@ export async function runShadowSettlement(
       away_team: history[H_AWAY] ?? "",
       home_team: history[H_HOME] ?? "",
       repaired_projected_total: projection,
+      actual_away_runs: final.actual_away_runs,
+      actual_home_runs: final.actual_home_runs,
       actual_total: final.actual_total,
       error,
       abs_error: Number.parseFloat(Math.abs(error).toFixed(2)),

@@ -50,8 +50,11 @@
  *      mirrored across DAILY_MATCHUPS, RUN_ENVIRONMENT, and GAME_SUMMARY;
  *      GAME_SUMMARY, PLAYER_INTEGRATION, SLATE_INPUT, and SLATE_BOARD gain explicit
  *      source, component, score, Run_ID, model-version, and read-back audit fields.
+ *  v19 (2026-08-09): DECISION_AUDIT_LOG required two-phase ledger. Pregame model,
+ *      manual-overlay, and authorization fields freeze at board lock; settlement
+ *      appends actuals and independent grading without rewriting pregame reasoning.
  */
-export const WORKBOOK_SCHEMA_VERSION = 18;
+export const WORKBOOK_SCHEMA_VERSION = 19;
 
 export interface ColumnDef {
   name: string;
@@ -62,7 +65,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -1170,6 +1173,65 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Failure_Modes", index: 16, type: "string", width: 240, filledBy: "MODULE_17", readOnly: true, exampleValue: "DIRECTION_MISS" },
       { name: "Exact_Blocker", index: 17, type: "string", width: 280, filledBy: "MODULE_17", readOnly: true, exampleValue: "INSUFFICIENT_PROJECTION_SEPARATION" },
       { name: "Graded_TS", index: 18, type: "string", width: 200, filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-25T08:30:00.000Z" },
+    ],
+  },
+
+  {
+    name: "DECISION_AUDIT_LOG",
+    description: "Required two-phase decision-learning ledger. Module20 freezes model, manual-overlay, and authorization evidence at board lock, then appends settlement grading without rewriting pregame reasoning. Idempotent by Date + Game_ID.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date", index: 0, type: "string", width: 95, filledBy: "MODULE_20", readOnly: true, exampleValue: "2026-08-09" },
+      { name: "Game_ID", index: 1, type: "string", width: 180, filledBy: "MODULE_20", readOnly: true, exampleValue: "20260809_CIN_WSN" },
+      { name: "Away_Team", index: 2, type: "string", width: 85, filledBy: "MODULE_20", readOnly: true, exampleValue: "CIN" },
+      { name: "Home_Team", index: 3, type: "string", width: 85, filledBy: "MODULE_20", readOnly: true, exampleValue: "WSN" },
+      { name: "Scheduled_First_Pitch", index: 4, type: "string", width: 195, filledBy: "MODULE_20", readOnly: true, exampleValue: "2026-08-09T17:35:00.000Z" },
+      { name: "Run_ID", index: 5, type: "string", width: 210, filledBy: "MODULE_20", readOnly: true, exampleValue: "20260809_CIN_WSN_run" },
+      { name: "Model_Version", index: 6, type: "string", width: 150, filledBy: "MODULE_20", readOnly: true, exampleValue: "DA-1.1.0" },
+      { name: "Audit_Status", index: 7, type: "string", width: 105, filledBy: "MODULE_20", readOnly: true, description: "OPEN before board lock; FROZEN after lock. Settlement fields are identified by Settlement_TS and Graded_TS.", exampleValue: "FROZEN" },
+      { name: "Frozen_Projected_Away_Runs", index: 8, type: "number", width: 190, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "4.70" },
+      { name: "Frozen_Projected_Home_Runs", index: 9, type: "number", width: 190, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "4.30" },
+      { name: "Frozen_Projected_Total", index: 10, type: "number", width: 165, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "9.00" },
+      { name: "Frozen_Market_Line", index: 11, type: "number", width: 145, format: "0.0", filledBy: "MODULE_20", readOnly: true, exampleValue: "8.5" },
+      { name: "Frozen_Model_Direction", index: 12, type: "string", width: 165, filledBy: "MODULE_20", readOnly: true, exampleValue: "OVER" },
+      { name: "Frozen_Model_Vehicle", index: 13, type: "string", width: 165, filledBy: "MODULE_20", readOnly: true, exampleValue: "GAME_TOTAL" },
+      { name: "Frozen_Model_Confidence", index: 14, type: "number", width: 175, format: "0", filledBy: "MODULE_20", readOnly: true, description: "Independent integer from 1 to 10.", exampleValue: "7" },
+      { name: "Frozen_Model_Blocker", index: 15, type: "string", width: 250, filledBy: "MODULE_20", readOnly: true, exampleValue: "INSUFFICIENT_PROJECTION_SEPARATION" },
+      { name: "Frozen_Model_TS", index: 16, type: "string", width: 195, filledBy: "MODULE_20", readOnly: true, exampleValue: "2026-08-09T15:00:00.000Z" },
+      { name: "Manual_Game_Truth", index: 17, type: "string", width: 190, filledBy: "OPERATOR", description: "Pregame manual truth statement; include OVER or UNDER when directional grading is intended.", exampleValue: "UNDER suppression" },
+      { name: "Manual_Away_Run_View", index: 18, type: "number", width: 165, format: "0.00", filledBy: "OPERATOR", exampleValue: "4.00" },
+      { name: "Manual_Home_Run_View", index: 19, type: "number", width: 165, format: "0.00", filledBy: "OPERATOR", exampleValue: "3.50" },
+      { name: "Manual_Total_View", index: 20, type: "number", width: 145, format: "0.00", filledBy: "OPERATOR", exampleValue: "7.50" },
+      { name: "Manual_Preferred_Vehicle", index: 21, type: "string", width: 195, filledBy: "OPERATOR", exampleValue: "FULL_GAME_UNDER" },
+      { name: "Manual_Allocation_Disagreement", index: 22, type: "string", width: 215, filledBy: "OPERATOR", exampleValue: "YES" },
+      { name: "Manual_Disagreement_Reason", index: 23, type: "string", width: 300, filledBy: "OPERATOR", exampleValue: "Model allocates too many runs to home offense" },
+      { name: "Manual_Confidence", index: 24, type: "number", width: 135, format: "0", filledBy: "OPERATOR", description: "Independent integer from 1 to 10.", exampleValue: "8" },
+      { name: "Statcast_Preview_Available", index: 25, type: "string", width: 190, filledBy: "MODULE_20", exampleValue: "AVAILABLE" },
+      { name: "Manual_Overlay_TS", index: 26, type: "string", width: 195, filledBy: "OPERATOR", exampleValue: "2026-08-09T15:10:00.000Z" },
+      { name: "Final_Reasoning_Source", index: 27, type: "string", width: 220, filledBy: "OPERATOR", description: "MODEL | MANUAL | MODEL_MANUAL_AGREEMENT | MODEL_WITH_MANUAL_DOWNGRADE | MANUAL_OVERRIDE | SPLIT_DECISION | UNRESOLVED", exampleValue: "MODEL_MANUAL_AGREEMENT" },
+      { name: "Final_Vehicle", index: 28, type: "string", width: 175, filledBy: "OPERATOR", exampleValue: "GAME_TOTAL" },
+      { name: "Final_Decision", index: 29, type: "string", width: 120, filledBy: "OPERATOR", description: "CORE | NO CORE", exampleValue: "NO CORE" },
+      { name: "Final_Authorization_Confidence", index: 30, type: "number", width: 215, format: "0", filledBy: "OPERATOR", description: "Independent integer from 1 to 10; never averaged from model and manual confidence.", exampleValue: "5" },
+      { name: "Final_Blocker", index: 31, type: "string", width: 260, filledBy: "OPERATOR", exampleValue: "UNRESOLVED_STARTER" },
+      { name: "Final_Decision_Notes", index: 32, type: "string", width: 300, filledBy: "OPERATOR", exampleValue: "Manual contradiction lowers authorization confidence" },
+      { name: "Final_Decision_TS", index: 33, type: "string", width: 195, filledBy: "OPERATOR", exampleValue: "2026-08-09T15:15:00.000Z" },
+      { name: "Actual_Away_Runs", index: 34, type: "number", width: 135, format: "0", filledBy: "MODULE_20", readOnly: true, exampleValue: "6" },
+      { name: "Actual_Home_Runs", index: 35, type: "number", width: 135, format: "0", filledBy: "MODULE_20", readOnly: true, exampleValue: "4" },
+      { name: "Actual_Total", index: 36, type: "number", width: 105, format: "0", filledBy: "MODULE_20", readOnly: true, exampleValue: "10" },
+      { name: "Ticket_Result", index: 37, type: "string", width: 125, filledBy: "MODULE_20", readOnly: true, description: "WIN | LOSS | PUSH | NO_WAGER | PENDING", exampleValue: "NO_WAGER" },
+      { name: "Settlement_TS", index: 38, type: "string", width: 195, filledBy: "MODULE_20", readOnly: true, exampleValue: "2026-08-10T03:00:00.000Z" },
+      { name: "Model_Truth_Grade", index: 39, type: "string", width: 160, filledBy: "MODULE_20", readOnly: true, exampleValue: "CORRECT" },
+      { name: "Manual_Truth_Grade", index: 40, type: "string", width: 165, filledBy: "MODULE_20", readOnly: true, exampleValue: "INCORRECT" },
+      { name: "Model_Allocation_Error", index: 41, type: "number", width: 175, format: "0.00", filledBy: "MODULE_20", readOnly: true, description: "Absolute away-run error plus absolute home-run error.", exampleValue: "2.00" },
+      { name: "Manual_Allocation_Error", index: 42, type: "number", width: 180, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "3.00" },
+      { name: "Allocation_Winner", index: 43, type: "string", width: 155, filledBy: "MODULE_20", readOnly: true, description: "MODEL | MANUAL | TIE | BOTH_WRONG | NOT_COMPARABLE", exampleValue: "MODEL" },
+      { name: "Vehicle_Capture_Grade", index: 44, type: "string", width: 190, filledBy: "MODULE_20", readOnly: true, exampleValue: "NO_AUTHORIZED_VEHICLE" },
+      { name: "Authorization_Grade", index: 45, type: "string", width: 190, filledBy: "MODULE_20", readOnly: true, description: "Pregame decision-quality grade; a passed winner is not automatically QUESTIONABLE_PASS.", exampleValue: "CORRECT_PASS" },
+      { name: "Outcome_Tag", index: 46, type: "string", width: 155, filledBy: "MODULE_20", readOnly: true, exampleValue: "MODEL_CORRECT" },
+      { name: "Failure_or_Survival_Mechanism", index: 47, type: "string", width: 270, filledBy: "MODULE_20", readOnly: true, exampleValue: "RECORDED_BLOCKER_PRESERVED_PASS" },
+      { name: "One_Sentence_Lesson", index: 48, type: "string", width: 380, filledBy: "MODULE_20", readOnly: true, exampleValue: "The pregame blocker governed the pass; the result alone does not invalidate it." },
+      { name: "Graded_TS", index: 49, type: "string", width: 195, filledBy: "MODULE_20", readOnly: true, exampleValue: "2026-08-10T03:05:00.000Z" },
     ],
   },
 

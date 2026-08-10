@@ -37,6 +37,11 @@ import { runShadowSettlement, type SettlementResult } from "./module14_shadowSet
 import { runRegressionReport, type RegressionReportResult } from "./module15_regressionReport.js";
 import { runStarterAudit, type StarterAuditResult } from "./module16_starterAudit.js";
 import { runSurvivalGateReplay, type SurvivalReplayResult } from "./module18_survivalGateReplay.js";
+import {
+  logDecisionAuditPregame,
+  settleDecisionAuditLog,
+  type DecisionAuditWriteResult,
+} from "./module20_decisionAuditLog.js";
 import { WORKBOOK_ID } from "../sheets/client.js";
 import {
   repairWorkbookSchemaReference,
@@ -214,6 +219,8 @@ export interface PublishResult {
   module_12: Module12Result;
   /** Module 17: Vehicle log — rows written for this publish run */
   module_17: VehicleLogResult;
+  /** Module 20: immutable pregame decision-audit snapshot. */
+  module_20_decision_audit: DecisionAuditWriteResult;
   workbook_url: string;
   errors: Array<{ module: string; error: string; timestamp: string }>;
 }
@@ -398,6 +405,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, no_core_count: 0, core_auth_status: "DISABLED_MONOTONICITY_NOT_COMPUTED", monotonicity_verdict: null, monotonicity_override_active: false, publication_validation: { status: "FAIL", expected_games: 0, board_games: 0, slate_input_games: 0, active_games: 0, errors: ["Skipped: Module 08 failed"] }, error: "Skipped: Module 08 failed" },
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       module_17: { status: "failure", date, publish_ts: new Date().toISOString(), rows_written: 0, rows_skipped: 0, errors: ["Skipped: Module 08 failed"] },
+      module_20_decision_audit: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, duplicates_removed: 0, errors: ["Skipped: Module 08 failed"] },
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
     };
@@ -527,6 +535,32 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     },
   );
 
+  // Module 20 (pregame): required decision-learning ledger. It observes the
+  // already-computed model/board state and never feeds back into projections,
+  // gates, board decisions, or lock state.
+  const mod20 = await logDecisionAuditPregame(
+    date,
+    mod11.slate_board,
+    mod09.game_summary_rows,
+    normalized.games,
+    previewFetchResult,
+    { workbookId },
+  ).catch((err: unknown): DecisionAuditWriteResult => {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      status: "failure", phase: "pregame", date,
+      rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
+      duplicates_removed: 0, errors: [msg],
+    };
+  });
+  if (mod20.status !== "success") {
+    allErrors.push({
+      module: "20_decision_audit_pregame",
+      error: mod20.errors.join("; ") || "Decision audit pregame write failed",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // Overall status before archival (so we can write it into the run log row).
   // mod08 "failure" case is already handled by the early return above;
   // at this point mod08.status is "success" | "partial_failure".
@@ -541,7 +575,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   const overallStatus =
     mod10.status === "failure"
       ? "failure"
-      : mod09.status === "error" || mod11.status === "failure" || mod11.slate_board.length === 0
+      : mod09.status === "error" || mod11.status === "failure" || mod11.slate_board.length === 0 || mod20.status !== "success"
         ? "partial_success"
         : mod08.status === "partial_failure"
           ? "partial_success"
@@ -572,6 +606,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_11: mod11,
     module_12: mod12,
     module_17: mod17,
+    module_20_decision_audit: mod20,
     workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
     errors: allErrors,
   };
@@ -588,12 +623,14 @@ export interface DailySettlementResult {
   starter_audit_status: StarterAuditResult["status"];
   postmortem_status: PostmortemResult["status"];
   replay_status: SurvivalReplayResult["status"];
+  decision_audit_status: DecisionAuditWriteResult["status"];
   schema_documentation_status: "success" | "failure";
   settlement: SettlementResult;
   regression: RegressionReportResult;
   starter_audit: StarterAuditResult;
   vehicle_postmortem: PostmortemResult;
   survival_replay: SurvivalReplayResult;
+  decision_audit: DecisionAuditWriteResult;
   schema_documentation: RepairSchemaResult;
   module_statuses: Array<{ module: string; status: string }>;
   /**
@@ -615,11 +652,12 @@ export interface DailySettlementResult {
 /**
  * Runs the end-of-day settlement feedback loop for a given date:
  *   1. Module 14 records final scores and actual pitching provenance.
- *   2. Module 15 refreshes regression and calibration output.
- *   3. Module 16 audits the actual starters who appeared.
- *   4. Module 17 grades the frozen vehicle decisions.
- *   5. Module 18 replays the survival gate.
- *   6. The schema reference and README are synchronized to the runtime schema.
+ *   2. Module 20 appends actuals and grades the frozen reasoning ledger.
+ *   3. Module 15 refreshes regression and calibration output.
+ *   4. Module 16 audits the actual starters who appeared.
+ *   5. Module 17 grades the frozen vehicle decisions.
+ *   6. Module 18 replays the survival gate.
+ *   7. The schema reference and README are synchronized to the runtime schema.
  *
  * The gate hit-rate (correct_blocks / (correct_blocks + collateral_blocks))
  * is logged and returned so operators can track threshold calibration over time.
@@ -663,6 +701,18 @@ export async function runDailySettlement(
       "Daily settlement: Module 14 complete",
     );
   }
+
+  const decision_audit = await settleDecisionAuditLog(date, settlement.rows, { workbookId }).catch(
+    (err: unknown): DecisionAuditWriteResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`decision_audit: ${msg}`);
+      return {
+        status: "failure", phase: "settlement", date,
+        rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
+        duplicates_removed: 0, errors: [msg],
+      };
+    },
+  );
 
   // Steps 2-4 consume the outcome snapshot and write their audit sheets.
   const regression = await runRegressionReport({ workbookId, writeSheets: true }).catch(
@@ -765,6 +815,7 @@ export async function runDailySettlement(
     { module: "MODULE_16_STARTER_AUDIT", status: starter_audit.status },
     { module: "MODULE_17_VEHICLE_POSTMORTEM", status: vehicle_postmortem.status },
     { module: "MODULE_18_SURVIVAL_GATE_REPLAY", status: survival_replay.status },
+    { module: "MODULE_20_DECISION_AUDIT_SETTLEMENT", status: decision_audit.status },
     { module: "WORKBOOK_SCHEMA_DOCUMENTATION", status: schema_documentation_status },
   ];
   errors.push(...settlement.errors.map((message) => `settlement: ${message}`));
@@ -772,6 +823,7 @@ export async function runDailySettlement(
   errors.push(...starter_audit.errors.map((message) => `starter_audit: ${message}`));
   errors.push(...vehicle_postmortem.errors.map((message) => `vehicle_postmortem: ${message}`));
   errors.push(...survival_replay.errors.map((message) => `survival_replay: ${message}`));
+  errors.push(...decision_audit.errors.map((message) => `decision_audit: ${message}`));
   errors.push(...schema_documentation.errors.map(
     ({ step, error }) => `schema_documentation:${step}: ${error}`,
   ));
@@ -792,6 +844,7 @@ export async function runDailySettlement(
       starter_audit_status: starter_audit.status,
       postmortem_status: vehicle_postmortem.status,
       replay_status: survival_replay.status,
+      decision_audit_status: decision_audit.status,
       schema_documentation_status,
       gate_hit_rate_pct,
       gate_denominator,
@@ -814,12 +867,14 @@ export async function runDailySettlement(
     starter_audit_status: starter_audit.status,
     postmortem_status: vehicle_postmortem.status,
     replay_status: survival_replay.status,
+    decision_audit_status: decision_audit.status,
     schema_documentation_status,
     settlement,
     regression,
     starter_audit,
     vehicle_postmortem,
     survival_replay,
+    decision_audit,
     schema_documentation,
     module_statuses,
     gate_hit_rate_pct,
