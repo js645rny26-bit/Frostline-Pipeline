@@ -91,22 +91,107 @@ class GoogleSheetsTransport implements SheetsTransport {
   readonly kind = "google" as const;
 
   async request(api: ApiKind, path: string, options: RequestOptions = {}): Promise<unknown> {
-    const token = await googleAccessToken();
-    const origin = api === "sheets" ? "https://sheets.googleapis.com" : "https://www.googleapis.com";
-    const response = await fetch(`${origin}${path}`, {
-      method: options.method ?? "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(options.body !== undefined && !options.rawBody ? { "Content-Type": "application/json" } : {}),
-        ...options.headers,
-      },
-      ...(options.body !== undefined
-        ? { body: options.rawBody ? String(options.body) : JSON.stringify(options.body) }
-        : {}),
-    });
-    if (!response.ok) throw new Error(`Google ${api} API ${response.status} on ${path}: ${await response.text()}`);
-    return response.json();
+    const method = options.method ?? "GET";
+    const isSheetsWrite = api === "sheets" && method !== "GET" && method !== "HEAD";
+    const maxAttempts = isSheetsWrite ? googleSheets429MaxAttempts() : 1;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (isSheetsWrite) await waitForGoogleSheetsWriteSlot();
+
+      const token = await googleAccessToken();
+      const origin = api === "sheets" ? "https://sheets.googleapis.com" : "https://www.googleapis.com";
+      const response = await fetch(`${origin}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(options.body !== undefined && !options.rawBody ? { "Content-Type": "application/json" } : {}),
+          ...options.headers,
+        },
+        ...(options.body !== undefined
+          ? { body: options.rawBody ? String(options.body) : JSON.stringify(options.body) }
+          : {}),
+      });
+
+      if (response.ok) return response.json();
+
+      if (response.status === 429 && attempt < maxAttempts) {
+        await sleep(googleSheets429RetryDelayMs(response.headers));
+        continue;
+      }
+
+      throw new Error(`Google ${api} API ${response.status} on ${path}: ${await response.text()}`);
+    }
+
+    throw new Error(`Google ${api} API request exhausted retries on ${path}`);
   }
+}
+
+const DEFAULT_GOOGLE_SHEETS_WRITE_INTERVAL_MS = 1_100;
+const DEFAULT_GOOGLE_SHEETS_429_RETRY_MS = 60_000;
+const DEFAULT_GOOGLE_SHEETS_429_MAX_ATTEMPTS = 3;
+
+let googleSheetsWriteQueue: Promise<void> = Promise.resolve();
+let nextGoogleSheetsWriteAt = 0;
+
+function nonNegativeInteger(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = nonNegativeInteger(value, fallback);
+  return parsed > 0 ? parsed : fallback;
+}
+
+function googleSheetsWriteIntervalMs(): number {
+  return nonNegativeInteger(
+    process.env.FROSTLINE_GOOGLE_SHEETS_WRITE_INTERVAL_MS,
+    DEFAULT_GOOGLE_SHEETS_WRITE_INTERVAL_MS,
+  );
+}
+
+function googleSheets429MaxAttempts(): number {
+  return positiveInteger(
+    process.env.FROSTLINE_GOOGLE_SHEETS_429_MAX_ATTEMPTS,
+    DEFAULT_GOOGLE_SHEETS_429_MAX_ATTEMPTS,
+  );
+}
+
+function googleSheets429RetryDelayMs(headers: Headers): number {
+  const retryAfter = headers.get("retry-after")?.trim();
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1_000);
+
+    const retryDate = Date.parse(retryAfter);
+    if (Number.isFinite(retryDate)) return Math.max(0, retryDate - Date.now());
+  }
+  return nonNegativeInteger(
+    process.env.FROSTLINE_GOOGLE_SHEETS_429_RETRY_MS,
+    DEFAULT_GOOGLE_SHEETS_429_RETRY_MS,
+  );
+}
+
+async function waitForGoogleSheetsWriteSlot(): Promise<void> {
+  const prior = googleSheetsWriteQueue;
+  let release!: () => void;
+  googleSheetsWriteQueue = new Promise<void>((resolve) => { release = resolve; });
+
+  await prior;
+  try {
+    const now = Date.now();
+    const scheduledAt = Math.max(now, nextGoogleSheetsWriteAt);
+    const waitMs = scheduledAt - now;
+    if (waitMs > 0) await sleep(waitMs);
+    nextGoogleSheetsWriteAt = Date.now() + googleSheetsWriteIntervalMs();
+  } finally {
+    release();
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
 
 const GOOGLE_SCOPES = [
@@ -172,6 +257,8 @@ function transport(): SheetsTransport {
 /** Test-only reset; production transport is selected once per process. */
 export function resetSheetsTransportForTest(): void {
   cachedTransport = undefined;
+  googleSheetsWriteQueue = Promise.resolve();
+  nextGoogleSheetsWriteAt = 0;
 }
 
 async function sheetsRequest(path: string, options?: RequestOptions): Promise<unknown> {
