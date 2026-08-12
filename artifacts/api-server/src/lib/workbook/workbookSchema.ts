@@ -53,8 +53,11 @@
  *  v19 (2026-08-09): DECISION_AUDIT_LOG required two-phase ledger. Pregame model,
  *      manual-overlay, and authorization fields freeze at board lock; settlement
  *      appends actuals and independent grading without rewriting pregame reasoning.
+ *  v20 (2026-08-12): Prospective lifecycle firewall, immutable publication,
+ *      single-source authorization, audit-gap state, truthful lifecycle timestamps,
+ *      and separate total/allocation/margin/winner settlement measurements.
  */
-export const WORKBOOK_SCHEMA_VERSION = 19;
+export const WORKBOOK_SCHEMA_VERSION = 20;
 
 export interface ColumnDef {
   name: string;
@@ -1189,7 +1192,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Scheduled_First_Pitch", index: 4, type: "string", width: 195, filledBy: "MODULE_20", readOnly: true, exampleValue: "2026-08-09T17:35:00.000Z" },
       { name: "Run_ID", index: 5, type: "string", width: 210, filledBy: "MODULE_20", readOnly: true, exampleValue: "20260809_CIN_WSN_run" },
       { name: "Model_Version", index: 6, type: "string", width: 150, filledBy: "MODULE_20", readOnly: true, exampleValue: "DA-1.1.0" },
-      { name: "Audit_Status", index: 7, type: "string", width: 105, filledBy: "MODULE_20", readOnly: true, description: "OPEN before board lock; FROZEN after lock. Settlement fields are identified by Settlement_TS and Graded_TS.", exampleValue: "FROZEN" },
+      { name: "Audit_Status", index: 7, type: "string", width: 105, filledBy: "MODULE_20", readOnly: true, description: "OPEN before board lock; FROZEN after a legitimate pregame lock; AUDIT_GAP when first pitch passed without a prospective freeze. Settlement fields are identified by Settlement_TS and Graded_TS.", exampleValue: "FROZEN" },
       { name: "Frozen_Projected_Away_Runs", index: 8, type: "number", width: 190, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "4.70" },
       { name: "Frozen_Projected_Home_Runs", index: 9, type: "number", width: 190, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "4.30" },
       { name: "Frozen_Projected_Total", index: 10, type: "number", width: 165, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "9.00" },
@@ -1232,6 +1235,18 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Failure_or_Survival_Mechanism", index: 47, type: "string", width: 270, filledBy: "MODULE_20", readOnly: true, exampleValue: "RECORDED_BLOCKER_PRESERVED_PASS" },
       { name: "One_Sentence_Lesson", index: 48, type: "string", width: 380, filledBy: "MODULE_20", readOnly: true, exampleValue: "The pregame blocker governed the pass; the result alone does not invalidate it." },
       { name: "Graded_TS", index: 49, type: "string", width: 195, filledBy: "MODULE_20", readOnly: true, exampleValue: "2026-08-10T03:05:00.000Z" },
+      { name: "Model_Total_Error", index: 50, type: "number", width: 150, format: "0.00", filledBy: "MODULE_20", readOnly: true, description: "Frozen model total minus actual total.", exampleValue: "-1.00" },
+      { name: "Manual_Total_Error", index: 51, type: "number", width: 155, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "-0.50" },
+      { name: "Model_Away_Run_Error", index: 52, type: "number", width: 175, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "-1.30" },
+      { name: "Model_Home_Run_Error", index: 53, type: "number", width: 175, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "0.30" },
+      { name: "Manual_Away_Run_Error", index: 54, type: "number", width: 180, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "-1.00" },
+      { name: "Manual_Home_Run_Error", index: 55, type: "number", width: 180, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "0.50" },
+      { name: "Model_Margin_Error", index: 56, type: "number", width: 165, format: "0.00", filledBy: "MODULE_20", readOnly: true, description: "Frozen projected margin minus actual margin.", exampleValue: "-1.60" },
+      { name: "Manual_Margin_Error", index: 57, type: "number", width: 170, format: "0.00", filledBy: "MODULE_20", readOnly: true, exampleValue: "-1.50" },
+      { name: "Actual_Winner", index: 58, type: "string", width: 125, filledBy: "MODULE_20", readOnly: true, description: "AWAY | HOME | TIE.", exampleValue: "AWAY" },
+      { name: "Model_Winner_Result", index: 59, type: "string", width: 165, filledBy: "MODULE_20", readOnly: true, description: "CORRECT | INCORRECT | PUSH | NOT_GRADABLE.", exampleValue: "CORRECT" },
+      { name: "Manual_Winner_Result", index: 60, type: "string", width: 170, filledBy: "MODULE_20", readOnly: true, exampleValue: "INCORRECT" },
+      { name: "Freeze_TS", index: 61, type: "string", width: 195, filledBy: "MODULE_20", readOnly: true, description: "Real timestamp when the coherent pregame snapshot became immutable; distinct from projection generation, decision, publication, and settlement.", exampleValue: "2026-08-11T20:51:25.000Z" },
     ],
   },
 

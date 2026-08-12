@@ -16,6 +16,7 @@ import {
   type PitcherMatchStatus,
   type PitcherProvenanceStatus,
 } from "./module14_pitcherProvenance.js";
+import type { PostmortemEventEvidence } from "./module21_postmortemMechanism.js";
 
 const MLB_API = "https://statsapi.mlb.com/api/v1";
 const HISTORY_SHEET = "SHADOW_HISTORY";
@@ -37,6 +38,7 @@ const H_PARK_SRC = 21;
 
 const O_SETTLEMENT_TS = 11;
 const O_FROZEN_SOURCE = 15;
+export const FROZEN_VEHICLE_REQUIRED_FROM_DATE = "2026-08-10";
 
 export const OUTCOMES_HEADER = [
   "Date", "Game_ID", "Away_Team", "Home_Team",
@@ -108,6 +110,8 @@ export interface SettlementRow {
   away_pitcher_chain: string;
   home_pitcher_chain: string;
   pitcher_provenance_status: PitcherProvenanceStatus;
+  /** Optional audited event evidence. Absence must not be inferred from the final score. */
+  postmortem_event_evidence?: PostmortemEventEvidence;
 }
 
 export interface SettlementResult {
@@ -297,6 +301,18 @@ function frozenAuditValues(
   ];
 }
 
+export function classifyFrozenVehicleGap(
+  date: string,
+  gameId: string,
+  hasFrozenProspectiveState: boolean,
+): { warning?: string; error?: string } {
+  if (hasFrozenProspectiveState) return {};
+  const message = `PREGAME_FREEZE_MISSING/AUDIT_GAP: ${gameId} has no preserved prospective VEHICLE_LOG row`;
+  return date < FROZEN_VEHICLE_REQUIRED_FROM_DATE
+    ? { warning: `LEGACY_${message}` }
+    : { error: message };
+}
+
 /** Migrate either legacy frozen-audit M:V rows or v16 pitcher M:W rows. */
 export function normalizeOutcomeValues(
   raw: unknown[],
@@ -459,29 +475,42 @@ export async function runShadowSettlement(
     }
 
     const existing = existingByGame.get(gameId);
-    const projection = Number.parseFloat(history[H_REPAIRED] ?? "0") || 0;
+    // Once an outcome row exists, preserve every pregame-origin field from that
+    // row. Settlement reruns may refresh actual/provenance fields only.
+    const projection = existing
+      ? numberOrNull(existing.values[4]) ?? 0
+      : Number.parseFloat(history[H_REPAIRED] ?? "0") || 0;
     const error = Number.parseFloat((projection - final.actual_total).toFixed(2));
     const provenance = final.provenance;
-    const awayMatch = comparePitcherNames(history[H_AWAY_PITCHER] ?? "", provenance.away.actual_starter);
-    const homeMatch = comparePitcherNames(history[H_HOME_PITCHER] ?? "", provenance.home.actual_starter);
+    const projectedAwayStarter = String(existing?.values[22] || history[H_AWAY_PITCHER] || "");
+    const projectedHomeStarter = String(existing?.values[23] || history[H_HOME_PITCHER] || "");
+    const awayMatch = comparePitcherNames(projectedAwayStarter, provenance.away.actual_starter);
+    const homeMatch = comparePitcherNames(projectedHomeStarter, provenance.home.actual_starter);
     const combinedStatus = combinedProvenanceStatus(provenance.status, awayMatch, homeMatch);
     if (combinedStatus !== "COMPLETE") provenanceIncomplete++;
     const frozen = frozenAuditValues(projection, final.actual_total, vehiclesByGame.get(gameId), existing?.values);
+    const frozenGap = classifyFrozenVehicleGap(
+      date,
+      gameId,
+      vehiclesByGame.has(gameId) || String(existing?.values[O_FROZEN_SOURCE] ?? "") === "FROZEN_VEHICLE_LOG",
+    );
+    if (frozenGap.warning) warnings.push(frozenGap.warning);
+    if (frozenGap.error) errors.push(frozenGap.error);
 
     const row: SettlementRow = {
-      date: history[H_DATE] ?? date,
+      date: String(existing?.values[0] || history[H_DATE] || date),
       game_id: gameId,
-      away_team: history[H_AWAY] ?? "",
-      home_team: history[H_HOME] ?? "",
+      away_team: String(existing?.values[2] || history[H_AWAY] || ""),
+      home_team: String(existing?.values[3] || history[H_HOME] || ""),
       repaired_projected_total: projection,
       actual_away_runs: final.actual_away_runs,
       actual_home_runs: final.actual_home_runs,
       actual_total: final.actual_total,
       error,
       abs_error: Number.parseFloat(Math.abs(error).toFixed(2)),
-      park_source_status: history[H_PARK_SRC] ?? "",
-      away_offense_source: history[H_AWAY_SRC] ?? "",
-      home_offense_source: history[H_HOME_SRC] ?? "",
+      park_source_status: String(existing?.values[8] || history[H_PARK_SRC] || ""),
+      away_offense_source: String(existing?.values[9] || history[H_AWAY_SRC] || ""),
+      home_offense_source: String(existing?.values[10] || history[H_HOME_SRC] || ""),
       settlement_ts: String(existing?.values[O_SETTLEMENT_TS] || ts),
       frozen_published_total: numberOrNull(frozen[0]),
       frozen_error: numberOrNull(frozen[1]),
@@ -493,8 +522,8 @@ export async function runShadowSettlement(
       frozen_ticket_result: String(frozen[7] ?? ""),
       settlement_ticket_result: String(frozen[8] ?? ""),
       projection_audit_status: String(frozen[9] ?? ""),
-      projected_away_starter: history[H_AWAY_PITCHER] ?? "",
-      projected_home_starter: history[H_HOME_PITCHER] ?? "",
+      projected_away_starter: projectedAwayStarter,
+      projected_home_starter: projectedHomeStarter,
       actual_away_starter: provenance.away.actual_starter,
       actual_home_starter: provenance.home.actual_starter,
       away_starter_match_status: awayMatch,

@@ -1,5 +1,14 @@
 # Frostline Daily SOP
 
+The independent reasoning procedure is governed by [COMMISSIONING_MANUAL_DOCTRINE.md](./COMMISSIONING_MANUAL_DOCTRINE.md). It is a manual operating layer and must not be translated into projection formulas.
+
+## Lifecycle safety
+
+- A prospective publish is allowed only before scheduled first pitch. At or after first pitch, use an explicitly labeled replay or settlement surface.
+- A missing pregame freeze is an `AUDIT_GAP`; it is never reconstructed from current or final information.
+- Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
+- Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
+
 **Schema v2 · updated 2026-07-23 · one page — this is the whole procedure.**
 
 ## Daily sequence (all times ET)

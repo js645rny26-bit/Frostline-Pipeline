@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  FROZEN_VEHICLE_REQUIRED_FROM_DATE,
+  classifyFrozenVehicleGap,
   frozenProjectionReplayValues,
   normalizeOutcomeValues,
   settlementRowToValues,
@@ -8,6 +10,17 @@ import {
 } from "./module14_shadowSettlement.js";
 
 const vehicle = { market_line: 8.5, direction: "OVER", projected_total: 9.11 };
+
+test("settlement fails closed on missing live prospective state without reconstructing it", () => {
+  assert.equal(FROZEN_VEHICLE_REQUIRED_FROM_DATE, "2026-08-10");
+  const live = classifyFrozenVehicleGap("2026-08-10", "20260810_CHC_WSN", false);
+  assert.match(live.error ?? "", /PREGAME_FREEZE_MISSING\/AUDIT_GAP/);
+  assert.equal(live.warning, undefined);
+
+  const legacy = classifyFrozenVehicleGap("2026-08-09", "20260809_CIN_WSN", false);
+  assert.match(legacy.warning ?? "", /LEGACY_PREGAME_FREEZE_MISSING/);
+  assert.equal(legacy.error, undefined);
+});
 
 test("legacy frozen audit columns survive the combined outcome migration", () => {
   const legacy = [

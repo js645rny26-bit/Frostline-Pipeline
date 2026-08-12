@@ -3,9 +3,12 @@ import test from "node:test";
 import {
   groupContiguousVehicleLogUpdates,
   gradeTicket,
+  isFinalizedVehiclePublication,
   postmortemRowToValues,
+  selectNewImmutableVehicleRows,
   type PostmortemRow,
 } from "./module17_vehiclePostmortem.js";
+import type { SlateBoardEntry } from "./module11_outputExtraction.js";
 
 test("vehicle postmortem preserves Over and Under pushes", () => {
   assert.deepEqual(gradeTicket("OVER", 9, 9), {
@@ -42,6 +45,32 @@ test("a full adjacent slate becomes one vehicle-log write group", () => {
   assert.equal(groups.length, 1);
   assert.equal(groups[0]?.start_data_row_index, 120);
   assert.equal(groups[0]?.rows.length, 15);
+});
+
+test("published vehicle rows remain byte-for-byte immutable on later refresh", () => {
+  const published = [[
+    "2026-08-10", "20260810_CHC_WSN", "CHC", "WSN", "GAME_TOTAL", 8.5,
+    "UNDER", 7.9, -0.6, "CORE", "", "BUY", 0.74, "2026-08-10T15:00:00.000Z",
+  ]];
+  const snapshot = structuredClone(published);
+  const laterCalculation = [[
+    "2026-08-10", "20260810_CHC_WSN", "CHC", "WSN", "GAME_TOTAL", 9,
+    "OVER", 11.2, 2.2, "NO_CORE", "LATE_CALCULATION", "LEAN", 0.61,
+    "2026-08-11T03:00:00.000Z",
+  ]];
+  const result = selectNewImmutableVehicleRows(published, laterCalculation);
+  assert.deepEqual(published, snapshot);
+  assert.equal(result.protectedRows, 1);
+  assert.deepEqual(result.newRows, []);
+});
+
+test("only finalized board-lock states can become immutable vehicle publications", () => {
+  const entry = (lock_status: SlateBoardEntry["lock_status"]) => ({ lock_status }) as SlateBoardEntry;
+  assert.equal(isFinalizedVehiclePublication(entry("PRE_LOCK")), false);
+  assert.equal(isFinalizedVehiclePublication(entry("LOCK_TIME_UNAVAILABLE")), false);
+  assert.equal(isFinalizedVehiclePublication(entry("LOCK_DATA_UNAVAILABLE")), false);
+  assert.equal(isFinalizedVehiclePublication(entry("LOCKED_IN")), true);
+  assert.equal(isFinalizedVehiclePublication(entry("LOCKED_OUT")), true);
 });
 
 test("postmortem rows match the current 19-column workbook schema", () => {

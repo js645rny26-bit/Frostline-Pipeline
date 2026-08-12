@@ -82,10 +82,14 @@ function outcome(overrides: Partial<SettlementRow> = {}): SettlementRow {
   };
 }
 
-test("decision audit schema has the exact 50-column contract", () => {
+test("decision audit schema has the exact 62-column contract", () => {
   assert.equal(DECISION_AUDIT_HEADER.length, DECISION_AUDIT_COLS);
+  assert.equal(DECISION_AUDIT_COLS, 62);
   assert.equal(DECISION_AUDIT_HEADER[0], "Date");
   assert.equal(DECISION_AUDIT_HEADER[49], "Graded_TS");
+  assert.equal(DECISION_AUDIT_HEADER[50], "Model_Total_Error");
+  assert.equal(DECISION_AUDIT_HEADER[60], "Manual_Winner_Result");
+  assert.equal(DECISION_AUDIT_HEADER[61], "Freeze_TS");
 });
 
 test("pregame replay is idempotent by Date + Game_ID with zero duplicates", () => {
@@ -125,11 +129,16 @@ test("lock transition freezes the latest model snapshot and preserves manual ove
     projected_total: 9.4,
     projected_away_runs: 5,
     projected_home_runs: 4.4,
+    projection_generated_ts: "2026-08-09T12:55:00.000Z",
+    final_decision_ts: "2026-08-09T12:59:00.000Z",
   })], TS2);
   assert.equal(atLock.rows[0]![C.AUDIT_STATUS], "FROZEN");
   assert.equal(atLock.rows[0]![C.FROZEN_TOTAL], 9.4);
   assert.equal(atLock.rows[0]![C.MANUAL_TRUTH], "UNDER");
   assert.equal(atLock.rows[0]![C.FINAL_REASONING_SOURCE], "SPLIT_DECISION");
+  assert.equal(atLock.rows[0]![C.FINAL_TS], "2026-08-09T12:59:00.000Z");
+  assert.equal(atLock.rows[0]![C.FROZEN_TS], "2026-08-09T12:55:00.000Z");
+  assert.equal(atLock.rows[0]![C.FREEZE_TS], TS2);
 
   const frozenSnapshot = atLock.rows[0]!.slice(0, 34);
   const lateRerun = upsertDecisionAuditPregameRows(atLock.rows, [pregame({
@@ -139,6 +148,78 @@ test("lock transition freezes the latest model snapshot and preserves manual ove
   })], TS3);
   assert.deepEqual(lateRerun.rows[0]!.slice(0, 34), frozenSnapshot);
   assert.equal(lateRerun.rowsFrozen, 1);
+});
+
+test("August 11 CHC-WSN OPEN refresh removes a resolved starter blocker before freeze", () => {
+  const open = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-08-11",
+    game_id: "20260811_CHC_WSN",
+    scheduled_first_pitch: "2026-08-11T22:45:00.000Z",
+    model_decision: "NO_CORE",
+    model_blocker: "UNRESOLVED_STARTER",
+  })], "2026-08-11T15:00:00.000Z");
+  assert.equal(open.rows[0]![C.AUDIT_STATUS], "OPEN");
+  assert.equal(open.rows[0]![C.FINAL_BLOCKER], "UNRESOLVED_STARTER");
+  assert.equal(open.rows[0]![C.FINAL_TS], "");
+
+  const resolved = upsertDecisionAuditPregameRows(open.rows, [pregame({
+    date: "2026-08-11",
+    game_id: "20260811_CHC_WSN",
+    scheduled_first_pitch: "2026-08-11T22:45:00.000Z",
+    model_decision: "CORE",
+    model_blocker: "",
+  })], "2026-08-11T16:00:00.000Z");
+  assert.equal(resolved.rows[0]![C.AUDIT_STATUS], "OPEN");
+  assert.equal(resolved.rows[0]![C.FINAL_DECISION], "CORE");
+  assert.equal(resolved.rows[0]![C.FINAL_BLOCKER], "");
+  assert.equal(resolved.rows[0]![C.FINAL_TS], "");
+
+  const frozen = upsertDecisionAuditPregameRows(resolved.rows, [pregame({
+    date: "2026-08-11",
+    game_id: "20260811_CHC_WSN",
+    scheduled_first_pitch: "2026-08-11T22:45:00.000Z",
+    lock_status: "LOCKED_IN",
+    model_decision: "CORE",
+    model_blocker: "",
+  })], "2026-08-11T20:45:00.000Z");
+  assert.equal(frozen.rows[0]![C.AUDIT_STATUS], "FROZEN");
+  assert.equal(frozen.rows[0]![C.FINAL_BLOCKER], "");
+  assert.equal(frozen.rows[0]![C.FINAL_TS], "2026-08-11T20:45:00.000Z");
+});
+
+test("post-first-pitch rerun records AUDIT_GAP without manufacturing pregame values", () => {
+  const late = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-08-10",
+    game_id: "20260810_CHC_WSN",
+    scheduled_first_pitch: "2026-08-10T22:45:00.000Z",
+    lock_status: "LOCKED_IN",
+  })], "2026-08-11T03:00:00.000Z");
+  const row = late.rows[0]!;
+  assert.equal(late.auditGaps, 1);
+  assert.equal(row[C.AUDIT_STATUS], "AUDIT_GAP");
+  assert.equal(row[C.FROZEN_TOTAL], "");
+  assert.equal(row[C.FROZEN_TS], "");
+  assert.equal(row[C.FREEZE_TS], "");
+  assert.equal(row[C.FINAL_DECISION], "");
+  assert.equal(row[C.FINAL_TS], "");
+
+  const settled = settleDecisionAuditRows(late.rows, [outcome({
+    date: "2026-08-10",
+    game_id: "20260810_CHC_WSN",
+  })], TS3);
+  assert.equal(settled.rows[0]![C.MODEL_TRUTH_GRADE], "NOT_GRADABLE");
+  assert.equal(settled.rows[0]![C.AUTHORIZATION_GRADE], "NOT_GRADABLE");
+  assert.equal(settled.rows[0]![C.MECHANISM], "PREGAME_FREEZE_MISSING");
+});
+
+test("missing first-pitch provenance fails closed as AUDIT_GAP", () => {
+  const result = upsertDecisionAuditPregameRows([], [pregame({
+    scheduled_first_pitch: "",
+  })], TS1);
+  assert.equal(result.auditGaps, 1);
+  assert.equal(result.rows[0]![C.AUDIT_STATUS], "AUDIT_GAP");
+  assert.equal(result.rows[0]![C.FROZEN_TOTAL], "");
+  assert.equal(result.rows[0]![C.FREEZE_TS], "");
 });
 
 test("settlement appends grading without changing any pregame field", () => {
@@ -151,6 +232,13 @@ test("settlement appends grading without changing any pregame field", () => {
   assert.equal(settled.rows[0]![C.ACTUAL_HOME], 4);
   assert.equal(settled.rows[0]![C.TICKET_RESULT], "WIN");
   assert.equal(settled.rows[0]![C.AUTHORIZATION_GRADE], "CORRECT_AUTHORIZE");
+  assert.equal(settled.rows[0]![C.MODEL_TOTAL_ERROR], -1);
+  assert.equal(settled.rows[0]![C.MODEL_AWAY_ERROR], -1.3);
+  assert.equal(settled.rows[0]![C.MODEL_HOME_ERROR], 0.3);
+  assert.equal(settled.rows[0]![C.MODEL_MARGIN_ERROR], -1.6);
+  assert.equal(settled.rows[0]![C.ACTUAL_WINNER], "AWAY");
+  assert.equal(settled.rows[0]![C.MODEL_WINNER_RESULT], "CORRECT");
+  assert.equal(settled.rows[0]![C.MANUAL_WINNER_RESULT], "NOT_GRADABLE");
 });
 
 test("settlement rerun is idempotent and cannot rewrite frozen reasoning", () => {
@@ -193,6 +281,31 @@ test("authorization quality is not rewritten from a losing ticket", () => {
   const row = settled.rows[0]!;
   assert.equal(row[C.TICKET_RESULT], "LOSS");
   assert.equal(row[C.AUTHORIZATION_GRADE], "CORRECT_AUTHORIZE");
+});
+
+test("August 11 CHW-CIN keeps the loss while recording bullpen and extra-inning mechanisms", () => {
+  const pre = upsertDecisionAuditPregameRows([], [pregame({
+    game_id: "20260811_CHW_CIN",
+    date: "2026-08-11",
+    scheduled_first_pitch: "2026-08-11T22:40:00.000Z",
+    lock_status: "LOCKED_IN",
+  })], "2026-08-11T20:30:00.000Z");
+  const settled = settleDecisionAuditRows(pre.rows, [outcome({
+    game_id: "20260811_CHW_CIN",
+    date: "2026-08-11",
+    actual_away_runs: 3,
+    actual_home_runs: 4,
+    actual_total: 7,
+    frozen_ticket_result: "LOSS",
+    settlement_ticket_result: "LOSS",
+    postmortem_event_evidence: {
+      bullpen_bridge_failure: true,
+      extra_inning_state_change: true,
+    },
+  })], "2026-08-12T04:00:00.000Z");
+  const row = settled.rows[0]!;
+  assert.equal(row[C.TICKET_RESULT], "LOSS");
+  assert.equal(row[C.MECHANISM], "EXTRA_INNING_STATE_CHANGE | BULLPEN_BRIDGE_FAILURE");
 });
 
 test("manual override grades the authorized manual direction without rewriting model truth", () => {

@@ -4,10 +4,10 @@
  * Two-phase module that separates thesis accuracy from ticket result:
  *
  *   Phase 1 — logVehicles()
- *     Called during every publish run (from runner.ts) to UPSERT each game's
- *     vehicle selection, market line, projection, and authorization decision
- *     into VEHICLE_LOG. Overwrites existing rows for today (canonical snapshot
- *     = final decision before lock) and appends new ones.
+ *     Called during every publish run (from runner.ts), but writes only games
+ *     whose single-source authorization has finalized at board lock. The first
+ *     finalized prospective Date + Game_ID record is immutable; provisional
+ *     calculations are not misidentified as frozen publications.
  *
  *     Cross-date validation: any slateBoard entry whose game_id date prefix
  *     does not match the `date` parameter is rejected to prevent contamination
@@ -201,6 +201,35 @@ export function groupContiguousVehicleLogUpdates(
   return groups;
 }
 
+export function selectNewImmutableVehicleRows(
+  existingRows: unknown[][],
+  candidateRows: unknown[][],
+): { newRows: unknown[][]; protectedRows: number } {
+  const existingKeys = new Set(existingRows.flatMap((row) => {
+    const rowDate = String(row[L_DATE] ?? "");
+    const gameId = String(row[L_GAME_ID] ?? "");
+    return rowDate && gameId && gameIdDateMatchesDate(gameId, rowDate)
+      ? [`${rowDate}_${gameId}`]
+      : [];
+  }));
+  const newRows: unknown[][] = [];
+  let protectedRows = 0;
+  for (const row of candidateRows) {
+    const key = `${String(row[L_DATE] ?? "")}_${String(row[L_GAME_ID] ?? "")}`;
+    if (existingKeys.has(key)) {
+      protectedRows++;
+      continue;
+    }
+    existingKeys.add(key);
+    newRows.push(row);
+  }
+  return { newRows, protectedRows };
+}
+
+export function isFinalizedVehiclePublication(entry: SlateBoardEntry): boolean {
+  return entry.lock_status === "LOCKED_IN" || entry.lock_status === "LOCKED_OUT";
+}
+
 // ─── Phase 1: log vehicles from a publish run ─────────────────────────────────
 
 export async function logVehicles(
@@ -232,6 +261,8 @@ export async function logVehicles(
     return true;
   });
   const crossDateSkipped = slateBoard.length - validEntries.length;
+  const finalizedEntries = validEntries.filter(isFinalizedVehiclePublication);
+  const provisionalSkipped = validEntries.length - finalizedEntries.length;
 
   // ── Read existing VEHICLE_LOG (full rows for UPSERT) ──────────────────────
   let existingAllRows: unknown[][] = [];
@@ -246,31 +277,10 @@ export async function logVehicles(
 
   const existingDataRows = existingAllRows.slice(1); // exclude header row
 
-  // Build upsert index: (date + game_id) → 0-based index in existingDataRows.
-  // Skip rows that are already cross-date contaminated (game_id date ≠ row date)
-  // so contaminated rows cannot win deduplication.
-  const existingIndex = new Map<string, number>();
-  for (let i = 0; i < existingDataRows.length; i++) {
-    const row       = existingDataRows[i] as unknown[];
-    const rowDate   = String(row[L_DATE]    ?? "");
-    const rowGameId = String(row[L_GAME_ID] ?? "");
-    if (!rowDate || !rowGameId) continue;
-    if (!gameIdDateMatchesDate(rowGameId, rowDate)) {
-      logger.warn(
-        { rowDate, rowGameId },
-        "MODULE_17: Contaminated row in VEHICLE_LOG index — skipping for upsert",
-      );
-      continue;
-    }
-    existingIndex.set(`${rowDate}_${rowGameId}`, i);
-  }
-
   // ── Build update and append lists ──────────────────────────────────────────
-  const rowUpdates = new Map<number, unknown[]>(); // dataRow index → new row data
-  const newRows: unknown[][] = [];
+  const candidateRows: unknown[][] = [];
 
-  for (const e of validEntries) {
-    const key = `${date}_${e.legacy_game_id}`;
+  for (const e of finalizedEntries) {
     const row: unknown[] = [
       date,
       e.legacy_game_id,
@@ -288,12 +298,10 @@ export async function logVehicles(
       ts,
     ];
 
-    if (existingIndex.has(key)) {
-      rowUpdates.set(existingIndex.get(key)!, row);
-    } else {
-      newRows.push(row);
-    }
+    candidateRows.push(row);
   }
+  const immutable = selectNewImmutableVehicleRows(existingDataRows, candidateRows);
+  const newRows = immutable.newRows;
 
   // ── Write ─────────────────────────────────────────────────────────────────
   let rowsWritten = 0;
@@ -305,21 +313,8 @@ export async function logVehicles(
       existingRowCount = 1;
     }
 
-    // In-place updates for existing rows (canonical snapshot = latest decision).
-    // Adjacent rows are written as one range so a full slate does not consume
-    // one Google Sheets write-quota unit per game.
-    for (const group of groupContiguousVehicleLogUpdates(rowUpdates)) {
-      const startSheetRow = group.start_data_row_index + 2; // +1 header, +1 for 1-based rows
-      const endSheetRow = startSheetRow + group.rows.length - 1;
-      await writeRange(
-        wbId,
-        `${VEHICLE_LOG_SHEET}!A${startSheetRow}:N${endSheetRow}`,
-        group.rows,
-      );
-      rowsWritten += group.rows.length;
-    }
-
-    // Append new rows not previously in the log
+    // Append only. Existing prospective rows are immutable evidence and may
+    // never be replaced by a later refresh or postgame calculation.
     if (newRows.length > 0) {
       const startRow = existingRowCount + 1;
       await writeRange(
@@ -331,7 +326,12 @@ export async function logVehicles(
     }
 
     logger.info(
-      { updated: rowUpdates.size, appended: newRows.length, crossDateSkipped },
+      {
+        protected: immutable.protectedRows,
+        appended: newRows.length,
+        crossDateSkipped,
+        provisionalSkipped,
+      },
       "MODULE_17: Vehicle log written",
     );
   } catch (err: unknown) {
@@ -340,7 +340,7 @@ export async function logVehicles(
     logger.error({ err: msg }, "MODULE_17: Vehicle log write failed");
   }
 
-  const rowsSkipped = crossDateSkipped;
+  const rowsSkipped = crossDateSkipped + provisionalSkipped + immutable.protectedRows;
   const status = errors.length === 0 ? "success" : rowsWritten > 0 ? "partial" : "failure";
   return { status, date, publish_ts: ts, rows_written: rowsWritten, rows_skipped: rowsSkipped, errors };
 }

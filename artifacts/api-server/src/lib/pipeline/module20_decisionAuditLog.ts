@@ -28,9 +28,14 @@ import type { SlateBoardEntry } from "./module11_outputExtraction.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 import type { StatcastPreviewResult } from "./module02e_statcastPreview.js";
 import type { SettlementRow } from "./module14_shadowSettlement.js";
+import { isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
+import {
+  classifyPostmortemMechanism,
+  formatPostmortemMechanism,
+} from "./module21_postmortemMechanism.js";
 
 export const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
-export const DECISION_AUDIT_COLS = 50;
+export const DECISION_AUDIT_COLS = 62;
 /** August 10 is the first live slate whose pregame publish includes Module 20. */
 export const DECISION_AUDIT_REQUIRED_FROM_DATE = "2026-08-10";
 
@@ -54,9 +59,15 @@ export const DECISION_AUDIT_HEADER = [
   "Manual_Allocation_Error", "Allocation_Winner", "Vehicle_Capture_Grade",
   "Authorization_Grade",
   "Outcome_Tag", "Failure_or_Survival_Mechanism", "One_Sentence_Lesson", "Graded_TS",
+  "Model_Total_Error", "Manual_Total_Error",
+  "Model_Away_Run_Error", "Model_Home_Run_Error",
+  "Manual_Away_Run_Error", "Manual_Home_Run_Error",
+  "Model_Margin_Error", "Manual_Margin_Error",
+  "Actual_Winner", "Model_Winner_Result", "Manual_Winner_Result",
+  "Freeze_TS",
 ] as const;
 
-export type DecisionAuditStatus = "OPEN" | "FROZEN" | "SETTLED";
+export type DecisionAuditStatus = "OPEN" | "FROZEN" | "SETTLED" | "AUDIT_GAP";
 export type FinalReasoningSource =
   | "MODEL"
   | "MANUAL"
@@ -143,6 +154,18 @@ export const DECISION_AUDIT_INDEX = {
   MECHANISM: 47,
   LESSON: 48,
   GRADED_TS: 49,
+  MODEL_TOTAL_ERROR: 50,
+  MANUAL_TOTAL_ERROR: 51,
+  MODEL_AWAY_ERROR: 52,
+  MODEL_HOME_ERROR: 53,
+  MANUAL_AWAY_ERROR: 54,
+  MANUAL_HOME_ERROR: 55,
+  MODEL_MARGIN_ERROR: 56,
+  MANUAL_MARGIN_ERROR: 57,
+  ACTUAL_WINNER: 58,
+  MODEL_WINNER_RESULT: 59,
+  MANUAL_WINNER_RESULT: 60,
+  FREEZE_TS: 61,
 } as const;
 
 export interface DecisionAuditPregameInput {
@@ -164,6 +187,8 @@ export interface DecisionAuditPregameInput {
   model_blocker: string;
   statcast_preview_available: string;
   model_decision: SlateBoardEntry["final_decision"];
+  projection_generated_ts?: string;
+  final_decision_ts?: string;
 }
 
 export interface DecisionAuditWriteResult {
@@ -175,6 +200,7 @@ export interface DecisionAuditWriteResult {
   rows_frozen: number;
   rows_settled: number;
   duplicates_removed: number;
+  audit_gaps: number;
   warnings: string[];
   errors: string[];
 }
@@ -186,6 +212,7 @@ interface RowMutationResult {
   rowsFrozen: number;
   rowsSettled: number;
   duplicatesRemoved: number;
+  auditGaps: number;
 }
 
 function padRow(raw: unknown[]): unknown[] {
@@ -260,6 +287,29 @@ function allocationError(
 ): number | null {
   if (projectedAway === null || projectedHome === null) return null;
   return round2(Math.abs(projectedAway - actualAway) + Math.abs(projectedHome - actualHome));
+}
+
+function signedError(projected: number | null, actual: number): number | null {
+  return projected === null ? null : round2(projected - actual);
+}
+
+function winner(away: number | null, home: number | null): "AWAY" | "HOME" | "TIE" | "NOT_GRADABLE" {
+  if (away === null || home === null) return "NOT_GRADABLE";
+  if (away === home) return "TIE";
+  return away > home ? "AWAY" : "HOME";
+}
+
+function winnerResult(
+  projectedAway: number | null,
+  projectedHome: number | null,
+  actualAway: number,
+  actualHome: number,
+): "CORRECT" | "INCORRECT" | "PUSH" | "NOT_GRADABLE" {
+  const projectedWinner = winner(projectedAway, projectedHome);
+  const actualWinner = winner(actualAway, actualHome);
+  if (projectedWinner === "NOT_GRADABLE") return "NOT_GRADABLE";
+  if (projectedWinner === "TIE" || actualWinner === "TIE") return "PUSH";
+  return projectedWinner === actualWinner ? "CORRECT" : "INCORRECT";
 }
 
 function chooseAllocationWinner(
@@ -387,6 +437,7 @@ export function upsertDecisionAuditPregameRows(
   let rowsWritten = 0;
   let rowsUpdated = 0;
   let rowsFrozen = 0;
+  let auditGaps = 0;
 
   for (const input of inputs) {
     const key = rowKey(input.date, input.game_id);
@@ -398,6 +449,36 @@ export function upsertDecisionAuditPregameRows(
       continue;
     }
 
+    // A late run may record the absence of a legitimate snapshot, but it may
+    // never manufacture frozen model/final fields after first pitch.
+    const scheduledFirstPitchMs = Date.parse(input.scheduled_first_pitch);
+    const checkedAtMs = Date.parse(ts);
+    const prospectiveWindowClosed = !Number.isFinite(scheduledFirstPitchMs)
+      || !Number.isFinite(checkedAtMs)
+      || isAtOrAfterFirstPitch(input.scheduled_first_pitch, ts);
+    if (prospectiveWindowClosed) {
+      auditGaps++;
+      if (existingStatus === "AUDIT_GAP") continue;
+      if (existing) {
+        const gap = padRow(existing);
+        gap[DECISION_AUDIT_INDEX.AUDIT_STATUS] = "AUDIT_GAP";
+        rows[position!] = gap;
+        rowsUpdated++;
+      } else {
+        const gap = Array(DECISION_AUDIT_COLS).fill("");
+        gap[DECISION_AUDIT_INDEX.DATE] = input.date;
+        gap[DECISION_AUDIT_INDEX.GAME_ID] = input.game_id;
+        gap[DECISION_AUDIT_INDEX.AWAY_TEAM] = input.away_team;
+        gap[DECISION_AUDIT_INDEX.HOME_TEAM] = input.home_team;
+        gap[DECISION_AUDIT_INDEX.SCHEDULED_FIRST_PITCH] = input.scheduled_first_pitch;
+        gap[DECISION_AUDIT_INDEX.AUDIT_STATUS] = "AUDIT_GAP";
+        index.set(key, rows.length);
+        rows.push(gap);
+        rowsWritten++;
+      }
+      continue;
+    }
+
     const isLocked = input.lock_status !== "PRE_LOCK";
     const status: DecisionAuditStatus = isLocked ? "FROZEN" : "OPEN";
     const manual = existing ? existing.slice(17, 27) : ["", "", "", "", "", "", "", "", input.statcast_preview_available, ""];
@@ -406,25 +487,35 @@ export function upsertDecisionAuditPregameRows(
 
     const defaultFinal: unknown[] = [
       "MODEL", input.vehicle, defaultDecision(input.model_decision), confidenceToTen(input.model_confidence),
-      input.model_blocker, "", ts,
+      input.model_blocker, "", status === "FROZEN" ? (input.final_decision_ts || ts) : "",
     ];
-    const final = existing ? existing.slice(27, 34) : defaultFinal;
+    const existingFinal = existing ? existing.slice(27, 34) : [];
+    const existingSource = String(existingFinal[0] ?? "").trim();
+    const modelControlled = !existingSource || existingSource === "MODEL" || existingSource === "UNRESOLVED";
+    const final = modelControlled ? defaultFinal : existingFinal;
     while (final.length < 7) final.push("");
     final[0] = controlledValue(final[0], FINAL_REASONING_SOURCES, "UNRESOLVED");
     final[2] = controlledValue(final[2], FINAL_AUDIT_DECISIONS, defaultDecision(input.model_decision));
     const finalConfidence = numberOrNull(final[3]);
     final[3] = finalConfidence === null ? confidenceToTen(input.model_confidence) : Math.max(1, Math.min(10, Math.round(finalConfidence)));
+    // While OPEN these values are explicitly provisional by Audit_Status and
+    // carry no Final_Decision_TS. Finalization stamps one coherent timestamp.
+    final[6] = status === "FROZEN" ? (input.final_decision_ts || ts) : "";
 
-    const settlement = existing ? existing.slice(34, 50) : Array(16).fill("");
-    while (settlement.length < 16) settlement.push("");
+    const settlement = existing
+      ? existing.slice(34, DECISION_AUDIT_COLS)
+      : Array(DECISION_AUDIT_COLS - 34).fill("");
+    while (settlement.length < DECISION_AUDIT_COLS - 34) settlement.push("");
     const row = [
       input.date, input.game_id, input.away_team, input.home_team, input.scheduled_first_pitch,
       input.run_id, input.model_version, status,
       round2(input.projected_away_runs), round2(input.projected_home_runs), round2(input.projected_total),
       input.market_line ?? "", input.direction, input.vehicle,
-      confidenceToTen(input.model_confidence), input.model_blocker, ts,
+      confidenceToTen(input.model_confidence), input.model_blocker,
+      input.projection_generated_ts || ts,
       ...manual, ...final, ...settlement,
     ].slice(0, DECISION_AUDIT_COLS);
+    row[DECISION_AUDIT_INDEX.FREEZE_TS] = status === "FROZEN" ? ts : "";
 
     if (position === undefined) {
       index.set(key, rows.length);
@@ -439,7 +530,7 @@ export function upsertDecisionAuditPregameRows(
 
   return {
     rows, rowsWritten, rowsUpdated, rowsFrozen, rowsSettled: 0,
-    duplicatesRemoved: deduped.duplicatesRemoved,
+    duplicatesRemoved: deduped.duplicatesRemoved, auditGaps,
   };
 }
 
@@ -455,6 +546,7 @@ export function settleDecisionAuditRows(
   ]));
   let rowsUpdated = 0;
   let rowsSettled = 0;
+  let auditGaps = 0;
 
   for (const outcome of outcomes) {
     const position = index.get(rowKey(outcome.date, outcome.game_id));
@@ -465,36 +557,49 @@ export function settleDecisionAuditRows(
       continue;
     }
 
-    const modelTruth = gradeAuditTruth(
+    const isAuditGap = current[DECISION_AUDIT_INDEX.AUDIT_STATUS] === "AUDIT_GAP";
+    if (isAuditGap) auditGaps++;
+
+    const modelTruth = isAuditGap ? "NOT_GRADABLE" : gradeAuditTruth(
       current[DECISION_AUDIT_INDEX.FROZEN_DIRECTION],
       numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_LINE]),
       outcome.actual_total,
     );
-    const manualTruth = gradeAuditTruth(
+    const manualTruth = isAuditGap ? "NOT_GRADABLE" : gradeAuditTruth(
       manualDirection(current[DECISION_AUDIT_INDEX.MANUAL_TRUTH]),
       numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_LINE]),
       outcome.actual_total,
     );
-    const modelAllocationError = allocationError(
+    const modelAllocationError = isAuditGap ? null : allocationError(
       numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_AWAY]),
       numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_HOME]),
       outcome.actual_away_runs,
       outcome.actual_home_runs,
     );
-    const manualAllocationError = allocationError(
+    const manualAllocationError = isAuditGap ? null : allocationError(
       numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_AWAY]),
       numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_HOME]),
       outcome.actual_away_runs,
       outcome.actual_home_runs,
     );
-    const result = ticketResult(current, outcome.actual_total);
+    const result = isAuditGap ? "NO_WAGER" : ticketResult(current, outcome.actual_total);
     const finalDecision = controlledValue(
       current[DECISION_AUDIT_INDEX.FINAL_DECISION],
       FINAL_AUDIT_DECISIONS,
       "NO CORE",
     );
-    const authorization = gradeAuthorization(current, result);
-    const diagnosis = diagnostic(result, authorization);
+    const authorization = isAuditGap ? "NOT_GRADABLE" : gradeAuthorization(current, result);
+    const evidenceClassification = outcome.postmortem_event_evidence
+      ? classifyPostmortemMechanism(outcome.postmortem_event_evidence)
+      : null;
+    const diagnosis = isAuditGap
+      ? { mechanism: "PREGAME_FREEZE_MISSING", lesson: "AUDIT_GAP: no prospective snapshot existed before first pitch." }
+      : evidenceClassification
+        ? {
+          mechanism: formatPostmortemMechanism(evidenceClassification),
+          lesson: "Mechanism classified from recorded event evidence; ticket and thesis grades remain independent.",
+        }
+      : diagnostic(result, authorization);
 
     current[DECISION_AUDIT_INDEX.ACTUAL_AWAY] = outcome.actual_away_runs;
     current[DECISION_AUDIT_INDEX.ACTUAL_HOME] = outcome.actual_home_runs;
@@ -514,6 +619,29 @@ export function settleDecisionAuditRows(
     current[DECISION_AUDIT_INDEX.MECHANISM] = diagnosis.mechanism;
     current[DECISION_AUDIT_INDEX.LESSON] = diagnosis.lesson;
     current[DECISION_AUDIT_INDEX.GRADED_TS] = ts;
+    const modelAway = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_AWAY]);
+    const modelHome = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_HOME]);
+    const modelTotal = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_TOTAL]);
+    const manualAway = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_AWAY]);
+    const manualHome = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_HOME]);
+    const manualTotal = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_TOTAL]);
+    current[DECISION_AUDIT_INDEX.MODEL_TOTAL_ERROR] = signedError(modelTotal, outcome.actual_total) ?? "";
+    current[DECISION_AUDIT_INDEX.MANUAL_TOTAL_ERROR] = signedError(manualTotal, outcome.actual_total) ?? "";
+    current[DECISION_AUDIT_INDEX.MODEL_AWAY_ERROR] = signedError(modelAway, outcome.actual_away_runs) ?? "";
+    current[DECISION_AUDIT_INDEX.MODEL_HOME_ERROR] = signedError(modelHome, outcome.actual_home_runs) ?? "";
+    current[DECISION_AUDIT_INDEX.MANUAL_AWAY_ERROR] = signedError(manualAway, outcome.actual_away_runs) ?? "";
+    current[DECISION_AUDIT_INDEX.MANUAL_HOME_ERROR] = signedError(manualHome, outcome.actual_home_runs) ?? "";
+    current[DECISION_AUDIT_INDEX.MODEL_MARGIN_ERROR] = modelAway === null || modelHome === null
+      ? "" : round2((modelAway - modelHome) - (outcome.actual_away_runs - outcome.actual_home_runs));
+    current[DECISION_AUDIT_INDEX.MANUAL_MARGIN_ERROR] = manualAway === null || manualHome === null
+      ? "" : round2((manualAway - manualHome) - (outcome.actual_away_runs - outcome.actual_home_runs));
+    current[DECISION_AUDIT_INDEX.ACTUAL_WINNER] = winner(outcome.actual_away_runs, outcome.actual_home_runs);
+    current[DECISION_AUDIT_INDEX.MODEL_WINNER_RESULT] = winnerResult(
+      modelAway, modelHome, outcome.actual_away_runs, outcome.actual_home_runs,
+    );
+    current[DECISION_AUDIT_INDEX.MANUAL_WINNER_RESULT] = winnerResult(
+      manualAway, manualHome, outcome.actual_away_runs, outcome.actual_home_runs,
+    );
     rows[position] = current;
     rowsUpdated++;
     rowsSettled++;
@@ -521,7 +649,7 @@ export function settleDecisionAuditRows(
 
   return {
     rows, rowsWritten: 0, rowsUpdated, rowsFrozen: 0, rowsSettled,
-    duplicatesRemoved: deduped.duplicatesRemoved,
+    duplicatesRemoved: deduped.duplicatesRemoved, auditGaps,
   };
 }
 
@@ -557,6 +685,8 @@ function buildPregameInputs(
       model_blocker: entry.core_blocker,
       statcast_preview_available: previewByGame.get(entry.legacy_game_id) ?? "UNAVAILABLE",
       model_decision: entry.final_decision,
+      projection_generated_ts: entry.projection_generated_ts,
+      final_decision_ts: entry.final_decision_ts,
     } satisfies DecisionAuditPregameInput];
   });
 }
@@ -578,7 +708,7 @@ async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
     const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === DECISION_AUDIT_SHEET);
     const widths = schema?.columns.map((column) => column.width ?? 120) ?? Array(DECISION_AUDIT_COLS).fill(120);
     const validations = [
-      [DECISION_AUDIT_INDEX.AUDIT_STATUS, ["OPEN", "FROZEN", "SETTLED"]],
+      [DECISION_AUDIT_INDEX.AUDIT_STATUS, ["OPEN", "FROZEN", "SETTLED", "AUDIT_GAP"]],
       [DECISION_AUDIT_INDEX.FINAL_REASONING_SOURCE, [...FINAL_REASONING_SOURCES]],
       [DECISION_AUDIT_INDEX.FINAL_DECISION, [...FINAL_AUDIT_DECISIONS]],
       [DECISION_AUDIT_INDEX.TICKET_RESULT, [...AUDIT_TICKET_RESULTS]],
@@ -631,7 +761,7 @@ async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
 }
 
 async function readAuditRows(workbookId: string): Promise<unknown[][]> {
-  const response = await readRange(workbookId, `${DECISION_AUDIT_SHEET}!A1:AX5000`);
+  const response = await readRange(workbookId, `${DECISION_AUDIT_SHEET}!A1:BJ5000`);
   return ((response.values ?? []) as unknown[][]).slice(1);
 }
 
@@ -672,12 +802,17 @@ export async function logDecisionAuditPregame(
       inputs,
       new Date().toISOString(),
     );
+    if (mutation.auditGaps > 0) {
+      errors.push(
+        `AUDIT_GAP: ${mutation.auditGaps} game(s) reached first pitch without a legitimate frozen pregame snapshot`,
+      );
+    }
     await writeAuditRows(workbookId, mutation.rows, existing.length);
     return {
       status: errors.length === 0 ? "success" : "partial", phase: "pregame", date,
       rows_written: mutation.rowsWritten, rows_updated: mutation.rowsUpdated,
       rows_frozen: mutation.rowsFrozen, rows_settled: 0,
-      duplicates_removed: mutation.duplicatesRemoved, warnings, errors,
+      duplicates_removed: mutation.duplicatesRemoved, audit_gaps: mutation.auditGaps, warnings, errors,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -686,7 +821,7 @@ export async function logDecisionAuditPregame(
     return {
       status: "failure", phase: "pregame", date,
       rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
-      duplicates_removed: 0, warnings, errors,
+      duplicates_removed: 0, audit_gaps: 0, warnings, errors,
     };
   }
 }
@@ -715,12 +850,17 @@ export async function settleDecisionAuditLog(
     const missingClassification = classifyMissingDecisionAuditRows(date, unmatched);
     warnings.push(...missingClassification.warnings);
     errors.push(...missingClassification.errors);
+    if (mutation.auditGaps > 0) {
+      errors.push(
+        `PREGAME_FREEZE_MISSING: ${mutation.auditGaps} settled game(s) have AUDIT_GAP provenance`,
+      );
+    }
     await writeAuditRows(workbookId, mutation.rows, existing.length);
     return {
       status: errors.length === 0 ? "success" : "partial", phase: "settlement", date,
       rows_written: 0, rows_updated: mutation.rowsUpdated,
       rows_frozen: 0, rows_settled: mutation.rowsSettled,
-      duplicates_removed: mutation.duplicatesRemoved, warnings, errors,
+      duplicates_removed: mutation.duplicatesRemoved, audit_gaps: mutation.auditGaps, warnings, errors,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -729,7 +869,7 @@ export async function settleDecisionAuditLog(
     return {
       status: "failure", phase: "settlement", date,
       rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
-      duplicates_removed: 0, warnings, errors,
+      duplicates_removed: 0, audit_gaps: 0, warnings, errors,
     };
   }
 }

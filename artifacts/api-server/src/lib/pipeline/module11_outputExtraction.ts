@@ -114,6 +114,10 @@ export interface SlateBoardEntry {
   environment_certainty: string;
   run_id: string;
   model_version: string;
+  /** Real timestamp when this projection generation completed. */
+  projection_generated_ts?: string;
+  /** Real timestamp when Module 11 produced the final authorization result. */
+  final_decision_ts?: string;
 }
 
 export interface ActiveBoardEntry {
@@ -637,6 +641,16 @@ export function detectFPShift(storedFP: string, currentFP: string): number {
   return !isNaN(storedMs) && !isNaN(currentMs) ? Math.abs(currentMs - storedMs) : 0;
 }
 
+export function synchronizeBoardLockAuthorization(
+  lockStatus: SlateBoardEntry["lock_status"],
+  finalDecision: SlateBoardEntry["final_decision"],
+): SlateBoardEntry["lock_status"] {
+  if (lockStatus === "PRE_LOCK" || lockStatus === "LOCK_TIME_UNAVAILABLE" || lockStatus === "LOCK_DATA_UNAVAILABLE") {
+    return lockStatus;
+  }
+  return finalDecision === "CORE" ? "LOCKED_IN" : "LOCKED_OUT";
+}
+
 /**
  * Result returned by buildGameLockCutoffs.
  *
@@ -1099,6 +1113,7 @@ export async function extractOutputBoards(
       let lockStatus: "PRE_LOCK" | "LOCKED_IN" | "LOCKED_OUT" | "LOCK_TIME_UNAVAILABLE" | "LOCK_DATA_UNAVAILABLE";
       let isFirstLock = false;
       let preLockDecision = effectiveBLS?.pre_lock_decision ?? "";
+      let stagedBLSRow: unknown[] | null = null;
 
       if (lockDataStatus === "UNAVAILABLE") {
         // ≥ 50 % of slate games have no scheduled time — entire slate lock suppressed.
@@ -1223,6 +1238,7 @@ export async function extractOutputBoards(
           effectiveBLS?.late_promotion_authorized ? true : false,   // K: Late_Promotion_Authorized (operator-preserved)
           nowIso,                                                    // L: Last_Updated_TS
         ];
+        stagedBLSRow = newBLSRow;
 
         if (blsIndexByGameId.has(gs.game_id)) {
           blsRowUpdates.set(blsIndexByGameId.get(gs.game_id)!, newBLSRow);
@@ -1362,6 +1378,15 @@ export async function extractOutputBoards(
         }
       }
 
+      // BOARD_LOCK_STATE consumes the one authoritative final decision. It does
+      // not calculate a separate authorization before downstream gates finish.
+      lockStatus = synchronizeBoardLockAuthorization(lockStatus, decision);
+      lockStatusUpdates.set(gs.game_id, lockStatus);
+      if (stagedBLSRow) {
+        stagedBLSRow[4] = lockStatus;
+        stagedBLSRow[5] = lockStatus === "PRE_LOCK" ? "" : decision;
+      }
+
       const scores = resolveDecisionScores({
         evidence: {
           game_id: gs.game_id,
@@ -1437,6 +1462,8 @@ export async function extractOutputBoards(
         environment_certainty:      gs.environment_certainty,
         run_id:                     scores.run_id,
         model_version:              scores.model_version,
+        projection_generated_ts:    calculatedTs,
+        final_decision_ts:           new Date(nowMs).toISOString(),
         starter_k_market_signal:         propSignals.starter_k_market_signal,
         starter_er_market_signal:        propSignals.starter_er_market_signal,
         lineup_tb_coverage_pct:          propSignals.lineup_tb_coverage_pct,
