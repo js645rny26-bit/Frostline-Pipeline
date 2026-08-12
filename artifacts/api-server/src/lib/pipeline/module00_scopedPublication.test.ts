@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeProtectedRows } from "./module00_scopedPublication.js";
+import {
+  buildPublicationProtection,
+  mergeProtectedRows,
+} from "./module00_scopedPublication.js";
 
 test("staggered-slate merge carries started game rows forward byte-for-byte", () => {
   const protectedId = "20260812_BAL_MIN";
@@ -38,4 +41,30 @@ test("shared team inputs preserve teams already involved in a started game", () 
     mergeProtectedRows(existing, incoming, 1, new Set(["BAL"])),
     [existing[0], incoming[1]],
   );
+});
+
+test("pre-write guard protects a game that could cross first pitch during the write", () => {
+  const games = [
+    {
+      legacy_game_id: "20260812_COL_ARI",
+      scheduled_utc_time: "2026-08-12T19:40:00.000Z",
+      away_team: { team_abbr: "COL" },
+      home_team: { team_abbr: "ARI" },
+    },
+    {
+      legacy_game_id: "20260812_HOU_SFG",
+      scheduled_utc_time: "2026-08-12T19:45:00.000Z",
+      away_team: { team_abbr: "HOU" },
+      home_team: { team_abbr: "SFG" },
+    },
+  ];
+  const protection = buildPublicationProtection(
+    games,
+    "2026-08-12T19:39:42.000Z",
+    30_000,
+  );
+
+  assert.deepEqual([...protection.protected_game_ids], ["20260812_COL_ARI"]);
+  assert.deepEqual([...protection.protected_team_abbrs], ["COL", "ARI"]);
+  assert.deepEqual(protection.expected_game_ids, ["20260812_COL_ARI", "20260812_HOU_SFG"]);
 });

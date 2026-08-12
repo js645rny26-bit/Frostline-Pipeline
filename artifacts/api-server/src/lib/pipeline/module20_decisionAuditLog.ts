@@ -803,7 +803,7 @@ export async function logDecisionAuditPregame(
       new Date().toISOString(),
     );
     if (mutation.auditGaps > 0) {
-      errors.push(
+      warnings.push(
         `AUDIT_GAP: ${mutation.auditGaps} game(s) reached first pitch without a legitimate frozen pregame snapshot`,
       );
     }
