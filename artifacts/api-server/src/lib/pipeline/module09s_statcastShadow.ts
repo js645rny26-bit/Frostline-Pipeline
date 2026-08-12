@@ -20,6 +20,7 @@
  */
 
 import { writeRange, readRange, addSheet, clearRange, WORKBOOK_ID } from "../sheets/client.js";
+import { mergeProtectedRows, type PublicationProtection } from "./module00_scopedPublication.js";
 import { logger } from "../../lib/logger.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
 import type {
@@ -325,6 +326,7 @@ export async function computeAndWriteStatcastShadow(
   gameSummaryRows: GameSummaryRow[],
   statcastPreview: StatcastPreviewResult,
   workbookId = WORKBOOK_ID,
+  protection?: PublicationProtection,
 ): Promise<StatcastShadowResult> {
   const snapshotTs = new Date().toISOString();
   const errors: string[] = [];
@@ -367,9 +369,16 @@ export async function computeAndWriteStatcastShadow(
     await ensureShadowAuditSheet(workbookId);
     // Full replace: clear old data rows so a re-run with fewer games leaves no
     // stale rows behind.
+    const incomingRows = shadowRows.map(rowToArray);
+    const rowsToWrite = protection && protection.protected_game_ids.size > 0
+      ? mergeProtectedRows(
+          (await readRange(workbookId, `${SHADOW_SHEET}!A2:Z10000`)).values ?? [],
+          incomingRows, 1, protection.protected_game_ids, protection.expected_game_ids,
+        )
+      : incomingRows;
     await clearRange(workbookId, `${SHADOW_SHEET}!A2:Z10000`);
-    await writeRange(workbookId, `${SHADOW_SHEET}!A2`, shadowRows.map(rowToArray));
-    rowsWritten = shadowRows.length;
+    await writeRange(workbookId, `${SHADOW_SHEET}!A2`, rowsToWrite);
+    rowsWritten = rowsToWrite.length;
     logger.info({ rows: rowsWritten }, "MODULE_09s: STATCAST_SHADOW_AUDIT written");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

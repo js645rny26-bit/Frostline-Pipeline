@@ -28,6 +28,7 @@
 import { clearRange, expandSheetColumns, readRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { NormalizationResult, NormalizedGame } from "./module06_normalization.js";
+import { mergeProtectedRows, type PublicationProtection } from "./module00_scopedPublication.js";
 import type { FangraphsResult } from "./module05_fangraphs.js";
 import { getSeasonalParkFactor } from "./module04d_parkFactors.js";
 import type { PitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
@@ -757,6 +758,7 @@ export async function verifyRecalculation(
   batterStatsMap: Map<number, BatterSeasonStats> = new Map(),
   lineupNameToIdMap: Map<string, number> = new Map(),
   statcastBatterMap: Map<number, StatcastBatterStats> = new Map(),
+  protection?: PublicationProtection,
 ): Promise<Module09Result> {
   const startTime = Date.now();
   logger.info({ games: normalized.games.length }, "MODULE_09: Computing GAME_INTEGRATION + GAME_SUMMARY");
@@ -1170,9 +1172,15 @@ export async function verifyRecalculation(
       "Weather_Multiplier",
       "Park_Source_Status",
     ]]).catch(() => {});
+    const giRowsToWrite = protection && protection.protected_game_ids.size > 0
+      ? mergeProtectedRows(
+          (await readRange(workbookId, "GAME_INTEGRATION!A2:AA200")).values ?? [],
+          giRows, 1, protection.protected_game_ids, protection.expected_game_ids,
+        )
+      : giRows;
     await clearRange(workbookId, "GAME_INTEGRATION!A2:AA200");
-    if (giRows.length > 0) {
-      await writeRange(workbookId, `GAME_INTEGRATION!A2:AA${1 + giRows.length}`, giRows);
+    if (giRowsToWrite.length > 0) {
+      await writeRange(workbookId, `GAME_INTEGRATION!A2:AA${1 + giRowsToWrite.length}`, giRowsToWrite);
     }
     logger.info({ rows: giRows.length }, "MODULE_09: GAME_INTEGRATION written");
   } catch (err: unknown) {
@@ -1234,30 +1242,44 @@ export async function verifyRecalculation(
       "Away_Lineup_xwOBA_Coverage",
       "Home_Lineup_xwOBA_Coverage",
     ]]).catch(() => {});
+    const gsRowsToWrite = protection && protection.protected_game_ids.size > 0
+      ? mergeProtectedRows(
+          (await readRange(workbookId, "GAME_SUMMARY!A2:BC100")).values ?? [],
+          gsRows, 1, protection.protected_game_ids, protection.expected_game_ids,
+        )
+      : gsRows;
     await clearRange(workbookId, "GAME_SUMMARY!A2:BC100");
-    if (gsRows.length > 0) {
-      await writeRange(workbookId, `GAME_SUMMARY!A2:BC${1 + gsRows.length}`, gsRows);
+    if (gsRowsToWrite.length > 0) {
+      await writeRange(workbookId, `GAME_SUMMARY!A2:BC${1 + gsRowsToWrite.length}`, gsRowsToWrite);
     }
     logger.info({ rows: gsRows.length }, "MODULE_09: GAME_SUMMARY written");
 
+    const playerRowsToWrite = protection && protection.protected_game_ids.size > 0
+      ? mergeProtectedRows(
+          (await readRange(workbookId, "PLAYER_INTEGRATION!A2:P1000")).values ?? [],
+          playerIntegrationRows, 1, protection.protected_game_ids, protection.expected_game_ids,
+        )
+      : playerIntegrationRows;
     await clearRange(workbookId, "PLAYER_INTEGRATION!A2:P1000");
-    if (playerIntegrationRows.length > 0) {
+    if (playerRowsToWrite.length > 0) {
       await writeRange(
         workbookId,
-        `PLAYER_INTEGRATION!A2:P${1 + playerIntegrationRows.length}`,
-        playerIntegrationRows,
+        `PLAYER_INTEGRATION!A2:P${1 + playerRowsToWrite.length}`,
+        playerRowsToWrite,
       );
     }
     logger.info({ rows: playerIntegrationRows.length }, "MODULE_09: PLAYER_INTEGRATION written");
 
-    const effectiveMultipliers = gameSummaryRows.map((row) => [row.combined_run_multiplier]);
-    if (effectiveMultipliers.length > 0) {
-      await writeRange(workbookId, `RUN_ENVIRONMENT!K2:K${1 + effectiveMultipliers.length}`, effectiveMultipliers);
-      await writeRange(
-        workbookId,
-        `DAILY_MATCHUPS!U2:V${1 + gameSummaryRows.length}`,
-        gameSummaryRows.map((row) => [row.home_run_factor, row.combined_run_multiplier]),
-      );
+    if (gameSummaryRows.length > 0) {
+      const rowOrder = protection?.expected_game_ids ?? gameSummaryRows.map((row) => row.game_id);
+      await Promise.all(gameSummaryRows.map(async (row) => {
+        const rowNumber = rowOrder.indexOf(row.game_id) + 2;
+        if (rowNumber < 2) throw new Error(`Missing publication row for ${row.game_id}`);
+        await Promise.all([
+          writeRange(workbookId, `RUN_ENVIRONMENT!K${rowNumber}:K${rowNumber}`, [[row.combined_run_multiplier]]),
+          writeRange(workbookId, `DAILY_MATCHUPS!U${rowNumber}:V${rowNumber}`, [[row.home_run_factor, row.combined_run_multiplier]]),
+        ]);
+      }));
     }
 
     const [giReadback, gsReadback, environmentReadback] = await Promise.all([
@@ -1266,11 +1288,12 @@ export async function verifyRecalculation(
       readRange(workbookId, "RUN_ENVIRONMENT!A2:L100"),
     ]);
     const expectedGameIds = normalized.games.map((game) => game.legacy_game_id);
+    const mutableIds = new Set(expectedGameIds);
     const projectionLineage = validateProjectionLineage(
       normalized.games[0]?.date ?? "",
       expectedGameIds,
-      giReadback.values ?? [],
-      gsReadback.values ?? [],
+      (giReadback.values ?? []).filter((row) => mutableIds.has(String(row[1] ?? ""))),
+      (gsReadback.values ?? []).filter((row) => mutableIds.has(String(row[1] ?? ""))),
     );
     const environmentLineage = validateEnvironmentLineage(
       normalized.games[0]?.date ?? "",
@@ -1279,7 +1302,7 @@ export async function verifyRecalculation(
         run_multiplier: row.combined_run_multiplier,
         home_run_factor: row.home_run_factor,
       })),
-      environmentReadback.values ?? [],
+      (environmentReadback.values ?? []).filter((row) => mutableIds.has(String(row[1] ?? ""))),
     );
     if (projectionLineage.status === "FAIL" || environmentLineage.status === "FAIL") {
       throw new Error([...projectionLineage.errors, ...environmentLineage.errors].join("; "));

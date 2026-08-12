@@ -31,6 +31,7 @@
 import { clearRange, expandSheetColumns, readRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
+import { mergeProtectedRows, type PublicationProtection } from "./module00_scopedPublication.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -143,6 +144,7 @@ export function scaleLegacyRuns(
 export async function runShadowValidation(
   gameSummaryRows: GameSummaryRow[],
   workbookId = WORKBOOK_ID,
+  protection?: PublicationProtection,
 ): Promise<ShadowValidationResult> {
   const startTs = new Date().toISOString();
   const errors: string[] = [];
@@ -255,10 +257,16 @@ export async function runShadowValidation(
   // ── Write to SHADOW_VALIDATION sheet (latest slate, full rewrite) ──
   try {
     await expandSheetColumns(workbookId, SHADOW_SHEET, N_COLS);
+    const rowsToWrite = protection && protection.protected_game_ids.size > 0
+      ? mergeProtectedRows(
+          (await readRange(workbookId, `${SHADOW_SHEET}!A2:W1000`)).values ?? [],
+          sheetRows, 1, protection.protected_game_ids, protection.expected_game_ids,
+        )
+      : sheetRows;
     await clearRange(workbookId, `${SHADOW_SHEET}!A1:W1000`);
     await writeRange(workbookId, `${SHADOW_SHEET}!A1:W1`, [HEADER_ROW]);
-    await writeRange(workbookId, `${SHADOW_SHEET}!A2:W${1 + sheetRows.length}`, sheetRows);
-    logger.info({ rows: sheetRows.length }, "MODULE_12s: Shadow validation written to sheet");
+    await writeRange(workbookId, `${SHADOW_SHEET}!A2:W${1 + rowsToWrite.length}`, rowsToWrite);
+    logger.info({ rows: rowsToWrite.length }, "MODULE_12s: Shadow validation written to sheet");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     errors.push(`Sheets write failed: ${msg}`);

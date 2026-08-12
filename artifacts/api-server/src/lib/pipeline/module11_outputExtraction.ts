@@ -6,6 +6,7 @@
  */
 
 import { readRange, clearRange, writeRange, expandSheetColumns, addSheet, WORKBOOK_ID } from "../sheets/client.js";
+import { mergeProtectedRows, type PublicationProtection } from "./module00_scopedPublication.js";
 import { logger } from "../../lib/logger.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
 import { computePropComparison, type RotowirePropsResult } from "./module05e_rotowireProps.js";
@@ -745,6 +746,7 @@ export async function extractOutputBoards(
   workbookId = WORKBOOK_ID,
   propsResult: RotowirePropsResult | null = null,
   normalizedGames?: NormalizedGame[],
+  protection?: PublicationProtection,
 ): Promise<Module11Result> {
   logger.info({ games: gameSummary.length }, "MODULE_11: Computing SLATE_BOARD + ACTIVE_BOARD_SNAPSHOT");
 
@@ -779,10 +781,12 @@ export async function extractOutputBoards(
 
     // ── Read SLATE_INPUT, BOARD_LOCK_STATE, and MONOTONICITY concurrently ──
     // BOARD_LOCK_STATE / MONOTONICITY may not exist yet — treat errors as empty.
-    const [slateInputData, blsData, verdictInfo] = await Promise.all([
+    const [slateInputData, blsData, verdictInfo, existingBoardData, existingActiveData] = await Promise.all([
       readRange(workbookId, "SLATE_INPUT!A:AH"),
       readRange(workbookId, "BOARD_LOCK_STATE!A:L").catch(() => ({ values: [] as unknown[][] })),
       readMonotonicityVerdict(workbookId),
+      readRange(workbookId, "SLATE_BOARD!A2:AW100").catch(() => ({ values: [] as unknown[][] })),
+      readRange(workbookId, "ACTIVE_BOARD_SNAPSHOT!A2:P100").catch(() => ({ values: [] as unknown[][] })),
     ]);
     const slateInputRows = (slateInputData.values ?? []).slice(1);
 
@@ -1572,9 +1576,15 @@ export async function extractOutputBoards(
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "MODULE_11: Could not write score-lineage headers");
     });
 
+    const sbRowsToWrite = protection && protection.protected_game_ids.size > 0
+      ? mergeProtectedRows(
+          existingBoardData.values ?? [], sbRows, 1,
+          protection.protected_game_ids, protection.expected_game_ids,
+        )
+      : sbRows;
     await clearRange(workbookId, "SLATE_BOARD!A2:AW100");
-    if (sbRows.length > 0) {
-      await writeRange(workbookId, `SLATE_BOARD!A2:AW${1 + sbRows.length}`, sbRows);
+    if (sbRowsToWrite.length > 0) {
+      await writeRange(workbookId, `SLATE_BOARD!A2:AW${1 + sbRowsToWrite.length}`, sbRowsToWrite);
     }
     logger.info(
       { rows: sbRows.length, core: output.core_count, noCore: output.no_core_count },
@@ -1630,7 +1640,9 @@ export async function extractOutputBoards(
 
     // ── Mirror Board_Lock_Status to SLATE_INPUT!AH (convenience copy) ────────
     if (lockStatusUpdates.size > 0) {
-      const ahValues = slateInputGameIds.map((id) => [lockStatusUpdates.get(id) ?? "PRE_LOCK"]);
+      const ahValues = slateInputRows.map((row, index) => [
+        lockStatusUpdates.get(slateInputGameIds[index] ?? "") ?? row[SLATE_INPUT_COLS.BOARD_LOCK_STATUS] ?? "PRE_LOCK",
+      ]);
       if (ahValues.length > 0) {
         await writeRange(
           workbookId,
@@ -1646,9 +1658,14 @@ export async function extractOutputBoards(
     }
 
     // ── Compute ACTIVE_BOARD_SNAPSHOT — CORE games only, 16 cols A–P ──
-    const slateInputScoreRows = slateInputGameIds.map((gameId) => {
+    const slateInputScoreRows = slateInputGameIds.map((gameId, index) => {
       const score = scoreUpdates.get(gameId);
-      if (!score) throw new Error(`SLATE_INPUT score bridge missing Game_ID ${gameId || "BLANK"}`);
+      if (!score) {
+        if (protection?.protected_game_ids.has(gameId)) {
+          return (slateInputRows[index] ?? []).slice(5, 14);
+        }
+        throw new Error(`SLATE_INPUT score bridge missing Game_ID ${gameId || "BLANK"}`);
+      }
       return [
         score.truth_family,
         score.truth_score,
@@ -1711,9 +1728,15 @@ export async function extractOutputBoards(
       ]);
     }
 
+    const abRowsToWrite = protection && protection.protected_game_ids.size > 0
+      ? mergeProtectedRows(
+          existingActiveData.values ?? [], abRows, 1,
+          protection.protected_game_ids, protection.expected_game_ids,
+        )
+      : abRows;
     await clearRange(workbookId, "ACTIVE_BOARD_SNAPSHOT!A2:P100");
-    if (abRows.length > 0) {
-      await writeRange(workbookId, `ACTIVE_BOARD_SNAPSHOT!A2:P${1 + abRows.length}`, abRows);
+    if (abRowsToWrite.length > 0) {
+      await writeRange(workbookId, `ACTIVE_BOARD_SNAPSHOT!A2:P${1 + abRowsToWrite.length}`, abRowsToWrite);
     }
     logger.info({ rows: abRows.length }, "MODULE_11: ACTIVE_BOARD_SNAPSHOT written");
 
@@ -1724,8 +1747,8 @@ export async function extractOutputBoards(
 
     output.publication_validation = await validateCurrentSlatePublicationWithRetry({
       date: slateDate,
-      expected_game_ids: gameSummary.map((game) => game.game_id),
-      expected_active_game_ids: output.active_board_snapshot.map((game) => game.game_id),
+      expected_game_ids: protection?.expected_game_ids ?? gameSummary.map((game) => game.game_id),
+      expected_active_game_ids: abRowsToWrite.map((row) => String(row[1] ?? "")),
     }, async () => {
       const [boardReadback, slateInputReadback, activeReadback] = await Promise.all([
         readRange(workbookId, "SLATE_BOARD!A2:AW100"),

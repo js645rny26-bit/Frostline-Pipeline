@@ -9,9 +9,10 @@
  * Projection logic, authorization, and lock state are not affected.
  */
 
-import { addSheet, clearRange, writeRange } from "../sheets/client.js";
+import { addSheet, clearRange, readRange, writeRange } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { StatcastPreviewResult, StatcastPreviewGameResult, StatcastPlayerStats } from "./module02e_statcastPreview.js";
+import { mergeProtectedRows, type PublicationProtection } from "./module00_scopedPublication.js";
 
 const SHEET = "STATCAST_GAME_PREVIEW";
 
@@ -148,6 +149,7 @@ function gameToRow(g: StatcastPreviewGameResult): (string | number | boolean)[] 
 export async function writeStatcastPreviewFeed(
   preview: StatcastPreviewResult,
   workbookId: string,
+  protection?: PublicationProtection,
 ): Promise<StatcastPreviewWriterResult> {
   const writeTs = new Date().toISOString();
   const errors: string[] = [];
@@ -155,7 +157,6 @@ export async function writeStatcastPreviewFeed(
   try {
     await ensureSheet(workbookId);
 
-    const lastCol = String.fromCharCode(65 + ((HEADER.length - 1) % 26)); // single-letter range cap
     // Use a wide enough column reference; HEADER has 55 cols (A–BC range)
     const colCount = HEADER.length;
     // Build A1 notation end column for 55 columns: A=1, Z=26, AA=27 … BC=55
@@ -169,15 +170,22 @@ export async function writeStatcastPreviewFeed(
       return s;
     }
     const endCol = colLetter(colCount);
-    const clearRangeStr = `${SHEET}!A1:${endCol}`;
-
-    await clearRange(workbookId, clearRangeStr);
-
-    const dataRows = preview.games.map(gameToRow);
-    const allRows = [HEADER, ...dataRows];
-
-    const writeRangeStr = `${SHEET}!A1:${endCol}${allRows.length}`;
-    await writeRange(workbookId, writeRangeStr, allRows);
+    const dataRange = `${SHEET}!A2:${endCol}100`;
+    const incomingRows = preview.games.map(gameToRow);
+    const dataRows = protection && protection.protected_game_ids.size > 0
+      ? mergeProtectedRows(
+          (await readRange(workbookId, dataRange)).values ?? [],
+          incomingRows,
+          1,
+          protection.protected_game_ids,
+          protection.expected_game_ids,
+        )
+      : incomingRows;
+    await clearRange(workbookId, dataRange);
+    await writeRange(workbookId, `${SHEET}!A1:${endCol}1`, [HEADER]);
+    if (dataRows.length > 0) {
+      await writeRange(workbookId, `${SHEET}!A2:${endCol}${1 + dataRows.length}`, dataRows);
+    }
 
     logger.info(
       {

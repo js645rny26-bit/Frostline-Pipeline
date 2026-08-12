@@ -49,6 +49,7 @@ import {
 } from "../workbook/workbookSetup.js";
 import { logger } from "../../lib/logger.js";
 import { assertProspectivePublicationAllowed } from "./module00_temporalFirewall.js";
+import type { PublicationProtection } from "./module00_scopedPublication.js";
 
 export interface ModuleStatus {
   module: string;
@@ -232,13 +233,31 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
 
   // Modules 01–07
   const slate = await runPipeline(date);
-  // P0 temporal firewall: a full publish is a prospective operation. Once any
-  // game has reached first pitch (or lacks a trustworthy scheduled time), the
-  // entire mutable publish fails closed before the first workbook write. This
-  // deliberately favors provenance over a partial late-slate refresh. Historical
-  // recalculation remains available only through labelled replay surfaces.
-  assertProspectivePublicationAllowed(slate.games, new Date().toISOString());
-  const normalized = { games: slate.games, normalization_timestamp_utc: slate.run_timestamp, status: "success" };
+  // P0 temporal firewall: partition a staggered slate game-by-game. Started or
+  // time-unresolved games are protected and carried forward verbatim; later
+  // games remain eligible for prospective refresh. If none remain mutable the
+  // guard fails before any workbook write.
+  const temporal = assertProspectivePublicationAllowed(slate.games, new Date().toISOString());
+  const mutableIds = new Set(temporal.mutable_games);
+  const protectedIds = new Set([...temporal.blocked_games, ...temporal.missing_time_games]);
+  const mutableGames = slate.games.filter((game) => mutableIds.has(game.legacy_game_id));
+  const protectedTeams = new Set(
+    slate.games
+      .filter((game) => protectedIds.has(game.legacy_game_id))
+      .flatMap((game) => [game.away_team.team_abbr, game.home_team.team_abbr])
+      .filter((team): team is string => Boolean(team)),
+  );
+  const protection: PublicationProtection = {
+    expected_game_ids: slate.games.map((game) => game.legacy_game_id),
+    protected_game_ids: protectedIds,
+    protected_team_abbrs: protectedTeams,
+  };
+  logger.info({
+    mutable_games: mutableGames.length,
+    protected_games: protectedIds.size,
+    temporal_code: temporal.code,
+  }, "Full pipeline: game-granular temporal scope established");
+  const normalized = { games: mutableGames, normalization_timestamp_utc: slate.run_timestamp, status: "success" };
   const splits = await fetchTeamSplitsWithFallback();
 
   const allErrors: Array<{ module: string; error: string; timestamp: string }> = [];
@@ -246,7 +265,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // Module 04b + 04c: Bullpen usage and Starting Nine — fetch in parallel, both non-blocking
   const slateTeamIds = Array.from(
     new Set(
-      slate.games
+      mutableGames
         .flatMap((g) => [g.away_team?.team_id, g.home_team?.team_id])
         .filter((id): id is number => typeof id === "number"),
     ),
@@ -290,8 +309,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       return new Map<string, number>();
     }),
     // Module 02e: Statcast game preview — fail-open; runs in parallel with other fetches
-    slate.games.length > 0
-      ? fetchStatcastPreviews(slate.games, date).catch((err: unknown) => {
+    mutableGames.length > 0
+      ? fetchStatcastPreviews(mutableGames, date).catch((err: unknown) => {
           logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: Statcast preview fetch threw — skipping");
           return null as StatcastPreviewResult | null;
         })
@@ -315,13 +334,17 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   }
 
   // Module 05b/05d: market odds → history snapshot → line movement
-  const oddsMap = buildOddsMap(oddsResult);
+  const scopedOddsResult = {
+    ...oddsResult,
+    lines: oddsResult.lines.filter((line) => mutableIds.has(line.game_id)),
+  };
+  const oddsMap = buildOddsMap(scopedOddsResult);
   if (oddsResult.status === "success") {
     logger.info({ lines: oddsMap.size, remaining: oddsResult.requests_remaining }, "Full pipeline: Market odds fetched");
   } else if (oddsResult.status === "error") {
     logger.warn({ err: oddsResult.error }, "Full pipeline: Market odds fetch failed — continuing without lines");
   }
-  const lineMovement = await trackLineMovement(oddsResult, workbookId);
+  const lineMovement = await trackLineMovement(scopedOddsResult, workbookId);
 
   // Module 02b: season stats for every starter + reliever on the slate (batched)
   const statIds: number[] = [];
@@ -382,6 +405,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     pitcherSeasonStats,
     teamRunRates,
     lineMovement,
+    protection,
   );
   const shadowSkipped: ShadowValidationResult = {
     status: "failure",
@@ -422,15 +446,15 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   const previewFetchResult: StatcastPreviewResult = statcastPreviewFetch ?? {
     status: "failure",
     fetch_timestamp: new Date().toISOString(),
-    games_expected: slate.games.length,
+    games_expected: mutableGames.length,
     games_available: 0,
     games_parsed: 0,
     games_missing: 0,
-    games_failed: slate.games.length,
+    games_failed: mutableGames.length,
     games_identity_mismatch: 0,
     games: [],
   };
-  const mod08b = await writeStatcastPreviewFeed(previewFetchResult, workbookId).catch(
+  const mod08b = await writeStatcastPreviewFeed(previewFetchResult, workbookId, protection).catch(
     (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error({ err: msg }, "Full pipeline: Module 08b threw — continuing");
@@ -455,6 +479,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     batterSeasonStats?.stats ?? new Map(),
     rosterNameMap ?? new Map(),
     statcastBatterStats?.stats ?? new Map(),
+    protection,
   );
   if (mod09.status === "error") {
     const mod09Errors = [
@@ -475,6 +500,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     mod09.game_summary_rows,
     previewFetchResult,
     workbookId,
+    protection,
   ).catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error({ err: msg }, "Full pipeline: Module 09s shadow audit threw — continuing");
@@ -490,7 +516,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
 
   // Module 12s: Shadow validation — compare repaired vs legacy projection per game.
   // Runs after every full publish; does not affect CORE authorization.
-  const mod12s = await runShadowValidation(mod09.game_summary_rows, workbookId).catch(
+  const mod12s = await runShadowValidation(mod09.game_summary_rows, workbookId, protection).catch(
     (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error({ err: msg }, "Full pipeline: Module 12s shadow validation threw — continuing");
@@ -508,7 +534,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   }
 
   // Module 10: Seed SLATE_INPUT (odds fetched earlier, reused here)
-  const mod10 = await seedSlateInput(normalized as Parameters<typeof seedSlateInput>[0], workbookId, oddsMap);
+  const mod10 = await seedSlateInput(normalized as Parameters<typeof seedSlateInput>[0], workbookId, oddsMap, protection);
   if (mod10.status === "failure") {
     allErrors.push(...mod10.errors);
   }
@@ -523,7 +549,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // traffic_conversion_runs, hr_xbh_damage_runs, environment_run_adjustment) are
   // typed as `number` on GameSummaryRow — not optional — so COMPONENT_DATA_UNAVAILABLE
   // cannot fire in a healthy module09 run; it is a defensive guard for future callers.
-  const mod11 = await extractOutputBoards(mod09.game_summary_rows, workbookId, rotowireProps, normalized.games);
+  const mod11 = await extractOutputBoards(mod09.game_summary_rows, workbookId, rotowireProps, normalized.games, protection);
 
   // Module 17 (phase 1): Log vehicle selections for this publish run.
   // Non-blocking — failure does not affect CORE authorization.

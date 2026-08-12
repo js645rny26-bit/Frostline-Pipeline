@@ -1,10 +1,10 @@
 /**
  * Runtime temporal firewall for prospective publication.
  *
- * Prospective surfaces may only be mutated while every scheduled game is
- * strictly before first pitch. Historical work belongs on an explicitly
- * labelled REPLAY surface; settlement is append-only and never calls this
- * guard to manufacture missing pregame evidence.
+ * Prospective mutation is game-granular. Games at/after first pitch (or with
+ * an unavailable first-pitch time) are protected while later games on the
+ * same slate remain mutable. Historical work belongs on an explicitly
+ * labelled REPLAY surface; settlement is append-only.
  */
 
 export type LifecycleSurface = "PUBLISH" | "REPLAY" | "SETTLEMENT";
@@ -18,9 +18,10 @@ export interface TemporalFirewallResult {
   surface: LifecycleSurface;
   checked_at: string;
   allowed: boolean;
+  mutable_games: string[];
   blocked_games: string[];
   missing_time_games: string[];
-  code: "PREGAME_MUTATION_ALLOWED" | "TEMPORAL_FIREWALL_BLOCKED" | "NON_PREGAME_SURFACE";
+  code: "PREGAME_MUTATION_ALLOWED" | "PARTIAL_PREGAME_MUTATION_ALLOWED" | "TEMPORAL_FIREWALL_BLOCKED" | "NON_PREGAME_SURFACE";
 }
 
 export function evaluateTemporalFirewall(
@@ -33,6 +34,7 @@ export function evaluateTemporalFirewall(
       surface,
       checked_at: checkedAt,
       allowed: true,
+      mutable_games: games.map((game) => game.legacy_game_id),
       blocked_games: [],
       missing_time_games: [],
       code: "NON_PREGAME_SURFACE",
@@ -46,6 +48,7 @@ export function evaluateTemporalFirewall(
 
   const blockedGames: string[] = [];
   const missingTimeGames: string[] = [];
+  const mutableGames: string[] = [];
   for (const game of games) {
     const firstPitchMs = Date.parse(game.scheduled_utc_time ?? "");
     if (!Number.isFinite(firstPitchMs)) {
@@ -53,16 +56,21 @@ export function evaluateTemporalFirewall(
       continue;
     }
     if (checkedAtMs >= firstPitchMs) blockedGames.push(game.legacy_game_id);
+    else mutableGames.push(game.legacy_game_id);
   }
 
-  const allowed = blockedGames.length === 0 && missingTimeGames.length === 0;
+  const allowed = mutableGames.length > 0;
+  const partiallyProtected = allowed && (blockedGames.length > 0 || missingTimeGames.length > 0);
   return {
     surface,
     checked_at: checkedAt,
     allowed,
+    mutable_games: mutableGames,
     blocked_games: blockedGames,
     missing_time_games: missingTimeGames,
-    code: allowed ? "PREGAME_MUTATION_ALLOWED" : "TEMPORAL_FIREWALL_BLOCKED",
+    code: allowed
+      ? partiallyProtected ? "PARTIAL_PREGAME_MUTATION_ALLOWED" : "PREGAME_MUTATION_ALLOWED"
+      : "TEMPORAL_FIREWALL_BLOCKED",
   };
 }
 
@@ -81,7 +89,7 @@ export function assertProspectivePublicationAllowed(
         : "",
     ].filter(Boolean).join("; ");
     throw new Error(
-      `TEMPORAL_FIREWALL_BLOCKED: mutable pregame publication disabled; ${reasons}. `
+      `TEMPORAL_FIREWALL_BLOCKED: no mutable pregame games remain; ${reasons}. `
       + "Use an explicitly labelled REPLAY surface for historical recalculation.",
     );
   }

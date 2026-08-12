@@ -36,6 +36,19 @@ test("missing first-pitch time fails closed instead of creating prospective evid
   assert.deepEqual(result.missing_time_games, ["20260811_HOU_SFG"]);
 });
 
+test("staggered slate protects started games while later games remain mutable", () => {
+  const games = [
+    { legacy_game_id: "20260812_BAL_MIN", scheduled_utc_time: "2026-08-12T17:40:00.000Z" },
+    { legacy_game_id: "20260812_COL_ARI", scheduled_utc_time: "2026-08-12T19:40:00.000Z" },
+    { legacy_game_id: "20260812_HOU_SFG", scheduled_utc_time: "2026-08-13T01:45:00.000Z" },
+  ];
+  const result = assertProspectivePublicationAllowed(games, "2026-08-12T18:15:00.000Z");
+  assert.equal(result.allowed, true);
+  assert.equal(result.code, "PARTIAL_PREGAME_MUTATION_ALLOWED");
+  assert.deepEqual(result.blocked_games, ["20260812_BAL_MIN"]);
+  assert.deepEqual(result.mutable_games, ["20260812_COL_ARI", "20260812_HOU_SFG"]);
+});
+
 test("REPLAY and SETTLEMENT surfaces remain explicitly non-pregame", () => {
   assert.equal(evaluateTemporalFirewall(AUG10, "2026-08-11T03:00:00.000Z", "REPLAY").allowed, true);
   assert.equal(evaluateTemporalFirewall(AUG10, "2026-08-11T03:00:00.000Z", "SETTLEMENT").allowed, true);

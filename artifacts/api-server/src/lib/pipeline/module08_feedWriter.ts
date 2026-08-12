@@ -5,6 +5,7 @@
 
 import {
   clearRange,
+  readRange,
   writeRange,
   WORKBOOK_ID,
 } from "../sheets/client.js";
@@ -22,6 +23,7 @@ import type { PitcherSeasonStatsResult, PitcherSeasonStats } from "./module02b_p
 import type { TeamRunRatesResult } from "./module05c_teamRunRates.js";
 import type { LineMovementResult } from "./module05d_oddsHistory.js";
 import type { LineupPlayer } from "./module04c_startingNine.js";
+import { mergeProtectedRows, type PublicationProtection } from "./module00_scopedPublication.js";
 
 export interface SheetWriteStatus {
   status: "success" | "failure" | "skipped";
@@ -348,15 +350,30 @@ async function safeWrite(
   writeRng: string,
   rows: unknown[][],
   workbookId: string,
+  protection?: {
+    keyColumn: number;
+    protectedKeys: ReadonlySet<string>;
+    orderedKeys?: readonly string[];
+  },
 ): Promise<SheetWriteStatus> {
   const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
+      const rowsToWrite = protection && protection.protectedKeys.size > 0
+        ? mergeProtectedRows(
+            (await readRange(workbookId, clearRng)).values ?? [],
+            rows,
+            protection.keyColumn,
+            protection.protectedKeys,
+            protection.orderedKeys,
+          )
+        : rows;
       await clearRange(workbookId, clearRng);
-      if (rows.length === 0) {
+      if (rowsToWrite.length === 0) {
         return { status: "success", rows_written: 0, range: writeRng };
       }
-      const result = await writeRange(workbookId, writeRng, rows);
+      const scopedWriteRange = writeRng.replace(/\d+$/, String(1 + rowsToWrite.length));
+      const result = await writeRange(workbookId, scopedWriteRange, rowsToWrite);
       logger.info({ sheet: label, rows: result.updatedRows }, "MODULE_08: Sheet written");
       return { status: "success", rows_written: result.updatedRows, range: result.updatedRange };
     } catch (err: unknown) {
@@ -385,6 +402,7 @@ export async function writeGoogleSheetsFeed(
   pitcherSeasonStats: PitcherSeasonStatsResult | null = null,
   teamRunRates: TeamRunRatesResult | null = null,
   lineMovement: LineMovementResult | null = null,
+  protection?: PublicationProtection,
 ): Promise<Module08Result> {
   logger.info({ games: normalized.games.length }, "MODULE_08: Writing feeds to Google Sheets");
 
@@ -430,6 +448,7 @@ export async function writeGoogleSheetsFeed(
     `DAILY_MATCHUPS!A2:AU${1 + Math.max(dmRows.length, 1)}`,
     dmRows,
     workbookId,
+    protection ? { keyColumn: 1, protectedKeys: protection.protected_game_ids, orderedKeys: protection.expected_game_ids } : undefined,
   );
   if (dmResult.status === "failure") {
     failed.push("daily_matchups");
@@ -444,6 +463,7 @@ export async function writeGoogleSheetsFeed(
     `TODAY_LINEUPS!A2:N${1 + Math.max(tlRows.length, 1)}`,
     tlRows,
     workbookId,
+    protection ? { keyColumn: 1, protectedKeys: protection.protected_game_ids, orderedKeys: protection.expected_game_ids } : undefined,
   );
   if (tlResult.status === "failure") {
     failed.push("today_lineups");
@@ -458,6 +478,7 @@ export async function writeGoogleSheetsFeed(
     `TEAM_FORM_INPUT!A2:H${1 + Math.max(tfRows.length, 1)}`,
     tfRows,
     workbookId,
+    protection ? { keyColumn: 1, protectedKeys: protection.protected_team_abbrs } : undefined,
   );
   if (tfResult.status === "failure") {
     failed.push("team_form_input");
@@ -468,12 +489,15 @@ export async function writeGoogleSheetsFeed(
   let buResult: SheetWriteStatus = { status: "skipped", rows_written: 0, range: "BULLPEN_USAGE_DAILY!A2:L300" };
   try {
     const buRows = buildBullpenRows(runDate, bullpenData, statsMap);
-    await clearRange(workbookId, "BULLPEN_USAGE_DAILY!A2:L300");
-    if (buRows.length > 0) {
-      await writeRange(workbookId, `BULLPEN_USAGE_DAILY!A2:L${1 + buRows.length}`, buRows);
-    }
-    buResult = { status: "success", rows_written: buRows.length, range: "BULLPEN_USAGE_DAILY!A2:L300" };
-    logger.info({ rows: buRows.length }, "MODULE_08: BULLPEN_USAGE_DAILY written");
+    buResult = await safeWrite(
+      "BULLPEN_USAGE_DAILY",
+      "BULLPEN_USAGE_DAILY!A2:L300",
+      `BULLPEN_USAGE_DAILY!A2:L${1 + Math.max(buRows.length, 1)}`,
+      buRows,
+      workbookId,
+      protection ? { keyColumn: 1, protectedKeys: protection.protected_team_abbrs } : undefined,
+    );
+    if (buResult.status === "failure") throw new Error(buResult.error ?? "write failed");
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     failed.push("bullpen_usage_daily");
@@ -489,6 +513,7 @@ export async function writeGoogleSheetsFeed(
     `RUN_ENVIRONMENT!A2:L${1 + Math.max(reRows.length, 1)}`,
     reRows,
     workbookId,
+    protection ? { keyColumn: 1, protectedKeys: protection.protected_game_ids, orderedKeys: protection.expected_game_ids } : undefined,
   );
   if (reResult.status === "failure") {
     failed.push("run_environment");

@@ -7,6 +7,7 @@
  */
 
 import { readRange, writeRange, clearRange, WORKBOOK_ID } from "../sheets/client.js";
+import { mergeProtectedRows, type PublicationProtection } from "./module00_scopedPublication.js";
 import { logger } from "../../lib/logger.js";
 import type { NormalizationResult } from "./module06_normalization.js";
 import type { MarketLine } from "./module05b_marketOdds.js";
@@ -149,6 +150,7 @@ export async function seedSlateInput(
   normalized: NormalizationResult,
   workbookId = WORKBOOK_ID,
   oddsMap: Map<string, MarketLine> = new Map(),
+  protection?: PublicationProtection,
 ): Promise<Module10Result> {
   logger.info({ games: normalized.games.length, oddsAvailable: oddsMap.size }, "MODULE_10: Seeding SLATE_INPUT");
 
@@ -334,20 +336,26 @@ export async function seedSlateInput(
       }
     }
 
+    const rowsToWrite = protection && protection.protected_game_ids.size > 0
+      ? mergeProtectedRows(
+          dataRows, seededRows, 0, protection.protected_game_ids, protection.expected_game_ids,
+        )
+      : seededRows;
+
     // Write all rows starting at row 2 (after header)
-    if (seededRows.length > 0) {
+    if (rowsToWrite.length > 0) {
       await writeRange(
         workbookId,
-        `SLATE_INPUT!A2:AH${1 + seededRows.length}`,
-        seededRows,
+        `SLATE_INPUT!A2:AH${1 + rowsToWrite.length}`,
+        rowsToWrite,
       );
     }
 
     // Clear stale rows from prior dates that are beyond the current slate.
     // Any existing row whose game_id is not in today's normalized slate was
     // left untouched above — purge those trailing rows now.
-    if (dataRows.length > seededRows.length) {
-      const firstStaleRow = seededRows.length + 2; // 1-based, after header + seeded rows
+    if (dataRows.length > rowsToWrite.length) {
+      const firstStaleRow = rowsToWrite.length + 2; // 1-based, after header + seeded rows
       const lastStaleRow  = dataRows.length + 1;
       await clearRange(workbookId, `SLATE_INPUT!A${firstStaleRow}:AH${lastStaleRow}`).catch(
         (err: unknown) => {
@@ -358,13 +366,13 @@ export async function seedSlateInput(
         },
       );
       logger.info(
-        { cleared: dataRows.length - seededRows.length },
+        { cleared: dataRows.length - rowsToWrite.length },
         "MODULE_10: Cleared stale SLATE_INPUT rows from prior dates",
       );
     }
 
-    output.rows_written = seededRows.length;
-    output.games_seeded.total_games = seededRows.length;
+    output.rows_written = rowsToWrite.length;
+    output.games_seeded.total_games = rowsToWrite.length;
 
     const linesPopulated = output.seed_results.filter((r) => r.line_populated).length;
     logger.info(
