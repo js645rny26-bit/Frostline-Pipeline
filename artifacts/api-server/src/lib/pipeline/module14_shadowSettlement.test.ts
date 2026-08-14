@@ -60,7 +60,7 @@ test("OPEN decision audit row is a valid prospective fallback only before first 
   assert.match(parsed.warnings[0] ?? "", /non-prospective timestamp/);
 });
 
-test("vehicle log wins and audit fallback cannot rewrite an existing outcome", () => {
+test("vehicle log wins while validated audit evidence can repair an unresolved outcome", () => {
   const frozenVehicle = {
     market_line: 8.5,
     direction: "UNDER",
@@ -74,9 +74,8 @@ test("vehicle log wins and audit fallback cannot rewrite an existing outcome", (
     source: "PROSPECTIVE_DECISION_AUDIT" as const,
   };
 
-  assert.equal(selectProspectiveProjection(frozenVehicle, prospectiveAudit, false), frozenVehicle);
-  assert.equal(selectProspectiveProjection(undefined, prospectiveAudit, false), prospectiveAudit);
-  assert.equal(selectProspectiveProjection(undefined, prospectiveAudit, true), undefined);
+  assert.equal(selectProspectiveProjection(frozenVehicle, prospectiveAudit), frozenVehicle);
+  assert.equal(selectProspectiveProjection(undefined, prospectiveAudit), prospectiveAudit);
 });
 
 test("decision audit fallback is labeled and propagated into projection replay", () => {

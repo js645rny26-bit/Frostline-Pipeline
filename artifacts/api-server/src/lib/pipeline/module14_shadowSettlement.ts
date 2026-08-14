@@ -82,9 +82,8 @@ export interface ProspectiveSnapshotParseResult {
 export function selectProspectiveProjection(
   vehicle: FrozenProjection | undefined,
   auditSnapshot: FrozenProjection | undefined,
-  existingOutcome: boolean,
 ): FrozenProjection | undefined {
-  return vehicle ?? (existingOutcome ? undefined : auditSnapshot);
+  return vehicle ?? auditSnapshot;
 }
 
 export interface SettlementRow {
@@ -578,14 +577,13 @@ export async function runShadowSettlement(
     const homeMatch = comparePitcherNames(projectedHomeStarter, provenance.home.actual_starter);
     const combinedStatus = combinedProvenanceStatus(provenance.status, awayMatch, homeMatch);
     if (combinedStatus !== "COMPLETE") provenanceIncomplete++;
-    // Existing outcome rows retain their original prospective-source result.
-    // This keeps the repair prospective and prevents a settlement rerun from
-    // silently rewriting a historical AUDIT_GAP. New outcomes use VehicleLog
-    // first, then the timestamp-validated Decision Audit snapshot.
+    // Already-valid prospective fields remain immutable in frozenAuditValues.
+    // An unresolved outcome may be repaired only from a timestamp-validated
+    // pre-first-pitch Decision Audit observation, never from a current model
+    // recalculation. VehicleLog remains the authoritative first choice.
     const prospectiveProjection = selectProspectiveProjection(
       vehiclesByGame.get(gameId),
       auditSnapshotsByGame.get(gameId),
-      existing !== undefined,
     );
     const frozen = frozenAuditValues(projection, final.actual_total, prospectiveProjection, existing?.values);
     const frozenGap = classifyFrozenVehicleGap(
