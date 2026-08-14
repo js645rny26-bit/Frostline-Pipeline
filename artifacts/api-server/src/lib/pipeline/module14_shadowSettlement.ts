@@ -22,6 +22,7 @@ const MLB_API = "https://statsapi.mlb.com/api/v1";
 const HISTORY_SHEET = "SHADOW_HISTORY";
 const OUTCOMES_SHEET = "SHADOW_OUTCOMES";
 const VEHICLE_LOG_SHEET = "VEHICLE_LOG";
+const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
 const PROJECTION_REPLAY_SHEET = "PROJECTION_REPLAY";
 const OUTCOMES_COLS = 33; // A-AG
 
@@ -66,10 +67,24 @@ export const PROJECTION_REPLAY_HEADER = [
   "Blend_Park_Pitcher_Error", "Market_Line", "Edge_BLEND_PARK_PITCHER", "Replay_Run_TS",
 ];
 
-interface FrozenVehicle {
+export interface FrozenProjection {
   market_line: number | null;
   direction: string;
   projected_total: number;
+  source?: "FROZEN_VEHICLE_LOG" | "PROSPECTIVE_DECISION_AUDIT";
+}
+
+export interface ProspectiveSnapshotParseResult {
+  snapshots: Map<string, FrozenProjection>;
+  warnings: string[];
+}
+
+export function selectProspectiveProjection(
+  vehicle: FrozenProjection | undefined,
+  auditSnapshot: FrozenProjection | undefined,
+  existingOutcome: boolean,
+): FrozenProjection | undefined {
+  return vehicle ?? (existingOutcome ? undefined : auditSnapshot);
 }
 
 export interface SettlementRow {
@@ -269,29 +284,83 @@ function gradeDirection(direction: string, line: number | null, actual: number):
   return "NO_BET";
 }
 
+function isPreservedProspectiveSource(value: unknown): boolean {
+  const source = String(value ?? "");
+  return source === "FROZEN_VEHICLE_LOG" || source === "PROSPECTIVE_DECISION_AUDIT";
+}
+
+/**
+ * Extract the last legitimate pre-first-pitch model snapshot from
+ * DECISION_AUDIT_LOG. OPEN is intentionally valid here: it is the most recent
+ * prospective observation for a game that never received a lock-time publish.
+ * AUDIT_GAP rows and timestamps at/after first pitch are always rejected.
+ */
+export function parseProspectiveDecisionAuditSnapshots(
+  rows: unknown[][],
+  date: string,
+): ProspectiveSnapshotParseResult {
+  const snapshots = new Map<string, FrozenProjection>();
+  const snapshotTimes = new Map<string, number>();
+  const warnings: string[] = [];
+
+  for (const row of rows) {
+    if (String(row[0] ?? "") !== date) continue;
+    const gameId = String(row[1] ?? "").trim();
+    const status = String(row[7] ?? "").trim();
+    if (!gameId || (status !== "OPEN" && status !== "FROZEN")) continue;
+
+    const firstPitch = Date.parse(String(row[4] ?? ""));
+    const modelTimestamp = Date.parse(String(row[16] ?? ""));
+    const projectedTotal = numberOrNull(row[10]);
+    if (
+      !Number.isFinite(firstPitch)
+      || !Number.isFinite(modelTimestamp)
+      || modelTimestamp >= firstPitch
+      || projectedTotal === null
+    ) {
+      warnings.push(
+        `DECISION_AUDIT snapshot rejected for ${gameId}: missing/invalid projection or non-prospective timestamp`,
+      );
+      continue;
+    }
+
+    const priorTimestamp = snapshotTimes.get(gameId) ?? Number.NEGATIVE_INFINITY;
+    if (modelTimestamp < priorTimestamp) continue;
+    snapshots.set(gameId, {
+      market_line: numberOrNull(row[11]),
+      direction: String(row[12] ?? "NONE"),
+      projected_total: projectedTotal,
+      source: "PROSPECTIVE_DECISION_AUDIT",
+    });
+    snapshotTimes.set(gameId, modelTimestamp);
+  }
+
+  return { snapshots, warnings };
+}
+
 function frozenAuditValues(
   repairedProjection: number,
   actualTotal: number,
-  vehicle: FrozenVehicle | undefined,
+  projection: FrozenProjection | undefined,
   existing?: unknown[],
 ): unknown[] {
   // Schema-v16 manual repairs stored the frozen audit directly in M:V. Preserve
   // those values verbatim while migrating the pitcher fields to W:AG.
-  if (String(existing?.[O_FROZEN_SOURCE] ?? "") === "FROZEN_VEHICLE_LOG") {
+  if (isPreservedProspectiveSource(existing?.[O_FROZEN_SOURCE])) {
     return existing!.slice(12, 22);
   }
-  if (!vehicle) {
+  if (!projection) {
     return ["", "", "", "MISSING_FROZEN_VEHICLE_LOG", "", "", "", "", "", "FROZEN_SOURCE_UNRESOLVED"];
   }
-  const frozenError = round2(vehicle.projected_total - actualTotal);
-  const delta = round2(repairedProjection - vehicle.projected_total);
-  const line = vehicle.market_line;
-  const result = gradeDirection(vehicle.direction, line, actualTotal);
+  const frozenError = round2(projection.projected_total - actualTotal);
+  const delta = round2(repairedProjection - projection.projected_total);
+  const line = projection.market_line;
+  const result = gradeDirection(projection.direction, line, actualTotal);
   return [
-    vehicle.projected_total,
+    projection.projected_total,
     frozenError,
     round2(Math.abs(frozenError)),
-    "FROZEN_VEHICLE_LOG",
+    projection.source ?? "FROZEN_VEHICLE_LOG",
     delta,
     line ?? "",
     line ?? "",
@@ -307,7 +376,7 @@ export function classifyFrozenVehicleGap(
   hasFrozenProspectiveState: boolean,
 ): { warning?: string; error?: string } {
   if (hasFrozenProspectiveState) return {};
-  const message = `PREGAME_FREEZE_MISSING/AUDIT_GAP: ${gameId} has no preserved prospective VEHICLE_LOG row`;
+  const message = `PREGAME_FREEZE_MISSING/AUDIT_GAP: ${gameId} has no preserved prospective projection snapshot`;
   return date < FROZEN_VEHICLE_REQUIRED_FROM_DATE
     ? { warning: `LEGACY_${message}` }
     : { error: message };
@@ -316,14 +385,14 @@ export function classifyFrozenVehicleGap(
 /** Migrate either legacy frozen-audit M:V rows or v16 pitcher M:W rows. */
 export function normalizeOutcomeValues(
   raw: unknown[],
-  vehicle?: FrozenVehicle,
+  vehicle?: FrozenProjection,
 ): unknown[] {
   const base = raw.slice(0, 12);
   while (base.length < 12) base.push("");
   const repaired = numberOrNull(base[4]) ?? 0;
   const actual = numberOrNull(base[5]) ?? 0;
   const hasCombinedLayout = String(raw[32] ?? "") !== "";
-  const hasLegacyFrozenLayout = String(raw[15] ?? "") === "FROZEN_VEHICLE_LOG";
+  const hasLegacyFrozenLayout = isPreservedProspectiveSource(raw[15]);
   const pitcher = hasCombinedLayout
     ? raw.slice(22, 33)
     : hasLegacyFrozenLayout
@@ -357,7 +426,7 @@ export function frozenProjectionReplayValues(row: SettlementRow, ts: string): un
     frozen, frozen, frozen, frozen, frozen,
     error, error, error, error, error,
     "", "", "", "", row.away_offense_source, row.home_offense_source,
-    "", "", "FROZEN_VEHICLE_LOG", "", "", frozen, error,
+    "", "", row.frozen_projection_source, "", "", frozen, error,
     row.frozen_market_line ?? "",
     row.frozen_market_line === null ? "" : round2(frozen - row.frozen_market_line),
     ts,
@@ -417,7 +486,7 @@ export async function runShadowSettlement(
     return { ...failedResult(date, ts, []), status: "success", games_found: 0 };
   }
 
-  const vehiclesByGame = new Map<string, FrozenVehicle>();
+  const vehiclesByGame = new Map<string, FrozenProjection>();
   try {
     const response = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:N5000`);
     for (const row of ((response.values ?? []) as unknown[][]).slice(1)) {
@@ -428,10 +497,31 @@ export async function runShadowSettlement(
         market_line: numberOrNull(row[5]),
         direction: String(row[6] ?? "NONE"),
         projected_total: projected,
+        source: "FROZEN_VEHICLE_LOG",
       });
     }
   } catch (error: unknown) {
     warnings.push(`VEHICLE_LOG frozen projection read failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // A game can remain OPEN until first pitch when no publish occurs near its
+  // lock cutoff. DECISION_AUDIT_LOG still contains the last real pregame model
+  // observation. Accept that observation only when its model timestamp is
+  // strictly earlier than scheduled first pitch; VehicleLog always wins when
+  // both sources exist.
+  const auditSnapshotsByGame = new Map<string, FrozenProjection>();
+  try {
+    const response = await readRange(wbId, `${DECISION_AUDIT_SHEET}!A1:Q5000`);
+    const parsed = parseProspectiveDecisionAuditSnapshots(
+      ((response.values ?? []) as unknown[][]).slice(1),
+      date,
+    );
+    for (const [gameId, snapshot] of parsed.snapshots) {
+      auditSnapshotsByGame.set(gameId, snapshot);
+    }
+    warnings.push(...parsed.warnings);
+  } catch (error: unknown) {
+    warnings.push(`DECISION_AUDIT_LOG prospective snapshot read failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   type Existing = { dataIndex: number; values: unknown[] };
@@ -488,11 +578,20 @@ export async function runShadowSettlement(
     const homeMatch = comparePitcherNames(projectedHomeStarter, provenance.home.actual_starter);
     const combinedStatus = combinedProvenanceStatus(provenance.status, awayMatch, homeMatch);
     if (combinedStatus !== "COMPLETE") provenanceIncomplete++;
-    const frozen = frozenAuditValues(projection, final.actual_total, vehiclesByGame.get(gameId), existing?.values);
+    // Existing outcome rows retain their original prospective-source result.
+    // This keeps the repair prospective and prevents a settlement rerun from
+    // silently rewriting a historical AUDIT_GAP. New outcomes use VehicleLog
+    // first, then the timestamp-validated Decision Audit snapshot.
+    const prospectiveProjection = selectProspectiveProjection(
+      vehiclesByGame.get(gameId),
+      auditSnapshotsByGame.get(gameId),
+      existing !== undefined,
+    );
+    const frozen = frozenAuditValues(projection, final.actual_total, prospectiveProjection, existing?.values);
     const frozenGap = classifyFrozenVehicleGap(
       date,
       gameId,
-      vehiclesByGame.has(gameId) || String(existing?.values[O_FROZEN_SOURCE] ?? "") === "FROZEN_VEHICLE_LOG",
+      prospectiveProjection !== undefined || isPreservedProspectiveSource(existing?.values[O_FROZEN_SOURCE]),
     );
     if (frozenGap.warning) warnings.push(frozenGap.warning);
     if (frozenGap.error) errors.push(frozenGap.error);
