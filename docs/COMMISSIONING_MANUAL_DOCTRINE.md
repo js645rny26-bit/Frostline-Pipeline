@@ -23,6 +23,14 @@ Do not begin by trying to preserve a Frostline Over, Under, side, confidence, or
 
 A veto of the original vehicle starts a price-blind reroute audit. Review the opposite game total, moneyline, run line, each team total, opponent team total, and appropriate derivatives. This search is mandatory; selecting an alternative is not. Return NO CORE when no alternative captures the dominant scripts better.
 
+### Structural event capture
+
+When the full-game total requires multiple independent conditions to hold, but a narrower bettable event is supported across more of the likely game scripts, that event must enter the price-blind vehicle tournament and may supersede the total.
+
+Checklist question: **Is there a narrower bettable event that occurs across more likely game scripts than the full-game total?**
+
+Structural event capture is manual vehicle-selection doctrine only. It does not change a projection, coefficient, threshold, gate, or game truth, and it does not force an alternative wager.
+
 When evidence weakens one side of a total, classify that evidence before deciding:
 
 - Opposite-direction evidence moves the expected run center toward the other side.
