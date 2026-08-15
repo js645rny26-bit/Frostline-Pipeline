@@ -61,6 +61,29 @@ function key(value: unknown): string {
 }
 
 /**
+ * Resolve physical worksheet row numbers by stable identity rather than by
+ * schedule position. A protected game may legitimately have no preserved row;
+ * in that case the remaining rows compact upward and schedule ordinals are no
+ * longer valid worksheet addresses.
+ */
+export function buildSheetRowNumberMap(
+  rows: readonly unknown[][],
+  keyColumn: number,
+  firstDataRow = 2,
+): Map<string, number> {
+  const rowNumbers = new Map<string, number>();
+  rows.forEach((row, index) => {
+    const rowKey = key(row[keyColumn]);
+    if (!rowKey) return;
+    if (rowNumbers.has(rowKey)) {
+      throw new Error(`DUPLICATE_PUBLICATION_KEY: ${rowKey}`);
+    }
+    rowNumbers.set(rowKey, firstDataRow + index);
+  });
+  return rowNumbers;
+}
+
+/**
  * Merge a replace-style table without recomputing protected rows.
  * Existing protected rows are copied byte-for-byte; incoming protected rows
  * are discarded. Rows are ordered by the supplied key order when present.

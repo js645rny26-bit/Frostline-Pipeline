@@ -28,7 +28,11 @@
 import { clearRange, expandSheetColumns, readRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { NormalizationResult, NormalizedGame } from "./module06_normalization.js";
-import { mergeProtectedRows, type PublicationProtection } from "./module00_scopedPublication.js";
+import {
+  buildSheetRowNumberMap,
+  mergeProtectedRows,
+  type PublicationProtection,
+} from "./module00_scopedPublication.js";
 import type { FangraphsResult } from "./module05_fangraphs.js";
 import { getSeasonalParkFactor } from "./module04d_parkFactors.js";
 import type { PitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
@@ -1271,13 +1275,32 @@ export async function verifyRecalculation(
     logger.info({ rows: playerIntegrationRows.length }, "MODULE_09: PLAYER_INTEGRATION written");
 
     if (gameSummaryRows.length > 0) {
-      const rowOrder = protection?.expected_game_ids ?? gameSummaryRows.map((row) => row.game_id);
+      const [environmentIdentity, matchupIdentity] = await Promise.all([
+        readRange(workbookId, "RUN_ENVIRONMENT!A2:B100"),
+        readRange(workbookId, "DAILY_MATCHUPS!A2:B100"),
+      ]);
+      const environmentRows = buildSheetRowNumberMap(environmentIdentity.values ?? [], 1);
+      const matchupRows = buildSheetRowNumberMap(matchupIdentity.values ?? [], 1);
       await Promise.all(gameSummaryRows.map(async (row) => {
-        const rowNumber = rowOrder.indexOf(row.game_id) + 2;
-        if (rowNumber < 2) throw new Error(`Missing publication row for ${row.game_id}`);
+        const environmentRowNumber = environmentRows.get(row.game_id);
+        const matchupRowNumber = matchupRows.get(row.game_id);
+        if (environmentRowNumber === undefined) {
+          throw new Error(`RUN_ENVIRONMENT publication row missing for ${row.game_id}`);
+        }
+        if (matchupRowNumber === undefined) {
+          throw new Error(`DAILY_MATCHUPS publication row missing for ${row.game_id}`);
+        }
         await Promise.all([
-          writeRange(workbookId, `RUN_ENVIRONMENT!K${rowNumber}:K${rowNumber}`, [[row.combined_run_multiplier]]),
-          writeRange(workbookId, `DAILY_MATCHUPS!U${rowNumber}:V${rowNumber}`, [[row.home_run_factor, row.combined_run_multiplier]]),
+          writeRange(
+            workbookId,
+            `RUN_ENVIRONMENT!K${environmentRowNumber}:K${environmentRowNumber}`,
+            [[row.combined_run_multiplier]],
+          ),
+          writeRange(
+            workbookId,
+            `DAILY_MATCHUPS!U${matchupRowNumber}:V${matchupRowNumber}`,
+            [[row.home_run_factor, row.combined_run_multiplier]],
+          ),
         ]);
       }));
     }

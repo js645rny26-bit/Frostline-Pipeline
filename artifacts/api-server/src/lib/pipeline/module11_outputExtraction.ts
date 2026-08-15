@@ -1745,9 +1745,15 @@ export async function extractOutputBoards(
     // Reapply the authoritative schema formats without altering any values.
     await applySchemaNumberFormats(workbookId, ["SLATE_INPUT", "SLATE_BOARD"]);
 
+    // A protected game can legitimately be absent when no prospective row was
+    // published before its cutoff. Validate the exact board surface produced by
+    // the immutable merge; never require a late run to manufacture that row.
+    const expectedPublishedGameIds = sbRowsToWrite
+      .map((row) => String(row[1] ?? "").trim())
+      .filter(Boolean);
     output.publication_validation = await validateCurrentSlatePublicationWithRetry({
       date: slateDate,
-      expected_game_ids: protection?.expected_game_ids ?? gameSummary.map((game) => game.game_id),
+      expected_game_ids: expectedPublishedGameIds,
       expected_active_game_ids: abRowsToWrite.map((row) => String(row[1] ?? "")),
     }, async () => {
       const [boardReadback, slateInputReadback, activeReadback] = await Promise.all([

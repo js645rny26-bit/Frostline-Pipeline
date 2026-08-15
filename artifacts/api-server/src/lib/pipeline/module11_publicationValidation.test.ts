@@ -48,6 +48,22 @@ test("semantic publication validation accepts an exact current slate", () => {
   assert.deepEqual(result.errors, []);
 });
 
+test("staggered publication accepts mutable rows when a protected game had no prior snapshot", () => {
+  const mutableIds = ["20260814_MIA_CIN", "20260814_BOS_PIT"];
+  const result = validateCurrentSlatePublication({
+    date: "2026-08-14",
+    expected_game_ids: mutableIds,
+    expected_active_game_ids: [],
+    slate_board_rows: mutableIds.map((id) => boardRow("2026-08-14", id)),
+    slate_input_rows: mutableIds.map((id) => slateRow("2026-08-14", id)),
+    active_board_rows: [],
+  });
+
+  assert.equal(result.status, "PASS");
+  assert.equal(result.expected_games, 2);
+  assert.deepEqual(result.errors, []);
+});
+
 test("formatted legacy percentage scores remain numeric during readback", () => {
   const board = boardRow("2026-08-02", "G1");
   const slate = slateRow("2026-08-02", "G1");

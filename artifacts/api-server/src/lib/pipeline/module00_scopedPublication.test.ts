@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildSheetRowNumberMap,
   buildPublicationProtection,
   mergeProtectedRows,
 } from "./module00_scopedPublication.js";
@@ -67,4 +68,37 @@ test("pre-write guard protects a game that could cross first pitch during the wr
   assert.deepEqual([...protection.protected_game_ids], ["20260812_COL_ARI"]);
   assert.deepEqual([...protection.protected_team_abbrs], ["COL", "ARI"]);
   assert.deepEqual(protection.expected_game_ids, ["20260812_COL_ARI", "20260812_HOU_SFG"]);
+});
+
+test("missing protected row does not shift mutable Game_ID worksheet addresses", () => {
+  const protectedId = "20260814_STL_CHC";
+  const firstMutableId = "20260814_MIA_CIN";
+  const secondMutableId = "20260814_BOS_PIT";
+  const merged = mergeProtectedRows(
+    [],
+    [
+      ["2026-08-14", protectedId, "ILLEGAL_LATE_VALUE"],
+      ["2026-08-14", firstMutableId, 0.98],
+      ["2026-08-14", secondMutableId, 1.02],
+    ],
+    1,
+    new Set([protectedId]),
+    [protectedId, firstMutableId, secondMutableId],
+  );
+
+  assert.deepEqual(merged.map((row) => row[1]), [firstMutableId, secondMutableId]);
+  const rowNumbers = buildSheetRowNumberMap(merged, 1);
+  assert.equal(rowNumbers.has(protectedId), false);
+  assert.equal(rowNumbers.get(firstMutableId), 2);
+  assert.equal(rowNumbers.get(secondMutableId), 3);
+});
+
+test("worksheet identity indexing fails closed on duplicate Game_ID rows", () => {
+  assert.throws(
+    () => buildSheetRowNumberMap([
+      ["2026-08-14", "20260814_MIA_CIN"],
+      ["2026-08-14", "20260814_MIA_CIN"],
+    ], 1),
+    /DUPLICATE_PUBLICATION_KEY/,
+  );
 });
