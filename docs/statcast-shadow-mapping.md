@@ -69,9 +69,9 @@ Each field is compared against currently active model inputs.
 |---|---|---|---|
 | `xwoba_avg` (hitters) | Module09 `computeLineupStrength` already blends per-batter xwOBA from module02d (Statcast leaderboard) at `STATCAST_BLEND_WEIGHT = 0.25`. The preview aggregate and module02d measure the same metric for largely the same players. | **EXCLUDED** — direct double-count with lineup factor. |
 | `ev_avg` (hitters) | Correlated with hitter xwOBA. Module02d also has `exit_velo_avg`. | **EXCLUDED** — proxied by lineup xwOBA. |
-| `hard_hit_avg` (hitters) | Module02d has `hard_hit_pct`. | **EXCLUDED** — correlated proxy. |
-| `k_pct_avg` (hitters) | Not currently in the lineup model. Independent signal. | **EXCLUDED in Phase 3** — directionally correct (higher K% = fewer baserunners), but magnitude calibration requires shadow validation data across multiple slates before inclusion. |
-| `bb_pct_avg` (hitters) | Not currently in the lineup model. Independent signal. | **EXCLUDED in Phase 3** — same reasoning as K%. |
+| `hard_hit_avg` (hitters) | Module02d has `hard_hit_pct`. | **ESTIMATE in Phase 4** — signed HR/XBH damage estimate, capped and retained outside the active projection. |
+| `k_pct_avg` (hitters) | Not currently in the lineup model. Independent signal. | **ESTIMATE in Phase 4** — combined with BB% for a signed traffic-conversion estimate. |
+| `bb_pct_avg` (hitters) | Not currently in the lineup model. Independent signal. | **ESTIMATE in Phase 4** — combined with K% for a signed traffic-conversion estimate. |
 
 ---
 
@@ -123,11 +123,28 @@ When `|totalUncapped| > 0.30`:
 - No change to CORE/NO_CORE decisions.
 - The STATCAST_SHADOW_AUDIT sheet is a read-only analysis surface.
 
+## Phase 4 Hitter-Tail Estimates
+
+`STATCAST_SHADOW_AUDIT` also records inexpensive candidate estimates:
+
+```
+trafficIndex = ((BB% / 8.5) + (22.5 / K%)) / 2
+trafficAdj   = clamp(projectedTeamRuns * (trafficIndex - 1), -0.35, +0.35)
+damageIndex  = HardHit% / 38.5
+damageAdj    = clamp(projectedTeamRuns * (damageIndex - 1), -0.35, +0.35)
+combinedTail = clamp(sum(team traffic + team damage), -0.60, +0.60)
+estimatedProjection = currentProjection + cappedStarterAdjustment + combinedTail
+```
+
+Missing inputs produce a zero estimate for that subcomponent and an explicit
+`PARTIAL` or `UNAVAILABLE` status. The active GAME_SUMMARY placeholders remain
+zero while these estimates accumulate evidence.
+
 ## Fields Reserved for Future Phases
 
 | Field | Reserved phase | Prerequisite |
 |---|---|---|
 | Pitcher K%/BB% | Phase 5 (stub replacement) | Requires removing FanGraphs stub; calibration across ≥30 slates |
 | Pitcher barrel rate | Phase 5 | Empirical δ-runs-per-barrel calibration |
-| Hitter K%/BB% avg | Phase 5 | Shadow validation evidence across ≥30 slates |
+| Hitter K%/BB% avg promotion | Phase 5 | Shadow validation evidence across ≥30 slates |
 | Cached-payload reuse detection | Phase 3 infrastructure | Cache-loading path not yet implemented |

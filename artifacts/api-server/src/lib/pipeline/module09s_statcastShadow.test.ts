@@ -26,10 +26,17 @@ import assert from "node:assert/strict";
 import {
   xwobaQualityFactor,
   shadowStarterQuality,
+  estimateTrafficAdjustment,
+  estimateDamageAdjustment,
   computeShadowAuditRow,
   LEAGUE_AVG_XWOBA_ALLOWED,
+  LEAGUE_AVG_HITTER_BB_PCT,
+  LEAGUE_AVG_HITTER_K_PCT,
+  LEAGUE_AVG_HITTER_HARD_HIT_PCT,
   SHADOW_BLEND_WEIGHT,
   SHADOW_ADJUSTMENT_CAP,
+  SHADOW_TAIL_TEAM_CAP,
+  SHADOW_TAIL_GAME_CAP,
 } from "./module09s_statcastShadow.js";
 
 import type { GameSummaryRow } from "./module09_recalculation.js";
@@ -246,6 +253,37 @@ describe("shadowStarterQuality", () => {
   });
 });
 
+describe("preview hitter tail estimates", () => {
+  it("returns neutral traffic and damage adjustments at league-average inputs", () => {
+    assert.strictEqual(
+      estimateTrafficAdjustment(4.5, LEAGUE_AVG_HITTER_BB_PCT, LEAGUE_AVG_HITTER_K_PCT),
+      0,
+    );
+    assert.strictEqual(
+      estimateDamageAdjustment(4.5, LEAGUE_AVG_HITTER_HARD_HIT_PCT),
+      0,
+    );
+  });
+
+  it("raises traffic for more walks and fewer strikeouts and lowers it for the inverse", () => {
+    assert.ok((estimateTrafficAdjustment(4.5, 11.0, 18.0) ?? 0) > 0);
+    assert.ok((estimateTrafficAdjustment(4.5, 6.0, 28.0) ?? 0) < 0);
+  });
+
+  it("raises damage for above-average hard-hit rate and lowers it below average", () => {
+    assert.ok((estimateDamageAdjustment(4.5, 46.0) ?? 0) > 0);
+    assert.ok((estimateDamageAdjustment(4.5, 31.0) ?? 0) < 0);
+  });
+
+  it("returns null for unavailable inputs and clamps extreme team estimates", () => {
+    assert.strictEqual(estimateTrafficAdjustment(4.5, null, 20), null);
+    assert.strictEqual(estimateTrafficAdjustment(4.5, 10, null), null);
+    assert.strictEqual(estimateDamageAdjustment(4.5, null), null);
+    assert.equal(Math.abs(estimateTrafficAdjustment(12, 25, 5) ?? 0), SHADOW_TAIL_TEAM_CAP);
+    assert.equal(Math.abs(estimateDamageAdjustment(12, 90) ?? 0), SHADOW_TAIL_TEAM_CAP);
+  });
+});
+
 // ─── computeShadowAuditRow ────────────────────────────────────────────────────
 
 describe("computeShadowAuditRow — preview unavailable", () => {
@@ -383,6 +421,35 @@ describe("computeShadowAuditRow — both starters have xwOBA data", () => {
   it("missing_fields is empty when both pitcher xwOBA values are present", () => {
     const row = computeShadowAuditRow(makeSummary(), makePreview(), TS);
     assert.deepEqual(row.missing_fields, []);
+  });
+
+  it("populates traffic and HR/XBH estimates and reconciles the estimated projection", () => {
+    const row = computeShadowAuditRow(makeSummary(), makePreview(), TS);
+    assert.equal(row.tail_estimate_status, "AVAILABLE");
+    assert.equal(
+      row.traffic_conversion_estimate,
+      parseFloat((row.away_traffic_adjustment + row.home_traffic_adjustment).toFixed(4)),
+    );
+    assert.equal(
+      row.hr_xbh_damage_estimate,
+      parseFloat((row.away_damage_adjustment + row.home_damage_adjustment).toFixed(4)),
+    );
+    assert.ok(Math.abs(row.combined_tail_adjustment) <= SHADOW_TAIL_GAME_CAP);
+    const starterCapped = Math.max(
+      -SHADOW_ADJUSTMENT_CAP,
+      Math.min(SHADOW_ADJUSTMENT_CAP, row.shadow_xwoba_adjustment),
+    );
+    assert.equal(
+      row.estimated_projection,
+      parseFloat((row.current_projection + starterCapped + row.combined_tail_adjustment).toFixed(2)),
+    );
+  });
+
+  it("marks tail estimates partial when only some hitter inputs are available", () => {
+    const preview = makePreview({ away_hitters_hard_hit_avg: null });
+    const row = computeShadowAuditRow(makeSummary(), preview, TS);
+    assert.equal(row.tail_estimate_status, "PARTIAL");
+    assert.ok(row.missing_fields.includes("away_hitter_hard_hit"));
   });
 
   it("identity_warnings populated from parse_warnings", () => {

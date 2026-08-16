@@ -56,8 +56,10 @@
  *  v20 (2026-08-12): Prospective lifecycle firewall, immutable publication,
  *      single-source authorization, audit-gap state, truthful lifecycle timestamps,
  *      and separate total/allocation/margin/winner settlement measurements.
+ *  v21 (2026-08-16): STATCAST_SHADOW_AUDIT adds estimated traffic-conversion
+ *      and HR/XBH damage adjustments plus a combined estimated projection.
  */
-export const WORKBOOK_SCHEMA_VERSION = 20;
+export const WORKBOOK_SCHEMA_VERSION = 21;
 
 export interface ColumnDef {
   name: string;
@@ -433,8 +435,8 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Starter_Attack_Runs", index: 40, type: "number", width: 150, format: "0.00", readOnly: true, filledBy: "MODULE_09", exampleValue: "4.25" },
       { name: "Bullpen_Continuation_Runs", index: 41, type: "number", width: 185, format: "0.00", readOnly: true, filledBy: "MODULE_09", exampleValue: "3.10" },
       { name: "Baseline_Offense_Runs", index: 42, type: "number", width: 165, format: "0.00", readOnly: true, filledBy: "MODULE_09", exampleValue: "8.40" },
-      { name: "Traffic_Conversion_Runs", index: 43, type: "number", width: 175, format: "0.00", readOnly: true, filledBy: "MODULE_09", description: "Reserved component; explicit zero until a validated model supplies it.", exampleValue: "0.00" },
-      { name: "HR_XBH_Damage_Runs", index: 44, type: "number", width: 160, format: "0.00", readOnly: true, filledBy: "MODULE_09", description: "Reserved component; explicit zero until a validated model supplies it.", exampleValue: "0.00" },
+      { name: "Traffic_Conversion_Runs", index: 43, type: "number", width: 175, format: "0.00", readOnly: true, filledBy: "MODULE_09", description: "Active component remains zero; current estimate is recorded in STATCAST_SHADOW_AUDIT.Traffic_Conversion_Estimate.", exampleValue: "0.00" },
+      { name: "HR_XBH_Damage_Runs", index: 44, type: "number", width: 160, format: "0.00", readOnly: true, filledBy: "MODULE_09", description: "Active component remains zero; current estimate is recorded in STATCAST_SHADOW_AUDIT.HR_XBH_Damage_Estimate.", exampleValue: "0.00" },
       { name: "Baseball_Only_Projection", index: 45, type: "number", width: 180, format: "0.00", readOnly: true, filledBy: "MODULE_09", description: "Projection excluding park/weather contribution.", exampleValue: "7.35" },
       { name: "Environment_Run_Adjustment", index: 46, type: "number", width: 190, format: "0.00", readOnly: true, filledBy: "MODULE_09", description: "Projected total minus baseball-only projection.", exampleValue: "0.55" },
       { name: "Away_Lineup_Status", index: 47, type: "string", width: 145, readOnly: true, filledBy: "MODULE_09", exampleValue: "FULL" },
@@ -1299,7 +1301,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
 
   {
     name: "STATCAST_SHADOW_AUDIT",
-    description: "Per-game shadow projection driven by Baseball Savant pitcher xwOBA-allowed. Full-replace each pipeline run (current-day snapshot only). Shadow-only — does not affect live board or CORE decisions. Written by module09s.",
+    description: "Per-game estimated projection driven by Baseball Savant pitcher xwOBA-allowed plus hitter traffic/damage shape. Full-replace each pipeline run (current-day snapshot only). Does not affect the board or authorization. Written by module09s.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: [
@@ -1326,6 +1328,16 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Identity_Warnings",             index: 20, type: "string", width: 350, filledBy: "MODULE_09s", readOnly: true, description: "Semicolon-separated parse warnings (pitcher ID mismatch, team mismatch, stale data, etc.).", exampleValue: "" },
       { name: "Preview_Used_In_Projection",    index: 21, type: "string", width: 200, filledBy: "MODULE_09s", readOnly: true, description: "Always NO throughout Phase 3.", exampleValue: "NO" },
       { name: "Snapshot_TS",                   index: 22, type: "string", width: 200, filledBy: "MODULE_09s", readOnly: true, exampleValue: "2026-07-26T10:00:00.000Z" },
+      { name: "Away_Traffic_Adjustment",       index: 23, type: "number", width: 175, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Signed away-team run estimate from preview walk/strikeout opportunity shape.", exampleValue: "0.0800" },
+      { name: "Home_Traffic_Adjustment",       index: 24, type: "number", width: 175, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Signed home-team run estimate from preview walk/strikeout opportunity shape.", exampleValue: "-0.0400" },
+      { name: "Traffic_Conversion_Estimate",  index: 25, type: "number", width: 205, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Away plus home traffic adjustments; diagnostic estimate, not the active GAME_SUMMARY component.", exampleValue: "0.0400" },
+      { name: "Away_Damage_Adjustment",        index: 26, type: "number", width: 175, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Signed away-team run estimate from preview hard-hit rate relative to league baseline.", exampleValue: "0.1200" },
+      { name: "Home_Damage_Adjustment",        index: 27, type: "number", width: 175, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Signed home-team run estimate from preview hard-hit rate relative to league baseline.", exampleValue: "0.0600" },
+      { name: "HR_XBH_Damage_Estimate",       index: 28, type: "number", width: 195, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Away plus home hard-hit damage adjustments; diagnostic estimate, not the active GAME_SUMMARY component.", exampleValue: "0.1800" },
+      { name: "Combined_Tail_Adjustment",      index: 29, type: "number", width: 190, format: "0.0000", filledBy: "MODULE_09s", readOnly: true, description: "Traffic plus damage estimate, capped to +/-0.60 runs per game.", exampleValue: "0.2200" },
+      { name: "Estimated_Projection",          index: 30, type: "number", width: 165, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Current projection plus capped starter xwOBA adjustment and combined tail estimate.", exampleValue: "8.96" },
+      { name: "Tail_Cap_Applied",              index: 31, type: "string", width: 135, filledBy: "MODULE_09s", readOnly: true, description: "YES when the combined traffic/damage estimate exceeded +/-0.60 runs.", exampleValue: "NO" },
+      { name: "Tail_Estimate_Status",          index: 32, type: "string", width: 165, filledBy: "MODULE_09s", readOnly: true, description: "AVAILABLE | PARTIAL | UNAVAILABLE according to preview hitter inputs.", exampleValue: "AVAILABLE" },
     ],
   },
 

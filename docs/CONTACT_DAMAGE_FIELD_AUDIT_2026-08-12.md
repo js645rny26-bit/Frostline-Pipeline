@@ -12,7 +12,10 @@ No missing runtime dependency was found. Current scoring already carries observe
 
 - Keep both fields at explicit zero.
 - Preserve their names and audit visibility.
-- Do not activate, infer, or tune either component from the August 10 or August 11 slates.
-- Treat any future activation as a separately commissioned model change requiring provenance, historical fixtures without lookahead, prospective validation, and coefficient governance.
+- Record inexpensive signed estimates in `STATCAST_SHADOW_AUDIT` using pregame preview hitter shape:
+  - walk/strikeout opportunity for `Traffic_Conversion_Estimate`;
+  - hard-hit rate for `HR_XBH_Damage_Estimate`.
+- Keep the active `GAME_SUMMARY` components unchanged while the estimates accumulate alongside outcomes.
+- Treat any later promotion into the active projection as a separately commissioned model change.
 
-Classification: intentional dormant placeholders, not evidence of a broken bridge.
+Classification: active components remain dormant; candidate estimates are now observable and testable.

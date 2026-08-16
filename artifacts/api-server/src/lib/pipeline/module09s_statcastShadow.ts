@@ -1,8 +1,9 @@
 /**
  * Module 09s: Statcast Preview Shadow Audit
  *
- * Computes per-game shadow projection adjustments driven by Baseball Savant
- * starter xwOBA-allowed data and writes them to the STATCAST_SHADOW_AUDIT sheet.
+ * Computes per-game estimated projection adjustments driven by Baseball Savant
+ * starter xwOBA-allowed and hitter traffic/damage shape, then writes them to the
+ * STATCAST_SHADOW_AUDIT sheet.
  *
  * Shadow semantics (fail-closed to zero projection influence):
  *   - Does NOT modify live board projections.
@@ -48,6 +49,15 @@ export const SHADOW_BLEND_WEIGHT = 0.25;
  */
 export const SHADOW_ADJUSTMENT_CAP = 0.30;
 
+/** League baselines used to turn preview hitter shape into signed run estimates. */
+export const LEAGUE_AVG_HITTER_BB_PCT = 8.5;
+export const LEAGUE_AVG_HITTER_K_PCT = 22.5;
+export const LEAGUE_AVG_HITTER_HARD_HIT_PCT = 38.5;
+
+/** Per-team and per-game clamps for the inexpensive tail estimates. */
+export const SHADOW_TAIL_TEAM_CAP = 0.35;
+export const SHADOW_TAIL_GAME_CAP = 0.60;
+
 const SHADOW_SHEET = "STATCAST_SHADOW_AUDIT";
 const DEFAULT_STARTER_IP = 5.5;
 
@@ -79,6 +89,20 @@ export interface ShadowAuditRow {
   away_starter_delta: number;
   /** Run delta contributed by changing the AWAY pitcher quality (affects HOME run scoring). */
   home_starter_delta: number;
+  /** Signed run estimate from hitter walk/strikeout opportunity shape. */
+  away_traffic_adjustment: number;
+  home_traffic_adjustment: number;
+  traffic_conversion_estimate: number;
+  /** Signed run estimate from hitter hard-hit contact shape. */
+  away_damage_adjustment: number;
+  home_damage_adjustment: number;
+  hr_xbh_damage_estimate: number;
+  /** Capped sum of traffic and damage estimates. */
+  combined_tail_adjustment: number;
+  /** Current projection plus starter xwOBA and hitter-tail estimates. */
+  estimated_projection: number;
+  tail_cap_applied: boolean;
+  tail_estimate_status: "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
   missing_fields: string[];
   identity_warnings: string[];
   preview_used_in_projection: "NO";
@@ -98,6 +122,43 @@ export interface StatcastShadowResult {
 
 function clampQual(v: number): number {
   return Math.max(0.40, Math.min(1.80, v));
+}
+
+function clampSigned(v: number, cap: number): number {
+  return Math.max(-cap, Math.min(cap, v));
+}
+
+/**
+ * Estimate a signed traffic-conversion run adjustment from walk and strikeout
+ * rates. Walks above the league baseline and strikeouts below it increase the
+ * opportunity index. Missing or invalid inputs return null instead of inventing
+ * a value.
+ */
+export function estimateTrafficAdjustment(
+  projectedRuns: number,
+  bbPct: number | null,
+  kPct: number | null,
+): number | null {
+  if (bbPct === null || kPct === null || kPct <= 0 || projectedRuns < 0) return null;
+  const opportunityIndex = (
+    (bbPct / LEAGUE_AVG_HITTER_BB_PCT) +
+    (LEAGUE_AVG_HITTER_K_PCT / kPct)
+  ) / 2;
+  return parseFloat(
+    clampSigned(projectedRuns * (opportunityIndex - 1), SHADOW_TAIL_TEAM_CAP).toFixed(4),
+  );
+}
+
+/** Estimate a signed HR/XBH run adjustment from hard-hit rate. */
+export function estimateDamageAdjustment(
+  projectedRuns: number,
+  hardHitPct: number | null,
+): number | null {
+  if (hardHitPct === null || projectedRuns < 0) return null;
+  const damageIndex = hardHitPct / LEAGUE_AVG_HITTER_HARD_HIT_PCT;
+  return parseFloat(
+    clampSigned(projectedRuns * (damageIndex - 1), SHADOW_TAIL_TEAM_CAP).toFixed(4),
+  );
 }
 
 /**
@@ -206,6 +267,60 @@ export function computeShadowAuditRow(
     ? parseFloat((Math.sign(totalUncapped) * SHADOW_ADJUSTMENT_CAP).toFixed(4))
     : totalUncapped;
 
+  const awayTrafficRaw = statsAvailable
+    ? estimateTrafficAdjustment(
+        summary.projected_away_runs,
+        preview?.away_hitters_bb_pct_avg ?? null,
+        preview?.away_hitters_k_pct_avg ?? null,
+      )
+    : null;
+  const homeTrafficRaw = statsAvailable
+    ? estimateTrafficAdjustment(
+        summary.projected_home_runs,
+        preview?.home_hitters_bb_pct_avg ?? null,
+        preview?.home_hitters_k_pct_avg ?? null,
+      )
+    : null;
+  const awayDamageRaw = statsAvailable
+    ? estimateDamageAdjustment(
+        summary.projected_away_runs,
+        preview?.away_hitters_hard_hit_avg ?? null,
+      )
+    : null;
+  const homeDamageRaw = statsAvailable
+    ? estimateDamageAdjustment(
+        summary.projected_home_runs,
+        preview?.home_hitters_hard_hit_avg ?? null,
+      )
+    : null;
+
+  if (statsAvailable) {
+    if (awayTrafficRaw === null) missing.push("away_hitter_traffic_shape");
+    if (homeTrafficRaw === null) missing.push("home_hitter_traffic_shape");
+    if (awayDamageRaw === null) missing.push("away_hitter_hard_hit");
+    if (homeDamageRaw === null) missing.push("home_hitter_hard_hit");
+  }
+
+  const tailValues = [awayTrafficRaw, homeTrafficRaw, awayDamageRaw, homeDamageRaw];
+  const availableTailValues = tailValues.filter((v): v is number => v !== null);
+  const tailEstimateStatus: ShadowAuditRow["tail_estimate_status"] =
+    availableTailValues.length === 4
+      ? "AVAILABLE"
+      : availableTailValues.length > 0
+        ? "PARTIAL"
+        : "UNAVAILABLE";
+  const awayTraffic = awayTrafficRaw ?? 0;
+  const homeTraffic = homeTrafficRaw ?? 0;
+  const awayDamage = awayDamageRaw ?? 0;
+  const homeDamage = homeDamageRaw ?? 0;
+  const trafficEstimate = parseFloat((awayTraffic + homeTraffic).toFixed(4));
+  const damageEstimate = parseFloat((awayDamage + homeDamage).toFixed(4));
+  const tailUncapped = parseFloat((trafficEstimate + damageEstimate).toFixed(4));
+  const tailCapApplied = Math.abs(tailUncapped) > SHADOW_TAIL_GAME_CAP;
+  const combinedTailAdjustment = parseFloat(
+    clampSigned(tailUncapped, SHADOW_TAIL_GAME_CAP).toFixed(4),
+  );
+
   return {
     game_id:                      summary.game_id,
     date:                         summary.date,
@@ -226,6 +341,18 @@ export function computeShadowAuditRow(
     home_pitcher_current_quality: summary.home_starter_quality,
     away_starter_delta:           awayDelta,
     home_starter_delta:           homeDelta,
+    away_traffic_adjustment:      awayTraffic,
+    home_traffic_adjustment:      homeTraffic,
+    traffic_conversion_estimate: trafficEstimate,
+    away_damage_adjustment:       awayDamage,
+    home_damage_adjustment:       homeDamage,
+    hr_xbh_damage_estimate:       damageEstimate,
+    combined_tail_adjustment:     combinedTailAdjustment,
+    estimated_projection:         parseFloat(
+      (summary.projected_total_runs + cappedAdj + combinedTailAdjustment).toFixed(2),
+    ),
+    tail_cap_applied:              tailCapApplied,
+    tail_estimate_status:          tailEstimateStatus,
     missing_fields:               missing,
     identity_warnings:            identityWarnings,
     preview_used_in_projection:   "NO",
@@ -259,12 +386,22 @@ const SHADOW_AUDIT_HEADERS = [
   "Identity_Warnings",
   "Preview_Used_In_Projection",
   "Snapshot_TS",
+  "Away_Traffic_Adjustment",
+  "Home_Traffic_Adjustment",
+  "Traffic_Conversion_Estimate",
+  "Away_Damage_Adjustment",
+  "Home_Damage_Adjustment",
+  "HR_XBH_Damage_Estimate",
+  "Combined_Tail_Adjustment",
+  "Estimated_Projection",
+  "Tail_Cap_Applied",
+  "Tail_Estimate_Status",
 ];
 
 async function ensureShadowAuditSheet(workbookId: string): Promise<void> {
   let sheetExists = true;
   try {
-    const existing = await readRange(workbookId, `${SHADOW_SHEET}!A1:Z1`);
+    const existing = await readRange(workbookId, `${SHADOW_SHEET}!A1:AG1`);
     const headerRow = (existing.values?.[0] ?? []).map((c) => String(c ?? "").trim());
     const upToDate =
       headerRow.length >= SHADOW_AUDIT_HEADERS.length &&
@@ -313,6 +450,16 @@ function rowToArray(r: ShadowAuditRow): unknown[] {
     r.identity_warnings.join("; "),
     r.preview_used_in_projection,
     r.snapshot_ts,
+    r.away_traffic_adjustment,
+    r.home_traffic_adjustment,
+    r.traffic_conversion_estimate,
+    r.away_damage_adjustment,
+    r.home_damage_adjustment,
+    r.hr_xbh_damage_estimate,
+    r.combined_tail_adjustment,
+    r.estimated_projection,
+    r.tail_cap_applied ? "YES" : "NO",
+    r.tail_estimate_status,
   ];
 }
 
@@ -372,11 +519,11 @@ export async function computeAndWriteStatcastShadow(
     const incomingRows = shadowRows.map(rowToArray);
     const rowsToWrite = protection && protection.protected_game_ids.size > 0
       ? mergeProtectedRows(
-          (await readRange(workbookId, `${SHADOW_SHEET}!A2:Z10000`)).values ?? [],
+          (await readRange(workbookId, `${SHADOW_SHEET}!A2:AG10000`)).values ?? [],
           incomingRows, 1, protection.protected_game_ids, protection.expected_game_ids,
         )
       : incomingRows;
-    await clearRange(workbookId, `${SHADOW_SHEET}!A2:Z10000`);
+    await clearRange(workbookId, `${SHADOW_SHEET}!A2:AG10000`);
     await writeRange(workbookId, `${SHADOW_SHEET}!A2`, rowsToWrite);
     rowsWritten = rowsToWrite.length;
     logger.info({ rows: rowsWritten }, "MODULE_09s: STATCAST_SHADOW_AUDIT written");
