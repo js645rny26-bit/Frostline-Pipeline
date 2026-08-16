@@ -1,6 +1,6 @@
 # Frostline Daily SOP
 
-The independent reasoning procedure is governed by [COMMISSIONING_MANUAL_DOCTRINE.md](./COMMISSIONING_MANUAL_DOCTRINE.md). It is a manual operating layer and must not be translated into projection formulas.
+The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The independent reasoning procedure is governed by [COMMISSIONING_MANUAL_DOCTRINE.md](./COMMISSIONING_MANUAL_DOCTRINE.md). It is a manual operating layer and must not be translated into projection formulas.
 
 ## Lifecycle safety
 

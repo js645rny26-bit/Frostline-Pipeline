@@ -31,6 +31,10 @@ Checklist question: **Is there a narrower bettable event that occurs across more
 
 Structural event capture is manual vehicle-selection doctrine only. It does not change a projection, coefficient, threshold, gate, or game truth, and it does not force an alternative wager.
 
+### Tentative total range
+
+When `STATCAST_SHADOW_AUDIT.Tail_Estimate_Status` is `AVAILABLE` or `PARTIAL`, treat the active `GAME_SUMMARY.Projected_Total_Runs` and `STATCAST_SHADOW_AUDIT.Estimated_Projection` as the endpoints of a tentative decision range. If the executable market line falls inside that range, the point-estimate direction is unstable and cannot authorize a wager by itself. If both endpoints remain on the same side, that is tentative agreement—not automatic authorization. Missing inputs and cap flags must be stated in the review.
+
 When evidence weakens one side of a total, classify that evidence before deciding:
 
 - Opposite-direction evidence moves the expected run center toward the other side.

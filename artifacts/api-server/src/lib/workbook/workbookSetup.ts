@@ -29,6 +29,7 @@ import {
   type SheetDef,
   type ColumnDef,
 } from "./workbookSchema.js";
+import { buildWorkbookRoadmapReadmeRows } from "./workbookRoadmap.js";
 
 export interface WorkbookCreateResult {
   workbook_id: string;
@@ -309,6 +310,11 @@ export async function repairWorkbookSchemaReference(
     ["Decision_Doctrine",   "Decision vocabulary is BET | PASS. CORE / NO_CORE remain historical compatibility values in legacy ledgers only."],
     ["Lock_Rules",          "Each game locks independently BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH (default 2 h) before its own first pitch. LOCKED_OUT games cannot be promoted to CORE without a named Late_Change_Reason."],
     ["Schema_Reference",    "See SCHEMA_REFERENCE tab for column-by-column definitions, types, and fill sources."],
+    ["Workbook_Roadmap",    "Authoritative guide: docs/WORKBOOK_ROADMAP.md. Tab_* rows below provide an in-workbook summary for every page."],
+    ["Efficient_Read_Order", "RUN_LOG → DAILY_MATCHUPS/TODAY_LINEUPS/BULLPEN_USAGE_DAILY/RUN_ENVIRONMENT → GAME_SUMMARY/GAME_INTEGRATION → STATCAST_SHADOW_AUDIT → SLATE_INPUT → SLATE_BOARD → ACTIVE_BOARD_SNAPSHOT → DECISION_AUDIT_LOG."],
+    ["Tentative_Total_Range", "Use min/max of GAME_SUMMARY.Projected_Total_Runs and STATCAST_SHADOW_AUDIT.Estimated_Projection as a tentative decision range. If the market line is inside that range, point-estimate direction is unstable and cannot authorize a wager by itself."],
+    ["Dormant_Components",   "GAME_SUMMARY Traffic_Conversion_Runs and HR_XBH_Damage_Runs are inactive zeros. Candidate estimates live in STATCAST_SHADOW_AUDIT and must be reported in slate/postmortem reviews."],
+    ...buildWorkbookRoadmapReadmeRows(),
     ["Last_Repair_TS",      new Date().toISOString()],
   ];
 
