@@ -38,7 +38,7 @@ import { getSeasonalParkFactor } from "./module04d_parkFactors.js";
 import type { PitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
 import type { BullpenResult, RelieverStat } from "./module04b_bullpenUsage.js";
 import type { TeamRunRatesResult } from "./module05c_teamRunRates.js";
-import type { StartingNineResult, StartingNineGame, ParkFactors, LineupPlayer } from "./module04c_startingNine.js";
+import { buildStartingNineMap, type StartingNineResult, type StartingNineGame, type ParkFactors, type LineupPlayer } from "./module04c_startingNine.js";
 import type { BatterSeasonStats } from "./module02c_batterSeasonStats.js";
 import { MIN_BATTER_PA } from "./module02c_batterSeasonStats.js";
 import type { StatcastBatterStats } from "./module02d_statcastBatters.js";
@@ -787,15 +787,12 @@ export async function verifyRecalculation(
   const parkFactorMap = new Map<string, ParkFactors>();
   const parkSourceMap = new Map<string, ParkSourceStatus>();
 
-  const lineupMap = new Map<string, StartingNineGame>();
-  if (startingNineResult) {
-    for (const sg of startingNineResult.games) {
-      if (sg.game_id) {
-        parkFactorMap.set(sg.game_id, sg.park_factors);
-        parkSourceMap.set(sg.game_id, "VENUE_FACTOR_USED");
-        lineupMap.set(sg.game_id, sg);
-      }
-    }
+  const lineupMap: Map<string, StartingNineGame> = startingNineResult
+    ? buildStartingNineMap(startingNineResult, normalized.games.map((game) => game.legacy_game_id))
+    : new Map<string, StartingNineGame>();
+  for (const [gameId, sg] of lineupMap) {
+    parkFactorMap.set(gameId, sg.park_factors);
+    parkSourceMap.set(gameId, "VENUE_FACTOR_USED");
   }
 
   // Seasonal fallback: fill any game not resolved by the live scrape

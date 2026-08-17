@@ -409,7 +409,10 @@ export async function writeGoogleSheetsFeed(
   const errors: Module08Result["errors"] = [];
   const failed: string[] = [];
 
-  const snMap = buildStartingNineMap(startingNineData ?? { status: "failure", date: runDate, games: [], games_parsed: 0, games_matched: 0, errors: [] });
+  const snMap = buildStartingNineMap(
+    startingNineData ?? { status: "failure", date: runDate, games: [], games_parsed: 0, games_matched: 0, errors: [] },
+    normalized.games.map((game) => game.legacy_game_id),
+  );
   const statsMap = pitcherSeasonStats?.stats ?? new Map<number, PitcherSeasonStats>();
 
   await writeRange(workbookId, "DAILY_MATCHUPS!U1:V1", [["Home_Run_Factor", "Run_Multiplier"]]).catch((err: unknown) => {

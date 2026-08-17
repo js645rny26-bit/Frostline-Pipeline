@@ -13,6 +13,7 @@
 
 import { logger } from "../../lib/logger.js";
 import { SOURCE_MAPPINGS } from "./config.js";
+import { baseGameId } from "./module01_mlbStatsApi.js";
 
 const BASE_URL = "https://mlbstartingnine.com";
 
@@ -311,11 +312,35 @@ export async function fetchStartingNine(date: string): Promise<StartingNineResul
   return result;
 }
 
-/** Build a Map<game_id, StartingNineGame> for quick lookup in module08 */
-export function buildStartingNineMap(result: StartingNineResult): Map<string, StartingNineGame> {
+/**
+ * Build a game-ID map for the current schedule.
+ *
+ * Starting Nine identifies cards by date + teams, which is ambiguous for a
+ * doubleheader. We deliberately withhold that card from both official games
+ * instead of assigning one lineup/park snapshot to the wrong game. Regular
+ * games retain the existing direct match.
+ */
+export function buildStartingNineMap(
+  result: StartingNineResult,
+  scheduleGameIds?: readonly string[],
+): Map<string, StartingNineGame> {
   const map = new Map<string, StartingNineGame>();
+  const scheduleByBase = new Map<string, string[]>();
+  for (const id of scheduleGameIds ?? []) {
+    const base = baseGameId(id);
+    const matches = scheduleByBase.get(base) ?? [];
+    matches.push(id);
+    scheduleByBase.set(base, matches);
+  }
+
   for (const g of result.games) {
-    if (g.game_id) map.set(g.game_id, g);
+    if (!g.game_id) continue;
+    const candidates = scheduleByBase.get(baseGameId(g.game_id));
+    if (candidates && candidates.length === 1) {
+      map.set(candidates[0]!, g);
+    } else if (!candidates) {
+      map.set(g.game_id, g);
+    }
   }
   return map;
 }

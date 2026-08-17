@@ -4,7 +4,7 @@
  */
 
 import { getTodayDateStr } from "./config.js";
-import { fetchMlbSchedule } from "./module01_mlbStatsApi.js";
+import { baseGameId, fetchMlbSchedule } from "./module01_mlbStatsApi.js";
 import { fetchPitcherWorkload } from "./module02_pitcherWorkload.js";
 import { classifyPitcherRoles } from "./module03_pitcherClassification.js";
 import { fetchWeatherForecasts } from "./module04_openMeteo.js";
@@ -339,10 +339,27 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       .map((game) => game.legacy_game_id)
       .filter((gameId) => !oddsWriteProtection.protected_game_ids.has(gameId)),
   );
-  const scopedOddsResult = {
-    ...oddsResult,
-    lines: oddsResult.lines.filter((line) => oddsMutableIds.has(line.game_id)),
-  };
+  // Odds providers identify a game by date + teams. That is unambiguous for
+  // regular games but not for a doubleheader. Route a line only when it maps
+  // to exactly one mutable official game; withholding an ambiguous line is
+  // safer than attaching Game 1's market to Game 2.
+  const scopedOddsLines = oddsResult.lines.flatMap((line) => {
+    const matches = slate.games.filter(
+      (game) => baseGameId(game.legacy_game_id) === line.game_id
+        && oddsMutableIds.has(game.legacy_game_id),
+    );
+    if (matches.length !== 1) {
+      if (matches.length > 1) {
+        logger.warn(
+          { base_game_id: line.game_id, games: matches.map((game) => game.legacy_game_id) },
+          "Full pipeline: ambiguous doubleheader market withheld",
+        );
+      }
+      return [];
+    }
+    return [{ ...line, game_id: matches[0]!.legacy_game_id }];
+  });
+  const scopedOddsResult = { ...oddsResult, lines: scopedOddsLines };
   const oddsMap = buildOddsMap(scopedOddsResult);
   if (oddsResult.status === "success") {
     logger.info({ lines: oddsMap.size, remaining: oddsResult.requests_remaining }, "Full pipeline: Market odds fetched");

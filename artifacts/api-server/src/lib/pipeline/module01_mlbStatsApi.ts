@@ -56,6 +56,17 @@ export interface GameScheduleResult {
   error?: string;
 }
 
+/**
+ * Return the date/away/home portion of a Frostline game identity.
+ *
+ * Regular games retain this familiar identifier. The schedule module adds a
+ * suffix only when the official schedule contains a same-day doubleheader,
+ * so team-only sources can still be matched conservatively by their base ID.
+ */
+export function baseGameId(gameId: string): string {
+  return gameId.replace(/__G(?:\d+|PK\d+)$/, "");
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeGame(raw: any): ScheduleGameData {
   const awayRaw = raw?.teams?.away ?? {};
@@ -128,6 +139,37 @@ function normalizeGame(raw: any): ScheduleGameData {
   };
 }
 
+/**
+ * Give each official game a worksheet-safe identity.
+ *
+ * The former date_away_home form is retained for normal slates. It is not
+ * unique on doubleheader days, however, so the two official games receive
+ * stable __G1 / __G2 suffixes based on MLB's gameNumber. If MLB omits that
+ * field, the official gamePk is used rather than guessing from source order.
+ */
+export function assignUniqueScheduleGameIds(games: readonly ScheduleGameData[]): ScheduleGameData[] {
+  const groups = new Map<string, ScheduleGameData[]>();
+  for (const game of games) {
+    const base = baseGameId(game.legacy_game_id);
+    const group = groups.get(base) ?? [];
+    group.push(game);
+    groups.set(base, group);
+  }
+
+  return games.map((game) => {
+    const base = baseGameId(game.legacy_game_id);
+    const group = groups.get(base) ?? [];
+    if (group.length < 2) return game;
+
+    const gameNumber = game.gameNumber;
+    const numberIsUnique = Number.isInteger(gameNumber)
+      && gameNumber !== null
+      && group.filter((candidate) => candidate.gameNumber === gameNumber).length === 1;
+    const suffix = numberIsUnique ? `G${gameNumber}` : `GPK${game.gamePk}`;
+    return { ...game, legacy_game_id: `${base}__${suffix}` };
+  });
+}
+
 export async function fetchMlbSchedule(dateStr: string): Promise<GameScheduleResult> {
   logger.info({ date: dateStr }, "MODULE_01: Fetching MLB schedule");
 
@@ -154,7 +196,7 @@ export async function fetchMlbSchedule(dateStr: string): Promise<GameScheduleRes
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const normalizedGames = allGames.map((g: any) => normalizeGame(g));
+    const normalizedGames = assignUniqueScheduleGameIds(allGames.map((g: any) => normalizeGame(g)));
 
     logger.info({ count: normalizedGames.length }, "MODULE_01: Schedule fetched");
 
