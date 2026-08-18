@@ -411,16 +411,14 @@ function combinedProvenanceStatus(
   return awayMatch === "UNRESOLVED" || homeMatch === "UNRESOLVED" ? "PARTIAL" : "COMPLETE";
 }
 
-function projectionReplayGameId(date: string, away: string, home: string): string {
-  return `${date}_${away}@${home}`;
-}
-
 export function frozenProjectionReplayValues(row: SettlementRow, ts: string): unknown[] | null {
   const frozen = row.frozen_published_total;
   const error = row.frozen_error;
   if (frozen === null || error === null) return null;
   return [
-    row.date, projectionReplayGameId(row.date, row.away_team, row.home_team),
+    // Settlement must carry the prospective Game_ID forward verbatim. Rebuilding
+    // it from the team pair collapses same-day doubleheaders in PROJECTION_REPLAY.
+    row.date, row.game_id,
     row.away_team, row.home_team, row.actual_total,
     frozen, frozen, frozen, frozen, frozen,
     error, error, error, error, error,

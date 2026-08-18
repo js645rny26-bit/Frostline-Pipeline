@@ -212,6 +212,15 @@ test("frozen projection replay serializes the packet projection, not repaired pr
   const replay = frozenProjectionReplayValues(row, "2026-08-09T00:00:00.000Z");
   assert.ok(replay);
   assert.equal(replay[5], 9.2);
+  assert.equal(replay[1], "20260807_OAK_BOS");
   assert.equal(replay[26], 9.2);
   assert.equal(replay[27], -4.8);
+
+  const doubleheaderReplay = frozenProjectionReplayValues(
+    { ...row, game_id: "20260807_OAK_BOS__G2" },
+    "2026-08-09T00:00:00.000Z",
+  );
+  assert.ok(doubleheaderReplay);
+  assert.equal(doubleheaderReplay[1], "20260807_OAK_BOS__G2");
+  assert.notEqual(replay[1], doubleheaderReplay[1]);
 });

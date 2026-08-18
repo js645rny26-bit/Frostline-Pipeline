@@ -226,6 +226,15 @@ function computeWindow(
   };
 }
 
+/**
+ * Only these sources represent a preserved prospective projection. Settlement
+ * must never treat a reconstructed calculation as frozen published history.
+ */
+export function isPreservedFrozenProjectionSource(value: unknown): boolean {
+  const source = String(value ?? "");
+  return source === "FROZEN_VEHICLE_LOG" || source === "PROSPECTIVE_DECISION_AUDIT";
+}
+
 function frozenAuditLabel(date: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   if (!match) return `${date}_frozen_published`;
@@ -622,7 +631,7 @@ export async function runRegressionReport(
     totalOutcomes = data.length;
     outcomeRows = data.map((r) => {
       const date = r[O_DATE] ?? "";
-      const hasFrozen = r[O_FROZEN_SOURCE] === "FROZEN_VEHICLE_LOG";
+      const hasFrozen = isPreservedFrozenProjectionSource(r[O_FROZEN_SOURCE]);
       const observation = {
         date,
         error: parseFloat((hasFrozen ? r[O_FROZEN_ERROR] : r[O_ERROR]) ?? "0") || 0,
