@@ -58,8 +58,10 @@
  *      and separate total/allocation/margin/winner settlement measurements.
  *  v21 (2026-08-16): STATCAST_SHADOW_AUDIT adds estimated traffic-conversion
  *      and HR/XBH damage adjustments plus a combined estimated projection.
+ *  v22 (2026-08-18): STATCAST_SHADOW_AUDIT adds a shadow-only low-center
+ *      volatility challenger and upper-tail audit band.
  */
-export const WORKBOOK_SCHEMA_VERSION = 21;
+export const WORKBOOK_SCHEMA_VERSION = 22;
 
 export interface ColumnDef {
   name: string;
@@ -1301,7 +1303,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
 
   {
     name: "STATCAST_SHADOW_AUDIT",
-    description: "Per-game estimated projection driven by Baseball Savant pitcher xwOBA-allowed plus hitter traffic/damage shape. Full-replace each pipeline run (current-day snapshot only). Does not affect the board or authorization. Written by module09s.",
+    description: "Per-game estimated projection driven by Baseball Savant pitcher xwOBA-allowed plus hitter traffic/damage shape, with a shadow-only low-center volatility challenger and upper-tail band. Full-replace each pipeline run (current-day snapshot only). Does not affect the board or authorization. Written by module09s.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: [
@@ -1338,6 +1340,11 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Estimated_Projection",          index: 30, type: "number", width: 165, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Current projection plus capped starter xwOBA adjustment and combined tail estimate.", exampleValue: "8.96" },
       { name: "Tail_Cap_Applied",              index: 31, type: "string", width: 135, filledBy: "MODULE_09s", readOnly: true, description: "YES when the combined traffic/damage estimate exceeded +/-0.60 runs.", exampleValue: "NO" },
       { name: "Tail_Estimate_Status",          index: 32, type: "string", width: 165, filledBy: "MODULE_09s", readOnly: true, description: "AVAILABLE | PARTIAL | UNAVAILABLE according to preview hitter inputs.", exampleValue: "AVAILABLE" },
+      { name: "Low_Center_Volatility_Flag",    index: 33, type: "string", width: 220, filledBy: "MODULE_09s", readOnly: true, description: "LOW_CENTER_VOLATILITY when Current_Projection is below 8.00; shadow-only diagnostic, never a board or authorization input.", exampleValue: "LOW_CENTER_VOLATILITY" },
+      { name: "Low_Center_Challenger_Projection", index: 34, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow-only Current_Projection + 1.50 center challenger for low-center games; blank otherwise.", exampleValue: "8.35" },
+      { name: "Low_Center_Upper_Tail_Band",   index: 35, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow-only upper-tail audit ceiling for low-center games; not a projection or wager signal.", exampleValue: "14.94" },
+      { name: "Low_Center_Upper_Tail_Residual", index: 36, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Observed low-center upper-tail residual behind the audit ceiling; blank outside the regime.", exampleValue: "8.09" },
+      { name: "Low_Center_Reason_Tags",       index: 37, type: "string", width: 360, filledBy: "MODULE_09s", readOnly: true, description: "Descriptive low-center inputs present in the snapshot; tags never create an automatic thesis.", exampleValue: "BASE_PROJECTION_LT_8; BOTH_STARTERS_BELOW_LEAGUE_QUALITY" },
     ],
   },
 

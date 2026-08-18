@@ -58,6 +58,16 @@ export const LEAGUE_AVG_HITTER_HARD_HIT_PCT = 38.5;
 export const SHADOW_TAIL_TEAM_CAP = 0.35;
 export const SHADOW_TAIL_GAME_CAP = 0.60;
 
+/**
+ * Shadow-only low-center calibration regime. The 2026-08-12/13/15/17
+ * prospective sample showed materially fatter upward residuals when the
+ * active total was below eight runs. These values are evidence accumulators,
+ * not live projection coefficients or authorization inputs.
+ */
+export const LOW_CENTER_VOLATILITY_THRESHOLD = 8.0;
+export const LOW_CENTER_CHALLENGER_LIFT = 1.5;
+export const LOW_CENTER_UPPER_TAIL_RESIDUAL = 8.09;
+
 const SHADOW_SHEET = "STATCAST_SHADOW_AUDIT";
 const DEFAULT_STARTER_IP = 5.5;
 
@@ -103,6 +113,16 @@ export interface ShadowAuditRow {
   estimated_projection: number;
   tail_cap_applied: boolean;
   tail_estimate_status: "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
+  /** Shadow-only flag; never consumed by Module 09, the board, or authorization. */
+  low_center_volatility_flag: "LOW_CENTER_VOLATILITY" | "STANDARD_RANGE";
+  /** Current projection + LOW_CENTER_CHALLENGER_LIFT when flagged; null otherwise. */
+  low_center_challenger_projection: number | null;
+  /** Current projection + observed shadow upper-tail residual when flagged; null otherwise. */
+  low_center_upper_tail_band: number | null;
+  /** Observed residual behind the shadow upper-tail band; null outside the low-center regime. */
+  low_center_upper_tail_residual: number | null;
+  /** Transparent, descriptive tags; they do not create an automated thesis. */
+  low_center_reason_tags: string[];
   missing_fields: string[];
   identity_warnings: string[];
   preview_used_in_projection: "NO";
@@ -321,6 +341,27 @@ export function computeShadowAuditRow(
     clampSigned(tailUncapped, SHADOW_TAIL_GAME_CAP).toFixed(4),
   );
 
+  const lowCenterVolatility = summary.projected_total_runs < LOW_CENTER_VOLATILITY_THRESHOLD;
+  const lowCenterReasonTags: string[] = [];
+  if (lowCenterVolatility) {
+    lowCenterReasonTags.push("BASE_PROJECTION_LT_8");
+    if (summary.away_starter_quality < 1 && summary.home_starter_quality < 1) {
+      lowCenterReasonTags.push("BOTH_STARTERS_BELOW_LEAGUE_QUALITY");
+    }
+    if (summary.combined_run_multiplier < 1) {
+      lowCenterReasonTags.push("SUB_NEUTRAL_ENVIRONMENT");
+    }
+    if (summary.roof_status === "CLOSED") {
+      lowCenterReasonTags.push("CLOSED_ROOF");
+    }
+    if (combinedTailAdjustment <= 0) {
+      lowCenterReasonTags.push("NO_POSITIVE_TAIL_ESTIMATE");
+    }
+    if (tailEstimateStatus !== "AVAILABLE") {
+      lowCenterReasonTags.push("TAIL_ESTIMATE_INCOMPLETE");
+    }
+  }
+
   return {
     game_id:                      summary.game_id,
     date:                         summary.date,
@@ -353,6 +394,15 @@ export function computeShadowAuditRow(
     ),
     tail_cap_applied:              tailCapApplied,
     tail_estimate_status:          tailEstimateStatus,
+    low_center_volatility_flag:    lowCenterVolatility ? "LOW_CENTER_VOLATILITY" : "STANDARD_RANGE",
+    low_center_challenger_projection: lowCenterVolatility
+      ? parseFloat((summary.projected_total_runs + LOW_CENTER_CHALLENGER_LIFT).toFixed(2))
+      : null,
+    low_center_upper_tail_band: lowCenterVolatility
+      ? parseFloat((summary.projected_total_runs + LOW_CENTER_UPPER_TAIL_RESIDUAL).toFixed(2))
+      : null,
+    low_center_upper_tail_residual: lowCenterVolatility ? LOW_CENTER_UPPER_TAIL_RESIDUAL : null,
+    low_center_reason_tags:        lowCenterReasonTags,
     missing_fields:               missing,
     identity_warnings:            identityWarnings,
     preview_used_in_projection:   "NO",
@@ -396,12 +446,17 @@ const SHADOW_AUDIT_HEADERS = [
   "Estimated_Projection",
   "Tail_Cap_Applied",
   "Tail_Estimate_Status",
+  "Low_Center_Volatility_Flag",
+  "Low_Center_Challenger_Projection",
+  "Low_Center_Upper_Tail_Band",
+  "Low_Center_Upper_Tail_Residual",
+  "Low_Center_Reason_Tags",
 ];
 
 async function ensureShadowAuditSheet(workbookId: string): Promise<void> {
   let sheetExists = true;
   try {
-    const existing = await readRange(workbookId, `${SHADOW_SHEET}!A1:AG1`);
+    const existing = await readRange(workbookId, `${SHADOW_SHEET}!A1:AL1`);
     const headerRow = (existing.values?.[0] ?? []).map((c) => String(c ?? "").trim());
     const upToDate =
       headerRow.length >= SHADOW_AUDIT_HEADERS.length &&
@@ -460,6 +515,11 @@ function rowToArray(r: ShadowAuditRow): unknown[] {
     r.estimated_projection,
     r.tail_cap_applied ? "YES" : "NO",
     r.tail_estimate_status,
+    r.low_center_volatility_flag,
+    r.low_center_challenger_projection ?? "",
+    r.low_center_upper_tail_band ?? "",
+    r.low_center_upper_tail_residual ?? "",
+    r.low_center_reason_tags.join("; "),
   ];
 }
 
@@ -519,11 +579,11 @@ export async function computeAndWriteStatcastShadow(
     const incomingRows = shadowRows.map(rowToArray);
     const rowsToWrite = protection && protection.protected_game_ids.size > 0
       ? mergeProtectedRows(
-          (await readRange(workbookId, `${SHADOW_SHEET}!A2:AG10000`)).values ?? [],
+          (await readRange(workbookId, `${SHADOW_SHEET}!A2:AL10000`)).values ?? [],
           incomingRows, 1, protection.protected_game_ids, protection.expected_game_ids,
         )
       : incomingRows;
-    await clearRange(workbookId, `${SHADOW_SHEET}!A2:AG10000`);
+    await clearRange(workbookId, `${SHADOW_SHEET}!A2:AL10000`);
     await writeRange(workbookId, `${SHADOW_SHEET}!A2`, rowsToWrite);
     rowsWritten = rowsToWrite.length;
     logger.info({ rows: rowsWritten }, "MODULE_09s: STATCAST_SHADOW_AUDIT written");

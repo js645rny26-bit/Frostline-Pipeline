@@ -37,6 +37,9 @@ import {
   SHADOW_ADJUSTMENT_CAP,
   SHADOW_TAIL_TEAM_CAP,
   SHADOW_TAIL_GAME_CAP,
+  LOW_CENTER_VOLATILITY_THRESHOLD,
+  LOW_CENTER_CHALLENGER_LIFT,
+  LOW_CENTER_UPPER_TAIL_RESIDUAL,
 } from "./module09s_statcastShadow.js";
 
 import type { GameSummaryRow } from "./module09_recalculation.js";
@@ -492,5 +495,48 @@ describe("computeShadowAuditRow — numerical correctness", () => {
     assert.strictEqual(row.game_id, "2026-07-26_CLE@CHC");
     assert.strictEqual(row.away_team, "CLE");
     assert.strictEqual(row.home_team, "CHC");
+  });
+});
+
+describe("low-center volatility shadow", () => {
+  it("flags sub-eight active totals and records only shadow candidates", () => {
+    const summary = makeSummary({
+      projected_total_runs: 7.58,
+      away_starter_quality: 0.90,
+      home_starter_quality: 0.92,
+      combined_run_multiplier: 0.96,
+      roof_status: "CLOSED",
+    });
+    const row = computeShadowAuditRow(summary, null, TS);
+
+    assert.equal(row.low_center_volatility_flag, "LOW_CENTER_VOLATILITY");
+    assert.equal(
+      row.low_center_challenger_projection,
+      parseFloat((summary.projected_total_runs + LOW_CENTER_CHALLENGER_LIFT).toFixed(2)),
+    );
+    assert.equal(
+      row.low_center_upper_tail_band,
+      parseFloat((summary.projected_total_runs + LOW_CENTER_UPPER_TAIL_RESIDUAL).toFixed(2)),
+    );
+    assert.equal(row.low_center_upper_tail_residual, LOW_CENTER_UPPER_TAIL_RESIDUAL);
+    assert.ok(row.low_center_reason_tags.includes("BASE_PROJECTION_LT_8"));
+    assert.ok(row.low_center_reason_tags.includes("BOTH_STARTERS_BELOW_LEAGUE_QUALITY"));
+    assert.ok(row.low_center_reason_tags.includes("SUB_NEUTRAL_ENVIRONMENT"));
+    assert.ok(row.low_center_reason_tags.includes("CLOSED_ROOF"));
+    assert.ok(row.low_center_reason_tags.includes("NO_POSITIVE_TAIL_ESTIMATE"));
+    assert.ok(row.low_center_reason_tags.includes("TAIL_ESTIMATE_INCOMPLETE"));
+    assert.equal(row.current_projection, summary.projected_total_runs);
+    assert.equal(row.shadow_projection, summary.projected_total_runs);
+  });
+
+  it("does not flag an eight-run-or-higher total or invent challenger values", () => {
+    const summary = makeSummary({ projected_total_runs: LOW_CENTER_VOLATILITY_THRESHOLD });
+    const row = computeShadowAuditRow(summary, makePreview(), TS);
+
+    assert.equal(row.low_center_volatility_flag, "STANDARD_RANGE");
+    assert.equal(row.low_center_challenger_projection, null);
+    assert.equal(row.low_center_upper_tail_band, null);
+    assert.equal(row.low_center_upper_tail_residual, null);
+    assert.deepEqual(row.low_center_reason_tags, []);
   });
 });

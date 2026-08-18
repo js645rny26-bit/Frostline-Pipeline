@@ -304,7 +304,8 @@ export async function repairWorkbookSchemaReference(
       + "v18 (2026-08-09): Explicit PUSH truth state in vehicle postmortem and survival replay; pushes excluded from directional and gate-performance denominators. "
       + "v19 (2026-08-09): DECISION_AUDIT_LOG required two-phase ledger; pregame model/manual/authorization evidence freezes at board lock and settlement appends independent grading without rewriting reasoning. "
       + "v20 (2026-08-12): Prospective lifecycle firewall, immutable publication, single-source authorization, audit-gap state, truthful lifecycle timestamps, and separate total/allocation/margin/winner settlement measurements. "
-      + "v21 (2026-08-16): STATCAST_SHADOW_AUDIT traffic-conversion and HR/XBH damage estimates with a combined estimated projection."],
+      + "v21 (2026-08-16): STATCAST_SHADOW_AUDIT traffic-conversion and HR/XBH damage estimates with a combined estimated projection. "
+      + "v22 (2026-08-18): Shadow-only low-center volatility flag, +1.50 center challenger, upper-tail audit band, and transparent reason tags; no active projection, authorization, or vehicle impact."],
     ["Workbook_Purpose",    "Frostline Pipeline — MLB totals projection and DA-1.1.0 BET/PASS decision publication."],
     ["Operator_Columns",    "Cells highlighted amber are operator-editable. All other cells are pipeline-maintained — do not edit."],
     ["Decision_Doctrine",   "Decision vocabulary is BET | PASS. CORE / NO_CORE remain historical compatibility values in legacy ledgers only."],
@@ -312,7 +313,7 @@ export async function repairWorkbookSchemaReference(
     ["Schema_Reference",    "See SCHEMA_REFERENCE tab for column-by-column definitions, types, and fill sources."],
     ["Workbook_Roadmap",    "Authoritative guide: docs/WORKBOOK_ROADMAP.md. Tab_* rows below provide an in-workbook summary for every page."],
     ["Efficient_Read_Order", "RUN_LOG → DAILY_MATCHUPS/TODAY_LINEUPS/BULLPEN_USAGE_DAILY/RUN_ENVIRONMENT → GAME_SUMMARY/GAME_INTEGRATION → STATCAST_SHADOW_AUDIT → SLATE_INPUT → SLATE_BOARD → ACTIVE_BOARD_SNAPSHOT → DECISION_AUDIT_LOG."],
-    ["Tentative_Total_Range", "Use min/max of GAME_SUMMARY.Projected_Total_Runs and STATCAST_SHADOW_AUDIT.Estimated_Projection as a tentative decision range. If the market line is inside that range, point-estimate direction is unstable and cannot authorize a wager by itself."],
+    ["Tentative_Total_Range", "Use min/max of GAME_SUMMARY.Projected_Total_Runs and STATCAST_SHADOW_AUDIT.Estimated_Projection as the ordinary tentative decision range. LOW_CENTER_VOLATILITY is a separate shadow-only distribution warning: inspect its challenger and upper-tail band during manual review, but neither may authorize or change a wager."],
     ["Dormant_Components",   "GAME_SUMMARY Traffic_Conversion_Runs and HR_XBH_Damage_Runs are inactive zeros. Candidate estimates live in STATCAST_SHADOW_AUDIT and must be reported in slate/postmortem reviews."],
     ...buildWorkbookRoadmapReadmeRows(),
     ["Last_Repair_TS",      new Date().toISOString()],
