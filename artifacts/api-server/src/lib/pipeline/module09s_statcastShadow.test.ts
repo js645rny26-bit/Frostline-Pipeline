@@ -39,6 +39,7 @@ import {
   SHADOW_TAIL_GAME_CAP,
   LOW_CENTER_VOLATILITY_THRESHOLD,
   LOW_CENTER_CHALLENGER_LIFT,
+  LOW_CENTER_SENSITIVITY_LIFT,
   LOW_CENTER_UPPER_TAIL_RESIDUAL,
 } from "./module09s_statcastShadow.js";
 
@@ -515,6 +516,10 @@ describe("low-center volatility shadow", () => {
       parseFloat((summary.projected_total_runs + LOW_CENTER_CHALLENGER_LIFT).toFixed(2)),
     );
     assert.equal(
+      row.low_center_sensitivity_projection,
+      parseFloat((summary.projected_total_runs + LOW_CENTER_SENSITIVITY_LIFT).toFixed(2)),
+    );
+    assert.equal(
       row.low_center_upper_tail_band,
       parseFloat((summary.projected_total_runs + LOW_CENTER_UPPER_TAIL_RESIDUAL).toFixed(2)),
     );
@@ -535,6 +540,7 @@ describe("low-center volatility shadow", () => {
 
     assert.equal(row.low_center_volatility_flag, "STANDARD_RANGE");
     assert.equal(row.low_center_challenger_projection, null);
+    assert.equal(row.low_center_sensitivity_projection, null);
     assert.equal(row.low_center_upper_tail_band, null);
     assert.equal(row.low_center_upper_tail_residual, null);
     assert.deepEqual(row.low_center_reason_tags, []);

@@ -305,7 +305,8 @@ export async function repairWorkbookSchemaReference(
       + "v19 (2026-08-09): DECISION_AUDIT_LOG required two-phase ledger; pregame model/manual/authorization evidence freezes at board lock and settlement appends independent grading without rewriting reasoning. "
       + "v20 (2026-08-12): Prospective lifecycle firewall, immutable publication, single-source authorization, audit-gap state, truthful lifecycle timestamps, and separate total/allocation/margin/winner settlement measurements. "
       + "v21 (2026-08-16): STATCAST_SHADOW_AUDIT traffic-conversion and HR/XBH damage estimates with a combined estimated projection. "
-      + "v22 (2026-08-18): Shadow-only low-center volatility flag, +1.50 center challenger, upper-tail audit band, and transparent reason tags; no active projection, authorization, or vehicle impact."],
+      + "v22 (2026-08-18): Shadow-only low-center volatility flag, +1.50 center challenger, upper-tail audit band, and transparent reason tags; no active projection, authorization, or vehicle impact. "
+      + "v23 (2026-08-19): Separate +2.00 low-center sensitivity challenger for prospective shadow comparison only."],
     ["Workbook_Purpose",    "Frostline Pipeline — MLB totals projection and DA-1.1.0 BET/PASS decision publication."],
     ["Operator_Columns",    "Cells highlighted amber are operator-editable. All other cells are pipeline-maintained — do not edit."],
     ["Decision_Doctrine",   "Decision vocabulary is BET | PASS. CORE / NO_CORE remain historical compatibility values in legacy ledgers only."],

@@ -147,10 +147,11 @@ For an active `Current_Projection` below 8.00, `STATCAST_SHADOW_AUDIT` records a
 ```text
 Low_Center_Volatility_Flag          = LOW_CENTER_VOLATILITY
 Low_Center_Challenger_Projection    = Current_Projection + 1.50
+Low_Center_Sensitivity_Projection   = Current_Projection + 2.00
 Low_Center_Upper_Tail_Band          = Current_Projection + 8.09
 ```
 
-The +1.50 center challenger and +8.09 upper-tail residual are shadow-only values derived from the preserved 2026-08-12/13/15/17 low-center calibration sample. They are not active projection coefficients, are not a new total forecast, do not create an Over thesis, and do not alter authorization. `Low_Center_Reason_Tags` preserves the visible low-run inputs present in the snapshot so a manual review can distinguish a credible suppression path from a detonation risk without pretending that any individual tag settles the game.
+The +1.50 center challenger, +2.00 sensitivity challenger, and +8.09 upper-tail residual are shadow-only values derived from the preserved low-center calibration sample. They are not active projection coefficients, are not a new total forecast, do not create an Over thesis, and do not alter authorization. Preserve them with the pregame audit and score both challengers prospectively against the base before promoting any calibration. `Low_Center_Reason_Tags` preserves the visible low-run inputs present in the snapshot so a manual review can distinguish a credible suppression path from a detonation risk without pretending that any individual tag settles the game.
 
 ## Fields Reserved for Future Phases
 

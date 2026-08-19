@@ -66,6 +66,7 @@ export const SHADOW_TAIL_GAME_CAP = 0.60;
  */
 export const LOW_CENTER_VOLATILITY_THRESHOLD = 8.0;
 export const LOW_CENTER_CHALLENGER_LIFT = 1.5;
+export const LOW_CENTER_SENSITIVITY_LIFT = 2.0;
 export const LOW_CENTER_UPPER_TAIL_RESIDUAL = 8.09;
 
 const SHADOW_SHEET = "STATCAST_SHADOW_AUDIT";
@@ -117,6 +118,8 @@ export interface ShadowAuditRow {
   low_center_volatility_flag: "LOW_CENTER_VOLATILITY" | "STANDARD_RANGE";
   /** Current projection + LOW_CENTER_CHALLENGER_LIFT when flagged; null otherwise. */
   low_center_challenger_projection: number | null;
+  /** Current projection + LOW_CENTER_SENSITIVITY_LIFT when flagged; null otherwise. */
+  low_center_sensitivity_projection: number | null;
   /** Current projection + observed shadow upper-tail residual when flagged; null otherwise. */
   low_center_upper_tail_band: number | null;
   /** Observed residual behind the shadow upper-tail band; null outside the low-center regime. */
@@ -398,6 +401,9 @@ export function computeShadowAuditRow(
     low_center_challenger_projection: lowCenterVolatility
       ? parseFloat((summary.projected_total_runs + LOW_CENTER_CHALLENGER_LIFT).toFixed(2))
       : null,
+    low_center_sensitivity_projection: lowCenterVolatility
+      ? parseFloat((summary.projected_total_runs + LOW_CENTER_SENSITIVITY_LIFT).toFixed(2))
+      : null,
     low_center_upper_tail_band: lowCenterVolatility
       ? parseFloat((summary.projected_total_runs + LOW_CENTER_UPPER_TAIL_RESIDUAL).toFixed(2))
       : null,
@@ -448,6 +454,7 @@ const SHADOW_AUDIT_HEADERS = [
   "Tail_Estimate_Status",
   "Low_Center_Volatility_Flag",
   "Low_Center_Challenger_Projection",
+  "Low_Center_Sensitivity_Projection",
   "Low_Center_Upper_Tail_Band",
   "Low_Center_Upper_Tail_Residual",
   "Low_Center_Reason_Tags",
@@ -456,7 +463,7 @@ const SHADOW_AUDIT_HEADERS = [
 async function ensureShadowAuditSheet(workbookId: string): Promise<void> {
   let sheetExists = true;
   try {
-    const existing = await readRange(workbookId, `${SHADOW_SHEET}!A1:AL1`);
+    const existing = await readRange(workbookId, `${SHADOW_SHEET}!A1:AM1`);
     const headerRow = (existing.values?.[0] ?? []).map((c) => String(c ?? "").trim());
     const upToDate =
       headerRow.length >= SHADOW_AUDIT_HEADERS.length &&
@@ -517,6 +524,7 @@ function rowToArray(r: ShadowAuditRow): unknown[] {
     r.tail_estimate_status,
     r.low_center_volatility_flag,
     r.low_center_challenger_projection ?? "",
+    r.low_center_sensitivity_projection ?? "",
     r.low_center_upper_tail_band ?? "",
     r.low_center_upper_tail_residual ?? "",
     r.low_center_reason_tags.join("; "),
@@ -579,11 +587,11 @@ export async function computeAndWriteStatcastShadow(
     const incomingRows = shadowRows.map(rowToArray);
     const rowsToWrite = protection && protection.protected_game_ids.size > 0
       ? mergeProtectedRows(
-          (await readRange(workbookId, `${SHADOW_SHEET}!A2:AL10000`)).values ?? [],
+          (await readRange(workbookId, `${SHADOW_SHEET}!A2:AM10000`)).values ?? [],
           incomingRows, 1, protection.protected_game_ids, protection.expected_game_ids,
         )
       : incomingRows;
-    await clearRange(workbookId, `${SHADOW_SHEET}!A2:AL10000`);
+    await clearRange(workbookId, `${SHADOW_SHEET}!A2:AM10000`);
     await writeRange(workbookId, `${SHADOW_SHEET}!A2`, rowsToWrite);
     rowsWritten = rowsToWrite.length;
     logger.info({ rows: rowsWritten }, "MODULE_09s: STATCAST_SHADOW_AUDIT written");
