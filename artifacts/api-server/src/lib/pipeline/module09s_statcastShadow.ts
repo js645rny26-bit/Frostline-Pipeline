@@ -70,7 +70,14 @@ export const LOW_CENTER_SENSITIVITY_LIFT = 2.0;
 export const LOW_CENTER_UPPER_TAIL_RESIDUAL = 8.09;
 
 const SHADOW_SHEET = "STATCAST_SHADOW_AUDIT";
+const LOW_CENTER_HISTORY_SHEET = "LOW_CENTER_CALIBRATION_HISTORY";
 const DEFAULT_STARTER_IP = 5.5;
+
+const LOW_CENTER_HISTORY_HEADERS = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
+  "Base_Projection", "Primary_Challenger_Projection", "Sensitivity_Challenger_Projection",
+  "Upper_Tail_Band", "Snapshot_TS",
+];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -532,6 +539,51 @@ function rowToArray(r: ShadowAuditRow): unknown[] {
 }
 
 /**
+ * Append only legitimate pregame low-center candidates. This is deliberately
+ * separate from the current-day audit sheet: settlement needs a durable,
+ * timestamped prospective record after the daily sheet is replaced.
+ */
+async function appendLowCenterCalibrationHistory(
+  workbookId: string,
+  rows: ShadowAuditRow[],
+  previewMap: Map<string, StatcastPreviewGameResult>,
+  protection?: PublicationProtection,
+): Promise<void> {
+  const appendRows = rows
+    .filter((row) => row.low_center_volatility_flag === "LOW_CENTER_VOLATILITY")
+    .filter((row) => !protection?.protected_game_ids.has(row.game_id))
+    .map((row) => [
+      row.date,
+      row.game_id,
+      row.away_team,
+      row.home_team,
+      previewMap.get(row.game_id)?.scheduled_first_pitch ?? "",
+      row.current_projection,
+      row.low_center_challenger_projection ?? "",
+      row.low_center_sensitivity_projection ?? "",
+      row.low_center_upper_tail_band ?? "",
+      row.snapshot_ts,
+    ]);
+  if (appendRows.length === 0) return;
+
+  let existingRows: unknown[][];
+  try {
+    existingRows = (await readRange(workbookId, `${LOW_CENTER_HISTORY_SHEET}!A1:J10000`)).values ?? [];
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;
+    await addSheet(workbookId, LOW_CENTER_HISTORY_SHEET);
+    existingRows = [];
+  }
+  const header = (existingRows[0] ?? []).map((value) => String(value ?? ""));
+  if (header.join("|") !== LOW_CENTER_HISTORY_HEADERS.join("|")) {
+    await writeRange(workbookId, `${LOW_CENTER_HISTORY_SHEET}!A1`, [LOW_CENTER_HISTORY_HEADERS]);
+    existingRows = [LOW_CENTER_HISTORY_HEADERS];
+  }
+  await writeRange(workbookId, `${LOW_CENTER_HISTORY_SHEET}!A${existingRows.length + 1}`, appendRows);
+}
+
+/**
  * Compute Statcast xwOBA shadow adjustments for every game in the module09
  * output and write a full-replace snapshot to STATCAST_SHADOW_AUDIT.
  *
@@ -593,6 +645,7 @@ export async function computeAndWriteStatcastShadow(
       : incomingRows;
     await clearRange(workbookId, `${SHADOW_SHEET}!A2:AM10000`);
     await writeRange(workbookId, `${SHADOW_SHEET}!A2`, rowsToWrite);
+    await appendLowCenterCalibrationHistory(workbookId, shadowRows, previewMap, protection);
     rowsWritten = rowsToWrite.length;
     logger.info({ rows: rowsWritten }, "MODULE_09s: STATCAST_SHADOW_AUDIT written");
   } catch (err: unknown) {

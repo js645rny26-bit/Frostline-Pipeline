@@ -5,6 +5,7 @@ import {
   classifyFrozenVehicleGap,
   frozenProjectionReplayValues,
   normalizeOutcomeValues,
+  parseLowCenterProspectiveSnapshots,
   parseProspectiveDecisionAuditSnapshots,
   selectProspectiveProjection,
   settlementRowToValues,
@@ -12,6 +13,31 @@ import {
 } from "./module14_shadowSettlement.js";
 
 const vehicle = { market_line: 8.5, direction: "OVER", projected_total: 9.11 };
+
+test("low-center candidates retain only the latest legitimate pre-first-pitch snapshot", () => {
+  const early = [
+    "2026-08-19", "20260819_SEA_HOU", "SEA", "HOU", "2026-08-19T23:10:00.000Z",
+    7.5, 9.0, 9.5, 15.59, "2026-08-19T16:00:00.000Z",
+  ];
+  const latest = [...early];
+  latest[5] = 7.7;
+  latest[6] = 9.2;
+  latest[7] = 9.7;
+  latest[9] = "2026-08-19T18:00:00.000Z";
+  const afterFirstPitch = [...latest];
+  afterFirstPitch[1] = "20260819_LAA_HOU";
+  afterFirstPitch[9] = "2026-08-19T23:10:00.000Z";
+
+  const parsed = parseLowCenterProspectiveSnapshots([early, afterFirstPitch, latest], "2026-08-19");
+  assert.deepEqual(parsed.get("20260819_SEA_HOU"), {
+    scheduled_first_pitch: "2026-08-19T23:10:00.000Z",
+    base_projection: 7.7,
+    primary_projection: 9.2,
+    sensitivity_projection: 9.7,
+    snapshot_ts: "2026-08-19T18:00:00.000Z",
+  });
+  assert.equal(parsed.has("20260819_LAA_HOU"), false);
+});
 
 test("settlement fails closed on missing live prospective state without reconstructing it", () => {
   assert.equal(FROZEN_VEHICLE_REQUIRED_FROM_DATE, "2026-08-10");

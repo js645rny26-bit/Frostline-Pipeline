@@ -6,7 +6,7 @@
  * provenance is missing, so a rerun repairs old settlements without duplicates.
  */
 
-import { readRange, writeRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
+import { addSheet, readRange, writeRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 import {
@@ -24,7 +24,17 @@ const OUTCOMES_SHEET = "SHADOW_OUTCOMES";
 const VEHICLE_LOG_SHEET = "VEHICLE_LOG";
 const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
 const PROJECTION_REPLAY_SHEET = "PROJECTION_REPLAY";
+const LOW_CENTER_HISTORY_SHEET = "LOW_CENTER_CALIBRATION_HISTORY";
+const LOW_CENTER_REPORT_SHEET = "LOW_CENTER_CALIBRATION_REPORT";
 const OUTCOMES_COLS = 33; // A-AG
+
+export const LOW_CENTER_CALIBRATION_REPORT_HEADER = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
+  "Base_Projection", "Primary_Challenger_Projection", "Sensitivity_Challenger_Projection",
+  "Actual_Total", "Base_Error", "Primary_Error", "Sensitivity_Error",
+  "Base_Abs_Error", "Primary_Abs_Error", "Sensitivity_Abs_Error",
+  "Prospective_Snapshot_TS", "Settlement_TS", "Calibration_Status",
+];
 
 const H_DATE = 0;
 const H_GAME_ID = 1;
@@ -72,6 +82,14 @@ export interface FrozenProjection {
   direction: string;
   projected_total: number;
   source?: "FROZEN_VEHICLE_LOG" | "PROSPECTIVE_DECISION_AUDIT";
+}
+
+export interface LowCenterProspectiveSnapshot {
+  scheduled_first_pitch: string;
+  base_projection: number;
+  primary_projection: number;
+  sensitivity_projection: number;
+  snapshot_ts: string;
 }
 
 export interface ProspectiveSnapshotParseResult {
@@ -124,6 +142,8 @@ export interface SettlementRow {
   away_pitcher_chain: string;
   home_pitcher_chain: string;
   pitcher_provenance_status: PitcherProvenanceStatus;
+  /** Timestamp-validated shadow candidate; never reconstructed during settlement. */
+  low_center_snapshot?: LowCenterProspectiveSnapshot;
   /** Optional audited event evidence. Absence must not be inferred from the final score. */
   postmortem_event_evidence?: PostmortemEventEvidence;
 }
@@ -337,6 +357,44 @@ export function parseProspectiveDecisionAuditSnapshots(
   return { snapshots, warnings };
 }
 
+/**
+ * Select the latest timestamp-validated low-center candidate for each game.
+ * The calibration history is append-only, so this retains a genuine pregame
+ * observation rather than deriving candidates from settlement-time state.
+ */
+export function parseLowCenterProspectiveSnapshots(
+  rows: unknown[][],
+  date: string,
+): Map<string, LowCenterProspectiveSnapshot> {
+  const snapshots = new Map<string, LowCenterProspectiveSnapshot>();
+  const latestTs = new Map<string, number>();
+  for (const row of rows) {
+    if (String(row[0] ?? "") !== date) continue;
+    const gameId = String(row[1] ?? "").trim();
+    const scheduledFirstPitch = String(row[4] ?? "");
+    const snapshotTs = String(row[9] ?? "");
+    const firstPitchMs = Date.parse(scheduledFirstPitch);
+    const snapshotMs = Date.parse(snapshotTs);
+    const base = numberOrNull(row[5]);
+    const primary = numberOrNull(row[6]);
+    const sensitivity = numberOrNull(row[7]);
+    if (
+      !gameId || !Number.isFinite(firstPitchMs) || !Number.isFinite(snapshotMs)
+      || snapshotMs >= firstPitchMs || base === null || primary === null || sensitivity === null
+    ) continue;
+    if (snapshotMs < (latestTs.get(gameId) ?? Number.NEGATIVE_INFINITY)) continue;
+    snapshots.set(gameId, {
+      scheduled_first_pitch: scheduledFirstPitch,
+      base_projection: base,
+      primary_projection: primary,
+      sensitivity_projection: sensitivity,
+      snapshot_ts: snapshotTs,
+    });
+    latestTs.set(gameId, snapshotMs);
+  }
+  return snapshots;
+}
+
 function frozenAuditValues(
   repairedProjection: number,
   actualTotal: number,
@@ -444,6 +502,44 @@ async function upsertFrozenProjectionReplay(
   await writeRange(workbookId, `${PROJECTION_REPLAY_SHEET}!A1`, [PROJECTION_REPLAY_HEADER, ...retained, ...replacements]);
 }
 
+function lowCenterCalibrationValues(row: SettlementRow): unknown[] | null {
+  const snapshot = row.low_center_snapshot;
+  if (!snapshot) return null;
+  const baseError = round2(snapshot.base_projection - row.actual_total);
+  const primaryError = round2(snapshot.primary_projection - row.actual_total);
+  const sensitivityError = round2(snapshot.sensitivity_projection - row.actual_total);
+  return [
+    row.date, row.game_id, row.away_team, row.home_team, snapshot.scheduled_first_pitch,
+    snapshot.base_projection, snapshot.primary_projection, snapshot.sensitivity_projection,
+    row.actual_total, baseError, primaryError, sensitivityError,
+    round2(Math.abs(baseError)), round2(Math.abs(primaryError)), round2(Math.abs(sensitivityError)),
+    snapshot.snapshot_ts, row.settlement_ts, "PROSPECTIVE_SHADOW_CANDIDATE",
+  ];
+}
+
+async function upsertLowCenterCalibrationReport(
+  workbookId: string,
+  date: string,
+  rows: SettlementRow[],
+): Promise<void> {
+  let allRows: unknown[][] = [];
+  try {
+    allRows = (await readRange(workbookId, `${LOW_CENTER_REPORT_SHEET}!A1:R5000`)).values ?? [];
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;
+    await addSheet(workbookId, LOW_CENTER_REPORT_SHEET);
+  }
+  const retained = allRows.slice(1).filter((row) => String(row[0] ?? "") !== date);
+  const replacements = rows.map(lowCenterCalibrationValues).filter((row): row is unknown[] => row !== null);
+  await expandSheetColumns(workbookId, LOW_CENTER_REPORT_SHEET, LOW_CENTER_CALIBRATION_REPORT_HEADER.length);
+  await writeRange(workbookId, `${LOW_CENTER_REPORT_SHEET}!A1`, [
+    LOW_CENTER_CALIBRATION_REPORT_HEADER,
+    ...retained,
+    ...replacements,
+  ]);
+}
+
 function failedResult(date: string, ts: string, errors: string[]): SettlementResult {
   return {
     status: "failure", settle_date: date, settlement_timestamp_utc: ts,
@@ -519,6 +615,21 @@ export async function runShadowSettlement(
     warnings.push(...parsed.warnings);
   } catch (error: unknown) {
     warnings.push(`DECISION_AUDIT_LOG prospective snapshot read failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const lowCenterSnapshotsByGame = new Map<string, LowCenterProspectiveSnapshot>();
+  try {
+    const response = await readRange(wbId, `${LOW_CENTER_HISTORY_SHEET}!A1:J5000`);
+    for (const [gameId, snapshot] of parseLowCenterProspectiveSnapshots(
+      ((response.values ?? []) as unknown[][]).slice(1),
+      date,
+    )) {
+      lowCenterSnapshotsByGame.set(gameId, snapshot);
+    }
+  } catch (error: unknown) {
+    // This surface begins with schema v24. Older dates do not require it, and
+    // its absence must not prevent normal settlement from grading the frozen model.
+    warnings.push(`LOW_CENTER_CALIBRATION_HISTORY read unavailable: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   type Existing = { dataIndex: number; values: unknown[] };
@@ -628,6 +739,7 @@ export async function runShadowSettlement(
       away_pitcher_chain: provenance.away.pitcher_chain,
       home_pitcher_chain: provenance.home.pitcher_chain,
       pitcher_provenance_status: combinedStatus,
+      low_center_snapshot: lowCenterSnapshotsByGame.get(gameId),
     };
     processed.push(row);
     if (existing) {
@@ -643,6 +755,11 @@ export async function runShadowSettlement(
     await expandSheetColumns(wbId, OUTCOMES_SHEET, OUTCOMES_COLS);
     await writeRange(wbId, `${OUTCOMES_SHEET}!A1`, [OUTCOMES_HEADER, ...existingRows]);
     await upsertFrozenProjectionReplay(wbId, date, processed, ts);
+    try {
+      await upsertLowCenterCalibrationReport(wbId, date, processed);
+    } catch (error: unknown) {
+      warnings.push(`LOW_CENTER_CALIBRATION_REPORT write failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   } catch (error: unknown) {
     errors.push(`SHADOW_OUTCOMES write failed: ${error instanceof Error ? error.message : String(error)}`);
   }

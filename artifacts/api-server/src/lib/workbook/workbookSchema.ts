@@ -62,8 +62,10 @@
  *      volatility challenger and upper-tail audit band.
  *  v23 (2026-08-19): STATCAST_SHADOW_AUDIT adds a separate +2.00 low-center
  *      sensitivity challenger for prospective calibration comparison.
+ *  v24 (2026-08-19): LOW_CENTER_CALIBRATION_HISTORY preserves timestamped
+ *      low-center candidates; settlement writes their prospective comparison.
  */
-export const WORKBOOK_SCHEMA_VERSION = 23;
+export const WORKBOOK_SCHEMA_VERSION = 24;
 
 export interface ColumnDef {
   name: string;
@@ -1348,6 +1350,52 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Low_Center_Upper_Tail_Band",   index: 36, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow-only upper-tail audit ceiling for low-center games; not a projection or wager signal.", exampleValue: "14.94" },
       { name: "Low_Center_Upper_Tail_Residual", index: 37, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Observed low-center upper-tail residual behind the audit ceiling; blank outside the regime.", exampleValue: "8.09" },
       { name: "Low_Center_Reason_Tags",       index: 38, type: "string", width: 360, filledBy: "MODULE_09s", readOnly: true, description: "Descriptive low-center inputs present in the snapshot; tags never create an automatic thesis.", exampleValue: "BASE_PROJECTION_LT_8; BOTH_STARTERS_BELOW_LEAGUE_QUALITY" },
+    ],
+  },
+
+  {
+    name: "LOW_CENTER_CALIBRATION_HISTORY",
+    description: "Append-only, timestamped pregame capture of low-center base and challenger projections. Used only to grade shadow candidates prospectively at settlement.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date", index: 0, type: "string", width: 90, filledBy: "MODULE_09s", readOnly: true, exampleValue: "2026-08-19" },
+      { name: "Game_ID", index: 1, type: "string", width: 180, filledBy: "MODULE_09s", readOnly: true, exampleValue: "20260819_SEA_HOU" },
+      { name: "Away_Team", index: 2, type: "string", width: 90, filledBy: "MODULE_09s", readOnly: true, exampleValue: "SEA" },
+      { name: "Home_Team", index: 3, type: "string", width: 90, filledBy: "MODULE_09s", readOnly: true, exampleValue: "HOU" },
+      { name: "Scheduled_First_Pitch", index: 4, type: "string", width: 200, filledBy: "MODULE_09s", readOnly: true, exampleValue: "2026-08-19T23:10:00.000Z" },
+      { name: "Base_Projection", index: 5, type: "number", width: 140, format: "0.00", filledBy: "MODULE_09s", readOnly: true, exampleValue: "7.50" },
+      { name: "Primary_Challenger_Projection", index: 6, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, exampleValue: "9.00" },
+      { name: "Sensitivity_Challenger_Projection", index: 7, type: "number", width: 250, format: "0.00", filledBy: "MODULE_09s", readOnly: true, exampleValue: "9.50" },
+      { name: "Upper_Tail_Band", index: 8, type: "number", width: 160, format: "0.00", filledBy: "MODULE_09s", readOnly: true, exampleValue: "15.59" },
+      { name: "Snapshot_TS", index: 9, type: "string", width: 200, filledBy: "MODULE_09s", readOnly: true, exampleValue: "2026-08-19T16:00:00.000Z" },
+    ],
+  },
+
+  {
+    name: "LOW_CENTER_CALIBRATION_REPORT",
+    description: "Settlement comparison of the preserved low-center base, +1.50 primary challenger, and +2.00 sensitivity challenger. Shadow-only; never affects projections or authorization.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date", index: 0, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-19" },
+      { name: "Game_ID", index: 1, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, exampleValue: "20260819_SEA_HOU" },
+      { name: "Away_Team", index: 2, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true, exampleValue: "SEA" },
+      { name: "Home_Team", index: 3, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true, exampleValue: "HOU" },
+      { name: "Scheduled_First_Pitch", index: 4, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-19T23:10:00.000Z" },
+      { name: "Base_Projection", index: 5, type: "number", width: 140, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "7.50" },
+      { name: "Primary_Challenger_Projection", index: 6, type: "number", width: 235, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "9.00" },
+      { name: "Sensitivity_Challenger_Projection", index: 7, type: "number", width: 250, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "9.50" },
+      { name: "Actual_Total", index: 8, type: "number", width: 115, format: "0", filledBy: "MODULE_14", readOnly: true, exampleValue: "11" },
+      { name: "Base_Error", index: 9, type: "number", width: 110, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "-3.50" },
+      { name: "Primary_Error", index: 10, type: "number", width: 125, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "-2.00" },
+      { name: "Sensitivity_Error", index: 11, type: "number", width: 145, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "-1.50" },
+      { name: "Base_Abs_Error", index: 12, type: "number", width: 135, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "3.50" },
+      { name: "Primary_Abs_Error", index: 13, type: "number", width: 150, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "2.00" },
+      { name: "Sensitivity_Abs_Error", index: 14, type: "number", width: 170, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "1.50" },
+      { name: "Prospective_Snapshot_TS", index: 15, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-19T16:00:00.000Z" },
+      { name: "Settlement_TS", index: 16, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-20T03:00:00.000Z" },
+      { name: "Calibration_Status", index: 17, type: "string", width: 220, filledBy: "MODULE_14", readOnly: true, exampleValue: "PROSPECTIVE_SHADOW_CANDIDATE" },
     ],
   },
 

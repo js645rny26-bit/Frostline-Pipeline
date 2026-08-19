@@ -153,6 +153,8 @@ Low_Center_Upper_Tail_Band          = Current_Projection + 8.09
 
 The +1.50 center challenger, +2.00 sensitivity challenger, and +8.09 upper-tail residual are shadow-only values derived from the preserved low-center calibration sample. They are not active projection coefficients, are not a new total forecast, do not create an Over thesis, and do not alter authorization. Preserve them with the pregame audit and score both challengers prospectively against the base before promoting any calibration. `Low_Center_Reason_Tags` preserves the visible low-run inputs present in the snapshot so a manual review can distinguish a credible suppression path from a detonation risk without pretending that any individual tag settles the game.
 
+`LOW_CENTER_CALIBRATION_HISTORY` is append-only and preserves the candidates with their scheduled first pitch and snapshot time. Module 14 accepts only the latest snapshot strictly before first pitch, then writes base, primary, and sensitivity errors to `LOW_CENTER_CALIBRATION_REPORT`. Missing or post-first-pitch candidate rows remain absent; settlement never reconstructs them.
+
 ## Fields Reserved for Future Phases
 
 | Field | Reserved phase | Prerequisite |
