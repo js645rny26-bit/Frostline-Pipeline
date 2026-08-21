@@ -39,6 +39,25 @@ This range must be considered whenever the Statcast estimate is available:
 
 When `STATCAST_SHADOW_AUDIT.Low_Center_Volatility_Flag` is `LOW_CENTER_VOLATILITY`, Frostline's active total is below 8.00 and the shadow audit records three **non-operative** candidates: a primary `Low_Center_Challenger_Projection` (+1.50 runs), a `Low_Center_Sensitivity_Projection` (+2.00 runs), and an `Low_Center_Upper_Tail_Band` based on the observed low-center upward tail. They are not forecasts, do not widen the ordinary tentative range automatically, and cannot create an Over, CORE, BET, or other authorization. Score the primary and sensitivity challengers against preserved prospective outcomes before promoting either. They require an explicit manual distribution audit: identify whether suppression survives common starter/bullpen paths or whether the game has a real detonation path. Read `Low_Center_Reason_Tags` as descriptive provenance, not as a scoring rule.
 
+## Starter-survival shadow challenger
+
+`STARTER_SURVIVAL_CALIBRATION_HISTORY` is a separate, shadow-only four-state
+starter workload calculation. It neither replaces `GAME_SUMMARY.Projected_Total_Runs`
+nor changes a vehicle, market line, authorization, or tentative range. The temporary
+probability definition is deliberately simple and reproducible:
+
+```
+p = clamp(Projected_Starter_Innings / 9, 0, 1)
+```
+
+It assumes the existing innings projection already captures role and workload. It does
+not weight injury, manager behavior, bullpen quality, or within-start performance
+variance. Each starter gets survival and one-inning-shorter failure branches; the
+removed starter inning transfers exactly to bullpen exposure. `P_SS`, `P_FS`, `P_SF`,
+`P_FF`, branch totals, and continuous FDS fields are diagnostic evidence for manual
+review only. `STARTER_SURVIVAL_CALIBRATION_REPORT` later grades only preserved
+pre-first-pitch snapshots, including whether each actual starter reached that workload.
+
 ## How data actually moves
 
 The operational tabs are pipeline-written value snapshots, not a network of spreadsheet formulas. “Feeds” below means that the pipeline consumes the same source or a prior module’s in-memory result and then writes the downstream snapshot.
@@ -88,6 +107,8 @@ Final results + frozen prospective state
 | `STATCAST_SHADOW_AUDIT` | Every publish after Module 09, Module 09s | Starter xwOBA, estimated traffic/damage tail adjustments, and a shadow-only low-center volatility audit. | Provides the tentative range companion and a manual distribution-risk warning; never changes the active total or authorization. | Compare `Current_Projection` and `Estimated_Projection`; when flagged, inspect both challengers, upper-tail band, reason tags, status, and caps. |
 | `LOW_CENTER_CALIBRATION_HISTORY` | Append every pregame Module 09s run for a low-center game | Timestamped base, +1.50 primary, and +2.00 sensitivity candidates. | No board input; preserves evidence for settlement. | Only a row strictly before its scheduled first pitch is valid prospective evidence. |
 | `LOW_CENTER_CALIBRATION_REPORT` | Settlement, Module 14 | Actual-result comparison of preserved base and challenger projections. | No board input; calibration evidence only. | Compare each candidate's absolute error over a sufficient prospective sample; never promote on an isolated slate. |
+| `STARTER_SURVIVAL_CALIBRATION_HISTORY` | Every pre-first-pitch Module 09t run | Four-state workload branch totals, probabilities, and continuous failure-dependency scores. | No board input; manual-review evidence only. | `p = clamp(Projected_Starter_Innings / 9, 0, 1)` is temporary and must be tested prospectively. |
+| `STARTER_SURVIVAL_CALIBRATION_REPORT` | Settlement, Module 14 | Actual-total comparison and starter survival grading from history. | No board input; challenger evidence only. | Cannot reconstruct or backdate a missing pregame candidate. |
 | `SLATE_INPUT` | Every publish, Module 10 | Model scores plus operator vehicle, line, odds, notes, and frozen market state. | Direct input to Module 11. | Operator owns O–W; authoritative pregame line outranks stale display Line after freeze. |
 | `SLATE_BOARD` | Every publish for mutable games, Module 11 | Complete decision output, blockers, gate, lock, and lineage. | It is the full decision board. | Never read Decision without projection, line, tentative range, blocker, and lock state. |
 | `ACTIVE_BOARD_SNAPSHOT` | Every publish, Module 11 | Condensed currently authorized entries. | Filtered view; does not create authorization. | Execution shortcut only after reviewing `SLATE_BOARD`. |

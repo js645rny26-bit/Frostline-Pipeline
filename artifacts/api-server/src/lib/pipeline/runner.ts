@@ -32,6 +32,7 @@ import { extractOutputBoards, type Module11Result } from "./module11_outputExtra
 import { archiveRunBundle, type Module12Result } from "./module12_archival.js";
 import { runShadowValidation, type ShadowValidationResult } from "./module12s_shadowValidation.js";
 import { computeAndWriteStatcastShadow, type StatcastShadowResult } from "./module09s_statcastShadow.js";
+import { computeAndWriteStarterSurvivalShadow, type StarterSurvivalResult } from "./module09t_starterSurvivalShadow.js";
 import { logVehicles, runPostmortem, type VehicleLogResult, type PostmortemResult } from "./module17_vehiclePostmortem.js";
 import { runShadowSettlement, type SettlementResult } from "./module14_shadowSettlement.js";
 import { runRegressionReport, type RegressionReportResult } from "./module15_regressionReport.js";
@@ -219,6 +220,8 @@ export interface PublishResult {
   module_09_shadow: ShadowValidationResult;
   /** Module 09s: Statcast shadow audit — per-game xwOBA shadow projection. Shadow-only; no CORE impact. */
   module_09s_statcast_shadow: StatcastShadowResult;
+  /** Module 09t: four-state starter-survival challenger. Shadow-only; no board impact. */
+  module_09t_starter_survival_shadow: StarterSurvivalResult;
   module_10: Module10Result;
   module_11: Module11Result;
   module_12: Module12Result;
@@ -454,6 +457,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_09: { status: "error", verification_timestamp_utc: new Date().toISOString(), checks: { game_integration: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, game_summary: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, consistency_check: { status: "inconsistent", read_1_timestamp: "", read_2_timestamp: "", diff_seconds: 0 } }, recalculation_time_ms: 0, game_summary_rows: [] },
       module_09_shadow: shadowSkipped,
       module_09s_statcast_shadow: { status: "skipped", write_timestamp_utc: new Date().toISOString(), rows_computed: 0, rows_written: 0, errors: ["Skipped: Module 08 failed"], shadow_rows: [] },
+      module_09t_starter_survival_shadow: { status: "partial", rows_computed: 0, rows_written: 0, errors: ["Skipped: Module 08 failed"], rows: [] },
       module_10: { status: "failure", seeding_timestamp_utc: new Date().toISOString(), games_seeded: { new_games: 0, updated_games: 0, total_games: 0 }, rows_written: 0, seed_results: [], errors: [{ module: "10", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, no_core_count: 0, core_auth_status: "DISABLED_MONOTONICITY_NOT_COMPUTED", monotonicity_verdict: null, monotonicity_override_active: false, publication_validation: { status: "FAIL", expected_games: 0, board_games: 0, slate_input_games: 0, active_games: 0, errors: ["Skipped: Module 08 failed"] }, error: "Skipped: Module 08 failed" },
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
@@ -534,6 +538,26 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       errors: [`Module 09s threw: ${msg}`],
       shadow_rows: [],
     } satisfies StatcastShadowResult;
+  });
+
+  // Module 09t is a prospective-only calibration challenger. It writes no
+  // active projection, authorization, vehicle, or market field.
+  const mod09t = await computeAndWriteStarterSurvivalShadow(
+    mod09.game_summary_rows,
+    previewFetchResult,
+    workbookId,
+    publicationProtectionNow(),
+    new Map(mutableGames.map((game) => [game.legacy_game_id, game.scheduled_utc_time])),
+  ).catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: msg }, "Full pipeline: Module 09t starter survival shadow threw — continuing");
+    return {
+      status: "partial" as const,
+      rows_computed: 0,
+      rows_written: 0,
+      errors: [`Module 09t threw: ${msg}`],
+      rows: [],
+    } satisfies StarterSurvivalResult;
   });
 
   // Module 12s: Shadow validation — compare repaired vs legacy projection per game.
@@ -687,6 +711,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_09: mod09,
     module_09_shadow: mod12s,
     module_09s_statcast_shadow: mod09s,
+    module_09t_starter_survival_shadow: mod09t,
     module_10: mod10,
     module_11: mod11,
     module_12: mod12,

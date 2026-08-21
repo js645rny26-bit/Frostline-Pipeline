@@ -11,6 +11,8 @@ export type PitcherProvenanceStatus = "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
 
 export interface TeamPitcherProvenance {
   actual_starter: string;
+  /** Official starter workload from the final MLB boxscore, never a pregame estimate. */
+  actual_starter_innings: number | null;
   bulk_pitcher: string;
   pitcher_chain: string;
   status: PitcherProvenanceStatus;
@@ -89,7 +91,7 @@ function getPlayer(team: RawBoxscoreTeam, pitcherId: number | string): RawBoxsco
 
 function parseTeam(team: RawBoxscoreTeam | undefined): TeamPitcherProvenance {
   if (!team) {
-    return { actual_starter: "", bulk_pitcher: "", pitcher_chain: "", status: "UNAVAILABLE" };
+    return { actual_starter: "", actual_starter_innings: null, bulk_pitcher: "", pitcher_chain: "", status: "UNAVAILABLE" };
   }
 
   const orderedIds = team.pitchers ?? [];
@@ -111,7 +113,7 @@ function parseTeam(team: RawBoxscoreTeam | undefined): TeamPitcherProvenance {
   }
 
   if (appearances.length === 0) {
-    return { actual_starter: "", bulk_pitcher: "", pitcher_chain: "", status: "UNAVAILABLE" };
+    return { actual_starter: "", actual_starter_innings: null, bulk_pitcher: "", pitcher_chain: "", status: "UNAVAILABLE" };
   }
 
   // MLB boxscores order pitchers by appearance. gamesStarted is authoritative;
@@ -127,6 +129,7 @@ function parseTeam(team: RawBoxscoreTeam | undefined): TeamPitcherProvenance {
 
   return {
     actual_starter: starter.name,
+    actual_starter_innings: Number((starter.outs / 3).toFixed(2)),
     bulk_pitcher: bulk?.name ?? "",
     pitcher_chain: pitcherChain,
     status: starter.name && pitcherChain ? "COMPLETE" : "PARTIAL",

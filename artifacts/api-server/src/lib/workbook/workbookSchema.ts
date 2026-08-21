@@ -64,8 +64,10 @@
  *      sensitivity challenger for prospective calibration comparison.
  *  v24 (2026-08-19): LOW_CENTER_CALIBRATION_HISTORY preserves timestamped
  *      low-center candidates; settlement writes their prospective comparison.
+ *  v25 (2026-08-21): STARTER_SURVIVAL_CALIBRATION_HISTORY and REPORT preserve
+ *      the four-state starter workload challenger and grade it at settlement.
  */
-export const WORKBOOK_SCHEMA_VERSION = 24;
+export const WORKBOOK_SCHEMA_VERSION = 25;
 
 export interface ColumnDef {
   name: string;
@@ -76,7 +78,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -1396,6 +1398,70 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Prospective_Snapshot_TS", index: 15, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-19T16:00:00.000Z" },
       { name: "Settlement_TS", index: 16, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-20T03:00:00.000Z" },
       { name: "Calibration_Status", index: 17, type: "string", width: 220, filledBy: "MODULE_14", readOnly: true, exampleValue: "PROSPECTIVE_SHADOW_CANDIDATE" },
+    ],
+  },
+
+  {
+    name: "STARTER_SURVIVAL_CALIBRATION_HISTORY",
+    description: "Immutable pre-first-pitch four-state starter survival/failure challenger snapshots. Shadow-only; never changes the active total, vehicle, market, or authorization.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date", index: 0, type: "string", width: 90, filledBy: "MODULE_09t", readOnly: true, exampleValue: "2026-08-21" },
+      { name: "Game_ID", index: 1, type: "string", width: 180, filledBy: "MODULE_09t", readOnly: true, exampleValue: "20260821_AAA_BBB" },
+      { name: "Scheduled_First_Pitch", index: 2, type: "string", width: 200, filledBy: "MODULE_09t", readOnly: true, exampleValue: "2026-08-21T23:10:00.000Z" },
+      { name: "Base_Projected_Total", index: 3, type: "number", width: 145, format: "0.00", filledBy: "MODULE_09t", readOnly: true, exampleValue: "7.50" },
+      { name: "Starter_Survival_Adjusted_Total", index: 4, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09t", readOnly: true, exampleValue: "7.63" },
+      { name: "Away_Starter_Survival_Workload", index: 5, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09t", readOnly: true, exampleValue: "5.80" },
+      { name: "Home_Starter_Survival_Workload", index: 6, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09t", readOnly: true, exampleValue: "5.40" },
+      { name: "Away_Starter_Survival_Prob", index: 7, type: "number", width: 205, format: "0.0000", filledBy: "MODULE_09t", readOnly: true, description: "Temporary default: clamp(Projected_Starter_Innings / 9, 0, 1).", exampleValue: "0.6444" },
+      { name: "Home_Starter_Survival_Prob", index: 8, type: "number", width: 205, format: "0.0000", filledBy: "MODULE_09t", readOnly: true, exampleValue: "0.6000" },
+      { name: "P_SS", index: 9, type: "number", width: 100, format: "0.0000", filledBy: "MODULE_09t", readOnly: true, exampleValue: "0.3867" },
+      { name: "P_FS", index: 10, type: "number", width: 100, format: "0.0000", filledBy: "MODULE_09t", readOnly: true, exampleValue: "0.2133" },
+      { name: "P_SF", index: 11, type: "number", width: 100, format: "0.0000", filledBy: "MODULE_09t", readOnly: true, exampleValue: "0.2578" },
+      { name: "P_FF", index: 12, type: "number", width: 100, format: "0.0000", filledBy: "MODULE_09t", readOnly: true, exampleValue: "0.1422" },
+      { name: "T_SS", index: 13, type: "number", width: 100, format: "0.00", filledBy: "MODULE_09t", readOnly: true, exampleValue: "7.30" },
+      { name: "T_FS", index: 14, type: "number", width: 100, format: "0.00", filledBy: "MODULE_09t", readOnly: true, exampleValue: "7.55" },
+      { name: "T_SF", index: 15, type: "number", width: 100, format: "0.00", filledBy: "MODULE_09t", readOnly: true, exampleValue: "7.70" },
+      { name: "T_FF", index: 16, type: "number", width: 100, format: "0.00", filledBy: "MODULE_09t", readOnly: true, exampleValue: "7.95" },
+      { name: "Away_Starter_FDS", index: 17, type: "number", width: 155, format: "0.0000", filledBy: "MODULE_09t", readOnly: true, exampleValue: "0.0320" },
+      { name: "Home_Starter_FDS", index: 18, type: "number", width: 155, format: "0.0000", filledBy: "MODULE_09t", readOnly: true, exampleValue: "0.0510" },
+      { name: "Game_FDS", index: 19, type: "number", width: 120, format: "0.0000", filledBy: "MODULE_09t", readOnly: true, exampleValue: "0.0450" },
+      { name: "Snapshot_TS", index: 20, type: "string", width: 200, filledBy: "MODULE_09t", readOnly: true, exampleValue: "2026-08-21T16:00:00.000Z" },
+      { name: "Calibration_Status", index: 21, type: "string", width: 220, filledBy: "MODULE_09t", readOnly: true, exampleValue: "PROSPECTIVE_SHADOW_CANDIDATE" },
+    ],
+  },
+
+  {
+    name: "STARTER_SURVIVAL_CALIBRATION_REPORT",
+    description: "Settlement-grade comparison of preserved base and starter-survival challenger totals. It appends actuals without rewriting the prospective history.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date", index: 0, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-21" },
+      { name: "Game_ID", index: 1, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true, exampleValue: "20260821_AAA_BBB" },
+      { name: "Away_Team", index: 2, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true, exampleValue: "AAA" },
+      { name: "Home_Team", index: 3, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true, exampleValue: "BBB" },
+      { name: "Scheduled_First_Pitch", index: 4, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-21T23:10:00.000Z" },
+      { name: "Base_Projected_Total", index: 5, type: "number", width: 145, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "7.50" },
+      { name: "Starter_Survival_Adjusted_Total", index: 6, type: "number", width: 235, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "7.63" },
+      { name: "Actual_Total", index: 7, type: "number", width: 115, format: "0", filledBy: "MODULE_14", readOnly: true, exampleValue: "9" },
+      { name: "Base_Error", index: 8, type: "number", width: 120, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "-1.50" },
+      { name: "Base_Abs_Error", index: 9, type: "number", width: 140, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "1.50" },
+      { name: "SSAT_Error", index: 10, type: "number", width: 120, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "-1.37" },
+      { name: "SSAT_Abs_Error", index: 11, type: "number", width: 140, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "1.37" },
+      { name: "Base_Market_Direction_Result", index: 12, type: "string", width: 205, filledBy: "MODULE_14", readOnly: true, exampleValue: "WIN" },
+      { name: "SSAT_Market_Direction_Result", index: 13, type: "string", width: 205, filledBy: "MODULE_14", readOnly: true, exampleValue: "WIN" },
+      { name: "Away_Starter_Actual_IP", index: 14, type: "number", width: 170, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "5.67" },
+      { name: "Home_Starter_Actual_IP", index: 15, type: "number", width: 170, format: "0.00", filledBy: "MODULE_14", readOnly: true, exampleValue: "4.00" },
+      { name: "Away_Starter_Survival_Result", index: 16, type: "string", width: 215, filledBy: "MODULE_14", readOnly: true, exampleValue: "FAILED" },
+      { name: "Home_Starter_Survival_Result", index: 17, type: "string", width: 215, filledBy: "MODULE_14", readOnly: true, exampleValue: "SURVIVED" },
+      { name: "Away_Starter_FDS", index: 18, type: "number", width: 155, format: "0.0000", filledBy: "MODULE_14", readOnly: true, exampleValue: "0.0320" },
+      { name: "Home_Starter_FDS", index: 19, type: "number", width: 155, format: "0.0000", filledBy: "MODULE_14", readOnly: true, exampleValue: "0.0510" },
+      { name: "Game_FDS", index: 20, type: "number", width: 120, format: "0.0000", filledBy: "MODULE_14", readOnly: true, exampleValue: "0.0450" },
+      { name: "Prospective_Snapshot_TS", index: 21, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-21T16:00:00.000Z" },
+      { name: "Settlement_TS", index: 22, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-22T03:00:00.000Z" },
+      { name: "Calibration_Status", index: 23, type: "string", width: 220, filledBy: "MODULE_14", readOnly: true, exampleValue: "SETTLED" },
     ],
   },
 

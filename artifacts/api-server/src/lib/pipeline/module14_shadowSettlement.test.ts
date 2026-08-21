@@ -6,9 +6,11 @@ import {
   frozenProjectionReplayValues,
   normalizeOutcomeValues,
   parseLowCenterProspectiveSnapshots,
+  parseStarterSurvivalProspectiveSnapshots,
   parseProspectiveDecisionAuditSnapshots,
   selectProspectiveProjection,
   settlementRowToValues,
+  starterSurvivalCalibrationValues,
   type SettlementRow,
 } from "./module14_shadowSettlement.js";
 
@@ -37,6 +39,65 @@ test("low-center candidates retain only the latest legitimate pre-first-pitch sn
     snapshot_ts: "2026-08-19T18:00:00.000Z",
   });
   assert.equal(parsed.has("20260819_LAA_HOU"), false);
+});
+
+test("starter-survival settlement accepts only a preserved pre-first-pitch candidate", () => {
+  const valid = Array(22).fill("");
+  valid[0] = "2026-08-21";
+  valid[1] = "20260821_AAA_BBB";
+  valid[2] = "2026-08-21T23:10:00.000Z";
+  valid[3] = 7.5;
+  valid[4] = 7.62;
+  valid[5] = 6;
+  valid[6] = 5.5;
+  valid[17] = 0.04;
+  valid[18] = 0.03;
+  valid[19] = 0.02;
+  valid[20] = "2026-08-21T16:00:00.000Z";
+  valid[21] = "PROSPECTIVE_SHADOW_CANDIDATE";
+  const postFirstPitch = [...valid];
+  postFirstPitch[1] = "20260821_CCC_DDD";
+  postFirstPitch[20] = "2026-08-21T23:10:00.000Z";
+
+  const snapshots = parseStarterSurvivalProspectiveSnapshots([valid, postFirstPitch], "2026-08-21");
+  assert.deepEqual(snapshots.get("20260821_AAA_BBB"), {
+    scheduled_first_pitch: "2026-08-21T23:10:00.000Z",
+    base_projected_total: 7.5,
+    starter_survival_adjusted_total: 7.62,
+    away_survival_workload: 6,
+    home_survival_workload: 5.5,
+    away_starter_fds: 0.04,
+    home_starter_fds: 0.03,
+    game_fds: 0.02,
+    snapshot_ts: "2026-08-21T16:00:00.000Z",
+  });
+  assert.equal(snapshots.has("20260821_CCC_DDD"), false);
+});
+
+test("starter-survival settlement derives grading without mutating the preserved snapshot", () => {
+  const snapshot = {
+    scheduled_first_pitch: "2026-08-21T23:10:00.000Z",
+    base_projected_total: 7.5,
+    starter_survival_adjusted_total: 7.62,
+    away_survival_workload: 6,
+    home_survival_workload: 5.5,
+    away_starter_fds: 0.04,
+    home_starter_fds: 0.03,
+    game_fds: 0.02,
+    snapshot_ts: "2026-08-21T16:00:00.000Z",
+  };
+  const before = structuredClone(snapshot);
+  const report = starterSurvivalCalibrationValues({
+    date: "2026-08-21", game_id: "20260821_AAA_BBB", away_team: "AAA", home_team: "BBB",
+    actual_total: 9, frozen_market_line: 8, actual_away_starter_innings: 6,
+    actual_home_starter_innings: 5, settlement_ts: "2026-08-22T03:00:00.000Z",
+    starter_survival_snapshot: snapshot,
+  } as SettlementRow);
+  assert.ok(report);
+  assert.equal(report[16], "SURVIVED");
+  assert.equal(report[17], "FAILED");
+  assert.equal(report[23], "SETTLED");
+  assert.deepEqual(snapshot, before);
 });
 
 test("settlement fails closed on missing live prospective state without reconstructing it", () => {

@@ -26,6 +26,8 @@ const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
 const PROJECTION_REPLAY_SHEET = "PROJECTION_REPLAY";
 const LOW_CENTER_HISTORY_SHEET = "LOW_CENTER_CALIBRATION_HISTORY";
 const LOW_CENTER_REPORT_SHEET = "LOW_CENTER_CALIBRATION_REPORT";
+const STARTER_SURVIVAL_HISTORY_SHEET = "STARTER_SURVIVAL_CALIBRATION_HISTORY";
+const STARTER_SURVIVAL_REPORT_SHEET = "STARTER_SURVIVAL_CALIBRATION_REPORT";
 const OUTCOMES_COLS = 33; // A-AG
 
 export const LOW_CENTER_CALIBRATION_REPORT_HEADER = [
@@ -33,6 +35,17 @@ export const LOW_CENTER_CALIBRATION_REPORT_HEADER = [
   "Base_Projection", "Primary_Challenger_Projection", "Sensitivity_Challenger_Projection",
   "Actual_Total", "Base_Error", "Primary_Error", "Sensitivity_Error",
   "Base_Abs_Error", "Primary_Abs_Error", "Sensitivity_Abs_Error",
+  "Prospective_Snapshot_TS", "Settlement_TS", "Calibration_Status",
+];
+
+export const STARTER_SURVIVAL_CALIBRATION_REPORT_HEADER = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
+  "Base_Projected_Total", "Starter_Survival_Adjusted_Total", "Actual_Total",
+  "Base_Error", "Base_Abs_Error", "SSAT_Error", "SSAT_Abs_Error",
+  "Base_Market_Direction_Result", "SSAT_Market_Direction_Result",
+  "Away_Starter_Actual_IP", "Home_Starter_Actual_IP",
+  "Away_Starter_Survival_Result", "Home_Starter_Survival_Result",
+  "Away_Starter_FDS", "Home_Starter_FDS", "Game_FDS",
   "Prospective_Snapshot_TS", "Settlement_TS", "Calibration_Status",
 ];
 
@@ -92,6 +105,19 @@ export interface LowCenterProspectiveSnapshot {
   snapshot_ts: string;
 }
 
+/** Immutable, timestamp-validated Module 09t candidate. Never reconstructed at settlement. */
+export interface StarterSurvivalProspectiveSnapshot {
+  scheduled_first_pitch: string;
+  base_projected_total: number;
+  starter_survival_adjusted_total: number;
+  away_survival_workload: number;
+  home_survival_workload: number;
+  away_starter_fds: number;
+  home_starter_fds: number;
+  game_fds: number;
+  snapshot_ts: string;
+}
+
 export interface ProspectiveSnapshotParseResult {
   snapshots: Map<string, FrozenProjection>;
   warnings: string[];
@@ -135,6 +161,9 @@ export interface SettlementRow {
   projected_home_starter: string;
   actual_away_starter: string;
   actual_home_starter: string;
+  /** Actual final-boxscore starter workloads; used only by the SSAT settlement report. */
+  actual_away_starter_innings?: number | null;
+  actual_home_starter_innings?: number | null;
   away_starter_match_status: PitcherMatchStatus;
   home_starter_match_status: PitcherMatchStatus;
   away_bulk_pitcher: string;
@@ -144,6 +173,8 @@ export interface SettlementRow {
   pitcher_provenance_status: PitcherProvenanceStatus;
   /** Timestamp-validated shadow candidate; never reconstructed during settlement. */
   low_center_snapshot?: LowCenterProspectiveSnapshot;
+  /** Timestamp-validated four-state candidate; never reconstructed during settlement. */
+  starter_survival_snapshot?: StarterSurvivalProspectiveSnapshot;
   /** Optional audited event evidence. Absence must not be inferred from the final score. */
   postmortem_event_evidence?: PostmortemEventEvidence;
 }
@@ -395,6 +426,54 @@ export function parseLowCenterProspectiveSnapshots(
   return snapshots;
 }
 
+/**
+ * Selects only a genuine pre-first-pitch Module 09t record.  Settlement must
+ * never create a candidate from a completed game's current data.
+ */
+export function parseStarterSurvivalProspectiveSnapshots(
+  rows: unknown[][],
+  date: string,
+): Map<string, StarterSurvivalProspectiveSnapshot> {
+  const snapshots = new Map<string, StarterSurvivalProspectiveSnapshot>();
+  const latestTs = new Map<string, number>();
+  for (const row of rows) {
+    if (String(row[0] ?? "") !== date) continue;
+    const gameId = String(row[1] ?? "").trim();
+    const scheduledFirstPitch = String(row[2] ?? "");
+    const snapshotTs = String(row[20] ?? "");
+    const firstPitchMs = Date.parse(scheduledFirstPitch);
+    const snapshotMs = Date.parse(snapshotTs);
+    const status = String(row[21] ?? "");
+    const base = numberOrNull(row[3]);
+    const ssat = numberOrNull(row[4]);
+    const awayWorkload = numberOrNull(row[5]);
+    const homeWorkload = numberOrNull(row[6]);
+    const awayFds = numberOrNull(row[17]);
+    const homeFds = numberOrNull(row[18]);
+    const gameFds = numberOrNull(row[19]);
+    if (
+      !gameId || status !== "PROSPECTIVE_SHADOW_CANDIDATE"
+      || !Number.isFinite(firstPitchMs) || !Number.isFinite(snapshotMs) || snapshotMs >= firstPitchMs
+      || base === null || ssat === null || awayWorkload === null || homeWorkload === null
+      || awayFds === null || homeFds === null || gameFds === null
+    ) continue;
+    if (snapshotMs < (latestTs.get(gameId) ?? Number.NEGATIVE_INFINITY)) continue;
+    snapshots.set(gameId, {
+      scheduled_first_pitch: scheduledFirstPitch,
+      base_projected_total: base,
+      starter_survival_adjusted_total: ssat,
+      away_survival_workload: awayWorkload,
+      home_survival_workload: homeWorkload,
+      away_starter_fds: awayFds,
+      home_starter_fds: homeFds,
+      game_fds: gameFds,
+      snapshot_ts: snapshotTs,
+    });
+    latestTs.set(gameId, snapshotMs);
+  }
+  return snapshots;
+}
+
 function frozenAuditValues(
   repairedProjection: number,
   actualTotal: number,
@@ -540,6 +619,71 @@ async function upsertLowCenterCalibrationReport(
   ]);
 }
 
+function survivalResult(actualIp: number | null, projectedWorkload: number): "SURVIVED" | "FAILED" | "UNAVAILABLE" {
+  if (actualIp === null) return "UNAVAILABLE";
+  return actualIp >= projectedWorkload ? "SURVIVED" : "FAILED";
+}
+
+function directionForProjection(projection: number, line: number | null): string {
+  if (line === null || Math.abs(projection - line) < 0.005) return "NONE";
+  return projection > line ? "OVER" : "UNDER";
+}
+
+export function starterSurvivalCalibrationValues(row: SettlementRow): unknown[] | null {
+  const snapshot = row.starter_survival_snapshot;
+  if (!snapshot) {
+    // Explicit gap record, not a recreated challenger. This preserves the
+    // distinction between no candidate and a candidate that performed poorly.
+    return [
+      row.date, row.game_id, row.away_team, row.home_team, "",
+      "", "", row.actual_total, "", "", "", "", "", "",
+      row.actual_away_starter_innings ?? "", row.actual_home_starter_innings ?? "",
+      "UNAVAILABLE", "UNAVAILABLE", "", "", "", "", row.settlement_ts,
+      "PREGAME_SNAPSHOT_MISSING",
+    ];
+  }
+  const baseError = round2(snapshot.base_projected_total - row.actual_total);
+  const ssatError = round2(snapshot.starter_survival_adjusted_total - row.actual_total);
+  const actualAwayIp = row.actual_away_starter_innings ?? null;
+  const actualHomeIp = row.actual_home_starter_innings ?? null;
+  return [
+    row.date, row.game_id, row.away_team, row.home_team, snapshot.scheduled_first_pitch,
+    snapshot.base_projected_total, snapshot.starter_survival_adjusted_total, row.actual_total,
+    baseError, round2(Math.abs(baseError)), ssatError, round2(Math.abs(ssatError)),
+    gradeDirection(directionForProjection(snapshot.base_projected_total, row.frozen_market_line), row.frozen_market_line, row.actual_total),
+    gradeDirection(directionForProjection(snapshot.starter_survival_adjusted_total, row.frozen_market_line), row.frozen_market_line, row.actual_total),
+    actualAwayIp ?? "", actualHomeIp ?? "",
+    survivalResult(actualAwayIp, snapshot.away_survival_workload),
+    survivalResult(actualHomeIp, snapshot.home_survival_workload),
+    snapshot.away_starter_fds, snapshot.home_starter_fds, snapshot.game_fds,
+    snapshot.snapshot_ts, row.settlement_ts,
+    actualAwayIp === null || actualHomeIp === null ? "SETTLED_PROVENANCE_INCOMPLETE" : "SETTLED",
+  ];
+}
+
+async function upsertStarterSurvivalCalibrationReport(
+  workbookId: string,
+  date: string,
+  rows: SettlementRow[],
+): Promise<void> {
+  let allRows: unknown[][] = [];
+  try {
+    allRows = (await readRange(workbookId, `${STARTER_SURVIVAL_REPORT_SHEET}!A1:X5000`)).values ?? [];
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;
+    await addSheet(workbookId, STARTER_SURVIVAL_REPORT_SHEET);
+  }
+  const retained = allRows.slice(1).filter((value) => String(value[0] ?? "") !== date);
+  const replacements = rows.map(starterSurvivalCalibrationValues).filter((value): value is unknown[] => value !== null);
+  await expandSheetColumns(workbookId, STARTER_SURVIVAL_REPORT_SHEET, STARTER_SURVIVAL_CALIBRATION_REPORT_HEADER.length);
+  await writeRange(workbookId, `${STARTER_SURVIVAL_REPORT_SHEET}!A1`, [
+    STARTER_SURVIVAL_CALIBRATION_REPORT_HEADER,
+    ...retained,
+    ...replacements,
+  ]);
+}
+
 function failedResult(date: string, ts: string, errors: string[]): SettlementResult {
   return {
     status: "failure", settle_date: date, settlement_timestamp_utc: ts,
@@ -630,6 +774,21 @@ export async function runShadowSettlement(
     // This surface begins with schema v24. Older dates do not require it, and
     // its absence must not prevent normal settlement from grading the frozen model.
     warnings.push(`LOW_CENTER_CALIBRATION_HISTORY read unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const starterSurvivalSnapshotsByGame = new Map<string, StarterSurvivalProspectiveSnapshot>();
+  try {
+    const response = await readRange(wbId, `${STARTER_SURVIVAL_HISTORY_SHEET}!A1:V5000`);
+    for (const [gameId, snapshot] of parseStarterSurvivalProspectiveSnapshots(
+      ((response.values ?? []) as unknown[][]).slice(1),
+      date,
+    )) {
+      starterSurvivalSnapshotsByGame.set(gameId, snapshot);
+    }
+  } catch (error: unknown) {
+    // This surface is new. Its absence must not mutate historical settlement
+    // behavior or prevent the frozen base model from settling.
+    warnings.push(`STARTER_SURVIVAL_CALIBRATION_HISTORY read unavailable: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   type Existing = { dataIndex: number; values: unknown[] };
@@ -732,6 +891,8 @@ export async function runShadowSettlement(
       projected_home_starter: projectedHomeStarter,
       actual_away_starter: provenance.away.actual_starter,
       actual_home_starter: provenance.home.actual_starter,
+      actual_away_starter_innings: provenance.away.actual_starter_innings,
+      actual_home_starter_innings: provenance.home.actual_starter_innings,
       away_starter_match_status: awayMatch,
       home_starter_match_status: homeMatch,
       away_bulk_pitcher: provenance.away.bulk_pitcher,
@@ -740,6 +901,7 @@ export async function runShadowSettlement(
       home_pitcher_chain: provenance.home.pitcher_chain,
       pitcher_provenance_status: combinedStatus,
       low_center_snapshot: lowCenterSnapshotsByGame.get(gameId),
+      starter_survival_snapshot: starterSurvivalSnapshotsByGame.get(gameId),
     };
     processed.push(row);
     if (existing) {
@@ -759,6 +921,11 @@ export async function runShadowSettlement(
       await upsertLowCenterCalibrationReport(wbId, date, processed);
     } catch (error: unknown) {
       warnings.push(`LOW_CENTER_CALIBRATION_REPORT write failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      await upsertStarterSurvivalCalibrationReport(wbId, date, processed);
+    } catch (error: unknown) {
+      warnings.push(`STARTER_SURVIVAL_CALIBRATION_REPORT write failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   } catch (error: unknown) {
     errors.push(`SHADOW_OUTCOMES write failed: ${error instanceof Error ? error.message : String(error)}`);

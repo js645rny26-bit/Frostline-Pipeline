@@ -40,6 +40,7 @@ test("parses actual starters, bulk arms, and appearance-order chains", () => {
 
   assert.equal(result.status, "COMPLETE");
   assert.equal(result.away.actual_starter, "Away Starter");
+  assert.equal(result.away.actual_starter_innings, 5.67);
   assert.equal(result.away.bulk_pitcher, "Away Bulk");
   assert.equal(
     result.away.pitcher_chain,
@@ -59,6 +60,7 @@ test("preserves opener as starter and identifies the longer bulk pitcher", () =>
   });
 
   assert.equal(result.away.actual_starter, "Actual Opener");
+  assert.equal(result.away.actual_starter_innings, 1);
   assert.equal(result.away.bulk_pitcher, "Bulk Follower");
 });
 
@@ -70,6 +72,7 @@ test("falls back to first appearance when older payload omits gamesStarted", () 
     },
   });
   assert.equal(result.away.actual_starter, "First Arm");
+  assert.equal(result.away.actual_starter_innings, 2);
   assert.equal(result.away.bulk_pitcher, "Second Arm");
 });
 
@@ -77,6 +80,7 @@ test("missing boxscore provenance is explicit and unavailable", () => {
   const result = parseGamePitcherProvenance(null);
   assert.equal(result.status, "UNAVAILABLE");
   assert.equal(result.away.actual_starter, "");
+  assert.equal(result.away.actual_starter_innings, null);
   assert.equal(result.home.pitcher_chain, "");
 });
 
