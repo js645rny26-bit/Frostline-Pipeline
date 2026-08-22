@@ -58,6 +58,13 @@ removed starter inning transfers exactly to bullpen exposure. `P_SS`, `P_FS`, `P
 review only. `STARTER_SURVIVAL_CALIBRATION_REPORT` later grades only preserved
 pre-first-pitch snapshots, including whether each actual starter reached that workload.
 
+`STARTER_SURVIVAL_V2_CALIBRATION_HISTORY` preserves a separate empirical v2
+challenger beside v1. It learns only from strictly earlier settled observations:
+survival rate, conditional workload shortfall, and observed conditional run
+cost. It does not silently reapply the v1 `IP / 9` proxy when history is thin;
+instead it records an explicit insufficiency. Its outputs are never board,
+vehicle, market, projection, or authorization inputs.
+
 ## How data actually moves
 
 The operational tabs are pipeline-written value snapshots, not a network of spreadsheet formulas. “Feeds” below means that the pipeline consumes the same source or a prior module’s in-memory result and then writes the downstream snapshot.
@@ -109,6 +116,8 @@ Final results + frozen prospective state
 | `LOW_CENTER_CALIBRATION_REPORT` | Settlement, Module 14 | Actual-result comparison of preserved base and challenger projections. | No board input; calibration evidence only. | Compare each candidate's absolute error over a sufficient prospective sample; never promote on an isolated slate. |
 | `STARTER_SURVIVAL_CALIBRATION_HISTORY` | Every pre-first-pitch Module 09t run | Four-state workload branch totals, probabilities, and continuous failure-dependency scores. | No board input; manual-review evidence only. | `p = clamp(Projected_Starter_Innings / 9, 0, 1)` is temporary and must be tested prospectively. |
 | `STARTER_SURVIVAL_CALIBRATION_REPORT` | Settlement, Module 14 | Actual-total comparison and starter survival grading from history. | No board input; challenger evidence only. | Cannot reconstruct or backdate a missing pregame candidate. |
+| `STARTER_SURVIVAL_V2_CALIBRATION_HISTORY` | Every pre-first-pitch Module 09u run | Empirical survival probability and conditional workload-failure severity. | No board input; v2 shadow evidence only. | Uses strictly earlier settled records only; no v1 proxy fallback. |
+| `STARTER_SURVIVAL_V2_CALIBRATION_REPORT` | Settlement, Module 14 | Base vs SSAT v1 vs SSAT v2 outcome comparison. | No board input; calibration evidence only. | Inspect cohort provenance and actual starter workload before interpreting results. |
 | `SLATE_INPUT` | Every publish, Module 10 | Model scores plus operator vehicle, line, odds, notes, and frozen market state. | Direct input to Module 11. | Operator owns O–W; authoritative pregame line outranks stale display Line after freeze. |
 | `SLATE_BOARD` | Every publish for mutable games, Module 11 | Complete decision output, blockers, gate, lock, and lineage. | It is the full decision board. | Never read Decision without projection, line, tentative range, blocker, and lock state. |
 | `ACTIVE_BOARD_SNAPSHOT` | Every publish, Module 11 | Condensed currently authorized entries. | Filtered view; does not create authorization. | Execution shortcut only after reviewing `SLATE_BOARD`. |

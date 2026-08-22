@@ -308,7 +308,8 @@ export async function repairWorkbookSchemaReference(
       + "v22 (2026-08-18): Shadow-only low-center volatility flag, +1.50 center challenger, upper-tail audit band, and transparent reason tags; no active projection, authorization, or vehicle impact. "
       + "v23 (2026-08-19): Separate +2.00 low-center sensitivity challenger for prospective shadow comparison only. "
       + "v24 (2026-08-19): Append-only low-center calibration history and settlement report score preserved base versus both challengers prospectively. "
-      + "v25 (2026-08-21): Starter-survival four-state challenger history and settlement report use only preserved prospective workloads; they never change active projections, vehicles, or authorization."],
+      + "v25 (2026-08-21): Starter-survival four-state challenger history and settlement report use only preserved prospective workloads; they never change active projections, vehicles, or authorization. "
+      + "v26 (2026-08-22): SSAT v2 records empirical survival and conditional failure severity from earlier settled evidence only; it remains shadow-only."],
     ["Workbook_Purpose",    "Frostline Pipeline — MLB totals projection and DA-1.1.0 BET/PASS decision publication."],
     ["Operator_Columns",    "Cells highlighted amber are operator-editable. All other cells are pipeline-maintained — do not edit."],
     ["Decision_Doctrine",   "Decision vocabulary is BET | PASS. CORE / NO_CORE remain historical compatibility values in legacy ledgers only."],
@@ -318,6 +319,7 @@ export async function repairWorkbookSchemaReference(
     ["Efficient_Read_Order", "RUN_LOG → DAILY_MATCHUPS/TODAY_LINEUPS/BULLPEN_USAGE_DAILY/RUN_ENVIRONMENT → GAME_SUMMARY/GAME_INTEGRATION → STATCAST_SHADOW_AUDIT → SLATE_INPUT → SLATE_BOARD → ACTIVE_BOARD_SNAPSHOT → DECISION_AUDIT_LOG."],
     ["Tentative_Total_Range", "Use min/max of GAME_SUMMARY.Projected_Total_Runs and STATCAST_SHADOW_AUDIT.Estimated_Projection as the ordinary tentative decision range. LOW_CENTER_VOLATILITY is a separate shadow-only distribution warning: inspect its challenger and upper-tail band during manual review, but neither may authorize or change a wager."],
     ["Starter_Survival_Shadow", "STARTER_SURVIVAL_CALIBRATION_HISTORY records a separate four-state workload challenger. Its temporary probability is clamp(Projected_Starter_Innings / 9, 0, 1). Treat its branch totals and FDS as manual-review evidence only; they cannot change the active total, vehicle, market, CORE/NO CORE decision, or authorization."],
+    ["Starter_Survival_V2_Shadow", "STARTER_SURVIVAL_V2_CALIBRATION_HISTORY is a separate empirical challenger. It uses strictly earlier settled starter survival and shortfall evidence; it never silently reuses the v1 Projected_Innings/9 proxy. Missing empirical history is an explicit gap, never a backfilled candidate."],
     ["Dormant_Components",   "GAME_SUMMARY Traffic_Conversion_Runs and HR_XBH_Damage_Runs are inactive zeros. Candidate estimates live in STATCAST_SHADOW_AUDIT and must be reported in slate/postmortem reviews."],
     ...buildWorkbookRoadmapReadmeRows(),
     ["Last_Repair_TS",      new Date().toISOString()],

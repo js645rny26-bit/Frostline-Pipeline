@@ -7,10 +7,13 @@ import {
   normalizeOutcomeValues,
   parseLowCenterProspectiveSnapshots,
   parseStarterSurvivalProspectiveSnapshots,
+  parseStarterSurvivalV2ProspectiveSnapshots,
   parseProspectiveDecisionAuditSnapshots,
   selectProspectiveProjection,
   settlementRowToValues,
   starterSurvivalCalibrationValues,
+  STARTER_SURVIVAL_V2_CALIBRATION_REPORT_HEADER,
+  starterSurvivalV2CalibrationValues,
   type SettlementRow,
 } from "./module14_shadowSettlement.js";
 
@@ -98,6 +101,52 @@ test("starter-survival settlement derives grading without mutating the preserved
   assert.equal(report[17], "FAILED");
   assert.equal(report[23], "SETTLED");
   assert.deepEqual(snapshot, before);
+});
+
+test("SSAT v2 settlement reads only its preserved prospective snapshot and keeps v1 as a control", () => {
+  const raw = Array(32).fill("");
+  raw[0] = "2026-08-22";
+  raw[1] = "20260822_AAA_BBB";
+  raw[2] = "2026-08-22T23:10:00.000Z";
+  raw[3] = 8;
+  raw[4] = 8.1;
+  raw[5] = 8.3;
+  raw[8] = 6;
+  raw[9] = 5.5;
+  raw[14] = 2;
+  raw[15] = 1.5;
+  raw[16] = 1.2;
+  raw[17] = 0.8;
+  raw[26] = 0.04;
+  raw[27] = 0.03;
+  raw[28] = 0.02;
+  raw[29] = "WORKLOAD|GLOBAL";
+  raw[30] = "2026-08-22T16:00:00.000Z";
+  raw[31] = "PROSPECTIVE_SHADOW_CANDIDATE";
+  const snapshots = parseStarterSurvivalV2ProspectiveSnapshots([raw], "2026-08-22");
+  const snapshot = snapshots.get("20260822_AAA_BBB");
+  assert.ok(snapshot);
+  const before = structuredClone(snapshot);
+  const report = starterSurvivalV2CalibrationValues({
+    date: "2026-08-22", game_id: "20260822_AAA_BBB", away_team: "AAA", home_team: "BBB",
+    actual_total: 10, frozen_market_line: 8.5, actual_away_starter_innings: 3,
+    actual_home_starter_innings: 6, settlement_ts: "2026-08-23T03:00:00.000Z",
+    starter_survival_v2_snapshot: snapshot,
+  } as SettlementRow);
+  assert.equal(report.length, STARTER_SURVIVAL_V2_CALIBRATION_REPORT_HEADER.length);
+  assert.equal(report[6], 8.1);
+  assert.equal(report[7], 8.3);
+  assert.equal(report[20], "FAILED");
+  assert.equal(report[21], "SURVIVED");
+  assert.deepEqual(snapshot, before);
+
+  const missingSnapshotReport = starterSurvivalV2CalibrationValues({
+    date: "2026-08-22", game_id: "20260822_MISSING", away_team: "AAA", home_team: "BBB",
+    actual_total: 7, actual_away_starter_innings: 5, actual_home_starter_innings: 5,
+    settlement_ts: "2026-08-23T03:00:00.000Z",
+  } as SettlementRow);
+  assert.equal(missingSnapshotReport.length, STARTER_SURVIVAL_V2_CALIBRATION_REPORT_HEADER.length);
+  assert.equal(missingSnapshotReport.at(-1), "PREGAME_SNAPSHOT_MISSING");
 });
 
 test("settlement fails closed on missing live prospective state without reconstructing it", () => {

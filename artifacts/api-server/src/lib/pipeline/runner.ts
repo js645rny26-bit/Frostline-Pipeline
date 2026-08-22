@@ -33,6 +33,7 @@ import { archiveRunBundle, type Module12Result } from "./module12_archival.js";
 import { runShadowValidation, type ShadowValidationResult } from "./module12s_shadowValidation.js";
 import { computeAndWriteStatcastShadow, type StatcastShadowResult } from "./module09s_statcastShadow.js";
 import { computeAndWriteStarterSurvivalShadow, type StarterSurvivalResult } from "./module09t_starterSurvivalShadow.js";
+import { computeAndWriteStarterSurvivalV2Shadow, type StarterSurvivalV2Result } from "./module09u_starterSurvivalV2Shadow.js";
 import { logVehicles, runPostmortem, type VehicleLogResult, type PostmortemResult } from "./module17_vehiclePostmortem.js";
 import { runShadowSettlement, type SettlementResult } from "./module14_shadowSettlement.js";
 import { runRegressionReport, type RegressionReportResult } from "./module15_regressionReport.js";
@@ -222,6 +223,8 @@ export interface PublishResult {
   module_09s_statcast_shadow: StatcastShadowResult;
   /** Module 09t: four-state starter-survival challenger. Shadow-only; no board impact. */
   module_09t_starter_survival_shadow: StarterSurvivalResult;
+  /** Module 09u: empirical SSAT v2 challenger. Shadow-only; no board impact. */
+  module_09u_starter_survival_v2_shadow: StarterSurvivalV2Result;
   module_10: Module10Result;
   module_11: Module11Result;
   module_12: Module12Result;
@@ -458,6 +461,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_09_shadow: shadowSkipped,
       module_09s_statcast_shadow: { status: "skipped", write_timestamp_utc: new Date().toISOString(), rows_computed: 0, rows_written: 0, errors: ["Skipped: Module 08 failed"], shadow_rows: [] },
       module_09t_starter_survival_shadow: { status: "partial", rows_computed: 0, rows_written: 0, errors: ["Skipped: Module 08 failed"], rows: [] },
+      module_09u_starter_survival_v2_shadow: { status: "partial", rows_computed: 0, rows_written: 0, errors: ["Skipped: Module 08 failed"], rows: [] },
       module_10: { status: "failure", seeding_timestamp_utc: new Date().toISOString(), games_seeded: { new_games: 0, updated_games: 0, total_games: 0 }, rows_written: 0, seed_results: [], errors: [{ module: "10", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, no_core_count: 0, core_auth_status: "DISABLED_MONOTONICITY_NOT_COMPUTED", monotonicity_verdict: null, monotonicity_override_active: false, publication_validation: { status: "FAIL", expected_games: 0, board_games: 0, slate_input_games: 0, active_games: 0, errors: ["Skipped: Module 08 failed"] }, error: "Skipped: Module 08 failed" },
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
@@ -558,6 +562,26 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       errors: [`Module 09t threw: ${msg}`],
       rows: [],
     } satisfies StarterSurvivalResult;
+  });
+
+  // Module 09u is SSAT v2. It calibrates only from strictly earlier settled
+  // observations and writes a standalone history surface. It is not an input
+  // to Module 09, Module 11, vehicle selection, or authorization.
+  const mod09u = await computeAndWriteStarterSurvivalV2Shadow(
+    mod09.game_summary_rows,
+    mutableGames,
+    workbookId,
+    publicationProtectionNow(),
+  ).catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: msg }, "Full pipeline: Module 09u starter survival v2 shadow threw — continuing");
+    return {
+      status: "partial" as const,
+      rows_computed: 0,
+      rows_written: 0,
+      errors: [`Module 09u threw: ${msg}`],
+      rows: [],
+    } satisfies StarterSurvivalV2Result;
   });
 
   // Module 12s: Shadow validation — compare repaired vs legacy projection per game.
@@ -712,6 +736,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_09_shadow: mod12s,
     module_09s_statcast_shadow: mod09s,
     module_09t_starter_survival_shadow: mod09t,
+    module_09u_starter_survival_v2_shadow: mod09u,
     module_10: mod10,
     module_11: mod11,
     module_12: mod12,

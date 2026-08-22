@@ -66,8 +66,10 @@
  *      low-center candidates; settlement writes their prospective comparison.
  *  v25 (2026-08-21): STARTER_SURVIVAL_CALIBRATION_HISTORY and REPORT preserve
  *      the four-state starter workload challenger and grade it at settlement.
+ *  v26 (2026-08-22): STARTER_SURVIVAL_V2_CALIBRATION_HISTORY and REPORT add
+ *      empirical pregame survival/failure-severity challenger evidence.
  */
-export const WORKBOOK_SCHEMA_VERSION = 25;
+export const WORKBOOK_SCHEMA_VERSION = 26;
 
 export interface ColumnDef {
   name: string;
@@ -78,7 +80,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -1462,6 +1464,97 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Prospective_Snapshot_TS", index: 21, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-21T16:00:00.000Z" },
       { name: "Settlement_TS", index: 22, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-22T03:00:00.000Z" },
       { name: "Calibration_Status", index: 23, type: "string", width: 220, filledBy: "MODULE_14", readOnly: true, exampleValue: "SETTLED" },
+    ],
+  },
+
+  {
+    name: "STARTER_SURVIVAL_V2_CALIBRATION_HISTORY",
+    description: "Immutable pre-first-pitch SSAT v2 snapshots. Survival probability and failure shortfall come only from earlier settled evidence; this challenger cannot alter live decisions.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date", index: 0, type: "string", width: 90, filledBy: "MODULE_09u", readOnly: true },
+      { name: "Game_ID", index: 1, type: "string", width: 180, filledBy: "MODULE_09u", readOnly: true },
+      { name: "Scheduled_First_Pitch", index: 2, type: "string", width: 200, filledBy: "MODULE_09u", readOnly: true },
+      { name: "Base_Projected_Total", index: 3, type: "number", width: 145, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "SSAT_V1_Total", index: 4, type: "number", width: 130, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "SSAT_V2_Total", index: 5, type: "number", width: 130, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Away_Starter_Role", index: 6, type: "string", width: 185, filledBy: "MODULE_09u", readOnly: true },
+      { name: "Home_Starter_Role", index: 7, type: "string", width: 185, filledBy: "MODULE_09u", readOnly: true },
+      { name: "Away_Expected_Survival_Innings", index: 8, type: "number", width: 225, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Home_Expected_Survival_Innings", index: 9, type: "number", width: 225, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Away_Expected_Failure_Innings", index: 10, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Home_Expected_Failure_Innings", index: 11, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Away_Starter_Survival_Prob", index: 12, type: "number", width: 205, format: "0.0000", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Home_Starter_Survival_Prob", index: 13, type: "number", width: 205, format: "0.0000", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Away_Starter_Failure_Shortfall", index: 14, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Home_Starter_Failure_Shortfall", index: 15, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Away_Starter_Failure_Run_Cost", index: 16, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Home_Starter_Failure_Run_Cost", index: 17, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "P_SS", index: 18, type: "number", width: 100, format: "0.0000", filledBy: "MODULE_09u", readOnly: true },
+      { name: "P_FS", index: 19, type: "number", width: 100, format: "0.0000", filledBy: "MODULE_09u", readOnly: true },
+      { name: "P_SF", index: 20, type: "number", width: 100, format: "0.0000", filledBy: "MODULE_09u", readOnly: true },
+      { name: "P_FF", index: 21, type: "number", width: 100, format: "0.0000", filledBy: "MODULE_09u", readOnly: true },
+      { name: "T_SS", index: 22, type: "number", width: 100, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "T_FS", index: 23, type: "number", width: 100, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "T_SF", index: 24, type: "number", width: 100, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "T_FF", index: 25, type: "number", width: 100, format: "0.00", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Away_Starter_FDS", index: 26, type: "number", width: 155, format: "0.0000", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Home_Starter_FDS", index: 27, type: "number", width: 155, format: "0.0000", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Game_FDS", index: 28, type: "number", width: 120, format: "0.0000", filledBy: "MODULE_09u", readOnly: true },
+      { name: "Calibration_Cohort", index: 29, type: "string", width: 220, filledBy: "MODULE_09u", readOnly: true },
+      { name: "Snapshot_TS", index: 30, type: "string", width: 200, filledBy: "MODULE_09u", readOnly: true },
+      { name: "Calibration_Status", index: 31, type: "string", width: 230, filledBy: "MODULE_09u", readOnly: true },
+      { name: "Away_Expected_Pitches", index: 32, type: "number", width: 165, format: "0", filledBy: "MODULE_09u", readOnly: true, description: "Captured pregame workload evidence; no v2 coefficient is assigned." },
+      { name: "Home_Expected_Pitches", index: 33, type: "number", width: 165, format: "0", filledBy: "MODULE_09u", readOnly: true, description: "Captured pregame workload evidence; no v2 coefficient is assigned." },
+      { name: "Away_Workload_Flags", index: 34, type: "string", width: 250, filledBy: "MODULE_09u", readOnly: true, description: "Existing pitcher-workload flags preserved for empirical survival research." },
+      { name: "Home_Workload_Flags", index: 35, type: "string", width: 250, filledBy: "MODULE_09u", readOnly: true, description: "Existing pitcher-workload flags preserved for empirical survival research." },
+      { name: "Away_Starter_Quality", index: 36, type: "number", width: 175, format: "0.0000", filledBy: "MODULE_09u", readOnly: true, description: "Existing FIP/K-BB starter quality captured without a new v2 coefficient." },
+      { name: "Home_Starter_Quality", index: 37, type: "number", width: 175, format: "0.0000", filledBy: "MODULE_09u", readOnly: true, description: "Existing FIP/K-BB starter quality captured without a new v2 coefficient." },
+      { name: "Away_Opponent_Pressure", index: 38, type: "number", width: 190, format: "0.0000", filledBy: "MODULE_09u", readOnly: true, description: "Opponent offense rate times lineup factor faced by the away starter; capture-only until evidence supports use." },
+      { name: "Home_Opponent_Pressure", index: 39, type: "number", width: 190, format: "0.0000", filledBy: "MODULE_09u", readOnly: true, description: "Opponent offense rate times lineup factor faced by the home starter; capture-only until evidence supports use." },
+    ],
+  },
+
+  {
+    name: "STARTER_SURVIVAL_V2_CALIBRATION_REPORT",
+    description: "Settlement comparison of base, frozen SSAT v1, and empirical SSAT v2 candidates. It never writes back to a prospective snapshot.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date", index: 0, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true },
+      { name: "Game_ID", index: 1, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true },
+      { name: "Away_Team", index: 2, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true },
+      { name: "Home_Team", index: 3, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true },
+      { name: "Scheduled_First_Pitch", index: 4, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true },
+      { name: "Base_Projected_Total", index: 5, type: "number", width: 145, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "SSAT_V1_Total", index: 6, type: "number", width: 130, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "SSAT_V2_Total", index: 7, type: "number", width: 130, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Actual_Total", index: 8, type: "number", width: 115, format: "0", filledBy: "MODULE_14", readOnly: true },
+      { name: "Base_Error", index: 9, type: "number", width: 115, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Base_Abs_Error", index: 10, type: "number", width: 135, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "SSAT_V1_Error", index: 11, type: "number", width: 125, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "SSAT_V1_Abs_Error", index: 12, type: "number", width: 145, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "SSAT_V2_Error", index: 13, type: "number", width: 125, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "SSAT_V2_Abs_Error", index: 14, type: "number", width: 145, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Base_Market_Direction_Result", index: 15, type: "string", width: 205, filledBy: "MODULE_14", readOnly: true },
+      { name: "SSAT_V1_Market_Direction_Result", index: 16, type: "string", width: 225, filledBy: "MODULE_14", readOnly: true },
+      { name: "SSAT_V2_Market_Direction_Result", index: 17, type: "string", width: 225, filledBy: "MODULE_14", readOnly: true },
+      { name: "Away_Starter_Actual_IP", index: 18, type: "number", width: 170, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Home_Starter_Actual_IP", index: 19, type: "number", width: 170, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Away_Starter_Survival_Result", index: 20, type: "string", width: 215, filledBy: "MODULE_14", readOnly: true },
+      { name: "Home_Starter_Survival_Result", index: 21, type: "string", width: 215, filledBy: "MODULE_14", readOnly: true },
+      { name: "Away_Starter_Failure_Shortfall", index: 22, type: "number", width: 220, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Home_Starter_Failure_Shortfall", index: 23, type: "number", width: 220, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Away_Starter_Failure_Run_Cost", index: 24, type: "number", width: 220, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Home_Starter_Failure_Run_Cost", index: 25, type: "number", width: 220, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Away_Starter_FDS", index: 26, type: "number", width: 155, format: "0.0000", filledBy: "MODULE_14", readOnly: true },
+      { name: "Home_Starter_FDS", index: 27, type: "number", width: 155, format: "0.0000", filledBy: "MODULE_14", readOnly: true },
+      { name: "Game_FDS", index: 28, type: "number", width: 120, format: "0.0000", filledBy: "MODULE_14", readOnly: true },
+      { name: "Calibration_Cohort", index: 29, type: "string", width: 220, filledBy: "MODULE_14", readOnly: true },
+      { name: "Prospective_Snapshot_TS", index: 30, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true },
+      { name: "Settlement_TS", index: 31, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true },
+      { name: "Calibration_Status", index: 32, type: "string", width: 230, filledBy: "MODULE_14", readOnly: true },
     ],
   },
 
