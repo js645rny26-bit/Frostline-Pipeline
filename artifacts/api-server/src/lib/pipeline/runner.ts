@@ -51,7 +51,7 @@ import {
 } from "../workbook/workbookSetup.js";
 import { logger } from "../../lib/logger.js";
 import { assertProspectivePublicationAllowed } from "./module00_temporalFirewall.js";
-import { buildPublicationProtection } from "./module00_scopedPublication.js";
+import { buildPublicationProtection, filterMutablePublicationGames } from "./module00_scopedPublication.js";
 
 /** Covers a paced write stage plus one full Google quota-retry window. */
 const PROSPECTIVE_WRITE_GUARD_MS = 3 * 60_000;
@@ -420,9 +420,16 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     }),
   ]);
 
+  // Sources can take long enough for an initially mutable game to enter the
+  // prospective write guard before the first Sheets mutation. Scope the feed
+  // here, then carry the compatible scope into Module 09.
+  const feedWriteProtection = publicationProtectionNow();
+  const feedGames = filterMutablePublicationGames(mutableGames, feedWriteProtection);
+  const feedNormalized = { ...normalized, games: feedGames };
+
   // Module 08: Write feeds to Google Sheets
   const mod08 = await writeGoogleSheetsFeed(
-    normalized as Parameters<typeof writeGoogleSheetsFeed>[0],
+    feedNormalized as Parameters<typeof writeGoogleSheetsFeed>[0],
     splits,
     date,
     workbookId,
@@ -433,7 +440,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     pitcherSeasonStats,
     teamRunRates,
     lineMovement,
-    publicationProtectionNow(),
+    feedWriteProtection,
   );
   const shadowSkipped: ShadowValidationResult = {
     status: "failure",
@@ -498,8 +505,14 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // Module 09: Compute + write GAME_INTEGRATION and GAME_SUMMARY
   // teamRunRates (L10 actual RS) and startingNineResult (park factors) are
   // now consumed by the projection formula — not display-only.
+  // Re-check at the calculation boundary. Games that entered the guard while
+  // feeds were written retain any legitimate earlier source row, but receive
+  // no new projection or prospective snapshot.
+  const recalculationProtection = publicationProtectionNow();
+  const recalculationGames = filterMutablePublicationGames(feedGames, recalculationProtection);
+  const recalculationNormalized = { ...feedNormalized, games: recalculationGames };
   const mod09 = await verifyRecalculation(
-    normalized as Parameters<typeof verifyRecalculation>[0],
+    recalculationNormalized as Parameters<typeof verifyRecalculation>[0],
     splits,
     workbookId,
     pitcherSeasonStats?.stats ?? new Map(),
@@ -509,7 +522,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     batterSeasonStats?.stats ?? new Map(),
     rosterNameMap ?? new Map(),
     statcastBatterStats?.stats ?? new Map(),
-    publicationProtectionNow(),
+    recalculationProtection,
   );
   if (mod09.status === "error") {
     const mod09Errors = [
@@ -551,7 +564,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     previewFetchResult,
     workbookId,
     publicationProtectionNow(),
-    new Map(mutableGames.map((game) => [game.legacy_game_id, game.scheduled_utc_time])),
+    new Map(recalculationGames.map((game) => [game.legacy_game_id, game.scheduled_utc_time])),
   ).catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error({ err: msg }, "Full pipeline: Module 09t starter survival shadow threw — continuing");
@@ -569,7 +582,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // to Module 09, Module 11, vehicle selection, or authorization.
   const mod09u = await computeAndWriteStarterSurvivalV2Shadow(
     mod09.game_summary_rows,
-    mutableGames,
+    recalculationGames,
     workbookId,
     publicationProtectionNow(),
   ).catch((err: unknown) => {
@@ -605,7 +618,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
 
   // Module 10: Seed SLATE_INPUT (odds fetched earlier, reused here)
   const mod10 = await seedSlateInput(
-    normalized as Parameters<typeof seedSlateInput>[0],
+    recalculationNormalized as Parameters<typeof seedSlateInput>[0],
     workbookId,
     oddsMap,
     publicationProtectionNow(),
@@ -628,7 +641,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     mod09.game_summary_rows,
     workbookId,
     rotowireProps,
-    normalized.games,
+    recalculationNormalized.games,
     publicationProtectionNow(),
   );
 

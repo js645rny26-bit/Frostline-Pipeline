@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildSheetRowNumberMap,
   buildPublicationProtection,
+  filterMutablePublicationGames,
   mergeProtectedRows,
 } from "./module00_scopedPublication.js";
 
@@ -68,6 +69,31 @@ test("pre-write guard protects a game that could cross first pitch during the wr
   assert.deepEqual([...protection.protected_game_ids], ["20260812_COL_ARI"]);
   assert.deepEqual([...protection.protected_team_abbrs], ["COL", "ARI"]);
   assert.deepEqual(protection.expected_game_ids, ["20260812_COL_ARI", "20260812_HOU_SFG"]);
+});
+
+test("guarded scope keeps feed and recalculation aligned when a game enters the write window", () => {
+  const games = [
+    {
+      legacy_game_id: "20260823_PIT_LAD",
+      scheduled_utc_time: "2026-08-23T20:10:00.000Z",
+      away_team: { team_abbr: "PIT" },
+      home_team: { team_abbr: "LAD" },
+    },
+    {
+      legacy_game_id: "20260823_CHC_SEA",
+      scheduled_utc_time: "2026-08-23T23:10:00.000Z",
+      away_team: { team_abbr: "CHC" },
+      home_team: { team_abbr: "SEA" },
+    },
+  ];
+  const protection = buildPublicationProtection(
+    games,
+    "2026-08-23T20:07:15.000Z",
+    3 * 60_000,
+  );
+
+  const scoped = filterMutablePublicationGames(games, protection);
+  assert.deepEqual(scoped.map((game) => game.legacy_game_id), ["20260823_CHC_SEA"]);
 });
 
 test("missing protected row does not shift mutable Game_ID worksheet addresses", () => {

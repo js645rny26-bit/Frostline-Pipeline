@@ -20,6 +20,21 @@ export interface PublicationGameIdentity {
 }
 
 /**
+ * Keep every dependent pregame writer on the same guarded game scope.
+ *
+ * A game can be mutable when a run begins, then enter the prospective-write
+ * guard while upstream sources are being fetched. Once that happens it must
+ * be excluded from both the source/feed write and every calculation that
+ * would expect one of those rows later in the run.
+ */
+export function filterMutablePublicationGames<T extends PublicationGameIdentity>(
+  games: readonly T[],
+  protection: Pick<PublicationProtection, "protected_game_ids">,
+): T[] {
+  return games.filter((game) => !protection.protected_game_ids.has(game.legacy_game_id));
+}
+
+/**
  * Rebuild protection immediately before a write stage. The guard window keeps
  * a game immutable when first pitch is too close for the pending Sheets write
  * to complete safely. This is deliberately conservative: a skipped refresh is
