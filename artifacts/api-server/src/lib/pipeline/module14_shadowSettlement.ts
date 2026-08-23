@@ -26,6 +26,8 @@ const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
 const PROJECTION_REPLAY_SHEET = "PROJECTION_REPLAY";
 const LOW_CENTER_HISTORY_SHEET = "LOW_CENTER_CALIBRATION_HISTORY";
 const LOW_CENTER_REPORT_SHEET = "LOW_CENTER_CALIBRATION_REPORT";
+const COLLISION_HISTORY_SHEET = "COLLISION_CALIBRATION_HISTORY";
+const COLLISION_REPORT_SHEET = "COLLISION_CALIBRATION_REPORT";
 const STARTER_SURVIVAL_HISTORY_SHEET = "STARTER_SURVIVAL_CALIBRATION_HISTORY";
 const STARTER_SURVIVAL_REPORT_SHEET = "STARTER_SURVIVAL_CALIBRATION_REPORT";
 const STARTER_SURVIVAL_V2_HISTORY_SHEET = "STARTER_SURVIVAL_V2_CALIBRATION_HISTORY";
@@ -37,6 +39,23 @@ export const LOW_CENTER_CALIBRATION_REPORT_HEADER = [
   "Base_Projection", "Primary_Challenger_Projection", "Sensitivity_Challenger_Projection",
   "Actual_Total", "Base_Error", "Primary_Error", "Sensitivity_Error",
   "Base_Abs_Error", "Primary_Abs_Error", "Sensitivity_Abs_Error",
+  "Prospective_Snapshot_TS", "Settlement_TS", "Calibration_Status",
+];
+
+/**
+ * Per-game settlement report for the Statcast collision candidate. Candidate
+ * fields are blank when the preserved preview was unavailable or incomplete;
+ * zero must never be mistaken for a neutral collision signal.
+ */
+export const COLLISION_CALIBRATION_REPORT_HEADER = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
+  "Base_Away_Projection", "Base_Home_Projection", "Base_Projection",
+  "Collision_Away_Evidence_Projection", "Collision_Home_Evidence_Projection",
+  "Collision_Estimated_Projection", "Traffic_Conversion_Estimate", "HR_XBH_Damage_Estimate",
+  "Combined_Tail_Adjustment", "Preview_Availability", "Tail_Estimate_Status",
+  "Actual_Away_Runs", "Actual_Home_Runs", "Actual_Total",
+  "Base_Error", "Base_Abs_Error", "Collision_Error", "Collision_Abs_Error",
+  "Base_Market_Direction_Result", "Collision_Market_Direction_Result",
   "Prospective_Snapshot_TS", "Settlement_TS", "Calibration_Status",
 ];
 
@@ -114,6 +133,24 @@ export interface LowCenterProspectiveSnapshot {
   base_projection: number;
   primary_projection: number;
   sensitivity_projection: number;
+  snapshot_ts: string;
+}
+
+/** Immutable, timestamp-validated Statcast collision record. */
+export interface CollisionProspectiveSnapshot {
+  scheduled_first_pitch: string;
+  base_away_projection: number;
+  base_home_projection: number;
+  base_projection: number;
+  collision_away_evidence_projection: number | null;
+  collision_home_evidence_projection: number | null;
+  collision_estimated_projection: number | null;
+  traffic_conversion_estimate: number | null;
+  hr_xbh_damage_estimate: number | null;
+  combined_tail_adjustment: number | null;
+  preview_availability: string;
+  tail_estimate_status: string;
+  candidate_status: string;
   snapshot_ts: string;
 }
 
@@ -204,6 +241,8 @@ export interface SettlementRow {
   pitcher_provenance_status: PitcherProvenanceStatus;
   /** Timestamp-validated shadow candidate; never reconstructed during settlement. */
   low_center_snapshot?: LowCenterProspectiveSnapshot;
+  /** Timestamp-validated collision candidate; never recreated at settlement. */
+  collision_snapshot?: CollisionProspectiveSnapshot;
   /** Timestamp-validated four-state candidate; never reconstructed during settlement. */
   starter_survival_snapshot?: StarterSurvivalProspectiveSnapshot;
   starter_survival_v2_snapshot?: StarterSurvivalV2ProspectiveSnapshot;
@@ -451,6 +490,58 @@ export function parseLowCenterProspectiveSnapshots(
       base_projection: base,
       primary_projection: primary,
       sensitivity_projection: sensitivity,
+      snapshot_ts: snapshotTs,
+    });
+    latestTs.set(gameId, snapshotMs);
+  }
+  return snapshots;
+}
+
+/**
+ * Read only pre-first-pitch collision records. A source-unavailable row is
+ * retained with a non-candidate status for audit coverage, but its candidate
+ * projection is deliberately null so settlement cannot grade a fake zero.
+ */
+export function parseCollisionProspectiveSnapshots(
+  rows: unknown[][],
+  date: string,
+): Map<string, CollisionProspectiveSnapshot> {
+  const snapshots = new Map<string, CollisionProspectiveSnapshot>();
+  const latestTs = new Map<string, number>();
+  for (const row of rows) {
+    if (String(row[0] ?? "") !== date) continue;
+    const gameId = String(row[1] ?? "").trim();
+    const scheduledFirstPitch = String(row[4] ?? "");
+    const snapshotTs = String(row[18] ?? "");
+    const firstPitchMs = Date.parse(scheduledFirstPitch);
+    const snapshotMs = Date.parse(snapshotTs);
+    const baseAway = numberOrNull(row[5]);
+    const baseHome = numberOrNull(row[6]);
+    const base = numberOrNull(row[7]);
+    const candidateStatus = String(row[17] ?? "");
+    const candidate = candidateStatus === "PROSPECTIVE_SHADOW_CANDIDATE"
+      ? numberOrNull(row[14])
+      : null;
+    if (
+      !gameId || !Number.isFinite(firstPitchMs) || !Number.isFinite(snapshotMs)
+      || snapshotMs >= firstPitchMs || baseAway === null || baseHome === null || base === null
+      || (candidateStatus === "PROSPECTIVE_SHADOW_CANDIDATE" && candidate === null)
+    ) continue;
+    if (snapshotMs < (latestTs.get(gameId) ?? Number.NEGATIVE_INFINITY)) continue;
+    snapshots.set(gameId, {
+      scheduled_first_pitch: scheduledFirstPitch,
+      base_away_projection: baseAway,
+      base_home_projection: baseHome,
+      base_projection: base,
+      collision_away_evidence_projection: candidate === null ? null : numberOrNull(row[8]),
+      collision_home_evidence_projection: candidate === null ? null : numberOrNull(row[9]),
+      collision_estimated_projection: candidate,
+      traffic_conversion_estimate: candidate === null ? null : numberOrNull(row[11]),
+      hr_xbh_damage_estimate: candidate === null ? null : numberOrNull(row[12]),
+      combined_tail_adjustment: candidate === null ? null : numberOrNull(row[13]),
+      preview_availability: String(row[15] ?? "UNAVAILABLE"),
+      tail_estimate_status: String(row[16] ?? "UNAVAILABLE"),
+      candidate_status: candidateStatus || "INSUFFICIENT_INPUT",
       snapshot_ts: snapshotTs,
     });
     latestTs.set(gameId, snapshotMs);
@@ -707,6 +798,62 @@ async function upsertLowCenterCalibrationReport(
   ]);
 }
 
+/** Settlement values for a preserved collision candidate, never a replay. */
+export function collisionCalibrationValues(row: SettlementRow): unknown[] {
+  const snapshot = row.collision_snapshot;
+  if (!snapshot) {
+    const base = row.frozen_published_total;
+    const baseError = base === null ? null : round2(base - row.actual_total);
+    return [
+      row.date, row.game_id, row.away_team, row.home_team, "",
+      "", "", base ?? "", "", "", "", "", "", "", "UNAVAILABLE", "UNAVAILABLE",
+      row.actual_away_runs, row.actual_home_runs, row.actual_total,
+      baseError ?? "", baseError === null ? "" : round2(Math.abs(baseError)), "", "", "NO_BET", "NO_BET",
+      "", row.settlement_ts, "PREGAME_SNAPSHOT_MISSING",
+    ];
+  }
+  const baseError = round2(snapshot.base_projection - row.actual_total);
+  const candidate = snapshot.collision_estimated_projection;
+  const collisionError = candidate === null ? null : round2(candidate - row.actual_total);
+  const status = candidate === null
+    ? `SETTLED_${snapshot.candidate_status}`
+    : "SETTLED";
+  return [
+    row.date, row.game_id, row.away_team, row.home_team, snapshot.scheduled_first_pitch,
+    snapshot.base_away_projection, snapshot.base_home_projection, snapshot.base_projection,
+    snapshot.collision_away_evidence_projection ?? "", snapshot.collision_home_evidence_projection ?? "",
+    candidate ?? "", snapshot.traffic_conversion_estimate ?? "", snapshot.hr_xbh_damage_estimate ?? "",
+    snapshot.combined_tail_adjustment ?? "", snapshot.preview_availability, snapshot.tail_estimate_status,
+    row.actual_away_runs, row.actual_home_runs, row.actual_total,
+    baseError, round2(Math.abs(baseError)), collisionError ?? "", collisionError === null ? "" : round2(Math.abs(collisionError)),
+    gradeDirection(directionForProjection(snapshot.base_projection, row.frozen_market_line), row.frozen_market_line, row.actual_total),
+    candidate === null ? "NO_BET" : gradeDirection(directionForProjection(candidate, row.frozen_market_line), row.frozen_market_line, row.actual_total),
+    snapshot.snapshot_ts, row.settlement_ts, status,
+  ];
+}
+
+async function upsertCollisionCalibrationReport(
+  workbookId: string,
+  date: string,
+  rows: SettlementRow[],
+): Promise<void> {
+  let allRows: unknown[][] = [];
+  try {
+    allRows = (await readRange(workbookId, `${COLLISION_REPORT_SHEET}!A1:AB5000`)).values ?? [];
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;
+    await addSheet(workbookId, COLLISION_REPORT_SHEET);
+  }
+  const retained = allRows.slice(1).filter((value) => String(value[0] ?? "") !== date);
+  await expandSheetColumns(workbookId, COLLISION_REPORT_SHEET, COLLISION_CALIBRATION_REPORT_HEADER.length);
+  await writeRange(workbookId, `${COLLISION_REPORT_SHEET}!A1`, [
+    COLLISION_CALIBRATION_REPORT_HEADER,
+    ...retained,
+    ...rows.map(collisionCalibrationValues),
+  ]);
+}
+
 function survivalResult(actualIp: number | null, projectedWorkload: number): "SURVIVED" | "FAILED" | "UNAVAILABLE" {
   if (actualIp === null) return "UNAVAILABLE";
   return actualIp >= projectedWorkload ? "SURVIVED" : "FAILED";
@@ -917,6 +1064,21 @@ export async function runShadowSettlement(
     warnings.push(`LOW_CENTER_CALIBRATION_HISTORY read unavailable: ${error instanceof Error ? error.message : String(error)}`);
   }
 
+  const collisionSnapshotsByGame = new Map<string, CollisionProspectiveSnapshot>();
+  try {
+    const response = await readRange(wbId, `${COLLISION_HISTORY_SHEET}!A1:S5000`);
+    for (const [gameId, snapshot] of parseCollisionProspectiveSnapshots(
+      ((response.values ?? []) as unknown[][]).slice(1),
+      date,
+    )) {
+      collisionSnapshotsByGame.set(gameId, snapshot);
+    }
+  } catch (error: unknown) {
+    // The ledger is new. Its absence must not rewrite history or prevent core
+    // settlement; a later run will record an explicit snapshot gap instead.
+    warnings.push(`COLLISION_CALIBRATION_HISTORY read unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   const starterSurvivalSnapshotsByGame = new Map<string, StarterSurvivalProspectiveSnapshot>();
   try {
     const response = await readRange(wbId, `${STARTER_SURVIVAL_HISTORY_SHEET}!A1:V5000`);
@@ -1055,6 +1217,7 @@ export async function runShadowSettlement(
       home_pitcher_chain: provenance.home.pitcher_chain,
       pitcher_provenance_status: combinedStatus,
       low_center_snapshot: lowCenterSnapshotsByGame.get(gameId),
+      collision_snapshot: collisionSnapshotsByGame.get(gameId),
       starter_survival_snapshot: starterSurvivalSnapshotsByGame.get(gameId),
       starter_survival_v2_snapshot: starterSurvivalV2SnapshotsByGame.get(gameId),
     };
@@ -1076,6 +1239,14 @@ export async function runShadowSettlement(
       await upsertLowCenterCalibrationReport(wbId, date, processed);
     } catch (error: unknown) {
       warnings.push(`LOW_CENTER_CALIBRATION_REPORT write failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      await upsertCollisionCalibrationReport(wbId, date, processed);
+    } catch (error: unknown) {
+      // This report is the proof that collision values are working rather than
+      // decorative. Do not let settlement claim a clean calibration chain when
+      // it failed to write.
+      errors.push(`COLLISION_CALIBRATION_REPORT write failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     try {
       await upsertStarterSurvivalCalibrationReport(wbId, date, processed);

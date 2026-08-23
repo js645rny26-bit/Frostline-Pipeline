@@ -70,8 +70,10 @@
  *      empirical pregame survival/failure-severity challenger evidence.
  *  v27 (2026-08-23): RUN_LOG records the actual pregame publication scope and
  *      audit gaps, so schedule size can never be mistaken for rows refreshed.
+ *  v28 (2026-08-23): COLLISION_CALIBRATION_HISTORY and REPORT preserve and
+ *      settle real pregame Statcast collision evidence without activating it.
  */
-export const WORKBOOK_SCHEMA_VERSION = 27;
+export const WORKBOOK_SCHEMA_VERSION = 28;
 
 export interface ColumnDef {
   name: string;
@@ -1362,6 +1364,10 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Low_Center_Upper_Tail_Band",   index: 36, type: "number", width: 220, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow-only upper-tail audit ceiling for low-center games; not a projection or wager signal.", exampleValue: "14.94" },
       { name: "Low_Center_Upper_Tail_Residual", index: 37, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Observed low-center upper-tail residual behind the audit ceiling; blank outside the regime.", exampleValue: "8.09" },
       { name: "Low_Center_Reason_Tags",       index: 38, type: "string", width: 360, filledBy: "MODULE_09s", readOnly: true, description: "Descriptive low-center inputs present in the snapshot; tags never create an automatic thesis.", exampleValue: "BASE_PROJECTION_LT_8; BOTH_STARTERS_BELOW_LEAGUE_QUALITY" },
+      { name: "Base_Away_Projection", index: 39, type: "number", width: 165, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Active away allocation preserved only for collision allocation comparison.", exampleValue: "3.40" },
+      { name: "Base_Home_Projection", index: 40, type: "number", width: 165, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Active home allocation preserved only for collision allocation comparison.", exampleValue: "4.10" },
+      { name: "Collision_Away_Evidence_Projection", index: 41, type: "number", width: 245, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Away allocation plus shadow xwOBA/traffic/damage evidence; not a live team projection.", exampleValue: "3.66" },
+      { name: "Collision_Home_Evidence_Projection", index: 42, type: "number", width: 245, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Home allocation plus shadow xwOBA/traffic/damage evidence; not a live team projection.", exampleValue: "4.38" },
     ],
   },
 
@@ -1408,6 +1414,71 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Prospective_Snapshot_TS", index: 15, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-19T16:00:00.000Z" },
       { name: "Settlement_TS", index: 16, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true, exampleValue: "2026-08-20T03:00:00.000Z" },
       { name: "Calibration_Status", index: 17, type: "string", width: 220, filledBy: "MODULE_14", readOnly: true, exampleValue: "PROSPECTIVE_SHADOW_CANDIDATE" },
+    ],
+  },
+
+  {
+    name: "COLLISION_CALIBRATION_HISTORY",
+    description: "One immutable pre-first-pitch Statcast collision snapshot per game. Source-unavailable and incomplete inputs remain explicit statuses, never neutral zero candidate evidence.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date", index: 0, type: "string", width: 90, filledBy: "MODULE_09s", readOnly: true },
+      { name: "Game_ID", index: 1, type: "string", width: 180, filledBy: "MODULE_09s", readOnly: true },
+      { name: "Away_Team", index: 2, type: "string", width: 90, filledBy: "MODULE_09s", readOnly: true },
+      { name: "Home_Team", index: 3, type: "string", width: 90, filledBy: "MODULE_09s", readOnly: true },
+      { name: "Scheduled_First_Pitch", index: 4, type: "string", width: 200, filledBy: "MODULE_09s", readOnly: true },
+      { name: "Base_Away_Projection", index: 5, type: "number", width: 165, format: "0.00", filledBy: "MODULE_09s", readOnly: true },
+      { name: "Base_Home_Projection", index: 6, type: "number", width: 165, format: "0.00", filledBy: "MODULE_09s", readOnly: true },
+      { name: "Base_Projection", index: 7, type: "number", width: 150, format: "0.00", filledBy: "MODULE_09s", readOnly: true },
+      { name: "Collision_Away_Evidence_Projection", index: 8, type: "number", width: 245, format: "0.00", filledBy: "MODULE_09s", readOnly: true },
+      { name: "Collision_Home_Evidence_Projection", index: 9, type: "number", width: 245, format: "0.00", filledBy: "MODULE_09s", readOnly: true },
+      { name: "xwOBA_Shadow_Projection", index: 10, type: "number", width: 185, format: "0.00", filledBy: "MODULE_09s", readOnly: true },
+      { name: "Traffic_Conversion_Estimate", index: 11, type: "number", width: 205, format: "0.0000", filledBy: "MODULE_09s", readOnly: true },
+      { name: "HR_XBH_Damage_Estimate", index: 12, type: "number", width: 195, format: "0.0000", filledBy: "MODULE_09s", readOnly: true },
+      { name: "Combined_Tail_Adjustment", index: 13, type: "number", width: 190, format: "0.0000", filledBy: "MODULE_09s", readOnly: true },
+      { name: "Collision_Estimated_Projection", index: 14, type: "number", width: 210, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow candidate only; never writes GAME_SUMMARY or a decision surface." },
+      { name: "Preview_Availability", index: 15, type: "string", width: 165, filledBy: "MODULE_09s", readOnly: true },
+      { name: "Tail_Estimate_Status", index: 16, type: "string", width: 165, filledBy: "MODULE_09s", readOnly: true },
+      { name: "Candidate_Status", index: 17, type: "string", width: 230, filledBy: "MODULE_09s", readOnly: true, description: "PROSPECTIVE_SHADOW_CANDIDATE | SOURCE_UNAVAILABLE | INSUFFICIENT_INPUT." },
+      { name: "Snapshot_TS", index: 18, type: "string", width: 200, filledBy: "MODULE_09s", readOnly: true },
+    ],
+  },
+
+  {
+    name: "COLLISION_CALIBRATION_REPORT",
+    description: "Settlement-only base-versus-preserved-collision comparison, including allocation evidence and source status. It never reconstructs an unavailable candidate.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Date", index: 0, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true },
+      { name: "Game_ID", index: 1, type: "string", width: 180, filledBy: "MODULE_14", readOnly: true },
+      { name: "Away_Team", index: 2, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true },
+      { name: "Home_Team", index: 3, type: "string", width: 90, filledBy: "MODULE_14", readOnly: true },
+      { name: "Scheduled_First_Pitch", index: 4, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true },
+      { name: "Base_Away_Projection", index: 5, type: "number", width: 165, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Base_Home_Projection", index: 6, type: "number", width: 165, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Base_Projection", index: 7, type: "number", width: 150, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Collision_Away_Evidence_Projection", index: 8, type: "number", width: 245, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Collision_Home_Evidence_Projection", index: 9, type: "number", width: 245, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Collision_Estimated_Projection", index: 10, type: "number", width: 210, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Traffic_Conversion_Estimate", index: 11, type: "number", width: 205, format: "0.0000", filledBy: "MODULE_14", readOnly: true },
+      { name: "HR_XBH_Damage_Estimate", index: 12, type: "number", width: 195, format: "0.0000", filledBy: "MODULE_14", readOnly: true },
+      { name: "Combined_Tail_Adjustment", index: 13, type: "number", width: 190, format: "0.0000", filledBy: "MODULE_14", readOnly: true },
+      { name: "Preview_Availability", index: 14, type: "string", width: 165, filledBy: "MODULE_14", readOnly: true },
+      { name: "Tail_Estimate_Status", index: 15, type: "string", width: 165, filledBy: "MODULE_14", readOnly: true },
+      { name: "Actual_Away_Runs", index: 16, type: "number", width: 140, format: "0", filledBy: "MODULE_14", readOnly: true },
+      { name: "Actual_Home_Runs", index: 17, type: "number", width: 140, format: "0", filledBy: "MODULE_14", readOnly: true },
+      { name: "Actual_Total", index: 18, type: "number", width: 115, format: "0", filledBy: "MODULE_14", readOnly: true },
+      { name: "Base_Error", index: 19, type: "number", width: 120, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Base_Abs_Error", index: 20, type: "number", width: 140, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Collision_Error", index: 21, type: "number", width: 135, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Collision_Abs_Error", index: 22, type: "number", width: 155, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Base_Market_Direction_Result", index: 23, type: "string", width: 215, filledBy: "MODULE_14", readOnly: true },
+      { name: "Collision_Market_Direction_Result", index: 24, type: "string", width: 235, filledBy: "MODULE_14", readOnly: true },
+      { name: "Prospective_Snapshot_TS", index: 25, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true },
+      { name: "Settlement_TS", index: 26, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true },
+      { name: "Calibration_Status", index: 27, type: "string", width: 245, filledBy: "MODULE_14", readOnly: true },
     ],
   },
 

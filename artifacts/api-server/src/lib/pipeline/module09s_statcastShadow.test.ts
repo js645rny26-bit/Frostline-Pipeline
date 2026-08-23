@@ -41,6 +41,7 @@ import {
   LOW_CENTER_CHALLENGER_LIFT,
   LOW_CENTER_SENSITIVITY_LIFT,
   LOW_CENTER_UPPER_TAIL_RESIDUAL,
+  upsertCollisionCalibrationHistory,
   upsertLowCenterCalibrationHistory,
 } from "./module09s_statcastShadow.js";
 
@@ -501,6 +502,41 @@ describe("computeShadowAuditRow — numerical correctness", () => {
 });
 
 describe("low-center volatility shadow", () => {
+  it("keeps one mutable prospective collision row per Date + Game_ID", () => {
+    const existing = [
+      ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "old", 7.03],
+      ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "duplicate", 7.02],
+      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.50],
+    ];
+    const rows = upsertCollisionCalibrationHistory(existing, [
+      ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "fresh", 7.06],
+    ]);
+    assert.deepEqual(rows, [
+      ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "fresh", 7.06],
+      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.50],
+    ]);
+  });
+
+  it("keeps collision allocation evidence separate from the active projections", () => {
+    const summary = makeSummary({ projected_away_runs: 2.8, projected_home_runs: 3.2 });
+    const row = computeShadowAuditRow(summary, makePreview(), TS);
+    assert.equal(row.base_away_projection, 2.8);
+    assert.equal(row.base_home_projection, 3.2);
+    assert.equal(row.current_projection, 6.0);
+    assert.equal(
+      row.collision_away_evidence_projection,
+      parseFloat((2.8 + row.away_starter_delta + row.away_traffic_adjustment + row.away_damage_adjustment).toFixed(2)),
+    );
+    assert.equal(
+      row.collision_home_evidence_projection,
+      parseFloat((3.2 + row.home_starter_delta + row.home_traffic_adjustment + row.home_damage_adjustment).toFixed(2)),
+    );
+    assert.equal(
+      row.estimated_projection,
+      parseFloat((row.shadow_projection + row.combined_tail_adjustment).toFixed(2)),
+    );
+  });
+
   it("keeps one mutable prospective history row per Date + Game_ID", () => {
     const prior = [
       ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "old", 7.03],

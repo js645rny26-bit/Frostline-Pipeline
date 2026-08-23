@@ -466,7 +466,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_08b_preview: statcastPreviewFetch ?? { status: "failure", fetch_timestamp: new Date().toISOString(), games_expected: 0, games_available: 0, games_parsed: 0, games_missing: 0, games_failed: 0, games_identity_mismatch: 0, games: [] },
       module_09: { status: "error", verification_timestamp_utc: new Date().toISOString(), checks: { game_integration: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, game_summary: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, consistency_check: { status: "inconsistent", read_1_timestamp: "", read_2_timestamp: "", diff_seconds: 0 } }, recalculation_time_ms: 0, game_summary_rows: [] },
       module_09_shadow: shadowSkipped,
-      module_09s_statcast_shadow: { status: "skipped", write_timestamp_utc: new Date().toISOString(), rows_computed: 0, rows_written: 0, errors: ["Skipped: Module 08 failed"], shadow_rows: [] },
+      module_09s_statcast_shadow: { status: "skipped", write_timestamp_utc: new Date().toISOString(), rows_computed: 0, rows_written: 0, collision_history_rows_written: 0, errors: ["Skipped: Module 08 failed"], shadow_rows: [] },
       module_09t_starter_survival_shadow: { status: "partial", rows_computed: 0, rows_written: 0, errors: ["Skipped: Module 08 failed"], rows: [] },
       module_09u_starter_survival_v2_shadow: { status: "partial", rows_computed: 0, rows_written: 0, errors: ["Skipped: Module 08 failed"], rows: [] },
       module_10: { status: "failure", seeding_timestamp_utc: new Date().toISOString(), games_seeded: { new_games: 0, updated_games: 0, total_games: 0 }, rows_written: 0, seed_results: [], errors: [{ module: "10", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
@@ -552,6 +552,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       write_timestamp_utc: new Date().toISOString(),
       rows_computed: 0,
       rows_written: 0,
+      collision_history_rows_written: 0,
       errors: [`Module 09s threw: ${msg}`],
       shadow_rows: [],
     } satisfies StatcastShadowResult;

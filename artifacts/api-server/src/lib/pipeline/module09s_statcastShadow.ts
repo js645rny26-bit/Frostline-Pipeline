@@ -71,6 +71,7 @@ export const LOW_CENTER_UPPER_TAIL_RESIDUAL = 8.09;
 
 const SHADOW_SHEET = "STATCAST_SHADOW_AUDIT";
 const LOW_CENTER_HISTORY_SHEET = "LOW_CENTER_CALIBRATION_HISTORY";
+const COLLISION_HISTORY_SHEET = "COLLISION_CALIBRATION_HISTORY";
 const DEFAULT_STARTER_IP = 5.5;
 
 const LOW_CENTER_HISTORY_HEADERS = [
@@ -78,6 +79,21 @@ const LOW_CENTER_HISTORY_HEADERS = [
   "Base_Projection", "Primary_Challenger_Projection", "Sensitivity_Challenger_Projection",
   "Upper_Tail_Band", "Snapshot_TS",
 ];
+
+/**
+ * Immutable, prospective record of the existing Statcast collision candidate.
+ * The candidate is intentionally kept separate from STATCAST_SHADOW_AUDIT,
+ * which is a replace-on-refresh operational view.  Settlement must read this
+ * surface rather than recreating a completed game's Savant data later.
+ */
+export const COLLISION_CALIBRATION_HISTORY_HEADERS = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
+  "Base_Away_Projection", "Base_Home_Projection", "Base_Projection",
+  "Collision_Away_Evidence_Projection", "Collision_Home_Evidence_Projection",
+  "xwOBA_Shadow_Projection", "Traffic_Conversion_Estimate", "HR_XBH_Damage_Estimate",
+  "Combined_Tail_Adjustment", "Collision_Estimated_Projection",
+  "Preview_Availability", "Tail_Estimate_Status", "Candidate_Status", "Snapshot_TS",
+] as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,6 +106,9 @@ export interface ShadowAuditRow {
   home_pitcher: string;
   /** Preview_Availability from STATCAST_GAME_PREVIEW, or "UNAVAILABLE" when not in result set. */
   preview_availability: string;
+  /** Preserved to make collision allocation evidence auditable at settlement. */
+  base_away_projection: number;
+  base_home_projection: number;
   current_projection: number;
   /** Uncapped xwOBA shadow adjustment (runs). Positive = more runs than current model. */
   shadow_xwoba_adjustment: number;
@@ -119,6 +138,9 @@ export interface ShadowAuditRow {
   combined_tail_adjustment: number;
   /** Current projection plus starter xwOBA and hitter-tail estimates. */
   estimated_projection: number;
+  /** Team-level evidence overlays. These are not active team projections. */
+  collision_away_evidence_projection: number;
+  collision_home_evidence_projection: number;
   tail_cap_applied: boolean;
   tail_estimate_status: "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
   /** Shadow-only flag; never consumed by Module 09, the board, or authorization. */
@@ -144,6 +166,7 @@ export interface StatcastShadowResult {
   write_timestamp_utc: string;
   rows_computed: number;
   rows_written: number;
+  collision_history_rows_written: number;
   errors: string[];
   shadow_rows: ShadowAuditRow[];
 }
@@ -169,6 +192,24 @@ export function upsertLowCenterCalibrationHistory(
   for (const row of existingRows) add(row);
   for (const row of incomingRows) add(row);
   return order.map((rowKey) => byKey.get(rowKey)!);
+}
+
+/** One mutable prospective collision record per Date + Game_ID. */
+export function upsertCollisionCalibrationHistory(
+  existingRows: unknown[][],
+  incomingRows: unknown[][],
+): unknown[][] {
+  const byKey = new Map<string, unknown[]>();
+  const order: string[] = [];
+  const add = (row: unknown[]) => {
+    const key = `${String(row[0] ?? "").trim()}|${String(row[1] ?? "").trim()}`;
+    if (key === "|") return;
+    if (!byKey.has(key)) order.push(key);
+    byKey.set(key, [...row]);
+  };
+  for (const row of existingRows) add(row);
+  for (const row of incomingRows) add(row);
+  return order.map((key) => byKey.get(key)!);
 }
 
 // ─── Pure computation (exported for tests) ────────────────────────────────────
@@ -373,6 +414,16 @@ export function computeShadowAuditRow(
   const combinedTailAdjustment = parseFloat(
     clampSigned(tailUncapped, SHADOW_TAIL_GAME_CAP).toFixed(4),
   );
+  const shadowProjection = parseFloat((summary.projected_total_runs + cappedAdj).toFixed(2));
+  // These are deliberately labelled evidence projections rather than live
+  // allocations. The total candidate has an explicit game-level cap, while
+  // these side views preserve which offense supplied each collision signal.
+  const collisionAwayEvidenceProjection = parseFloat((
+    summary.projected_away_runs + awayDelta + awayTraffic + awayDamage
+  ).toFixed(2));
+  const collisionHomeEvidenceProjection = parseFloat((
+    summary.projected_home_runs + homeDelta + homeTraffic + homeDamage
+  ).toFixed(2));
 
   const lowCenterVolatility = summary.projected_total_runs < LOW_CENTER_VOLATILITY_THRESHOLD;
   const lowCenterReasonTags: string[] = [];
@@ -403,9 +454,11 @@ export function computeShadowAuditRow(
     away_pitcher:                 summary.away_pitcher,
     home_pitcher:                 summary.home_pitcher,
     preview_availability:         previewAvailability,
+    base_away_projection:         summary.projected_away_runs,
+    base_home_projection:         summary.projected_home_runs,
     current_projection:           summary.projected_total_runs,
     shadow_xwoba_adjustment:      totalUncapped,
-    shadow_projection:            parseFloat((summary.projected_total_runs + cappedAdj).toFixed(2)),
+    shadow_projection:            shadowProjection,
     cap_applied:                  capApplied,
     away_pitcher_xwoba:           awayXwoba,
     away_pitcher_shadow_quality:  awayShadowQual,
@@ -422,9 +475,9 @@ export function computeShadowAuditRow(
     home_damage_adjustment:       homeDamage,
     hr_xbh_damage_estimate:       damageEstimate,
     combined_tail_adjustment:     combinedTailAdjustment,
-    estimated_projection:         parseFloat(
-      (summary.projected_total_runs + cappedAdj + combinedTailAdjustment).toFixed(2),
-    ),
+    estimated_projection:         parseFloat((shadowProjection + combinedTailAdjustment).toFixed(2)),
+    collision_away_evidence_projection: collisionAwayEvidenceProjection,
+    collision_home_evidence_projection: collisionHomeEvidenceProjection,
     tail_cap_applied:              tailCapApplied,
     tail_estimate_status:          tailEstimateStatus,
     low_center_volatility_flag:    lowCenterVolatility ? "LOW_CENTER_VOLATILITY" : "STANDARD_RANGE",
@@ -488,12 +541,16 @@ const SHADOW_AUDIT_HEADERS = [
   "Low_Center_Upper_Tail_Band",
   "Low_Center_Upper_Tail_Residual",
   "Low_Center_Reason_Tags",
+  "Base_Away_Projection",
+  "Base_Home_Projection",
+  "Collision_Away_Evidence_Projection",
+  "Collision_Home_Evidence_Projection",
 ];
 
 async function ensureShadowAuditSheet(workbookId: string): Promise<void> {
   let sheetExists = true;
   try {
-    const existing = await readRange(workbookId, `${SHADOW_SHEET}!A1:AM1`);
+    const existing = await readRange(workbookId, `${SHADOW_SHEET}!A1:AQ1`);
     const headerRow = (existing.values?.[0] ?? []).map((c) => String(c ?? "").trim());
     const upToDate =
       headerRow.length >= SHADOW_AUDIT_HEADERS.length &&
@@ -558,6 +615,10 @@ function rowToArray(r: ShadowAuditRow): unknown[] {
     r.low_center_upper_tail_band ?? "",
     r.low_center_upper_tail_residual ?? "",
     r.low_center_reason_tags.join("; "),
+    r.base_away_projection,
+    r.base_home_projection,
+    r.collision_away_evidence_projection,
+    r.collision_home_evidence_projection,
   ];
 }
 
@@ -611,6 +672,63 @@ async function appendLowCenterCalibrationHistory(
   await writeRange(workbookId, `${LOW_CENTER_HISTORY_SHEET}!A1`, [LOW_CENTER_HISTORY_HEADERS, ...nextRows]);
 }
 
+function collisionCandidateStatus(row: ShadowAuditRow): string {
+  if (row.preview_availability !== "AVAILABLE") return "SOURCE_UNAVAILABLE";
+  if (row.tail_estimate_status !== "AVAILABLE") return "INSUFFICIENT_INPUT";
+  return "PROSPECTIVE_SHADOW_CANDIDATE";
+}
+
+/**
+ * Freeze a real pre-first-pitch collision observation.  SOURCE_UNAVAILABLE
+ * and INSUFFICIENT_INPUT are intentionally retained as explicit statuses;
+ * their numerical zeroes must never be interpreted as neutral collision data.
+ */
+async function upsertCollisionCalibrationHistorySheet(
+  workbookId: string,
+  rows: ShadowAuditRow[],
+  previewMap: Map<string, StatcastPreviewGameResult>,
+  protection?: PublicationProtection,
+): Promise<number> {
+  const incoming = rows
+    .filter((row) => !protection?.protected_game_ids.has(row.game_id))
+    .flatMap((row): unknown[][] => {
+      const scheduledFirstPitch = previewMap.get(row.game_id)?.scheduled_first_pitch ?? "";
+      const firstPitchMs = Date.parse(scheduledFirstPitch);
+      const snapshotMs = Date.parse(row.snapshot_ts);
+      // Without both timestamps we cannot certify this as prospective. Do not
+      // create a record that settlement might mistake for a real pregame row.
+      if (!Number.isFinite(firstPitchMs) || !Number.isFinite(snapshotMs) || snapshotMs >= firstPitchMs) return [];
+      return [[
+        row.date, row.game_id, row.away_team, row.home_team, scheduledFirstPitch,
+        row.base_away_projection, row.base_home_projection, row.current_projection,
+        row.collision_away_evidence_projection, row.collision_home_evidence_projection,
+        row.shadow_projection, row.traffic_conversion_estimate, row.hr_xbh_damage_estimate,
+        row.combined_tail_adjustment, row.estimated_projection,
+        row.preview_availability, row.tail_estimate_status, collisionCandidateStatus(row), row.snapshot_ts,
+      ]];
+    });
+  if (incoming.length === 0) return 0;
+
+  let existingRows: unknown[][];
+  try {
+    existingRows = (await readRange(workbookId, `${COLLISION_HISTORY_SHEET}!A1:S10000`)).values ?? [];
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;
+    await addSheet(workbookId, COLLISION_HISTORY_SHEET);
+    existingRows = [];
+  }
+  const header = (existingRows[0] ?? []).map((value) => String(value ?? ""));
+  if (header.join("|") !== COLLISION_CALIBRATION_HISTORY_HEADERS.join("|")) {
+    await writeRange(workbookId, `${COLLISION_HISTORY_SHEET}!A1`, [Array.from(COLLISION_CALIBRATION_HISTORY_HEADERS)]);
+    existingRows = [Array.from(COLLISION_CALIBRATION_HISTORY_HEADERS)];
+  }
+  const nextRows = upsertCollisionCalibrationHistory(existingRows.slice(1), incoming);
+  await clearRange(workbookId, `${COLLISION_HISTORY_SHEET}!A2:S10000`);
+  await writeRange(workbookId, `${COLLISION_HISTORY_SHEET}!A1`, [Array.from(COLLISION_CALIBRATION_HISTORY_HEADERS), ...nextRows]);
+  return incoming.length;
+}
+
 /**
  * Compute Statcast xwOBA shadow adjustments for every game in the module09
  * output and write a full-replace snapshot to STATCAST_SHADOW_AUDIT.
@@ -643,6 +761,7 @@ export async function computeAndWriteStatcastShadow(
       write_timestamp_utc: snapshotTs,
       rows_computed: 0,
       rows_written: 0,
+      collision_history_rows_written: 0,
       errors: [],
       shadow_rows: [],
     };
@@ -660,6 +779,7 @@ export async function computeAndWriteStatcastShadow(
   );
 
   let rowsWritten = 0;
+  let collisionHistoryRowsWritten = 0;
   try {
     await ensureShadowAuditSheet(workbookId);
     // Full replace: clear old data rows so a re-run with fewer games leaves no
@@ -667,13 +787,12 @@ export async function computeAndWriteStatcastShadow(
     const incomingRows = shadowRows.map(rowToArray);
     const rowsToWrite = protection && protection.protected_game_ids.size > 0
       ? mergeProtectedRows(
-          (await readRange(workbookId, `${SHADOW_SHEET}!A2:AM10000`)).values ?? [],
+          (await readRange(workbookId, `${SHADOW_SHEET}!A2:AQ10000`)).values ?? [],
           incomingRows, 1, protection.protected_game_ids, protection.expected_game_ids,
         )
       : incomingRows;
-    await clearRange(workbookId, `${SHADOW_SHEET}!A2:AM10000`);
+    await clearRange(workbookId, `${SHADOW_SHEET}!A2:AQ10000`);
     await writeRange(workbookId, `${SHADOW_SHEET}!A2`, rowsToWrite);
-    await appendLowCenterCalibrationHistory(workbookId, shadowRows, previewMap, protection);
     rowsWritten = rowsToWrite.length;
     logger.info({ rows: rowsWritten }, "MODULE_09s: STATCAST_SHADOW_AUDIT written");
   } catch (err: unknown) {
@@ -682,11 +801,36 @@ export async function computeAndWriteStatcastShadow(
     errors.push(msg);
   }
 
+  // Calibration surfaces are independently fail-open. A low-center history
+  // problem cannot suppress the collision record that proves whether the
+  // source data was actually available before first pitch.
+  try {
+    await appendLowCenterCalibrationHistory(workbookId, shadowRows, previewMap, protection);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: msg }, "MODULE_09s: Failed to write LOW_CENTER_CALIBRATION_HISTORY — continuing");
+    errors.push(`LOW_CENTER_CALIBRATION_HISTORY: ${msg}`);
+  }
+  try {
+    collisionHistoryRowsWritten = await upsertCollisionCalibrationHistorySheet(
+      workbookId, shadowRows, previewMap, protection,
+    );
+    logger.info(
+      { collision_history_rows: collisionHistoryRowsWritten },
+      "MODULE_09s: COLLISION_CALIBRATION_HISTORY written",
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: msg }, "MODULE_09s: Failed to write COLLISION_CALIBRATION_HISTORY — continuing");
+    errors.push(`COLLISION_CALIBRATION_HISTORY: ${msg}`);
+  }
+
   return {
     status: errors.length > 0 ? "partial" : "success",
     write_timestamp_utc: snapshotTs,
     rows_computed: shadowRows.length,
     rows_written: rowsWritten,
+    collision_history_rows_written: collisionHistoryRowsWritten,
     errors,
     shadow_rows: shadowRows,
   };

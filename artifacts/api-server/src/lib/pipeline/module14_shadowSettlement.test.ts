@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   FROZEN_VEHICLE_REQUIRED_FROM_DATE,
+  COLLISION_CALIBRATION_REPORT_HEADER,
   classifyFrozenVehicleGap,
+  collisionCalibrationValues,
   frozenProjectionReplayValues,
   normalizeOutcomeValues,
   parseLowCenterProspectiveSnapshots,
+  parseCollisionProspectiveSnapshots,
   parseStarterSurvivalProspectiveSnapshots,
   parseStarterSurvivalV2ProspectiveSnapshots,
   parseProspectiveDecisionAuditSnapshots,
@@ -18,6 +21,99 @@ import {
 } from "./module14_shadowSettlement.js";
 
 const vehicle = { market_line: 8.5, direction: "OVER", projected_total: 9.11 };
+
+test("collision settlement accepts only a preserved pre-first-pitch available candidate", () => {
+  const valid = Array(19).fill("");
+  valid[0] = "2026-08-23";
+  valid[1] = "20260823_ATL_MIL";
+  valid[4] = "2026-08-23T23:10:00.000Z";
+  valid[5] = 3.2;
+  valid[6] = 3.8;
+  valid[7] = 7;
+  valid[8] = 3.5;
+  valid[9] = 4.1;
+  valid[11] = 0.4;
+  valid[12] = 0.6;
+  valid[13] = 0.6;
+  valid[14] = 7.6;
+  valid[15] = "AVAILABLE";
+  valid[16] = "AVAILABLE";
+  valid[17] = "PROSPECTIVE_SHADOW_CANDIDATE";
+  valid[18] = "2026-08-23T16:00:00.000Z";
+  const late = [...valid];
+  late[1] = "20260823_LATE";
+  late[18] = "2026-08-23T23:10:00.000Z";
+
+  const snapshots = parseCollisionProspectiveSnapshots([valid, late], "2026-08-23");
+  assert.deepEqual(snapshots.get("20260823_ATL_MIL"), {
+    scheduled_first_pitch: "2026-08-23T23:10:00.000Z",
+    base_away_projection: 3.2,
+    base_home_projection: 3.8,
+    base_projection: 7,
+    collision_away_evidence_projection: 3.5,
+    collision_home_evidence_projection: 4.1,
+    collision_estimated_projection: 7.6,
+    traffic_conversion_estimate: 0.4,
+    hr_xbh_damage_estimate: 0.6,
+    combined_tail_adjustment: 0.6,
+    preview_availability: "AVAILABLE",
+    tail_estimate_status: "AVAILABLE",
+    candidate_status: "PROSPECTIVE_SHADOW_CANDIDATE",
+    snapshot_ts: "2026-08-23T16:00:00.000Z",
+  });
+  assert.equal(snapshots.has("20260823_LATE"), false);
+});
+
+test("collision settlement leaves an unavailable preview ungradable instead of treating zeros as evidence", () => {
+  const raw = Array(19).fill("");
+  raw[0] = "2026-08-23";
+  raw[1] = "20260823_NO_SOURCE";
+  raw[4] = "2026-08-23T23:10:00.000Z";
+  raw[5] = 3;
+  raw[6] = 4;
+  raw[7] = 7;
+  raw[14] = 7; // Raw shadow default, deliberately not a candidate.
+  raw[15] = "NOT_PUBLISHED";
+  raw[16] = "UNAVAILABLE";
+  raw[17] = "SOURCE_UNAVAILABLE";
+  raw[18] = "2026-08-23T16:00:00.000Z";
+  const snapshot = parseCollisionProspectiveSnapshots([raw], "2026-08-23").get("20260823_NO_SOURCE");
+  assert.ok(snapshot);
+  assert.equal(snapshot.collision_estimated_projection, null);
+  const values = collisionCalibrationValues({
+    date: "2026-08-23", game_id: "20260823_NO_SOURCE", away_team: "AAA", home_team: "BBB",
+    actual_away_runs: 3, actual_home_runs: 4, actual_total: 7, settlement_ts: "2026-08-24T03:00:00.000Z",
+    frozen_market_line: 7.5, collision_snapshot: snapshot,
+  } as SettlementRow);
+  assert.equal(values.length, COLLISION_CALIBRATION_REPORT_HEADER.length);
+  assert.equal(values[10], "");
+  assert.equal(values[21], "");
+  assert.equal(values[27], "SETTLED_SOURCE_UNAVAILABLE");
+});
+
+test("collision settlement grades a frozen candidate without changing its snapshot", () => {
+  const snapshot = {
+    scheduled_first_pitch: "2026-08-23T23:10:00.000Z",
+    base_away_projection: 3.2, base_home_projection: 3.8, base_projection: 7,
+    collision_away_evidence_projection: 3.5, collision_home_evidence_projection: 4.1,
+    collision_estimated_projection: 7.6, traffic_conversion_estimate: 0.4,
+    hr_xbh_damage_estimate: 0.6, combined_tail_adjustment: 0.6,
+    preview_availability: "AVAILABLE", tail_estimate_status: "AVAILABLE",
+    candidate_status: "PROSPECTIVE_SHADOW_CANDIDATE", snapshot_ts: "2026-08-23T16:00:00.000Z",
+  };
+  const before = structuredClone(snapshot);
+  const values = collisionCalibrationValues({
+    date: "2026-08-23", game_id: "20260823_ATL_MIL", away_team: "ATL", home_team: "MIL",
+    actual_away_runs: 5, actual_home_runs: 4, actual_total: 9, frozen_market_line: 7.5,
+    settlement_ts: "2026-08-24T03:00:00.000Z", collision_snapshot: snapshot,
+  } as SettlementRow);
+  assert.equal(values[19], -2);
+  assert.equal(values[21], -1.4);
+  assert.equal(values[23], "LOSS");
+  assert.equal(values[24], "WIN");
+  assert.equal(values[27], "SETTLED");
+  assert.deepEqual(snapshot, before);
+});
 
 test("low-center candidates retain only the latest legitimate pre-first-pitch snapshot", () => {
   const early = [

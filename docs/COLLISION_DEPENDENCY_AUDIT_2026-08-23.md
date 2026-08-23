@@ -13,6 +13,8 @@ coefficient change.
 | Exact pitcher input | Shadow ingestion | The parser resolves the known probable pitcher by the pregame player ID from `roster.pitchers`; it never infers a starter from roster position. |
 | `STATCAST_SHADOW_AUDIT` | Shadow only | Existing traffic, damage, and conversion estimates can receive the repaired preview inputs. `Preview_Used_In_Projection` remains `NO`. |
 | `Traffic_Conversion_Estimate` / `HR_XBH_Damage_Estimate` | Shadow only | These are observed candidate values, not active run components. |
+| `COLLISION_CALIBRATION_HISTORY` | Prospective shadow ledger | Freezes one real pre-first-pitch collision record per game, including explicit `SOURCE_UNAVAILABLE` / `INSUFFICIENT_INPUT` states that cannot be graded as neutral zeroes. |
+| `COLLISION_CALIBRATION_REPORT` | Settlement only | Grades only frozen available candidates against totals, allocation evidence, and the frozen market line; it never rebuilds a completed game's preview. |
 | `GAME_SUMMARY` | Intentionally inactive | `Traffic_Conversion_Runs` and `HR_XBH_Damage_Runs` remain explicit zeroes in the active projection. |
 | Final projection / authorization / vehicle | Unchanged | No collision value crosses this boundary in this repair. |
 
@@ -31,9 +33,9 @@ not become the sole required dependency for the active game projection.
 
 ## Commissioning boundary
 
-This is an ingestion and observability repair, not a collision-model rollout.
-The next pre-first-pitch commissioning run must confirm that preview rows are
-available and that the shadow audit produces nonzero candidate values where
-the source supplies usable fields. Only then may a separate replay-backed
-proposal evaluate dependency-controlled collision calculations. No additive
-traffic, damage, conversion, lineup, hand, or bullpen bonus has been enabled.
+This is an ingestion and prospective-calibration repair, not a collision-model
+rollout. Each legitimate pregame run now preserves the exact candidate inputs
+needed for a settlement comparison. Only a later report with enough preserved
+available candidates may support a replay-backed proposal to promote, revise,
+or retire any collision calculation. No additive traffic, damage, conversion,
+lineup, hand, or bullpen bonus has been enabled.

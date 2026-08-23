@@ -65,6 +65,18 @@ cost. It does not silently reapply the v1 `IP / 9` proxy when history is thin;
 instead it records an explicit insufficiency. Its outputs are never board,
 vehicle, market, projection, or authorization inputs.
 
+## Collision calibration ledger
+
+`COLLISION_CALIBRATION_HISTORY` freezes the actual pre-first-pitch Statcast
+collision observation for each legitimately mutable game: base allocation,
+xwOBA companion, traffic, damage, tail adjustment, availability, and a
+candidate-status field. A `SOURCE_UNAVAILABLE` or `INSUFFICIENT_INPUT` row is
+an explicit evidence gap—its numerical zeroes must never be read as a neutral
+collision signal. `COLLISION_CALIBRATION_REPORT` is written only at settlement
+and compares the preserved base and available collision candidate against
+actual total, actual team allocation, and the frozen market line. Neither tab
+can modify the active projection, vehicle, or authorization.
+
 ## How data actually moves
 
 The operational tabs are pipeline-written value snapshots, not a network of spreadsheet formulas. “Feeds” below means that the pipeline consumes the same source or a prior module’s in-memory result and then writes the downstream snapshot.
@@ -114,6 +126,8 @@ Final results + frozen prospective state
 | `STATCAST_SHADOW_AUDIT` | Every publish after Module 09, Module 09s | Starter xwOBA, estimated traffic/damage tail adjustments, and a shadow-only low-center volatility audit. | Provides the tentative range companion and a manual distribution-risk warning; never changes the active total or authorization. | Compare `Current_Projection` and `Estimated_Projection`; when flagged, inspect both challengers, upper-tail band, reason tags, status, and caps. |
 | `LOW_CENTER_CALIBRATION_HISTORY` | Append every pregame Module 09s run for a low-center game | Timestamped base, +1.50 primary, and +2.00 sensitivity candidates. | No board input; preserves evidence for settlement. | Only a row strictly before its scheduled first pitch is valid prospective evidence. |
 | `LOW_CENTER_CALIBRATION_REPORT` | Settlement, Module 14 | Actual-result comparison of preserved base and challenger projections. | No board input; calibration evidence only. | Compare each candidate's absolute error over a sufficient prospective sample; never promote on an isolated slate. |
+| `COLLISION_CALIBRATION_HISTORY` | Every legitimate pre-first-pitch Module 09s run | Frozen real Statcast traffic/damage/xwOBA collision evidence plus availability status. | No board input; preserves actual candidate inputs for settlement. | Only `PROSPECTIVE_SHADOW_CANDIDATE` is comparable; unavailable source rows are not zero evidence. |
+| `COLLISION_CALIBRATION_REPORT` | Settlement, Module 14 | Base-versus-collision total, allocation, and market-direction result. | No board input; promotion-or-retirement evidence only. | Read candidate error only where a valid prospective candidate exists. |
 | `STARTER_SURVIVAL_CALIBRATION_HISTORY` | Every pre-first-pitch Module 09t run | Four-state workload branch totals, probabilities, and continuous failure-dependency scores. | No board input; manual-review evidence only. | `p = clamp(Projected_Starter_Innings / 9, 0, 1)` is temporary and must be tested prospectively. |
 | `STARTER_SURVIVAL_CALIBRATION_REPORT` | Settlement, Module 14 | Actual-total comparison and starter survival grading from history. | No board input; challenger evidence only. | Cannot reconstruct or backdate a missing pregame candidate. |
 | `STARTER_SURVIVAL_V2_CALIBRATION_HISTORY` | Every pre-first-pitch Module 09u run | Empirical survival probability and conditional workload-failure severity. | No board input; v2 shadow evidence only. | Uses strictly earlier settled records only; no v1 proxy fallback. |
