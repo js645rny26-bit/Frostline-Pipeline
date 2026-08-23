@@ -23,7 +23,7 @@ import { logger } from "../../lib/logger.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 
 const BASE_URL = "https://baseballsavant.mlb.com/preview";
-const PARSER_VERSION = "1.0.0";
+const PARSER_VERSION = "1.1.0";
 const RAW_PAYLOAD_DIR = "artifacts/statcast-preview";
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -171,7 +171,7 @@ function extractTeamsJson(html: string): unknown {
 }
 
 /** Extract Statcast player stats from a raw player object in the `var teams` payload. */
-function extractPlayerStats(raw: unknown): StatcastPlayerStats | null {
+export function extractPlayerStats(raw: unknown): StatcastPlayerStats | null {
   if (!raw || typeof raw !== "object") return null;
   const p = raw as Record<string, unknown>;
 
@@ -192,11 +192,18 @@ function extractPlayerStats(raw: unknown): StatcastPlayerStats | null {
     p["didNotQualify"] === true;
 
   const playerId = num(p["id"]) ?? num(p["player_id"]);
+  const person = typeof p["person"] === "object" && p["person"] !== null
+    ? p["person"] as Record<string, unknown>
+    : null;
   const playerName =
     typeof p["name"] === "string"
       ? p["name"]
       : typeof p["fullName"] === "string"
         ? p["fullName"]
+        : typeof person?.["fullName"] === "string"
+          ? person["fullName"]
+          : typeof p["name_display_first_last"] === "string"
+            ? p["name_display_first_last"]
         : null;
 
   return {
@@ -214,6 +221,89 @@ function extractPlayerStats(raw: unknown): StatcastPlayerStats | null {
     whiff_percent: num(src["whiff_percent"]),
     barrel_batted_rate: num(src["barrel_batted_rate"]),
   };
+}
+
+export type HitterAggregationSource =
+  | "POSTED_BATTING_ORDER"
+  | "ROSTER_FALLBACK"
+  | "UNAVAILABLE";
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+/** Flatten either an array or a keyed-object player collection. */
+function playerRows(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  const record = asRecord(value);
+  return record ? Object.values(record) : [];
+}
+
+/**
+ * Select the hitter collection supplied by the preview page without assuming
+ * that hitterPlusRows is an array. The live page currently exposes the useful
+ * Statcast fields under roster.hitters and represents hitterPlusRows as a
+ * numeric counter, so that counter is evidence of neither freshness nor
+ * unavailability by itself.
+ */
+export function selectStatcastHitterRows(side: Record<string, unknown>): {
+  rows: unknown[];
+  source: HitterAggregationSource;
+} {
+  const roster = asRecord(side["roster"]);
+  const directRows = playerRows(side["hitterRows"] ?? side["hitters"]);
+  const rosterRows = playerRows(roster?.["hitters"]);
+  const candidates = directRows.length > 0 ? directRows : rosterRows;
+
+  const postedOrder = candidates.filter((candidate) => {
+    const row = asRecord(candidate);
+    const battingOrder = num(row?.["battingOrder"] ?? row?.["batting_order"]);
+    return battingOrder !== null && battingOrder > 0;
+  });
+
+  if (side["hasLineup"] === true && postedOrder.length > 0) {
+    return { rows: postedOrder, source: "POSTED_BATTING_ORDER" };
+  }
+  if (candidates.length > 0) {
+    return { rows: candidates, source: "ROSTER_FALLBACK" };
+  }
+  return { rows: [], source: "UNAVAILABLE" };
+}
+
+/** A side is usable when it contains at least one hitter with actual Statcast input. */
+export function hasUsableStatcastHitterPayload(side: Record<string, unknown>): boolean {
+  return selectStatcastHitterRows(side).rows.some((row) => {
+    const stats = extractPlayerStats(row);
+    return stats !== null && (
+      stats.xwoba !== null ||
+      stats.hard_hit_percent !== null ||
+      stats.k_percent !== null ||
+      stats.bb_percent !== null
+    );
+  });
+}
+
+/**
+ * The preview page's probable pitcher is currently in roster.pitchers, not at
+ * the root. Resolve it by the pipeline's pregame probable-pitcher ID; never
+ * guess a pitcher from roster order.
+ */
+export function resolveStatcastPitcherRaw(
+  side: Record<string, unknown>,
+  expectedPlayerId: number | null | undefined,
+): unknown {
+  const direct = side["pitcher"] ?? side["startingPitcher"];
+  if (direct !== null && direct !== undefined) return direct;
+  if (expectedPlayerId === null || expectedPlayerId === undefined) return null;
+
+  const roster = asRecord(side["roster"]);
+  return playerRows(roster?.["pitchers"])
+    .find((candidate) => {
+      const row = asRecord(candidate);
+      return num(row?.["id"]) === expectedPlayerId || num(row?.["player_id"]) === expectedPlayerId;
+    }) ?? null;
 }
 
 /** Compute the mean of non-null values; null when fewer than 2 qualified values. */
@@ -416,24 +506,23 @@ async function fetchOneGame(game: NormalizedGame): Promise<StatcastPreviewGameRe
   }
 
   // ── 4b. Detect live/completed-game page format ────────────────────────────
-  // When a game is live or completed, the Savant preview page restructures the
-  // var teams object: hitterPlusRows and pitcherPlusRows become numeric counts
-  // (not arrays) and Statcast stats are absent from the payload.  Attempting to
-  // call .map() on a number crashes the hitter aggregation step.
-  // Return NOT_PUBLISHED — the source is reachable but pregame stats are not
-  // available in this page format.
-  if (
-    typeof awayRaw["hitterPlusRows"] === "number" ||
-    typeof homeRaw["hitterPlusRows"] === "number"
-  ) {
+  // The source may expose hitterPlusRows as a numeric counter while preserving
+  // usable player-level Statcast fields in roster.hitters. Availability is
+  // therefore determined from those fields, not the counter's runtime type.
+  const awayHasUsableHitterStats = hasUsableStatcastHitterPayload(awayRaw);
+  const homeHasUsableHitterStats = hasUsableStatcastHitterPayload(homeRaw);
+  if (!awayHasUsableHitterStats && !homeHasUsableHitterStats) {
     return {
       ...base,
       preview_availability: "NOT_PUBLISHED",
       fetch_status: "success",
       payload_hash: payloadHash,
       raw_payload_path: rawPayloadPath,
-      parse_error: "Live/completed-game page format detected — pregame Statcast stats not available in this structure",
+      parse_error: "No usable pregame Statcast hitter fields found in the page payload",
     };
+  }
+  if (typeof awayRaw["hitterPlusRows"] === "number" || typeof homeRaw["hitterPlusRows"] === "number") {
+    warnings.push("Numeric hitterPlusRows counter accepted; using roster-level Statcast fields");
   }
 
   const hasLineupAway = awayRaw["hasLineup"] === true;
@@ -492,8 +581,8 @@ async function fetchOneGame(game: NormalizedGame): Promise<StatcastPreviewGameRe
   }
 
   // ── 6. Extract pitcher Statcast stats ─────────────────────────────────────
-  const awayPitcherRaw = awayRaw["pitcher"] ?? awayRaw["startingPitcher"];
-  const homePitcherRaw = homeRaw["pitcher"] ?? homeRaw["startingPitcher"];
+  const awayPitcherRaw = resolveStatcastPitcherRaw(awayRaw, game.away_pitcher.player_id);
+  const homePitcherRaw = resolveStatcastPitcherRaw(homeRaw, game.home_pitcher.player_id);
   const awayPitcherStats = hasProbableAway ? extractPlayerStats(awayPitcherRaw) : null;
   const homePitcherStats = hasProbableHome ? extractPlayerStats(homePitcherRaw) : null;
 
@@ -521,7 +610,7 @@ async function fetchOneGame(game: NormalizedGame): Promise<StatcastPreviewGameRe
     // count (treat as empty).  Without this guard, a non-array crashes here
     // and escapes fetchOneGame entirely — the outer .catch() then mislabels
     // the failure as http_error / SOURCE_UNAVAILABLE.
-    const rawValue = side["hitterRows"] ?? side["hitters"] ?? side["roster"];
+    const rawValue = selectStatcastHitterRows(side).rows;
     let rawList: unknown[];
     if (Array.isArray(rawValue)) {
       rawList = rawValue;
@@ -567,6 +656,14 @@ async function fetchOneGame(game: NormalizedGame): Promise<StatcastPreviewGameRe
 
   if (awayHitters.total === 0) warnings.push("No hitter rows found for away team");
   if (homeHitters.total === 0) warnings.push("No hitter rows found for home team");
+  const awayHitterSource = selectStatcastHitterRows(awayRaw).source;
+  const homeHitterSource = selectStatcastHitterRows(homeRaw).source;
+  if (hasLineupAway && awayHitterSource !== "POSTED_BATTING_ORDER") {
+    warnings.push(`Away lineup posted but Statcast hitter source is ${awayHitterSource}`);
+  }
+  if (hasLineupHome && homeHitterSource !== "POSTED_BATTING_ORDER") {
+    warnings.push(`Home lineup posted but Statcast hitter source is ${homeHitterSource}`);
+  }
 
   const lineupMatchStatus: LineupMatchStatus =
     hasLineupAway && hasLineupHome

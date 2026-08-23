@@ -1,0 +1,37 @@
+# Collision Dependency Audit — 2026-08-23
+
+Scope: commissioning branch only. This document records the data-path audit; it
+does not authorize a projection, authorization, vehicle, workbook, or
+coefficient change.
+
+## Current path and status
+
+| Surface | Status | Finding |
+| --- | --- | --- |
+| `STATCAST_GAME_PREVIEW` | Repaired source contract | Savant serves usable Statcast fields in `roster.hitters` and `roster.pitchers` while `hitterPlusRows` is a numeric counter. Treating that counter as a live/completed-page failure caused false `NOT_PUBLISHED` results. |
+| Exact lineup input | Shadow ingestion | When a lineup is posted, the parser now uses only hitters with a posted batting order. Before lineup publication it records a roster fallback rather than inventing an order. |
+| Exact pitcher input | Shadow ingestion | The parser resolves the known probable pitcher by the pregame player ID from `roster.pitchers`; it never infers a starter from roster position. |
+| `STATCAST_SHADOW_AUDIT` | Shadow only | Existing traffic, damage, and conversion estimates can receive the repaired preview inputs. `Preview_Used_In_Projection` remains `NO`. |
+| `Traffic_Conversion_Estimate` / `HR_XBH_Damage_Estimate` | Shadow only | These are observed candidate values, not active run components. |
+| `GAME_SUMMARY` | Intentionally inactive | `Traffic_Conversion_Runs` and `HR_XBH_Damage_Runs` remain explicit zeroes in the active projection. |
+| Final projection / authorization / vehicle | Unchanged | No collision value crosses this boundary in this repair. |
+
+## Source-availability conclusion
+
+The August 2 onward `0 available / 0 parsed` pattern was not ordinary preview
+timing and was not a network failure: the source returned HTTP success and
+contained roster-level Statcast metrics, but Module 02e rejected the payload
+before its roster fallback could run. This repair corrects that false negative
+and records a warning whenever it accepts the numeric counter format.
+
+The source is still an undocumented HTML page. It remains fail-open and must
+not become the sole required dependency for the active game projection.
+
+## Commissioning boundary
+
+This is an ingestion and observability repair, not a collision-model rollout.
+The next pre-first-pitch commissioning run must confirm that preview rows are
+available and that the shadow audit produces nonzero candidate values where
+the source supplies usable fields. Only then may a separate replay-backed
+proposal evaluate dependency-controlled collision calculations. No additive
+traffic, damage, conversion, lineup, hand, or bullpen bonus has been enabled.
