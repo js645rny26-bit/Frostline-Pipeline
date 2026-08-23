@@ -23,7 +23,7 @@ import { logger } from "../../lib/logger.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 
 const BASE_URL = "https://baseballsavant.mlb.com/preview";
-const PARSER_VERSION = "1.1.0";
+const PARSER_VERSION = "1.2.0";
 const RAW_PAYLOAD_DIR = "artifacts/statcast-preview";
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -177,13 +177,17 @@ export function extractPlayerStats(raw: unknown): StatcastPlayerStats | null {
 
   // The Statcast fields may live directly on the player object or under a nested
   // 'stats' or 'statcast' sub-object — try all three paths.
-  const src: Record<string, unknown> = (
-    typeof p["statcast"] === "object" && p["statcast"] !== null
-      ? p["statcast"]
-      : typeof p["stats"] === "object" && p["stats"] !== null
-        ? p["stats"]
-        : p
-  ) as Record<string, unknown>;
+  // Savant roster rows can retain a generic nested `stats` object for MLB
+  // box-score fields while placing actual Statcast metrics directly on the
+  // player record. A metric-free nested object must not mask that payload.
+  const nestedStatcast = asRecord(p["statcast"]);
+  const nestedStats = asRecord(p["stats"]);
+  const hasStatcastMetric = (candidate: Record<string, unknown> | null): candidate is Record<string, unknown> =>
+    candidate !== null && [
+      "xwoba", "hard_hit_percent", "k_percent", "bb_percent",
+      "exit_velocity_avg", "whiff_percent", "barrel_batted_rate",
+    ].some((field) => num(candidate[field]) !== null);
+  const src = [nestedStatcast, p, nestedStats].find(hasStatcastMetric) ?? p;
 
   const didNotQualify =
     src["didNotQualify"] === "*" ||

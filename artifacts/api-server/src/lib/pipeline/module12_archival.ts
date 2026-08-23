@@ -5,7 +5,7 @@
  * only proxies Sheets v4 paths, not Drive v3.
  */
 
-import { writeRange, readRange, appendRange, addSheet, WORKBOOK_ID } from "../sheets/client.js";
+import { writeRange, readRange, appendRange, addSheet, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
 import { WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
 import { logger } from "../../lib/logger.js";
 import type { Module08Result } from "./module08_feedWriter.js";
@@ -57,7 +57,29 @@ export const RUN_LOG_HEADERS = [
   "Statcast_Preview_Games_Failed",
   "Statcast_Preview_Stale_Count",
   "Statcast_Preview_Identity_Mismatch_Count",
+  // Publication scope is deliberately separate from the full MLB schedule
+  // count above. A staggered-slate run may legitimately write only the games
+  // that remain pregame; reporting it as a full 15-game board is misleading.
+  "Mutable_Games_At_Start",
+  "Protected_Games_At_Start",
+  "Feed_Writable_Games",
+  "Projection_Writable_Games",
+  "Audit_Gap_Games",
+  "Publication_Scope",
 ] as const;
+
+/**
+ * Exact prospective scope observed by the runner. These are observability
+ * facts, not another authorization layer. They let RUN_LOG say plainly when a
+ * 15-game schedule produced a one-game pregame refresh.
+ */
+export interface PublicationScopeAudit {
+  mutable_games_at_start: number;
+  protected_games_at_start: number;
+  feed_writable_games: number;
+  projection_writable_games: number;
+  audit_gap_games: number;
+}
 
 export interface ArchivedFile {
   name: string;
@@ -109,6 +131,11 @@ async function ensureHeaders(workbookId: string): Promise<void> {
     await writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [Array.from(RUN_LOG_HEADERS)]);
     logger.info("MODULE_12: RUN_LOG sheet created with headers");
   }
+
+  // Schema v27 appends scope fields beyond the legacy 38-column RUN_LOG.
+  // Expand first so an old commissioning workbook never silently truncates
+  // the scope record that explains a partial slate.
+  await expandSheetColumns(workbookId, RUN_LOG_SHEET, RUN_LOG_HEADERS.length);
 }
 
 export async function archiveRunBundle(
@@ -121,6 +148,7 @@ export async function archiveRunBundle(
   versionNumber = 1,
   workbookId = WORKBOOK_ID,
   statcastPreview: StatcastPreviewResult | null = null,
+  scope: PublicationScopeAudit | null = null,
 ): Promise<Module12Result> {
   const dateStr = slate.date;
   const bundleName = `${dateStr}_v${String(versionNumber).padStart(2, "0")}`;
@@ -195,6 +223,16 @@ export async function archiveRunBundle(
     statcastPreview?.games_failed ?? 0,                  // Statcast_Preview_Games_Failed
     statcastPreview?.games.filter((g) => g.preview_availability === "STALE").length ?? 0, // Statcast_Preview_Stale_Count
     statcastPreview?.games_identity_mismatch ?? 0,       // Statcast_Preview_Identity_Mismatch_Count
+    scope?.mutable_games_at_start ?? slate.total_games,   // Mutable_Games_At_Start
+    scope?.protected_games_at_start ?? 0,                 // Protected_Games_At_Start
+    scope?.feed_writable_games ?? slate.total_games,      // Feed_Writable_Games
+    scope?.projection_writable_games ?? slate.total_games,// Projection_Writable_Games
+    scope?.audit_gap_games ?? 0,                          // Audit_Gap_Games
+    !scope || scope.projection_writable_games === slate.total_games
+      ? "FULL_PREGAME_SCOPE"
+      : scope.projection_writable_games > 0
+        ? "PARTIAL_PREGAME_SCOPE"
+        : "NO_PREGAME_SCOPE",                            // Publication_Scope
   ];
 
   try {

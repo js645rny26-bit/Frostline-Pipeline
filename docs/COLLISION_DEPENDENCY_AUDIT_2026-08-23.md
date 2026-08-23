@@ -20,9 +20,11 @@ coefficient change.
 
 The August 2 onward `0 available / 0 parsed` pattern was not ordinary preview
 timing and was not a network failure: the source returned HTTP success and
-contained roster-level Statcast metrics, but Module 02e rejected the payload
-before its roster fallback could run. This repair corrects that false negative
-and records a warning whenever it accepts the numeric counter format.
+contained roster-level Statcast metrics, but Module 02e chose the generic
+empty `stats` object before checking the direct Statcast fields on the same
+player row. Parser v1.2.0 corrects that false negative. The numeric
+`hitterPlusRows` counter remains accepted only as a counter; roster metrics
+remain the source of truth.
 
 The source is still an undocumented HTML page. It remains fail-open and must
 not become the sole required dependency for the active game projection.

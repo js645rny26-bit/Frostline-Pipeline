@@ -68,8 +68,10 @@
  *      the four-state starter workload challenger and grade it at settlement.
  *  v26 (2026-08-22): STARTER_SURVIVAL_V2_CALIBRATION_HISTORY and REPORT add
  *      empirical pregame survival/failure-severity challenger evidence.
+ *  v27 (2026-08-23): RUN_LOG records the actual pregame publication scope and
+ *      audit gaps, so schedule size can never be mistaken for rows refreshed.
  */
-export const WORKBOOK_SCHEMA_VERSION = 26;
+export const WORKBOOK_SCHEMA_VERSION = 27;
 
 export interface ColumnDef {
   name: string;
@@ -889,6 +891,12 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Statcast_Preview_Games_Failed",              index: 35, type: "number", width: 180, format: "0",   filledBy: "MODULE_12", description: "SOURCE_UNAVAILABLE + PARSE_FAILED + UNSUPPORTED_FORMAT", exampleValue: "1" },
       { name: "Statcast_Preview_Stale_Count",               index: 36, type: "number", width: 175, format: "0",   filledBy: "MODULE_12", description: "Games where Preview_Availability = STALE", exampleValue: "0" },
       { name: "Statcast_Preview_Identity_Mismatch_Count",   index: 37, type: "number", width: 235, format: "0",   filledBy: "MODULE_12", description: "Games where Preview_Availability = IDENTITY_MISMATCH", exampleValue: "0" },
+      { name: "Mutable_Games_At_Start",                     index: 38, type: "number", width: 175, format: "0",   filledBy: "MODULE_12", description: "Games still before first pitch when this publish started", exampleValue: "5" },
+      { name: "Protected_Games_At_Start",                   index: 39, type: "number", width: 185, format: "0",   filledBy: "MODULE_12", description: "Started or time-unresolved games excluded before pregame writes", exampleValue: "10" },
+      { name: "Feed_Writable_Games",                        index: 40, type: "number", width: 165, format: "0",   filledBy: "MODULE_12", description: "Games that remained eligible when Module 08 wrote feeds", exampleValue: "3" },
+      { name: "Projection_Writable_Games",                  index: 41, type: "number", width: 195, format: "0",   filledBy: "MODULE_12", description: "Games that remained eligible when Module 09 calculated projections", exampleValue: "1" },
+      { name: "Audit_Gap_Games",                            index: 42, type: "number", width: 145, format: "0",   filledBy: "MODULE_12", description: "Games that reached first pitch without a preserved prospective decision snapshot", exampleValue: "2" },
+      { name: "Publication_Scope",                          index: 43, type: "string", width: 190,               filledBy: "MODULE_12", description: "FULL_PREGAME_SCOPE | PARTIAL_PREGAME_SCOPE | NO_PREGAME_SCOPE", exampleValue: "PARTIAL_PREGAME_SCOPE" },
     ],
   },
 

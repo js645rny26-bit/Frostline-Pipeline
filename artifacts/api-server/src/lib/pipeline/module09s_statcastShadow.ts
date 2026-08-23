@@ -148,6 +148,29 @@ export interface StatcastShadowResult {
   shadow_rows: ShadowAuditRow[];
 }
 
+/**
+ * One current prospective row per Date + Game_ID. Reruns before first pitch
+ * replace the candidate rather than appending a second pseudo-snapshot. This
+ * preserves the most recent legitimate pregame state while keeping the
+ * history surface usable for settlement joins.
+ */
+export function upsertLowCenterCalibrationHistory(
+  existingRows: unknown[][],
+  incomingRows: unknown[][],
+): unknown[][] {
+  const byKey = new Map<string, unknown[]>();
+  const order: string[] = [];
+  const add = (row: unknown[]) => {
+    const rowKey = `${String(row[0] ?? "").trim()}|${String(row[1] ?? "").trim()}`;
+    if (!rowKey || rowKey === "|") return;
+    if (!byKey.has(rowKey)) order.push(rowKey);
+    byKey.set(rowKey, [...row]);
+  };
+  for (const row of existingRows) add(row);
+  for (const row of incomingRows) add(row);
+  return order.map((rowKey) => byKey.get(rowKey)!);
+}
+
 // ─── Pure computation (exported for tests) ────────────────────────────────────
 
 function clampQual(v: number): number {
@@ -580,7 +603,12 @@ async function appendLowCenterCalibrationHistory(
     await writeRange(workbookId, `${LOW_CENTER_HISTORY_SHEET}!A1`, [LOW_CENTER_HISTORY_HEADERS]);
     existingRows = [LOW_CENTER_HISTORY_HEADERS];
   }
-  await writeRange(workbookId, `${LOW_CENTER_HISTORY_SHEET}!A${existingRows.length + 1}`, appendRows);
+  const nextRows = upsertLowCenterCalibrationHistory(existingRows.slice(1), appendRows);
+  // Clear stale duplicate tail rows before writing the canonical one-row-per-
+  // game history. The reconstructed contents preserve every unique historical
+  // candidate and replace only the current mutable game.
+  await clearRange(workbookId, `${LOW_CENTER_HISTORY_SHEET}!A2:J10000`);
+  await writeRange(workbookId, `${LOW_CENTER_HISTORY_SHEET}!A1`, [LOW_CENTER_HISTORY_HEADERS, ...nextRows]);
 }
 
 /**

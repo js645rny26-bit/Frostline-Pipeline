@@ -1,8 +1,8 @@
 /**
  * Schema-validation tests: module12 RUN_LOG_HEADERS vs workbookSchema RUN_LOG columns.
  *
- * These tests prove that the 38 header strings module12 writes to the live
- * RUN_LOG sheet exactly match the 38 column definitions registered in
+ * These tests prove that the 44 header strings module12 writes to the live
+ * RUN_LOG sheet exactly match the 44 column definitions registered in
  * workbookSchema.ts — in the same order, with sequential indices.
  *
  * Any rename, reorder, addition, or deletion that keeps one file in sync but
@@ -23,19 +23,19 @@ describe("RUN_LOG schema alignment", () => {
     assert.ok(RUN_LOG_SHEET, "RUN_LOG sheet must be registered in WORKBOOK_SCHEMA");
   });
 
-  it("WORKBOOK_SCHEMA RUN_LOG has exactly 38 columns", () => {
+  it("WORKBOOK_SCHEMA RUN_LOG has exactly 44 columns", () => {
     assert.strictEqual(
       RUN_LOG_SHEET!.columns.length,
-      38,
-      `Expected 38 schema columns, got ${RUN_LOG_SHEET!.columns.length}`,
+      44,
+      `Expected 44 schema columns, got ${RUN_LOG_SHEET!.columns.length}`,
     );
   });
 
-  it("module12 RUN_LOG_HEADERS has exactly 38 entries", () => {
+  it("module12 RUN_LOG_HEADERS has exactly 44 entries", () => {
     assert.strictEqual(
       RUN_LOG_HEADERS.length,
-      38,
-      `Expected 38 RUN_LOG_HEADERS, got ${RUN_LOG_HEADERS.length}`,
+      44,
+      `Expected 44 RUN_LOG_HEADERS, got ${RUN_LOG_HEADERS.length}`,
     );
   });
 
@@ -71,7 +71,7 @@ describe("RUN_LOG schema alignment", () => {
     );
   });
 
-  it("last 8 headers are the Statcast_Preview_* columns from the approved spec", () => {
+  it("Statcast preview observability headers remain in their approved positions", () => {
     const expected = [
       "Statcast_Preview_Status",
       "Statcast_Preview_Games_Expected",
@@ -83,12 +83,26 @@ describe("RUN_LOG schema alignment", () => {
       "Statcast_Preview_Identity_Mismatch_Count",
     ] as const;
 
-    const actual = [...RUN_LOG_HEADERS].slice(30);
+    const actual = [...RUN_LOG_HEADERS].slice(30, 38);
 
     assert.deepEqual(
       actual,
       expected,
       `Statcast_Preview_* headers (indices 30–37) do not match the approved spec.\nExpected: ${JSON.stringify(expected)}\nActual:   ${JSON.stringify(actual)}`,
+    );
+  });
+
+  it("ends with explicit pregame publication scope rather than inferring it from Total_Games", () => {
+    assert.deepEqual(
+      [...RUN_LOG_HEADERS].slice(38),
+      [
+        "Mutable_Games_At_Start",
+        "Protected_Games_At_Start",
+        "Feed_Writable_Games",
+        "Projection_Writable_Games",
+        "Audit_Gap_Games",
+        "Publication_Scope",
+      ],
     );
   });
 });

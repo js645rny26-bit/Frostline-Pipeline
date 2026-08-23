@@ -50,7 +50,7 @@ import {
   type RepairSchemaResult,
 } from "../workbook/workbookSetup.js";
 import { logger } from "../../lib/logger.js";
-import { assertProspectivePublicationAllowed } from "./module00_temporalFirewall.js";
+import { assertProspectivePublicationAllowed, isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
 import { buildPublicationProtection, filterMutablePublicationGames } from "./module00_scopedPublication.js";
 
 /** Covers a paced write stage plus one full Google quota-retry window. */
@@ -671,13 +671,30 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // Module 20 (pregame): required decision-learning ledger. It observes the
   // already-computed model/board state and never feeds back into projections,
   // gates, board decisions, or lock state.
+  const decisionAuditProtection = publicationProtectionNow();
+  const decisionAuditCheckedAt = new Date().toISOString();
+  // The three-minute write guard also protects games that are merely close to
+  // first pitch. Those remain legitimate OPEN rows, not audit gaps. Only an
+  // actual first-pitch crossing (or a missing time) can create an AUDIT_GAP.
+  const auditGapGameIds = new Set(
+    slate.games
+      .filter((game) => decisionAuditProtection.protected_game_ids.has(game.legacy_game_id))
+      .filter((game) => !game.scheduled_utc_time || isAtOrAfterFirstPitch(game.scheduled_utc_time, decisionAuditCheckedAt))
+      .map((game) => game.legacy_game_id),
+  );
   const mod20 = await logDecisionAuditPregame(
     date,
     mod11.slate_board,
     mod09.game_summary_rows,
     slate.games,
     previewFetchResult,
-    { workbookId },
+    {
+      workbookId,
+      // A board row may be absent because the game was already protected when
+      // this run began. Record that absence as an AUDIT_GAP after first pitch;
+      // do not manufacture a late projection or board row to fill it.
+      protectedGameIds: auditGapGameIds,
+    },
   ).catch((err: unknown): DecisionAuditWriteResult => {
     const msg = err instanceof Error ? err.message : String(err);
     return {
@@ -728,7 +745,17 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
           : "success";
 
   // Module 12: Append run log row to RUN_LOG sheet (non-blocking — failure is advisory)
-  const mod12 = await archiveRunBundle(slate, mod08, mod09, mod10, mod11, overallStatus, 1, workbookId, previewFetchResult);
+  const mod12 = await archiveRunBundle(
+    slate, mod08, mod09, mod10, mod11, overallStatus, 1, workbookId,
+    previewFetchResult,
+    {
+      mutable_games_at_start: mutableGames.length,
+      protected_games_at_start: protectedIds.size,
+      feed_writable_games: feedGames.length,
+      projection_writable_games: recalculationGames.length,
+      audit_gap_games: mod20.audit_gaps,
+    },
+  );
   if (mod12.status !== "success") {
     // Run log is best-effort; don't downgrade overall status for it
     allErrors.push(...mod12.errors);

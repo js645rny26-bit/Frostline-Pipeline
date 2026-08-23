@@ -41,6 +41,7 @@ import {
   LOW_CENTER_CHALLENGER_LIFT,
   LOW_CENTER_SENSITIVITY_LIFT,
   LOW_CENTER_UPPER_TAIL_RESIDUAL,
+  upsertLowCenterCalibrationHistory,
 } from "./module09s_statcastShadow.js";
 
 import type { GameSummaryRow } from "./module09_recalculation.js";
@@ -500,6 +501,20 @@ describe("computeShadowAuditRow — numerical correctness", () => {
 });
 
 describe("low-center volatility shadow", () => {
+  it("keeps one mutable prospective history row per Date + Game_ID", () => {
+    const prior = [
+      ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "old", 7.03],
+      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.50],
+      ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "duplicate", 7.02],
+    ];
+    const fresh = [["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "fresh", 7.06]];
+    const rows = upsertLowCenterCalibrationHistory(prior, fresh);
+    assert.deepEqual(rows, [
+      ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "fresh", 7.06],
+      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.50],
+    ]);
+  });
+
   it("flags sub-eight active totals and records only shadow candidates", () => {
     const summary = makeSummary({
       projected_total_runs: 7.58,

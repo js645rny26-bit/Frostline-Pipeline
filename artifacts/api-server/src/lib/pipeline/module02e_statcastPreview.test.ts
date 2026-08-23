@@ -38,6 +38,27 @@ describe("module02e Statcast game preview source contract", () => {
     assert.equal(hasUsableStatcastHitterPayload(side), true);
   });
 
+  it("uses direct Savant metrics when a generic nested stats object is present", () => {
+    const liveRosterHitter = {
+      player_id: 10,
+      battingOrder: "100",
+      person: { fullName: "Live Roster Hitter" },
+      // Current Savant pages include this generic object, but the Statcast
+      // fields are siblings on the player row.
+      stats: { batting: {}, pitching: {}, fielding: {} },
+      xwoba: ".333",
+      hard_hit_percent: 42.1,
+      k_percent: 21.2,
+      bb_percent: 8.4,
+    };
+    const side = { hasLineup: true, roster: { hitters: [liveRosterHitter] } };
+
+    assert.equal(hasUsableStatcastHitterPayload(side), true);
+    const stats = extractPlayerStats(liveRosterHitter);
+    assert.equal(stats?.xwoba, 0.333);
+    assert.equal(stats?.hard_hit_percent, 42.1);
+  });
+
   it("uses a roster fallback rather than inventing a batting order before lineups post", () => {
     const side = {
       hasLineup: false,

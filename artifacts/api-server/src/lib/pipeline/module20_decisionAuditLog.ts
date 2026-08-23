@@ -659,11 +659,12 @@ function buildPregameInputs(
   summaries: GameSummaryRow[],
   games: NormalizedGame[],
   previews: StatcastPreviewResult,
+  protectedGameIds: ReadonlySet<string> = new Set(),
 ): DecisionAuditPregameInput[] {
   const summaryByGame = new Map(summaries.map((summary) => [summary.game_id, summary]));
   const gameById = new Map(games.map((game) => [game.legacy_game_id, game]));
   const previewByGame = new Map(previews.games.map((preview) => [preview.game_id, preview.preview_availability]));
-  return slateBoard.flatMap((entry) => {
+  const boardInputs = slateBoard.flatMap((entry) => {
     const summary = summaryByGame.get(entry.legacy_game_id);
     if (!summary) return [];
     return [{
@@ -689,6 +690,36 @@ function buildPregameInputs(
       final_decision_ts: entry.final_decision_ts,
     } satisfies DecisionAuditPregameInput];
   });
+  const boardIds = new Set(boardInputs.map((input) => input.game_id));
+  // A protected game without a board entry has no legitimate prospective
+  // record from this run. Supply only its identity to the audit writer; after
+  // first pitch it becomes AUDIT_GAP, never a fabricated zero projection.
+  const protectedMissingInputs = games
+    .filter((game) => protectedGameIds.has(game.legacy_game_id))
+    .filter((game) => !boardIds.has(game.legacy_game_id))
+    .map((game) => ({
+      date,
+      game_id: game.legacy_game_id,
+      away_team: game.away_team.team_abbr ?? "",
+      home_team: game.home_team.team_abbr ?? "",
+      scheduled_first_pitch: game.scheduled_utc_time ?? "",
+      run_id: "",
+      model_version: "",
+      lock_status: "LOCKED_OUT" as const,
+      projected_away_runs: 0,
+      projected_home_runs: 0,
+      projected_total: 0,
+      market_line: null,
+      direction: "NONE" as const,
+      vehicle: "",
+      model_confidence: 0,
+      model_blocker: "PREGAME_FREEZE_MISSING",
+      statcast_preview_available: previewByGame.get(game.legacy_game_id) ?? "UNAVAILABLE",
+      model_decision: "NO_CORE" as const,
+      projection_generated_ts: "",
+      final_decision_ts: "",
+    } satisfies DecisionAuditPregameInput));
+  return [...boardInputs, ...protectedMissingInputs];
 }
 
 async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
@@ -783,7 +814,7 @@ export async function logDecisionAuditPregame(
   summaries: GameSummaryRow[],
   games: NormalizedGame[],
   previews: StatcastPreviewResult,
-  options: { workbookId?: string } = {},
+  options: { workbookId?: string; protectedGameIds?: ReadonlySet<string> } = {},
 ): Promise<DecisionAuditWriteResult> {
   const workbookId = options.workbookId ?? WORKBOOK_ID;
   const warnings: string[] = [];
@@ -791,8 +822,8 @@ export async function logDecisionAuditPregame(
   try {
     await ensureDecisionAuditSheet(workbookId);
     const existing = await readAuditRows(workbookId);
-    const inputs = buildPregameInputs(date, slateBoard, summaries, games, previews);
-    if (inputs.length !== slateBoard.length) {
+    const inputs = buildPregameInputs(date, slateBoard, summaries, games, previews, options.protectedGameIds);
+    if (inputs.length < slateBoard.length) {
       errors.push(
         `Decision audit input mismatch: ${inputs.length}/${slateBoard.length} board games have projection summaries`,
       );

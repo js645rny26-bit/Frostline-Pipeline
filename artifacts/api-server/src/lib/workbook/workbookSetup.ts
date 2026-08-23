@@ -309,7 +309,8 @@ export async function repairWorkbookSchemaReference(
       + "v23 (2026-08-19): Separate +2.00 low-center sensitivity challenger for prospective shadow comparison only. "
       + "v24 (2026-08-19): Append-only low-center calibration history and settlement report score preserved base versus both challengers prospectively. "
       + "v25 (2026-08-21): Starter-survival four-state challenger history and settlement report use only preserved prospective workloads; they never change active projections, vehicles, or authorization. "
-      + "v26 (2026-08-22): SSAT v2 records empirical survival and conditional failure severity from earlier settled evidence only; it remains shadow-only."],
+      + "v26 (2026-08-22): SSAT v2 records empirical survival and conditional failure severity from earlier settled evidence only; it remains shadow-only. "
+      + "v27 (2026-08-23): RUN_LOG records actual mutable/protected/feed/projection scope and audit-gap counts; low-center history upserts one current pregame row per game; Statcast parser v1.2 reads direct roster metrics despite generic nested stats objects."],
     ["Workbook_Purpose",    "Frostline Pipeline — MLB totals projection and DA-1.1.0 BET/PASS decision publication."],
     ["Operator_Columns",    "Cells highlighted amber are operator-editable. All other cells are pipeline-maintained — do not edit."],
     ["Decision_Doctrine",   "Decision vocabulary is BET | PASS. CORE / NO_CORE remain historical compatibility values in legacy ledgers only."],
