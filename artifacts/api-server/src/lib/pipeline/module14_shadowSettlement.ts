@@ -692,9 +692,15 @@ export function classifyFrozenVehicleGap(
 ): { warning?: string; error?: string } {
   if (hasFrozenProspectiveState) return {};
   const message = `PREGAME_FREEZE_MISSING/AUDIT_GAP: ${gameId} has no preserved prospective projection snapshot`;
+  // Fail closed means: never reconstruct or silently grade a missing
+  // prospective value.  It does not mean an otherwise successful settlement
+  // should fail merely for truthfully recording a known partial-pregame scope.
+  // The per-game outcome remains explicitly ungradable through
+  // FROZEN_SOURCE_UNRESOLVED, while a missing *decision-audit row* still fails
+  // the settlement chain in Module 20.
   return date < FROZEN_VEHICLE_REQUIRED_FROM_DATE
     ? { warning: `LEGACY_${message}` }
-    : { error: message };
+    : { warning: message };
 }
 
 /** Migrate either legacy frozen-audit M:V rows or v16 pitcher M:W rows. */

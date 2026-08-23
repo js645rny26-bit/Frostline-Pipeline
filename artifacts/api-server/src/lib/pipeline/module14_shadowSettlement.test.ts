@@ -245,11 +245,11 @@ test("SSAT v2 settlement reads only its preserved prospective snapshot and keeps
   assert.equal(missingSnapshotReport.at(-1), "PREGAME_SNAPSHOT_MISSING");
 });
 
-test("settlement fails closed on missing live prospective state without reconstructing it", () => {
+test("settlement records a missing live prospective state without reconstructing it", () => {
   assert.equal(FROZEN_VEHICLE_REQUIRED_FROM_DATE, "2026-08-10");
   const live = classifyFrozenVehicleGap("2026-08-10", "20260810_CHC_WSN", false);
-  assert.match(live.error ?? "", /PREGAME_FREEZE_MISSING\/AUDIT_GAP/);
-  assert.equal(live.warning, undefined);
+  assert.match(live.warning ?? "", /PREGAME_FREEZE_MISSING\/AUDIT_GAP/);
+  assert.equal(live.error, undefined);
 
   const legacy = classifyFrozenVehicleGap("2026-08-09", "20260809_CIN_WSN", false);
   assert.match(legacy.warning ?? "", /LEGACY_PREGAME_FREEZE_MISSING/);

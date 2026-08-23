@@ -882,8 +882,11 @@ export async function settleDecisionAuditLog(
     warnings.push(...missingClassification.warnings);
     errors.push(...missingClassification.errors);
     if (mutation.auditGaps > 0) {
-      errors.push(
-        `PREGAME_FREEZE_MISSING: ${mutation.auditGaps} settled game(s) have AUDIT_GAP provenance`,
+      // The row is intentionally present and explicitly ungradable.  This is
+      // a partial-pregame-scope fact, not a failed settlement write.  A truly
+      // missing current decision-audit row remains an error above.
+      warnings.push(
+        `PREGAME_FREEZE_MISSING: ${mutation.auditGaps} settled game(s) have AUDIT_GAP provenance and remain NOT_GRADABLE`,
       );
     }
     await writeAuditRows(workbookId, mutation.rows, existing.length);

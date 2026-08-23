@@ -148,6 +148,7 @@ jobs:
           const report = JSON.parse(fs.readFileSync("frostline-settlement-report.json", "utf8"));
           const failures = [];
           const settlement = report.settlement ?? {};
+          const decisionAudit = report.decision_audit ?? {};
           const regression = report.regression ?? {};
           const starterAudit = report.starter_audit ?? {};
           const postmortem = report.vehicle_postmortem ?? {};
@@ -178,6 +179,11 @@ jobs:
           if (Array.isArray(starterAudit.errors) && starterAudit.errors.length > 0) failures.push(`starter_audit.errors: ${JSON.stringify(starterAudit.errors)}`);
           if (Array.isArray(postmortem.errors) && postmortem.errors.length > 0) failures.push(`vehicle_postmortem.errors: ${JSON.stringify(postmortem.errors)}`);
           if (Array.isArray(replay.errors) && replay.errors.length > 0) failures.push(`survival_replay.errors: ${JSON.stringify(replay.errors)}`);
+
+          const auditGaps = Number(decisionAudit.audit_gaps ?? 0);
+          if (auditGaps > 0) {
+            console.warn(`::warning title=Pregame audit gaps preserved::${auditGaps} settled game(s) have no legitimate pre-first-pitch snapshot. They remain explicitly NOT_GRADABLE; settlement did not reconstruct them.`);
+          }
 
           if (failures.length > 0) {
             console.error(`Settlement semantic gate failed:\n${failures.join("\n")}`);
@@ -228,6 +234,7 @@ jobs:
           const postmortemIds = new Set(postmortem.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
           const replayIds = new Set(replay.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
           const projectionReplayIds = new Set(projectionReplay.map((row) => String(row[1] ?? "").trim()).filter(Boolean));
+          const auditGapOutcomeIds = [];
           const postmortemByGame = new Map(postmortem.map((row) => [String(row[1] ?? "").trim(), row]));
           const replayByGame = new Map(replay.map((row) => [String(row[1] ?? "").trim(), row]));
           const expected = endpoint.settlement?.games_found ?? 0;
@@ -249,6 +256,13 @@ jobs:
           for (const row of outcomes) {
             const gameId = String(row[1] ?? "").trim();
             if (!String(row[15] ?? "").trim()) failures.push(`SHADOW_OUTCOMES frozen projection source is missing for ${gameId}`);
+            if (String(row[15] ?? "").trim() === "MISSING_FROZEN_VEHICLE_LOG") {
+              if (String(row[21] ?? "").trim() !== "FROZEN_SOURCE_UNRESOLVED") {
+                failures.push(`SHADOW_OUTCOMES missing frozen source is not explicitly flagged for ${gameId}`);
+              } else {
+                auditGapOutcomeIds.push(gameId);
+              }
+            }
             if (!String(row[32] ?? "").trim()) failures.push(`SHADOW_OUTCOMES pitcher provenance status is missing for ${gameId}`);
             if (!String(row[24] ?? "").trim() || !String(row[25] ?? "").trim()) failures.push(`SHADOW_OUTCOMES actual starters are missing for ${gameId}`);
           }
@@ -324,6 +338,7 @@ jobs:
             survival_gate_replay_unique_games: replayIds.size,
             projection_replay_rows: projectionReplay.length,
             projection_replay_unique_games: projectionReplayIds.size,
+            pregame_snapshot_gap_games: auditGapOutcomeIds,
             failures,
           };
           fs.writeFileSync("frostline-settlement-validation.json", JSON.stringify(validation, null, 2));
