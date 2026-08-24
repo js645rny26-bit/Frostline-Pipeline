@@ -238,6 +238,8 @@ export interface PublishResult {
   module_20_decision_audit: DecisionAuditWriteResult;
   /** Module 20a: immutable, self-contained dependent pregame packet. */
   module_20a_pregame_packet: PregamePacketResult;
+  /** Schema/reference documentation refreshed from the runtime workbook schema. */
+  module_schema_documentation: RepairSchemaResult;
   workbook_url: string;
   errors: Array<{ module: string; error: string; timestamp: string }>;
 }
@@ -481,6 +483,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_17: { status: "failure", date, publish_ts: new Date().toISOString(), rows_written: 0, rows_skipped: 0, errors: ["Skipped: Module 08 failed"] },
       module_20_decision_audit: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, duplicates_removed: 0, audit_gaps: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_20a_pregame_packet: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_skipped_after_first_pitch: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
+      module_schema_documentation: { workbook_id: workbookId, schema_reference_rows: 0, readme_rows: 0, errors: [{ step: "schema_documentation", error: "Skipped: Module 08 failed" }] },
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
     };
@@ -746,6 +749,30 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     });
   }
 
+  // Keep the in-workbook road map and column reference synchronized with the
+  // runtime schema during ordinary pregame publication as well as settlement.
+  // This metadata write is idempotent and never touches game-state tabs.
+  const schemaDocumentation = await repairWorkbookSchemaReference(workbookId).catch(
+    (err: unknown): RepairSchemaResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        workbook_id: workbookId,
+        schema_reference_rows: 0,
+        readme_rows: 0,
+        errors: [{ step: "schema_documentation", error: msg }],
+      };
+    },
+  );
+  if (schemaDocumentation.errors.length > 0) {
+    allErrors.push({
+      module: "schema_documentation",
+      error: schemaDocumentation.errors
+        .map(({ step, error }) => `${step}: ${error}`)
+        .join("; "),
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // Publish the immutable vehicle record only after the coherent audit and
   // full dependent packet freeze. This enforces projection -> decision ->
   // packet freeze -> vehicle publication chronology.
@@ -774,7 +801,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   const overallStatus =
     mod10.status === "failure"
       ? "failure"
-      : mod09.status === "error" || mod11.status === "failure" || mod11.slate_board.length === 0 || mod20.status !== "success" || mod20a.status !== "success"
+      : mod09.status === "error" || mod11.status === "failure" || mod11.slate_board.length === 0 || mod20.status !== "success" || mod20a.status !== "success" || schemaDocumentation.errors.length > 0
         ? "partial_success"
         : mod08.status === "partial_failure"
           ? "partial_success"
@@ -819,6 +846,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_17: mod17,
     module_20_decision_audit: mod20,
     module_20a_pregame_packet: mod20a,
+    module_schema_documentation: schemaDocumentation,
     workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
     errors: allErrors,
   };
