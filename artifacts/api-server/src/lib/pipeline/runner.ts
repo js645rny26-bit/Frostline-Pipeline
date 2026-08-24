@@ -44,6 +44,10 @@ import {
   settleDecisionAuditLog,
   type DecisionAuditWriteResult,
 } from "./module20_decisionAuditLog.js";
+import {
+  writePregamePacketHistory,
+  type PregamePacketResult,
+} from "./module20a_pregamePacket.js";
 import { WORKBOOK_ID } from "../sheets/client.js";
 import {
   repairWorkbookSchemaReference,
@@ -232,6 +236,8 @@ export interface PublishResult {
   module_17: VehicleLogResult;
   /** Module 20: immutable pregame decision-audit snapshot. */
   module_20_decision_audit: DecisionAuditWriteResult;
+  /** Module 20a: immutable, self-contained dependent pregame packet. */
+  module_20a_pregame_packet: PregamePacketResult;
   workbook_url: string;
   errors: Array<{ module: string; error: string; timestamp: string }>;
 }
@@ -474,6 +480,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       module_17: { status: "failure", date, publish_ts: new Date().toISOString(), rows_written: 0, rows_skipped: 0, errors: ["Skipped: Module 08 failed"] },
       module_20_decision_audit: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, duplicates_removed: 0, audit_gaps: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
+      module_20a_pregame_packet: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_skipped_after_first_pitch: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
     };
@@ -712,9 +719,37 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     });
   }
 
-  // Publish the immutable vehicle record only after the coherent audit freeze.
-  // This enforces projection -> decision -> freeze -> publication chronology.
-  const mod17: VehicleLogResult = mod20.status === "success"
+  // One self-contained packet preserves the exact state held by all dependent
+  // pregame surfaces. It must exist before vehicle publication, otherwise a
+  // later settlement could only see fragments of a valid board decision.
+  const mod20a: PregamePacketResult = mod20.status === "success"
+    ? await writePregamePacketHistory(
+      date,
+      mod09.game_summary_rows,
+      mod11.slate_board,
+      slate.games,
+      mod09s.shadow_rows,
+      mod09t.rows,
+      mod09u.rows,
+      { workbookId },
+    )
+    : {
+      status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0,
+      rows_skipped_after_first_pitch: 0, warnings: [],
+      errors: ["Pregame packet blocked: decision-audit freeze did not complete"],
+    };
+  if (mod20a.status !== "success") {
+    allErrors.push({
+      module: "20a_pregame_packet",
+      error: mod20a.errors.join("; ") || "Pregame packet write failed",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // Publish the immutable vehicle record only after the coherent audit and
+  // full dependent packet freeze. This enforces projection -> decision ->
+  // packet freeze -> vehicle publication chronology.
+  const mod17: VehicleLogResult = mod20.status === "success" && mod20a.status === "success"
     ? await publishVehicleLog()
     : {
       status: "failure",
@@ -722,7 +757,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       publish_ts: new Date().toISOString(),
       rows_written: 0,
       rows_skipped: mod11.slate_board.length,
-      errors: ["Vehicle publication blocked: decision-audit freeze did not complete"],
+      errors: ["Vehicle publication blocked: decision-audit or pregame-packet freeze did not complete"],
     };
 
   // Overall status before archival (so we can write it into the run log row).
@@ -739,7 +774,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   const overallStatus =
     mod10.status === "failure"
       ? "failure"
-      : mod09.status === "error" || mod11.status === "failure" || mod11.slate_board.length === 0 || mod20.status !== "success"
+      : mod09.status === "error" || mod11.status === "failure" || mod11.slate_board.length === 0 || mod20.status !== "success" || mod20a.status !== "success"
         ? "partial_success"
         : mod08.status === "partial_failure"
           ? "partial_success"
@@ -783,6 +818,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_12: mod12,
     module_17: mod17,
     module_20_decision_audit: mod20,
+    module_20a_pregame_packet: mod20a,
     workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
     errors: allErrors,
   };

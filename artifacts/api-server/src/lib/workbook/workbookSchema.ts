@@ -72,8 +72,10 @@
  *      audit gaps, so schedule size can never be mistaken for rows refreshed.
  *  v28 (2026-08-23): COLLISION_CALIBRATION_HISTORY and REPORT preserve and
  *      settle real pregame Statcast collision evidence without activating it.
+ *  v29 (2026-08-24): PREGAME_PACKET_HISTORY atomically preserves a complete
+ *      pre-first-pitch dependency packet before vehicle publication.
  */
-export const WORKBOOK_SCHEMA_VERSION = 28;
+export const WORKBOOK_SCHEMA_VERSION = 29;
 
 export interface ColumnDef {
   name: string;
@@ -84,7 +86,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "MODULE_20a" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -95,6 +97,49 @@ export interface SheetDef {
   columns: ColumnDef[];
   frozenRows?: number;
 }
+
+const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
+  "Packet_Status", "Run_ID", "Model_Version", "Projection_Generated_TS",
+  "Final_Decision_TS", "Freeze_TS", "Packet_Snapshot_TS", "Core_Packet_Status",
+  "Base_Away_Projection", "Base_Home_Projection", "Base_Projection", "Market_Line",
+  "Market_Snapshot_Status", "Direction", "Vehicle", "Final_Decision", "Final_Blocker",
+  "Confidence", "Variance", "Lock_Status", "Away_Starter", "Home_Starter",
+  "Away_Starter_Role", "Home_Starter_Role", "Away_Expected_IP", "Home_Expected_IP",
+  "Away_Starter_Quality", "Home_Starter_Quality", "Bullpen_Data_Status",
+  "Starter_Attack_Runs", "Bullpen_Continuation_Runs", "Baseball_Only_Projection",
+  "Environment_Run_Adjustment", "Away_Lineup_Status", "Home_Lineup_Status",
+  "Away_Lineup_Source", "Home_Lineup_Source", "Away_Lineup_Coverage",
+  "Home_Lineup_Coverage", "Stadium", "Park_Multiplier", "Weather_Multiplier",
+  "Run_Multiplier", "Roof_Status", "Wind_Disposition", "Environment_Certainty",
+  "Weather_Vehicle_Status", "Statcast_Preview_Availability", "Collision_Status",
+  "Collision_xwOBA_Projection", "Collision_Traffic_Estimate", "Collision_Damage_Estimate",
+  "Collision_Tail_Adjustment", "Collision_Estimated_Projection",
+  "Collision_Away_Evidence_Projection", "Collision_Home_Evidence_Projection",
+  "Low_Center_Status", "Low_Center_Primary", "Low_Center_Sensitivity", "Low_Center_Upper_Band",
+  "SSAT_V1_Status", "SSAT_V1_Total", "SSAT_V2_Status", "SSAT_V2_Total",
+] as const;
+
+const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
+  "Base_Away_Projection", "Base_Home_Projection", "Base_Projection", "Market_Line", "Confidence", "Variance",
+  "Away_Expected_IP", "Home_Expected_IP", "Away_Starter_Quality", "Home_Starter_Quality", "Starter_Attack_Runs",
+  "Bullpen_Continuation_Runs", "Baseball_Only_Projection", "Environment_Run_Adjustment", "Away_Lineup_Coverage",
+  "Home_Lineup_Coverage", "Park_Multiplier", "Weather_Multiplier", "Run_Multiplier", "Collision_xwOBA_Projection",
+  "Collision_Traffic_Estimate", "Collision_Damage_Estimate", "Collision_Tail_Adjustment", "Collision_Estimated_Projection",
+  "Collision_Away_Evidence_Projection", "Collision_Home_Evidence_Projection", "Low_Center_Primary",
+  "Low_Center_Sensitivity", "Low_Center_Upper_Band", "SSAT_V1_Total", "SSAT_V2_Total",
+]);
+
+const PREGAME_PACKET_HISTORY_COLUMNS: ColumnDef[] = PREGAME_PACKET_HISTORY_COLUMN_NAMES.map((name, index) => ({
+  name,
+  index,
+  type: PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS.has(name) ? "number" : "string",
+  width: name.includes("Status") || name.includes("Blocker") ? 205 : name.includes("TS") || name.includes("Pitch") ? 190 : 150,
+  format: PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS.has(name) ? "0.00" : undefined,
+  filledBy: "MODULE_20a",
+  readOnly: true,
+  description: "Immutable pregame dependency packet field; blank values remain explicit missing-source evidence.",
+}));
 
 const HISTORICAL_REPLAY_COLUMNS = [
   "Replay_Date", "Game_ID", "Away_Team", "Home_Team", "Actual_Total",
@@ -1199,6 +1244,14 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Exact_Blocker", index: 17, type: "string", width: 280, filledBy: "MODULE_17", readOnly: true, exampleValue: "INSUFFICIENT_PROJECTION_SEPARATION" },
       { name: "Graded_TS", index: 18, type: "string", width: 200, filledBy: "MODULE_17", readOnly: true, exampleValue: "2026-07-25T08:30:00.000Z" },
     ],
+  },
+
+  {
+    name: "PREGAME_PACKET_HISTORY",
+    description: "One self-contained, date-anchored record of every valid pre-first-pitch model, market, allocation, starter, bullpen, lineup, environment, collision, low-center, and starter-survival dependency. OPEN packets may update before first pitch; the first FROZEN_PREGAME packet is immutable.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: PREGAME_PACKET_HISTORY_COLUMNS,
   },
 
   {

@@ -166,6 +166,8 @@ jobs:
             "module_11.status": "success",
             "module_12.status": "success",
             "module_17.status": "success",
+            "module_20_decision_audit.status": "success",
+            "module_20a_pregame_packet.status": "success",
           };
           const valueAt = (path) => path.split(".").reduce((value, key) => value?.[key], report);
           const failures = Object.entries(expected)

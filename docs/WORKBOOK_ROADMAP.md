@@ -77,6 +77,23 @@ and compares the preserved base and available collision candidate against
 actual total, actual team allocation, and the frozen market line. Neither tab
 can modify the active projection, vehicle, or authorization.
 
+## Pregame packet history
+
+`PREGAME_PACKET_HISTORY` is the single replay-safe packet written immediately
+before `VEHICLE_LOG`. It preserves the active allocation and total, captured
+market state, decision, starters and expected innings, bullpen status, lineup
+state, environment identity, and every shadow companion then available
+(collision, low-center, SSAT v1, SSAT v2).
+
+- `OPEN_PROSPECTIVE` may update only before that game starts.
+- `FROZEN_PREGAME` is immutable; later refreshes cannot change a value in it.
+- `MARKET_SNAPSHOT_MISSING` is a real research gap, not permission to fill in a
+  later line during settlement.
+- No row may be created or updated at or after first pitch.
+
+This packet is provenance infrastructure only. It cannot change the active
+projection, authorization, vehicle selection, or market interpretation.
+
 ## How data actually moves
 
 The operational tabs are pipeline-written value snapshots, not a network of spreadsheet formulas. “Feeds” below means that the pipeline consumes the same source or a prior module’s in-memory result and then writes the downstream snapshot.
@@ -137,6 +154,7 @@ Final results + frozen prospective state
 | `ACTIVE_BOARD_SNAPSHOT` | Every publish, Module 11 | Condensed currently authorized entries. | Filtered view; does not create authorization. | Execution shortcut only after reviewing `SLATE_BOARD`. |
 | `BOARD_LOCK_STATE` | At each game’s lock, Module 11 | Immutable record of final authorization and lock provenance. | Records the single authorization source. | Use to resolve contradictory displays; lock never invents CORE/BET. |
 | `VEHICLE_LOG` | Frozen after board publication, Module 17 | Prospective vehicle, projection, line, direction, and decision. | Preserves what the board actually published. | Historical grading must use this, not a later recalculation. |
+| `PREGAME_PACKET_HISTORY` | Every legitimate pre-first-pitch publish, Module 20a | Complete active projection, market, allocation, starter/bullpen, lineup, environment, and shadow-dependency packet. | Provenance only; it is written before vehicle publication and cannot alter authorization. | `OPEN_PROSPECTIVE` may refresh before first pitch; `FROZEN_PREGAME` is immutable; missing market is explicit. |
 | `DECISION_AUDIT_LOG` | Pregame publish and settlement, Module 20 | Model, manual overlay, authorization, result, and independent grades. | Consumes the authoritative decision and records why. | OPEN may update; frozen pregame evidence may not. |
 
 ## Run-health and documentation tabs
