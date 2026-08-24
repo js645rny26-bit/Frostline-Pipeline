@@ -15,6 +15,7 @@ coefficient change.
 | `Traffic_Conversion_Estimate` / `HR_XBH_Damage_Estimate` | Shadow only | These are observed candidate values, not active run components. |
 | `COLLISION_CALIBRATION_HISTORY` | Prospective shadow ledger | Freezes one real pre-first-pitch collision record per game, including explicit `SOURCE_UNAVAILABLE` / `INSUFFICIENT_INPUT` states that cannot be graded as neutral zeroes. |
 | `COLLISION_CALIBRATION_REPORT` | Settlement only | Grades only frozen available candidates against totals, allocation evidence, and the frozen market line; it never rebuilds a completed game's preview. |
+| `COLLISION_REPLAY_V1` | Settlement replay | Compares base, xwOBA, traffic, damage, tail-only, and combined candidates on the same preserved sample, including allocation and tail diagnostics. It has no operational input. |
 | `GAME_SUMMARY` | Intentionally inactive | `Traffic_Conversion_Runs` and `HR_XBH_Damage_Runs` remain explicit zeroes in the active projection. |
 | Final projection / authorization / vehicle | Unchanged | No collision value crosses this boundary in this repair. |
 
@@ -39,3 +40,8 @@ needed for a settlement comparison. Only a later report with enough preserved
 available candidates may support a replay-backed proposal to promote, revise,
 or retire any collision calculation. No additive traffic, damage, conversion,
 lineup, hand, or bullpen bonus has been enabled.
+
+Collision Replay V1 reports candidate metrics by the sign of the preserved tail
+estimate. It does not use an invented strength threshold and does not backfill
+component allocations for older packets; those cells remain explicit evidence
+gaps rather than reconstructed history.

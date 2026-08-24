@@ -41,6 +41,8 @@ import {
   LOW_CENTER_CHALLENGER_LIFT,
   LOW_CENTER_SENSITIVITY_LIFT,
   LOW_CENTER_UPPER_TAIL_RESIDUAL,
+  COLLISION_CALIBRATION_HISTORY_HEADERS,
+  migrateCollisionCalibrationHistoryRows,
   upsertCollisionCalibrationHistory,
   upsertLowCenterCalibrationHistory,
 } from "./module09s_statcastShadow.js";
@@ -535,6 +537,17 @@ describe("low-center volatility shadow", () => {
       row.estimated_projection,
       parseFloat((row.shadow_projection + row.combined_tail_adjustment).toFixed(2)),
     );
+  });
+
+  it("migrates older collision history by header without erasing prospective evidence", () => {
+    const oldHeader = Array.from(COLLISION_CALIBRATION_HISTORY_HEADERS).slice(0, 19);
+    const oldRow = oldHeader.map((_, index) => index === 0 ? "2026-08-23" : index === 1 ? "20260823_ATL_MIL" : `old-${index}`);
+    const migrated = migrateCollisionCalibrationHistoryRows(oldHeader, [oldRow]);
+    assert.equal(migrated.length, 1);
+    assert.equal(migrated[0]!.length, COLLISION_CALIBRATION_HISTORY_HEADERS.length);
+    assert.equal(migrated[0]![0], "2026-08-23");
+    assert.equal(migrated[0]![1], "20260823_ATL_MIL");
+    assert.equal(migrated[0]![19], "");
   });
 
   it("keeps one mutable prospective history row per Date + Game_ID", () => {

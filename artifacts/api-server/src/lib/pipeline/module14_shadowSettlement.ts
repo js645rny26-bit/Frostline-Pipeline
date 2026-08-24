@@ -57,6 +57,14 @@ export const COLLISION_CALIBRATION_REPORT_HEADER = [
   "Base_Error", "Base_Abs_Error", "Collision_Error", "Collision_Abs_Error",
   "Base_Market_Direction_Result", "Collision_Market_Direction_Result",
   "Prospective_Snapshot_TS", "Settlement_TS", "Calibration_Status",
+  // Replay V1 candidate decomposition. These fields are preserved prospective
+  // evidence, never settlement-time reconstruction or live model inputs.
+  "xwOBA_Shadow_Projection", "Traffic_Only_Projection", "Damage_Only_Projection",
+  "Combined_Tail_Only_Projection",
+  "xwOBA_Away_Evidence_Projection", "xwOBA_Home_Evidence_Projection",
+  "Traffic_Away_Evidence_Projection", "Traffic_Home_Evidence_Projection",
+  "Damage_Away_Evidence_Projection", "Damage_Home_Evidence_Projection",
+  "Frozen_Market_Line",
 ];
 
 export const STARTER_SURVIVAL_CALIBRATION_REPORT_HEADER = [
@@ -144,6 +152,13 @@ export interface CollisionProspectiveSnapshot {
   base_projection: number;
   collision_away_evidence_projection: number | null;
   collision_home_evidence_projection: number | null;
+  xwoba_shadow_projection: number | null;
+  xwoba_away_evidence_projection: number | null;
+  xwoba_home_evidence_projection: number | null;
+  traffic_away_evidence_projection: number | null;
+  traffic_home_evidence_projection: number | null;
+  damage_away_evidence_projection: number | null;
+  damage_home_evidence_projection: number | null;
   collision_estimated_projection: number | null;
   traffic_conversion_estimate: number | null;
   hr_xbh_damage_estimate: number | null;
@@ -535,6 +550,13 @@ export function parseCollisionProspectiveSnapshots(
       base_projection: base,
       collision_away_evidence_projection: candidate === null ? null : numberOrNull(row[8]),
       collision_home_evidence_projection: candidate === null ? null : numberOrNull(row[9]),
+      xwoba_shadow_projection: candidate === null ? null : numberOrNull(row[10]),
+      xwoba_away_evidence_projection: candidate === null ? null : numberOrNull(row[19]),
+      xwoba_home_evidence_projection: candidate === null ? null : numberOrNull(row[20]),
+      traffic_away_evidence_projection: candidate === null ? null : numberOrNull(row[21]),
+      traffic_home_evidence_projection: candidate === null ? null : numberOrNull(row[22]),
+      damage_away_evidence_projection: candidate === null ? null : numberOrNull(row[23]),
+      damage_home_evidence_projection: candidate === null ? null : numberOrNull(row[24]),
       collision_estimated_projection: candidate,
       traffic_conversion_estimate: candidate === null ? null : numberOrNull(row[11]),
       hr_xbh_damage_estimate: candidate === null ? null : numberOrNull(row[12]),
@@ -816,6 +838,7 @@ export function collisionCalibrationValues(row: SettlementRow): unknown[] {
       row.actual_away_runs, row.actual_home_runs, row.actual_total,
       baseError ?? "", baseError === null ? "" : round2(Math.abs(baseError)), "", "", "NO_BET", "NO_BET",
       "", row.settlement_ts, "PREGAME_SNAPSHOT_MISSING",
+      "", "", "", "", "", "", "", "", "", "", row.frozen_market_line ?? "",
     ];
   }
   const baseError = round2(snapshot.base_projection - row.actual_total);
@@ -835,6 +858,14 @@ export function collisionCalibrationValues(row: SettlementRow): unknown[] {
     gradeDirection(directionForProjection(snapshot.base_projection, row.frozen_market_line), row.frozen_market_line, row.actual_total),
     candidate === null ? "NO_BET" : gradeDirection(directionForProjection(candidate, row.frozen_market_line), row.frozen_market_line, row.actual_total),
     snapshot.snapshot_ts, row.settlement_ts, status,
+    snapshot.xwoba_shadow_projection ?? "",
+    snapshot.traffic_conversion_estimate === null ? "" : round2(snapshot.base_projection + snapshot.traffic_conversion_estimate),
+    snapshot.hr_xbh_damage_estimate === null ? "" : round2(snapshot.base_projection + snapshot.hr_xbh_damage_estimate),
+    snapshot.combined_tail_adjustment === null ? "" : round2(snapshot.base_projection + snapshot.combined_tail_adjustment),
+    snapshot.xwoba_away_evidence_projection ?? "", snapshot.xwoba_home_evidence_projection ?? "",
+    snapshot.traffic_away_evidence_projection ?? "", snapshot.traffic_home_evidence_projection ?? "",
+    snapshot.damage_away_evidence_projection ?? "", snapshot.damage_home_evidence_projection ?? "",
+    row.frozen_market_line ?? "",
   ];
 }
 
@@ -845,7 +876,7 @@ async function upsertCollisionCalibrationReport(
 ): Promise<void> {
   let allRows: unknown[][] = [];
   try {
-    allRows = (await readRange(workbookId, `${COLLISION_REPORT_SHEET}!A1:AB5000`)).values ?? [];
+    allRows = (await readRange(workbookId, `${COLLISION_REPORT_SHEET}!A1:AM5000`)).values ?? [];
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;
@@ -1072,7 +1103,7 @@ export async function runShadowSettlement(
 
   const collisionSnapshotsByGame = new Map<string, CollisionProspectiveSnapshot>();
   try {
-    const response = await readRange(wbId, `${COLLISION_HISTORY_SHEET}!A1:S5000`);
+    const response = await readRange(wbId, `${COLLISION_HISTORY_SHEET}!A1:Y5000`);
     for (const [gameId, snapshot] of parseCollisionProspectiveSnapshots(
       ((response.values ?? []) as unknown[][]).slice(1),
       date,

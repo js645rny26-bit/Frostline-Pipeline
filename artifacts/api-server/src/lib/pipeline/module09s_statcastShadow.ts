@@ -93,6 +93,11 @@ export const COLLISION_CALIBRATION_HISTORY_HEADERS = [
   "xwOBA_Shadow_Projection", "Traffic_Conversion_Estimate", "HR_XBH_Damage_Estimate",
   "Combined_Tail_Adjustment", "Collision_Estimated_Projection",
   "Preview_Availability", "Tail_Estimate_Status", "Candidate_Status", "Snapshot_TS",
+  // Component allocations are ledger evidence only. Appending them preserves
+  // all pre-v30 records without changing the meaning of existing columns.
+  "xwOBA_Away_Evidence_Projection", "xwOBA_Home_Evidence_Projection",
+  "Traffic_Away_Evidence_Projection", "Traffic_Home_Evidence_Projection",
+  "Damage_Away_Evidence_Projection", "Damage_Home_Evidence_Projection",
 ] as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -210,6 +215,20 @@ export function upsertCollisionCalibrationHistory(
   for (const row of existingRows) add(row);
   for (const row of incomingRows) add(row);
   return order.map((key) => byKey.get(key)!);
+}
+
+/** Name-based migration used when the prospective collision ledger gains a column. */
+export function migrateCollisionCalibrationHistoryRows(
+  previousHeader: unknown[],
+  previousRows: unknown[][],
+): unknown[][] {
+  const oldIndex = new Map(previousHeader.map((name, index) => [String(name ?? ""), index]));
+  return previousRows.map((row) =>
+    COLLISION_CALIBRATION_HISTORY_HEADERS.map((name) => {
+      const index = oldIndex.get(name);
+      return index === undefined ? "" : row[index] ?? "";
+    }),
+  );
 }
 
 // ─── Pure computation (exported for tests) ────────────────────────────────────
@@ -705,13 +724,19 @@ async function upsertCollisionCalibrationHistorySheet(
         row.shadow_projection, row.traffic_conversion_estimate, row.hr_xbh_damage_estimate,
         row.combined_tail_adjustment, row.estimated_projection,
         row.preview_availability, row.tail_estimate_status, collisionCandidateStatus(row), row.snapshot_ts,
+        parseFloat((row.base_away_projection + row.away_starter_delta).toFixed(2)),
+        parseFloat((row.base_home_projection + row.home_starter_delta).toFixed(2)),
+        parseFloat((row.base_away_projection + row.away_traffic_adjustment).toFixed(2)),
+        parseFloat((row.base_home_projection + row.home_traffic_adjustment).toFixed(2)),
+        parseFloat((row.base_away_projection + row.away_damage_adjustment).toFixed(2)),
+        parseFloat((row.base_home_projection + row.home_damage_adjustment).toFixed(2)),
       ]];
     });
   if (incoming.length === 0) return 0;
 
   let existingRows: unknown[][];
   try {
-    existingRows = (await readRange(workbookId, `${COLLISION_HISTORY_SHEET}!A1:S10000`)).values ?? [];
+    existingRows = (await readRange(workbookId, `${COLLISION_HISTORY_SHEET}!A1:Y10000`)).values ?? [];
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;
@@ -720,11 +745,14 @@ async function upsertCollisionCalibrationHistorySheet(
   }
   const header = (existingRows[0] ?? []).map((value) => String(value ?? ""));
   if (header.join("|") !== COLLISION_CALIBRATION_HISTORY_HEADERS.join("|")) {
-    await writeRange(workbookId, `${COLLISION_HISTORY_SHEET}!A1`, [Array.from(COLLISION_CALIBRATION_HISTORY_HEADERS)]);
-    existingRows = [Array.from(COLLISION_CALIBRATION_HISTORY_HEADERS)];
+    // Schema additions must not erase older legitimate prospective evidence.
+    // Name-based migration retains each existing column and leaves only new
+    // component-allocation fields blank; settlement will treat those as gaps.
+    const migrated = migrateCollisionCalibrationHistoryRows(header, existingRows.slice(1));
+    existingRows = [Array.from(COLLISION_CALIBRATION_HISTORY_HEADERS), ...migrated];
   }
   const nextRows = upsertCollisionCalibrationHistory(existingRows.slice(1), incoming);
-  await clearRange(workbookId, `${COLLISION_HISTORY_SHEET}!A2:S10000`);
+  await clearRange(workbookId, `${COLLISION_HISTORY_SHEET}!A2:Y10000`);
   await writeRange(workbookId, `${COLLISION_HISTORY_SHEET}!A1`, [Array.from(COLLISION_CALIBRATION_HISTORY_HEADERS), ...nextRows]);
   return incoming.length;
 }

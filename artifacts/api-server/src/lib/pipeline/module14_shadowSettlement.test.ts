@@ -32,6 +32,7 @@ test("collision settlement accepts only a preserved pre-first-pitch available ca
   valid[7] = 7;
   valid[8] = 3.5;
   valid[9] = 4.1;
+  valid[10] = 7.2;
   valid[11] = 0.4;
   valid[12] = 0.6;
   valid[13] = 0.6;
@@ -52,6 +53,13 @@ test("collision settlement accepts only a preserved pre-first-pitch available ca
     base_projection: 7,
     collision_away_evidence_projection: 3.5,
     collision_home_evidence_projection: 4.1,
+    xwoba_shadow_projection: 7.2,
+    xwoba_away_evidence_projection: null,
+    xwoba_home_evidence_projection: null,
+    traffic_away_evidence_projection: null,
+    traffic_home_evidence_projection: null,
+    damage_away_evidence_projection: null,
+    damage_home_evidence_projection: null,
     collision_estimated_projection: 7.6,
     traffic_conversion_estimate: 0.4,
     hr_xbh_damage_estimate: 0.6,

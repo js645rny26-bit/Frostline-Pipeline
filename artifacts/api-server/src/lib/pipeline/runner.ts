@@ -39,6 +39,7 @@ import { runShadowSettlement, type SettlementResult } from "./module14_shadowSet
 import { runRegressionReport, type RegressionReportResult } from "./module15_regressionReport.js";
 import { runStarterAudit, type StarterAuditResult } from "./module16_starterAudit.js";
 import { runSurvivalGateReplay, type SurvivalReplayResult } from "./module18_survivalGateReplay.js";
+import { runCollisionReplayV1, type CollisionReplayResult } from "./module22_collisionReplay.js";
 import {
   logDecisionAuditPregame,
   settleDecisionAuditLog,
@@ -863,6 +864,7 @@ export interface DailySettlementResult {
   starter_audit_status: StarterAuditResult["status"];
   postmortem_status: PostmortemResult["status"];
   replay_status: SurvivalReplayResult["status"];
+  collision_replay_status: CollisionReplayResult["status"];
   decision_audit_status: DecisionAuditWriteResult["status"];
   schema_documentation_status: "success" | "failure";
   settlement: SettlementResult;
@@ -870,6 +872,7 @@ export interface DailySettlementResult {
   starter_audit: StarterAuditResult;
   vehicle_postmortem: PostmortemResult;
   survival_replay: SurvivalReplayResult;
+  collision_replay: CollisionReplayResult;
   decision_audit: DecisionAuditWriteResult;
   schema_documentation: RepairSchemaResult;
   module_statuses: Array<{ module: string; status: string }>;
@@ -897,7 +900,8 @@ export interface DailySettlementResult {
  *   4. Module 16 audits the actual starters who appeared.
  *   5. Module 17 grades the frozen vehicle decisions.
  *   6. Module 18 replays the survival gate.
- *   7. The schema reference and README are synchronized to the runtime schema.
+ *   7. Module 22 aggregates only preserved collision candidates for replay.
+ *   8. The schema reference and README are synchronized to the runtime schema.
  *
  * The gate hit-rate (correct_blocks / (correct_blocks + collateral_blocks))
  * is logged and returned so operators can track threshold calibration over time.
@@ -941,6 +945,14 @@ export async function runDailySettlement(
       "Daily settlement: Module 14 complete",
     );
   }
+
+  // Module 22 reads the collision settlement report written by Module 14.
+  // It is a shadow-only aggregate and cannot alter any pregame artifact.
+  const collision_replay = await runCollisionReplayV1({ workbookId }).catch((err: unknown): CollisionReplayResult => {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`collision_replay: ${msg}`);
+    return { status: "failure", report_timestamp_utc: new Date().toISOString(), source_rows: 0, eligible_games: 0, rows: [], errors: [msg] };
+  });
 
   const decision_audit = await settleDecisionAuditLog(date, settlement.rows, { workbookId }).catch(
     (err: unknown): DecisionAuditWriteResult => {
@@ -1055,6 +1067,7 @@ export async function runDailySettlement(
     { module: "MODULE_16_STARTER_AUDIT", status: starter_audit.status },
     { module: "MODULE_17_VEHICLE_POSTMORTEM", status: vehicle_postmortem.status },
     { module: "MODULE_18_SURVIVAL_GATE_REPLAY", status: survival_replay.status },
+    { module: "MODULE_22_COLLISION_REPLAY_V1", status: collision_replay.status },
     { module: "MODULE_20_DECISION_AUDIT_SETTLEMENT", status: decision_audit.status },
     { module: "WORKBOOK_SCHEMA_DOCUMENTATION", status: schema_documentation_status },
   ];
@@ -1063,6 +1076,7 @@ export async function runDailySettlement(
   errors.push(...starter_audit.errors.map((message) => `starter_audit: ${message}`));
   errors.push(...vehicle_postmortem.errors.map((message) => `vehicle_postmortem: ${message}`));
   errors.push(...survival_replay.errors.map((message) => `survival_replay: ${message}`));
+  errors.push(...collision_replay.errors.map((message) => `collision_replay: ${message}`));
   errors.push(...decision_audit.errors.map((message) => `decision_audit: ${message}`));
   errors.push(...schema_documentation.errors.map(
     ({ step, error }) => `schema_documentation:${step}: ${error}`,
@@ -1084,6 +1098,7 @@ export async function runDailySettlement(
       starter_audit_status: starter_audit.status,
       postmortem_status: vehicle_postmortem.status,
       replay_status: survival_replay.status,
+      collision_replay_status: collision_replay.status,
       decision_audit_status: decision_audit.status,
       schema_documentation_status,
       gate_hit_rate_pct,
@@ -1107,6 +1122,7 @@ export async function runDailySettlement(
     starter_audit_status: starter_audit.status,
     postmortem_status: vehicle_postmortem.status,
     replay_status: survival_replay.status,
+    collision_replay_status: collision_replay.status,
     decision_audit_status: decision_audit.status,
     schema_documentation_status,
     settlement,
@@ -1114,6 +1130,7 @@ export async function runDailySettlement(
     starter_audit,
     vehicle_postmortem,
     survival_replay,
+    collision_replay,
     decision_audit,
     schema_documentation,
     module_statuses,

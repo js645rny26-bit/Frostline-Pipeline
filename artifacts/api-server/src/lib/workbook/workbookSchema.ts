@@ -74,8 +74,11 @@
  *      settle real pregame Statcast collision evidence without activating it.
  *  v29 (2026-08-24): PREGAME_PACKET_HISTORY atomically preserves a complete
  *      pre-first-pitch dependency packet before vehicle publication.
+ *  v30 (2026-08-24): Collision Replay V1 preserves component allocation
+ *      evidence and reports base/xwOBA/traffic/damage/tail/combined candidates
+ *      from settled prospective records only.
  */
-export const WORKBOOK_SCHEMA_VERSION = 29;
+export const WORKBOOK_SCHEMA_VERSION = 30;
 
 export interface ColumnDef {
   name: string;
@@ -86,7 +89,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "MODULE_20a" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "MODULE_20a" | "MODULE_22" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -1495,6 +1498,12 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Tail_Estimate_Status", index: 16, type: "string", width: 165, filledBy: "MODULE_09s", readOnly: true },
       { name: "Candidate_Status", index: 17, type: "string", width: 230, filledBy: "MODULE_09s", readOnly: true, description: "PROSPECTIVE_SHADOW_CANDIDATE | SOURCE_UNAVAILABLE | INSUFFICIENT_INPUT." },
       { name: "Snapshot_TS", index: 18, type: "string", width: 200, filledBy: "MODULE_09s", readOnly: true },
+      { name: "xwOBA_Away_Evidence_Projection", index: 19, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow-only away allocation with xwOBA signal only." },
+      { name: "xwOBA_Home_Evidence_Projection", index: 20, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow-only home allocation with xwOBA signal only." },
+      { name: "Traffic_Away_Evidence_Projection", index: 21, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow-only away allocation with traffic signal only." },
+      { name: "Traffic_Home_Evidence_Projection", index: 22, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow-only home allocation with traffic signal only." },
+      { name: "Damage_Away_Evidence_Projection", index: 23, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow-only away allocation with damage signal only." },
+      { name: "Damage_Home_Evidence_Projection", index: 24, type: "number", width: 235, format: "0.00", filledBy: "MODULE_09s", readOnly: true, description: "Shadow-only home allocation with damage signal only." },
     ],
   },
 
@@ -1532,6 +1541,46 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Prospective_Snapshot_TS", index: 25, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true },
       { name: "Settlement_TS", index: 26, type: "string", width: 200, filledBy: "MODULE_14", readOnly: true },
       { name: "Calibration_Status", index: 27, type: "string", width: 245, filledBy: "MODULE_14", readOnly: true },
+      { name: "xwOBA_Shadow_Projection", index: 28, type: "number", width: 195, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Traffic_Only_Projection", index: 29, type: "number", width: 190, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Damage_Only_Projection", index: 30, type: "number", width: 190, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Combined_Tail_Only_Projection", index: 31, type: "number", width: 230, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "xwOBA_Away_Evidence_Projection", index: 32, type: "number", width: 235, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "xwOBA_Home_Evidence_Projection", index: 33, type: "number", width: 235, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Traffic_Away_Evidence_Projection", index: 34, type: "number", width: 235, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Traffic_Home_Evidence_Projection", index: 35, type: "number", width: 235, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Damage_Away_Evidence_Projection", index: 36, type: "number", width: 235, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Damage_Home_Evidence_Projection", index: 37, type: "number", width: 235, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+      { name: "Frozen_Market_Line", index: 38, type: "number", width: 165, format: "0.00", filledBy: "MODULE_14", readOnly: true },
+    ],
+  },
+
+  {
+    name: "COLLISION_REPLAY_V1",
+    description: "Shadow-only aggregate comparison of preserved base, xwOBA, traffic, damage, tail-only, and combined collision candidates. It is never a live authorization input.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Scope", index: 0, type: "string", width: 170, filledBy: "MODULE_22", readOnly: true },
+      { name: "Candidate", index: 1, type: "string", width: 170, filledBy: "MODULE_22", readOnly: true },
+      { name: "N_Eligible", index: 2, type: "number", width: 115, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "N_Allocation", index: 3, type: "number", width: 125, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "MAE", index: 4, type: "number", width: 100, format: "0.000", filledBy: "MODULE_22", readOnly: true },
+      { name: "Median_AE", index: 5, type: "number", width: 125, format: "0.000", filledBy: "MODULE_22", readOnly: true },
+      { name: "Bias", index: 6, type: "number", width: 100, format: "0.000", filledBy: "MODULE_22", readOnly: true },
+      { name: "Miss_4Plus_Count", index: 7, type: "number", width: 150, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "Miss_4Plus_Pct", index: 8, type: "number", width: 140, format: "0.0", filledBy: "MODULE_22", readOnly: true },
+      { name: "High_Tail_Underprediction_Count", index: 9, type: "number", width: 245, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "Low_Tail_Overprojection_Count", index: 10, type: "number", width: 230, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "Directional_N", index: 11, type: "number", width: 125, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "Directional_Wins", index: 12, type: "number", width: 145, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "Directional_Pushes", index: 13, type: "number", width: 160, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "Directional_Accuracy_Pct", index: 14, type: "number", width: 195, format: "0.0", filledBy: "MODULE_22", readOnly: true },
+      { name: "False_Over_Creation_Count", index: 15, type: "number", width: 195, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "Fragile_Under_Base_Count", index: 16, type: "number", width: 190, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "Fragile_Under_Averted_Count", index: 17, type: "number", width: 210, format: "0", filledBy: "MODULE_22", readOnly: true },
+      { name: "Allocation_MAE", index: 18, type: "number", width: 145, format: "0.000", filledBy: "MODULE_22", readOnly: true },
+      { name: "Report_TS", index: 19, type: "string", width: 200, filledBy: "MODULE_22", readOnly: true },
     ],
   },
 

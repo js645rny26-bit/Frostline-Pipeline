@@ -312,7 +312,8 @@ export async function repairWorkbookSchemaReference(
       + "v26 (2026-08-22): SSAT v2 records empirical survival and conditional failure severity from earlier settled evidence only; it remains shadow-only. "
       + "v27 (2026-08-23): RUN_LOG records actual mutable/protected/feed/projection scope and audit-gap counts; low-center history upserts one current pregame row per game; Statcast parser v1.2 reads direct roster metrics despite generic nested stats objects. "
       + "v28 (2026-08-23): COLLISION_CALIBRATION_HISTORY freezes real pregame Statcast traffic/damage evidence and explicit availability; settlement writes a base-versus-collision report without changing any active projection or decision. "
-      + "v29 (2026-08-24): PREGAME_PACKET_HISTORY atomically preserves the full legitimate pre-first-pitch dependency packet before vehicle publication; OPEN packets may refresh only before first pitch and FROZEN_PREGAME packets are immutable."],
+      + "v29 (2026-08-24): PREGAME_PACKET_HISTORY atomically preserves the full legitimate pre-first-pitch dependency packet before vehicle publication; OPEN packets may refresh only before first pitch and FROZEN_PREGAME packets are immutable. "
+      + "v30 (2026-08-24): COLLISION_REPLAY_V1 compares preserved base, xwOBA, traffic, damage, tail-only, and combined shadow candidates; it remains entirely non-operational."],
     ["Workbook_Purpose",    "Frostline Pipeline — MLB totals projection and DA-1.1.0 BET/PASS decision publication."],
     ["Operator_Columns",    "Cells highlighted amber are operator-editable. All other cells are pipeline-maintained — do not edit."],
     ["Decision_Doctrine",   "Decision vocabulary is BET | PASS. CORE / NO_CORE remain historical compatibility values in legacy ledgers only."],
