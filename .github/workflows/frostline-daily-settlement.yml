@@ -154,6 +154,7 @@ jobs:
           const postmortem = report.vehicle_postmortem ?? {};
           const replay = report.survival_replay ?? {};
           const collisionReplay = report.collision_replay ?? {};
+          const monotonicityV2 = report.monotonicity_v2 ?? {};
 
           if (report.status !== "success") failures.push(`status: ${report.status ?? "missing"}`);
           if (report.date !== process.env.SETTLEMENT_DATE) failures.push(`date: ${report.date ?? "missing"}`);
@@ -164,6 +165,8 @@ jobs:
           if (report.replay_status !== "success") failures.push(`replay_status: ${report.replay_status ?? "missing"}`);
           if (report.collision_replay_status !== "success") failures.push(`collision_replay_status: ${report.collision_replay_status ?? "missing"}`);
           if (!Array.isArray(collisionReplay.rows) || collisionReplay.rows.length !== 24) failures.push("collision_replay.rows must contain 24 candidate/scope metrics");
+          if (report.monotonicity_v2_status !== "success") failures.push(`monotonicity_v2_status: ${report.monotonicity_v2_status ?? "missing"}`);
+          if (!Array.isArray(monotonicityV2.summaries) || monotonicityV2.summaries.length !== 2) failures.push("monotonicity_v2.summaries must contain OVER and UNDER calibration states");
           if (!Number.isInteger(settlement.games_found) || settlement.games_found <= 0) {
             failures.push(`settlement.games_found: ${settlement.games_found ?? "missing"}`);
           }
@@ -183,6 +186,7 @@ jobs:
           if (Array.isArray(postmortem.errors) && postmortem.errors.length > 0) failures.push(`vehicle_postmortem.errors: ${JSON.stringify(postmortem.errors)}`);
           if (Array.isArray(replay.errors) && replay.errors.length > 0) failures.push(`survival_replay.errors: ${JSON.stringify(replay.errors)}`);
           if (Array.isArray(collisionReplay.errors) && collisionReplay.errors.length > 0) failures.push(`collision_replay.errors: ${JSON.stringify(collisionReplay.errors)}`);
+          if (Array.isArray(monotonicityV2.errors) && monotonicityV2.errors.length > 0) failures.push(`monotonicity_v2.errors: ${JSON.stringify(monotonicityV2.errors)}`);
 
           const auditGaps = Number(decisionAudit.audit_gaps ?? 0);
           if (auditGaps > 0) {

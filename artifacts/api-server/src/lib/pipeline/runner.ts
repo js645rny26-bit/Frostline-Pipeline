@@ -40,6 +40,7 @@ import { runRegressionReport, type RegressionReportResult } from "./module15_reg
 import { runStarterAudit, type StarterAuditResult } from "./module16_starterAudit.js";
 import { runSurvivalGateReplay, type SurvivalReplayResult } from "./module18_survivalGateReplay.js";
 import { runCollisionReplayV1, type CollisionReplayResult } from "./module22_collisionReplay.js";
+import { runMonotonicityV2, type MonotonicityV2Result } from "./module23_monotonicityV2.js";
 import {
   logDecisionAuditPregame,
   settleDecisionAuditLog,
@@ -865,6 +866,7 @@ export interface DailySettlementResult {
   postmortem_status: PostmortemResult["status"];
   replay_status: SurvivalReplayResult["status"];
   collision_replay_status: CollisionReplayResult["status"];
+  monotonicity_v2_status: MonotonicityV2Result["status"];
   decision_audit_status: DecisionAuditWriteResult["status"];
   schema_documentation_status: "success" | "failure";
   settlement: SettlementResult;
@@ -873,6 +875,7 @@ export interface DailySettlementResult {
   vehicle_postmortem: PostmortemResult;
   survival_replay: SurvivalReplayResult;
   collision_replay: CollisionReplayResult;
+  monotonicity_v2: MonotonicityV2Result;
   decision_audit: DecisionAuditWriteResult;
   schema_documentation: RepairSchemaResult;
   module_statuses: Array<{ module: string; status: string }>;
@@ -901,7 +904,8 @@ export interface DailySettlementResult {
  *   5. Module 17 grades the frozen vehicle decisions.
  *   6. Module 18 replays the survival gate.
  *   7. Module 22 aggregates only preserved collision candidates for replay.
- *   8. The schema reference and README are synchronized to the runtime schema.
+ *   8. Module 23 records a shadow-only edge-magnitude calibration and replay.
+ *   9. The schema reference and README are synchronized to the runtime schema.
  *
  * The gate hit-rate (correct_blocks / (correct_blocks + collateral_blocks))
  * is logged and returned so operators can track threshold calibration over time.
@@ -952,6 +956,14 @@ export async function runDailySettlement(
     const msg = err instanceof Error ? err.message : String(err);
     errors.push(`collision_replay: ${msg}`);
     return { status: "failure", report_timestamp_utc: new Date().toISOString(), source_rows: 0, eligible_games: 0, rows: [], errors: [msg] };
+  });
+
+  // Module 23 is a separate shadow experiment: UNVERIFIED is informational,
+  // never an authorization veto. It reads frozen vehicle/outcome records only.
+  const monotonicity_v2 = await runMonotonicityV2({ workbookId }).catch((err: unknown): MonotonicityV2Result => {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`monotonicity_v2: ${msg}`);
+    return { status: "failure", report_timestamp_utc: new Date().toISOString(), eligible_games: 0, summaries: [], replay_rows: [], errors: [msg] };
   });
 
   const decision_audit = await settleDecisionAuditLog(date, settlement.rows, { workbookId }).catch(
@@ -1068,6 +1080,7 @@ export async function runDailySettlement(
     { module: "MODULE_17_VEHICLE_POSTMORTEM", status: vehicle_postmortem.status },
     { module: "MODULE_18_SURVIVAL_GATE_REPLAY", status: survival_replay.status },
     { module: "MODULE_22_COLLISION_REPLAY_V1", status: collision_replay.status },
+    { module: "MODULE_23_MONOTONICITY_V2", status: monotonicity_v2.status },
     { module: "MODULE_20_DECISION_AUDIT_SETTLEMENT", status: decision_audit.status },
     { module: "WORKBOOK_SCHEMA_DOCUMENTATION", status: schema_documentation_status },
   ];
@@ -1077,6 +1090,7 @@ export async function runDailySettlement(
   errors.push(...vehicle_postmortem.errors.map((message) => `vehicle_postmortem: ${message}`));
   errors.push(...survival_replay.errors.map((message) => `survival_replay: ${message}`));
   errors.push(...collision_replay.errors.map((message) => `collision_replay: ${message}`));
+  errors.push(...monotonicity_v2.errors.map((message) => `monotonicity_v2: ${message}`));
   errors.push(...decision_audit.errors.map((message) => `decision_audit: ${message}`));
   errors.push(...schema_documentation.errors.map(
     ({ step, error }) => `schema_documentation:${step}: ${error}`,
@@ -1099,6 +1113,7 @@ export async function runDailySettlement(
       postmortem_status: vehicle_postmortem.status,
       replay_status: survival_replay.status,
       collision_replay_status: collision_replay.status,
+      monotonicity_v2_status: monotonicity_v2.status,
       decision_audit_status: decision_audit.status,
       schema_documentation_status,
       gate_hit_rate_pct,
@@ -1123,6 +1138,7 @@ export async function runDailySettlement(
     postmortem_status: vehicle_postmortem.status,
     replay_status: survival_replay.status,
     collision_replay_status: collision_replay.status,
+    monotonicity_v2_status: monotonicity_v2.status,
     decision_audit_status: decision_audit.status,
     schema_documentation_status,
     settlement,
@@ -1131,6 +1147,7 @@ export async function runDailySettlement(
     vehicle_postmortem,
     survival_replay,
     collision_replay,
+    monotonicity_v2,
     decision_audit,
     schema_documentation,
     module_statuses,

@@ -77,8 +77,11 @@
  *  v30 (2026-08-24): Collision Replay V1 preserves component allocation
  *      evidence and reports base/xwOBA/traffic/damage/tail/combined candidates
  *      from settled prospective records only.
+ *  v31 (2026-08-24): MONOTONICITY_V2 and MONOTONICITY_V2_REPLAY add a
+ *      shadow-only pooled edge-magnitude calibration. UNVERIFIED is not a
+ *      decision blocker; V1 authorization remains unchanged during replay.
  */
-export const WORKBOOK_SCHEMA_VERSION = 30;
+export const WORKBOOK_SCHEMA_VERSION = 31;
 
 export interface ColumnDef {
   name: string;
@@ -89,7 +92,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "MODULE_20a" | "MODULE_22" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "MODULE_20a" | "MODULE_22" | "MODULE_23" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -143,6 +146,32 @@ const PREGAME_PACKET_HISTORY_COLUMNS: ColumnDef[] = PREGAME_PACKET_HISTORY_COLUM
   readOnly: true,
   description: "Immutable pregame dependency packet field; blank values remain explicit missing-source evidence.",
 }));
+
+const MONOTONICITY_V2_CALIBRATION_COLUMN_NAMES = [
+  "Direction", "Row_Type", "Edge_Min", "Edge_Max", "N_Eligible", "N_Directional", "N_Wins", "N_Pushes",
+  "Directional_Accuracy_Pct", "MAE", "Median_AE", "Bias", "Miss_4Plus_Pct", "High_Tail_Underprediction_Count", "Low_Tail_Overprojection_Count",
+  "Edge_Hit_Correlation", "Hit_CI_Low", "Hit_CI_High", "Edge_AE_Correlation", "AE_CI_Low", "AE_CI_High",
+  "V2_State", "Relationship", "V1_Blocked_Winner_Count", "V1_Blocked_Loser_Count", "V2_Blocked_Winner_Count", "V2_Blocked_Loser_Count",
+  "V2_Unverified_Count", "V2_Calibrated_Count", "V2_Anti_Monotone_Count", "Report_TS",
+] as const;
+const MONOTONICITY_V2_REPLAY_COLUMN_NAMES = [
+  "Date", "Game_ID", "Direction", "Raw_Model_Edge", "Frozen_Projection", "Frozen_Market_Line", "Actual_Total",
+  "Directional_Result", "Projection_Error", "Abs_Error", "V1_Status", "V1_Blocked", "No_V1_Gate_Counterfactual",
+  "V2_State", "V2_Would_Block", "V2_Edge_Credit", "V2_Policy", "Report_TS",
+] as const;
+const MONOTONICITY_V2_STRING_COLUMNS = new Set<string>([
+  "Direction", "Row_Type", "V2_State", "Relationship", "Report_TS", "Date", "Game_ID", "Directional_Result", "V1_Status", "V1_Blocked",
+  "No_V1_Gate_Counterfactual", "V2_Would_Block", "V2_Edge_Credit", "V2_Policy",
+]);
+function monotonicityV2Columns(names: readonly string[]): ColumnDef[] {
+  return names.map((name, index) => ({
+    name, index, type: MONOTONICITY_V2_STRING_COLUMNS.has(name) ? "string" : "number",
+    width: name.includes("Counterfactual") || name.includes("Policy") ? 260 : name.includes("Correlation") || name.includes("Tail") ? 220 : 150,
+    format: MONOTONICITY_V2_STRING_COLUMNS.has(name) ? undefined : name.includes("Pct") ? "0.0" : "0.000",
+    filledBy: "MODULE_23", readOnly: true,
+    description: "Shadow-only Monotonicity V2 evidence; never an active projection, vehicle, or authorization input.",
+  }));
+}
 
 const HISTORICAL_REPLAY_COLUMNS = [
   "Replay_Date", "Game_ID", "Away_Team", "Home_Team", "Actual_Total",
@@ -1177,6 +1206,22 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "MAE_Monotone_vs_Prior",  index: 13, type: "string", width: 185, filledBy: "MODULE_15", readOnly: true, description: "PASS | FAIL | N/A | INSUFFICIENT_SAMPLE. PASS if MAE ≤ prior tier's and both n ≥ 75.", exampleValue: "PASS" },
       { name: "Report_TS",              index: 14, type: "string", width: 200, filledBy: "MODULE_15", readOnly: true, exampleValue: "2026-07-25T08:00:00.000Z" },
     ],
+  },
+
+  {
+    name: "MONOTONICITY_V2",
+    description: "Shadow-only pooled edge-magnitude calibration. Uses frozen prospective vehicle records only, keeps OVER and UNDER separate, and distinguishes CALIBRATED, UNVERIFIED, and ANTI_MONOTONE without changing V1 authorization.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: monotonicityV2Columns(MONOTONICITY_V2_CALIBRATION_COLUMN_NAMES),
+  },
+
+  {
+    name: "MONOTONICITY_V2_REPLAY",
+    description: "Per-frozen-game V1 wall, no-V1-gate counterfactual, and Monotonicity V2 shadow-policy comparison. It records what V2 would do without changing a historical or live decision.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: monotonicityV2Columns(MONOTONICITY_V2_REPLAY_COLUMN_NAMES),
   },
 
   {
