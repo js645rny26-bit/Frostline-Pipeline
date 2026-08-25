@@ -246,19 +246,6 @@ jobs:
           const postmortemByGame = new Map(postmortem.map((row) => [String(row[1] ?? "").trim(), row]));
           const replayByGame = new Map(replay.map((row) => [String(row[1] ?? "").trim(), row]));
           const expected = endpoint.settlement?.games_found ?? 0;
-          const endpointPostmortemRows = Array.isArray(endpoint.vehicle_postmortem?.rows)
-            ? endpoint.vehicle_postmortem.rows
-            : [];
-          const endpointReplayRows = Array.isArray(endpoint.survival_replay?.rows)
-            ? endpoint.survival_replay.rows
-            : [];
-          const expectedPostmortemIds = new Set(
-            endpointPostmortemRows.map((row) => String(row.game_id ?? "").trim()).filter(Boolean),
-          );
-          const expectedReplayIds = new Set(
-            endpointReplayRows.map((row) => String(row.game_id ?? "").trim()).filter(Boolean),
-          );
-
           if (outcomes.length !== expected) failures.push(`SHADOW_OUTCOMES rows: expected ${expected}, received ${outcomes.length}`);
           if (outcomeIds.size !== outcomes.length) failures.push("SHADOW_OUTCOMES contains duplicate game IDs for the date");
           for (const row of outcomes) {
@@ -274,14 +261,21 @@ jobs:
             if (!String(row[32] ?? "").trim()) failures.push(`SHADOW_OUTCOMES pitcher provenance status is missing for ${gameId}`);
             if (!String(row[24] ?? "").trim() || !String(row[25] ?? "").trim()) failures.push(`SHADOW_OUTCOMES actual starters are missing for ${gameId}`);
           }
-          if (endpointPostmortemRows.length !== expectedPostmortemIds.size) failures.push("vehicle_postmortem endpoint rows contain duplicate or missing game IDs");
-          if (postmortem.length !== expectedPostmortemIds.size) failures.push(`VEHICLE_POSTMORTEM rows: expected ${expectedPostmortemIds.size}, received ${postmortem.length}`);
+          // SHADOW_OUTCOMES is the durable settlement source of truth.  A game
+          // whose frozen source is explicitly unresolved is an audit gap: it has
+          // a real result, but no legitimate prospective vehicle/replay record to
+          // grade.  Do not make the workflow depend on transient endpoint row
+          // shapes to discover that distinction.
+          const gradeableOutcomeIds = new Set(
+            [...outcomeIds].filter((gameId) => !auditGapOutcomeIds.includes(gameId)),
+          );
+          if (postmortem.length !== gradeableOutcomeIds.size) failures.push(`VEHICLE_POSTMORTEM rows: expected ${gradeableOutcomeIds.size}, received ${postmortem.length}`);
           if (postmortemIds.size !== postmortem.length) failures.push("VEHICLE_POSTMORTEM contains duplicate game IDs for the date");
-          for (const gameId of expectedPostmortemIds) {
+          for (const gameId of gradeableOutcomeIds) {
             if (!postmortemIds.has(gameId)) failures.push(`VEHICLE_POSTMORTEM is missing ${gameId}`);
           }
           for (const gameId of postmortemIds) {
-            if (!expectedPostmortemIds.has(gameId)) failures.push(`VEHICLE_POSTMORTEM contains unexpected ${gameId}`);
+            if (!gradeableOutcomeIds.has(gameId)) failures.push(`VEHICLE_POSTMORTEM contains unexpected ${gameId}`);
           }
           for (const row of postmortem) {
             if (row.length < 19 || !String(row[18] ?? "").trim()) failures.push(`VEHICLE_POSTMORTEM schema is incomplete for ${String(row[1] ?? "unknown")}`);
@@ -299,14 +293,13 @@ jobs:
               if (pitcher && !auditedPitchers.has(pitcher)) failures.push(`STARTER_AUDIT is missing actual starter ${pitcher}`);
             }
           }
-          if (endpointReplayRows.length !== expectedReplayIds.size) failures.push("survival_replay endpoint rows contain duplicate or missing game IDs");
-          if (replay.length !== expectedReplayIds.size) failures.push(`SURVIVAL_GATE_REPLAY rows: expected ${expectedReplayIds.size}, received ${replay.length}`);
+          if (replay.length !== gradeableOutcomeIds.size) failures.push(`SURVIVAL_GATE_REPLAY rows: expected ${gradeableOutcomeIds.size}, received ${replay.length}`);
           if (replayIds.size !== replay.length) failures.push("SURVIVAL_GATE_REPLAY contains duplicate game IDs for the date");
-          for (const gameId of expectedReplayIds) {
+          for (const gameId of gradeableOutcomeIds) {
             if (!replayIds.has(gameId)) failures.push(`SURVIVAL_GATE_REPLAY is missing ${gameId}`);
           }
           for (const gameId of replayIds) {
-            if (!expectedReplayIds.has(gameId)) failures.push(`SURVIVAL_GATE_REPLAY contains unexpected ${gameId}`);
+            if (!gradeableOutcomeIds.has(gameId)) failures.push(`SURVIVAL_GATE_REPLAY contains unexpected ${gameId}`);
           }
           for (const row of replay) {
             if (!String(row[37] ?? "").trim()) failures.push(`SURVIVAL_GATE_REPLAY provenance flag is missing for ${String(row[1] ?? "unknown")}`);
@@ -316,13 +309,13 @@ jobs:
             const gameId = String(row[1] ?? "").trim();
             const postmortemRow = postmortemByGame.get(gameId);
             const replayRow = replayByGame.get(gameId);
-            if (expectedPostmortemIds.has(gameId) && String(postmortemRow?.[12] ?? "").trim() !== "TRUTH_PUSH") {
+            if (gradeableOutcomeIds.has(gameId) && String(postmortemRow?.[12] ?? "").trim() !== "TRUTH_PUSH") {
               failures.push(`VEHICLE_POSTMORTEM did not preserve PUSH truth for ${gameId}`);
             }
-            if (expectedPostmortemIds.has(gameId) && String(postmortemRow?.[16] ?? "").includes("DIRECTION_MISS")) {
+            if (gradeableOutcomeIds.has(gameId) && String(postmortemRow?.[16] ?? "").includes("DIRECTION_MISS")) {
               failures.push(`VEHICLE_POSTMORTEM incorrectly marked PUSH as DIRECTION_MISS for ${gameId}`);
             }
-            if (expectedReplayIds.has(gameId) && String(replayRow?.[11] ?? "").trim() !== "PUSH") {
+            if (gradeableOutcomeIds.has(gameId) && String(replayRow?.[11] ?? "").trim() !== "PUSH") {
               failures.push(`SURVIVAL_GATE_REPLAY did not preserve PUSH for ${gameId}`);
             }
           }
@@ -337,11 +330,11 @@ jobs:
             expected_games: expected,
             shadow_outcomes_rows: outcomes.length,
             shadow_outcomes_unique_games: outcomeIds.size,
-            expected_vehicle_postmortem_games: expectedPostmortemIds.size,
+            expected_vehicle_postmortem_games: gradeableOutcomeIds.size,
             vehicle_postmortem_rows: postmortem.length,
             regression_report_rows: regression.length,
             starter_audit_rows: starterAudit.length,
-            expected_survival_gate_replay_games: expectedReplayIds.size,
+            expected_survival_gate_replay_games: gradeableOutcomeIds.size,
             survival_gate_replay_rows: replay.length,
             survival_gate_replay_unique_games: replayIds.size,
             projection_replay_rows: projectionReplay.length,
