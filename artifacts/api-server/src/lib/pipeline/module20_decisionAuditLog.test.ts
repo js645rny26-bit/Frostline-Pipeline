@@ -212,6 +212,42 @@ test("post-first-pitch rerun records AUDIT_GAP without manufacturing pregame val
   assert.equal(settled.rows[0]![C.MECHANISM], "PREGAME_FREEZE_MISSING");
 });
 
+test("a legitimate OPEN audit row freezes after first pitch without becoming an AUDIT_GAP", () => {
+  const open = upsertDecisionAuditPregameRows([], [pregame({
+    scheduled_first_pitch: "2026-08-10T22:45:00.000Z",
+    projected_total: 8.68,
+    model_blocker: "INSUFFICIENT_PROJECTION_SEPARATION",
+  })], "2026-08-10T20:00:00.000Z");
+  const before = [...open.rows[0]!];
+
+  // This mirrors a protected game whose board/summary is no longer mutable.
+  // The identity-only input must freeze the real earlier snapshot, not replace
+  // it with an audit gap or reconstructed model values.
+  const protectedRun = upsertDecisionAuditPregameRows(open.rows, [pregame({
+    scheduled_first_pitch: "2026-08-10T22:45:00.000Z",
+    lock_status: "LOCKED_OUT",
+    projected_away_runs: 0,
+    projected_home_runs: 0,
+    projected_total: 0,
+    market_line: null,
+    direction: "NONE",
+    vehicle: "",
+    model_confidence: 0,
+    model_blocker: "PREGAME_FREEZE_MISSING",
+  })], "2026-08-10T23:00:00.000Z");
+  const after = protectedRun.rows[0]!;
+  assert.equal(protectedRun.auditGaps, 0);
+  assert.equal(protectedRun.rowsFrozen, 1);
+  assert.equal(after[C.AUDIT_STATUS], "FROZEN");
+  assert.equal(after[C.FREEZE_TS], "2026-08-10T23:00:00.000Z");
+  assert.equal(after[C.FINAL_TS], "2026-08-10T23:00:00.000Z");
+  assert.equal(after[C.FROZEN_TS], before[C.FROZEN_TS]);
+  assert.equal(after[C.FROZEN_TOTAL], before[C.FROZEN_TOTAL]);
+  assert.equal(after[C.FROZEN_LINE], before[C.FROZEN_LINE]);
+  assert.equal(after[C.FROZEN_DIRECTION], before[C.FROZEN_DIRECTION]);
+  assert.equal(after[C.FROZEN_BLOCKER], before[C.FROZEN_BLOCKER]);
+});
+
 test("missing first-pitch provenance fails closed as AUDIT_GAP", () => {
   const result = upsertDecisionAuditPregameRows([], [pregame({
     scheduled_first_pitch: "",

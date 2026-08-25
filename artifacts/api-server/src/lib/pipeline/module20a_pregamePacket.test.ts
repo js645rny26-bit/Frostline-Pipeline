@@ -45,6 +45,25 @@ test("post-first-pitch attempts create no packet and cannot backfill history", (
   assert.equal(late.rowsSkippedAfterFirstPitch, 1);
 });
 
+test("a legitimate OPEN packet becomes immutable after first pitch without changing its snapshot", () => {
+  const open = upsertPregamePacketRows([], [input("OPEN_PROSPECTIVE", 8.5)], "2026-08-24T18:00:00.000Z");
+  const before = [...open.rows[0]!];
+
+  // A protected game has no fresh module inputs.  The lifecycle writer may
+  // promote its stored prospective packet but must not create a new snapshot.
+  const protectedRun = upsertPregamePacketRows(open.rows, [], "2026-08-24T23:11:00.000Z");
+  const after = protectedRun.rows[0]!;
+  assert.equal(protectedRun.rowsFrozen, 1);
+  assert.equal(protectedRun.rowsUpdated, 1);
+  assert.equal(after[5], "FROZEN_PREGAME");
+  assert.equal(after[10], "2026-08-24T23:11:00.000Z");
+  assert.equal(after[11], before[11]);
+  assert.deepEqual(
+    after.map((value, index) => (index === 5 || index === 10 ? before[index] : value)),
+    before,
+  );
+});
+
 test("packet contract preserves market and dependent shadow fields as explicit columns", () => {
   for (const required of [
     "Market_Line", "Market_Snapshot_Status", "Away_Expected_IP", "Bullpen_Data_Status",

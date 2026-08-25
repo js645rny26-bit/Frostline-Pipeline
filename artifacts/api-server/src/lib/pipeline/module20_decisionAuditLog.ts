@@ -456,6 +456,28 @@ export function upsertDecisionAuditPregameRows(
     const prospectiveWindowClosed = !Number.isFinite(scheduledFirstPitchMs)
       || !Number.isFinite(checkedAtMs)
       || isAtOrAfterFirstPitch(input.scheduled_first_pitch, ts);
+
+    // A valid OPEN row was produced before first pitch.  Once a later scoped
+    // run finds that game protected, retain every captured pregame value and
+    // promote only its lifecycle state.  This is not a late projection or a
+    // reconstructed freeze: Frozen_Model_TS stays the original prospective
+    // timestamp, while Freeze_TS records the actual observation time.
+    if (existing && existingStatus === "OPEN" && prospectiveWindowClosed) {
+      const storedSnapshotMs = Date.parse(String(existing[DECISION_AUDIT_INDEX.FROZEN_TS] ?? ""));
+      const hasLegitimateProspectiveSnapshot = Number.isFinite(scheduledFirstPitchMs)
+        && Number.isFinite(storedSnapshotMs)
+        && storedSnapshotMs < scheduledFirstPitchMs;
+      if (hasLegitimateProspectiveSnapshot) {
+        const frozen = padRow(existing);
+        frozen[DECISION_AUDIT_INDEX.AUDIT_STATUS] = "FROZEN";
+        frozen[DECISION_AUDIT_INDEX.FINAL_TS] = ts;
+        frozen[DECISION_AUDIT_INDEX.FREEZE_TS] = ts;
+        rows[position!] = frozen;
+        rowsUpdated++;
+        rowsFrozen++;
+        continue;
+      }
+    }
     if (prospectiveWindowClosed) {
       auditGaps++;
       if (existingStatus === "AUDIT_GAP") continue;

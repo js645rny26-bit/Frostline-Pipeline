@@ -173,6 +173,32 @@ export function upsertPregamePacketRows(
   let rowsFrozen = 0;
   let rowsSkippedAfterFirstPitch = 0;
 
+  // A packet created while OPEN already contains the only evidence that may
+  // become prospective history: its own pre-first-pitch snapshot timestamp.
+  // When a later scoped run observes that the game has started, promote that
+  // stored packet to immutable history without reading or copying any current
+  // game inputs.  This is a lifecycle transition, not a late freeze/backfill:
+  // Packet_Snapshot_TS remains the original prospective timestamp and
+  // Freeze_TS truthfully records when this runner observed the transition.
+  for (const [rowIndex, existing] of rows.entries()) {
+    if (existing[I.Packet_Status] !== "OPEN_PROSPECTIVE") continue;
+    const scheduledFirstPitch = String(existing[I.Scheduled_First_Pitch] ?? "");
+    const packetSnapshot = String(existing[I.Packet_Snapshot_TS] ?? "");
+    const firstPitchMs = Date.parse(scheduledFirstPitch);
+    const packetSnapshotMs = Date.parse(packetSnapshot);
+    const hasLegitimateProspectiveSnapshot = Number.isFinite(firstPitchMs)
+      && Number.isFinite(packetSnapshotMs)
+      && packetSnapshotMs < firstPitchMs;
+    if (!hasLegitimateProspectiveSnapshot || !isAtOrAfterFirstPitch(scheduledFirstPitch, snapshotTs)) continue;
+
+    const frozen = pad(existing);
+    frozen[I.Packet_Status] = "FROZEN_PREGAME";
+    frozen[I.Freeze_TS] = snapshotTs;
+    rows[rowIndex] = frozen;
+    rowsUpdated++;
+    rowsFrozen++;
+  }
+
   for (const input of incoming) {
     if (isAtOrAfterFirstPitch(input.scheduled_first_pitch, snapshotTs)) {
       rowsSkippedAfterFirstPitch++;
