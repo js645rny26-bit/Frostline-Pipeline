@@ -3,9 +3,16 @@ import test from "node:test";
 import {
   COLLISION_REPLAY_V1_HEADER,
   buildCollisionReplayRows,
+  isMissingSheetError,
   parseCollisionReplayObservations,
   type CollisionReplayObservation,
 } from "./module22_collisionReplay.js";
+
+test("Collision Replay V1 recognizes Google Sheets named-tab errors as first-use creation", () => {
+  assert.equal(isMissingSheetError(new Error('Sheet "COLLISION_REPLAY_V1" not found')), true);
+  assert.equal(isMissingSheetError(new Error("Unable to parse range: COLLISION_REPLAY_V1!A1")), true);
+  assert.equal(isMissingSheetError(new Error("permission denied")), false);
+});
 
 const base: CollisionReplayObservation = {
   base: 7, baseAway: 3, baseHome: 4,

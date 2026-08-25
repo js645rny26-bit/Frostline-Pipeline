@@ -285,12 +285,18 @@ export function parseFrozenMonotonicityV2Observations(vehicleRows: unknown[][], 
   return output;
 }
 
+export function isMissingSheetError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /unable to parse range|\b400\b|sheet\s+"?[^"]+"?\s+not found/i.test(message);
+}
+
 async function ensureSheet(workbookId: string, sheet: string, columns: number): Promise<void> {
   try {
     await expandSheetColumns(workbookId, sheet, columns);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;
+    // Google Sheets uses this named-tab message for a brand-new workbook;
+    // it is not necessarily surfaced as an HTTP 400 range error.
+    if (!isMissingSheetError(error)) throw error;
     await addSheet(workbookId, sheet);
     await expandSheetColumns(workbookId, sheet, columns);
   }

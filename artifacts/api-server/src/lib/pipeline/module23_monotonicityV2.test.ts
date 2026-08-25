@@ -3,10 +3,17 @@ import test from "node:test";
 import {
   buildDirectionalV2Summary,
   buildMonotonicityV2Replay,
+  isMissingSheetError,
   parseFrozenMonotonicityV2Observations,
   poolNearbyEdgeRegions,
   type MonotonicityV2Observation,
 } from "./module23_monotonicityV2.js";
+
+test("Monotonicity V2 first-use sheet creation accepts named-tab errors", () => {
+  assert.equal(isMissingSheetError(new Error('Sheet "MONOTONICITY_V2" not found')), true);
+  assert.equal(isMissingSheetError(new Error("Unable to parse range: MONOTONICITY_V2!A1")), true);
+  assert.equal(isMissingSheetError(new Error("permission denied")), false);
+});
 
 function observation(index: number, edge: number, result: "WIN" | "LOSS" | "PUSH", absError = 2, v1Blocked = false): MonotonicityV2Observation {
   return {

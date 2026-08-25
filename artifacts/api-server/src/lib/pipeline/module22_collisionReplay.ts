@@ -253,6 +253,22 @@ function values(row: CollisionReplayRow, reportTs: string): unknown[] {
   ];
 }
 
+/** Google Sheets reports a missing tab by name, not consistently as HTTP 400. */
+export function isMissingSheetError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /unable to parse range|\b400\b|sheet\s+"?[^"]+"?\s+not found/i.test(message);
+}
+
+async function ensureCollisionReplaySheet(workbookId: string): Promise<void> {
+  try {
+    await expandSheetColumns(workbookId, TARGET_SHEET, COLLISION_REPLAY_V1_HEADER.length);
+  } catch (error: unknown) {
+    if (!isMissingSheetError(error)) throw error;
+    await addSheet(workbookId, TARGET_SHEET);
+    await expandSheetColumns(workbookId, TARGET_SHEET, COLLISION_REPLAY_V1_HEADER.length);
+  }
+}
+
 export async function runCollisionReplayV1(options: { workbookId?: string } = {}): Promise<CollisionReplayResult> {
   const workbookId = options.workbookId ?? WORKBOOK_ID;
   const reportTs = new Date().toISOString();
@@ -266,14 +282,7 @@ export async function runCollisionReplayV1(options: { workbookId?: string } = {}
     }
     const observations = parseCollisionReplayObservations(source);
     const rows = buildCollisionReplayRows(observations);
-    try {
-      await expandSheetColumns(workbookId, TARGET_SHEET, COLLISION_REPLAY_V1_HEADER.length);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;
-      await addSheet(workbookId, TARGET_SHEET);
-      await expandSheetColumns(workbookId, TARGET_SHEET, COLLISION_REPLAY_V1_HEADER.length);
-    }
+    await ensureCollisionReplaySheet(workbookId);
     await writeRange(workbookId, `${TARGET_SHEET}!A1`, [Array.from(COLLISION_REPLAY_V1_HEADER), ...rows.map((row) => values(row, reportTs))]);
     logger.info({ eligible_games: observations.length, metric_rows: rows.length }, "MODULE_22: Collision Replay V1 written");
     return { status: "success", report_timestamp_utc: reportTs, source_rows: Math.max(source.length - 1, 0), eligible_games: observations.length, rows, errors: [] };
