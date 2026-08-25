@@ -216,6 +216,8 @@ export function selectProspectiveProjection(
 export interface SettlementRow {
   date: string;
   game_id: string;
+  /** Official MLB game identifier; diagnostic-only and never written as a pregame field. */
+  game_pk?: number;
   away_team: string;
   home_team: string;
   repaired_projected_total: number;
@@ -1218,6 +1220,7 @@ export async function runShadowSettlement(
     const row: SettlementRow = {
       date: String(existing?.values[0] || history[H_DATE] || date),
       game_id: gameId,
+      game_pk: final.game_pk,
       away_team: String(existing?.values[2] || history[H_AWAY] || ""),
       home_team: String(existing?.values[3] || history[H_HOME] || ""),
       repaired_projected_total: projection,

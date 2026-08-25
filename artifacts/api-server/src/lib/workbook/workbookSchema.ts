@@ -80,8 +80,12 @@
  *  v31 (2026-08-24): MONOTONICITY_V2 and MONOTONICITY_V2_REPLAY add a
  *      shadow-only pooled edge-magnitude calibration. UNVERIFIED is not a
  *      decision blocker; V1 authorization remains unchanged during replay.
+ *  v32 (2026-08-25): durable operator evidence, full-game total ladder
+ *      history, allocation, starter-dimension, bullpen-timing, and
+ *      full-ladder settlement diagnostics. All new surfaces are observational
+ *      and consume only frozen pregame packets plus official final data.
  */
-export const WORKBOOK_SCHEMA_VERSION = 31;
+export const WORKBOOK_SCHEMA_VERSION = 32;
 
 export interface ColumnDef {
   name: string;
@@ -92,7 +96,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "MODULE_20a" | "MODULE_22" | "MODULE_23" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "MODULE_20a" | "MODULE_20b" | "MODULE_22" | "MODULE_23" | "MODULE_24" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -124,6 +128,8 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Collision_Away_Evidence_Projection", "Collision_Home_Evidence_Projection",
   "Low_Center_Status", "Low_Center_Primary", "Low_Center_Sensitivity", "Low_Center_Upper_Band",
   "SSAT_V1_Status", "SSAT_V1_Total", "SSAT_V2_Status", "SSAT_V2_Total",
+  "Operator_Evidence_Status", "Operator_Evidence_Fields", "Operator_Evidence_Source",
+  "Operator_Evidence_TS", "Operator_Reauthorization_Status",
 ] as const;
 
 const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
@@ -146,6 +152,67 @@ const PREGAME_PACKET_HISTORY_COLUMNS: ColumnDef[] = PREGAME_PACKET_HISTORY_COLUM
   readOnly: true,
   description: "Immutable pregame dependency packet field; blank values remain explicit missing-source evidence.",
 }));
+
+const OPERATOR_EVIDENCE_OVERLAY_COLUMN_NAMES = [
+  "Date", "Game_ID", "Field_Name", "Field_Value", "Supplied_TS", "Source", "Evidence_Note",
+] as const;
+const FULL_LADDER_AUDIT_COLUMN_NAMES = [
+  "Date", "Game_ID", "Run_ID", "Scheduled_First_Pitch", "Snapshot_TS", "Freeze_TS", "Ledger_Status",
+  "Directional_Truth", "Run_Band_Low", "Run_Band_Center", "Run_Band_High",
+  "Available_HardRock_Total_Lines", "Preferred_Total_Vehicle", "BET_or_PASS", "Named_Blocker",
+  "Current_Price", "Reasoning_Source", "Operator_Evidence_Provenance", "Decision_Notes",
+  "Manual_Audit_Status", "Ticket_Status", "Settlement_TS", "Selected_Vehicle_Result",
+  "Ledger_Settlement_Status",
+] as const;
+const ALLOCATION_SETTLEMENT_DIAGNOSTIC_COLUMN_NAMES = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Frozen_Packet_Snapshot_TS",
+  "Projected_Away_Runs", "Projected_Home_Runs", "Projected_Total", "Projected_Margin",
+  "Actual_Away_Runs", "Actual_Home_Runs", "Actual_Total", "Actual_Margin",
+  "Away_Run_Error", "Away_Abs_Error", "Home_Run_Error", "Home_Abs_Error",
+  "Total_Error", "Total_Abs_Error", "Margin_Error", "Margin_Abs_Error", "Allocation_MAE",
+  "Projected_Higher_Scoring_Team", "Actual_Higher_Scoring_Team", "Allocation_Sign_Reversal",
+  "Allocation_Rank_Reversal", "Diagnostic_Status", "Settlement_TS",
+] as const;
+const STARTER_OUTCOME_DIAGNOSTIC_COLUMN_NAMES = [
+  "Date", "Game_ID", "Team_Side", "Team", "Starter", "Expected_IP", "Actual_IP", "IP_Delta", "Workload_Leash_Status",
+  "Actual_Pitches", "BB", "HBP", "Hits", "Baserunners", "Traffic_Data_Status",
+  "Contact_Data_Status", "xBA", "Hard_Hit_Pct", "Balls_In_Play", "Damage_Data_Status",
+  "HR", "Barrels", "XBH", "Run_Prevention_Data_Status", "R", "ER", "Starter_Window_Runs_Allowed", "K", "Whiffs",
+  "Starter_Exit_Inning", "Diagnostic_Status", "Settlement_TS",
+] as const;
+const BULLPEN_TIMING_DIAGNOSTIC_COLUMN_NAMES = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Away_Starter_Exit_Inning", "Home_Starter_Exit_Inning",
+  "Away_Starter_Window_Runs_Allowed", "Home_Starter_Window_Runs_Allowed",
+  "Away_Bullpen_Runs_Allowed", "Home_Bullpen_Runs_Allowed",
+  "Away_Runs_1_3", "Away_Runs_4_6", "Away_Runs_7Plus", "Away_Extra_Inning_Runs",
+  "Home_Runs_1_3", "Home_Runs_4_6", "Home_Runs_7Plus", "Home_Extra_Inning_Runs",
+  "Timing_Granularity", "Diagnostic_Status", "Settlement_TS",
+] as const;
+const FULL_LADDER_SETTLEMENT_COLUMN_NAMES = [
+  "Date", "Game_ID", "Directional_Truth", "Available_Line", "Actual_Total", "Counterfactual_Result",
+  "Is_Preferred_Vehicle", "Selected_Vehicle_Result", "Adjacent_Lower_Line_Result", "Adjacent_Higher_Line_Result",
+  "Tighter_Line_Also_Captured", "Wider_Line_Required", "All_Reasonable_Vehicles_Failed",
+  "Vehicle_Grade", "Ticket_Status", "Current_Price", "Reasoning_Source", "Diagnostic_Status", "Settlement_TS",
+] as const;
+
+function diagnosticColumns(
+  names: readonly string[],
+  numeric: readonly string[],
+  filledBy: NonNullable<ColumnDef["filledBy"]>,
+  readOnly = true,
+): ColumnDef[] {
+  const numericNames = new Set(numeric);
+  return names.map((name, index) => ({
+    name,
+    index,
+    type: numericNames.has(name) ? "number" as const : "string" as const,
+    width: name.includes("Provenance") || name.includes("Status") || name.includes("Result") ? 220 : name.includes("TS") || name.includes("Pitch") ? 195 : 155,
+    format: numericNames.has(name) ? "0.00" : undefined,
+    filledBy,
+    readOnly,
+    description: "Commissioning evidence only; this field never changes active projection, vehicle, or authorization.",
+  }));
+}
 
 const MONOTONICITY_V2_CALIBRATION_COLUMN_NAMES = [
   "Direction", "Row_Type", "Edge_Min", "Edge_Max", "N_Eligible", "N_Directional", "N_Wins", "N_Pushes",
@@ -1164,6 +1231,54 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   },
 
   {
+    name: "ALLOCATION_SETTLEMENT_DIAGNOSTICS",
+    description: "One frozen-packet allocation audit per legitimate settled game. Stores team, total, and margin errors plus raw allocation reversals without defining an operational threshold.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      ALLOCATION_SETTLEMENT_DIAGNOSTIC_COLUMN_NAMES,
+      ["Projected_Away_Runs", "Projected_Home_Runs", "Projected_Total", "Projected_Margin", "Actual_Away_Runs", "Actual_Home_Runs", "Actual_Total", "Actual_Margin", "Away_Run_Error", "Away_Abs_Error", "Home_Run_Error", "Home_Abs_Error", "Total_Error", "Total_Abs_Error", "Margin_Error", "Margin_Abs_Error", "Allocation_MAE"],
+      "MODULE_24",
+    ),
+  },
+
+  {
+    name: "STARTER_OUTCOME_DIAGNOSTICS",
+    description: "Two rows per legitimate settled game, one per actual starter. Separates workload, traffic, contact, damage, and run-prevention evidence; workload failure is never silently treated as general pitcher failure.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      STARTER_OUTCOME_DIAGNOSTIC_COLUMN_NAMES,
+      ["Expected_IP", "Actual_IP", "IP_Delta", "Actual_Pitches", "BB", "HBP", "Hits", "Baserunners", "xBA", "Hard_Hit_Pct", "Balls_In_Play", "HR", "Barrels", "XBH", "R", "ER", "Starter_Window_Runs_Allowed", "K", "Whiffs", "Starter_Exit_Inning"],
+      "MODULE_24",
+    ),
+  },
+
+  {
+    name: "BULLPEN_TIMING_DIAGNOSTICS",
+    description: "One legitimate settled game row with starter-exit, starter-window, bullpen, early/middle/late, and extra-inning scoring shape. Raw timing evidence only; it does not create bullpen-quality coefficients.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      BULLPEN_TIMING_DIAGNOSTIC_COLUMN_NAMES,
+      ["Away_Starter_Exit_Inning", "Home_Starter_Exit_Inning", "Away_Starter_Window_Runs_Allowed", "Home_Starter_Window_Runs_Allowed", "Away_Bullpen_Runs_Allowed", "Home_Bullpen_Runs_Allowed", "Away_Runs_1_3", "Away_Runs_4_6", "Away_Runs_7Plus", "Away_Extra_Inning_Runs", "Home_Runs_1_3", "Home_Runs_4_6", "Home_Runs_7Plus", "Home_Extra_Inning_Runs"],
+      "MODULE_24",
+    ),
+  },
+
+  {
+    name: "FULL_LADDER_SETTLEMENT",
+    description: "One row per frozen available full-game half-number ladder threshold. Grades the manual directional read, selected threshold, adjacent thresholds, and counterfactual capture without inferring a wager or using price as truth.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      FULL_LADDER_SETTLEMENT_COLUMN_NAMES,
+      ["Available_Line", "Actual_Total"],
+      "MODULE_24",
+    ),
+  },
+
+  {
     name: "REGRESSION_REPORT",
     description: "Per-window performance summary computed from SHADOW_OUTCOMES. Overwritten on each run. Written by module15.",
     section: "ANALYSIS",
@@ -1300,6 +1415,26 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
     section: "ANALYSIS",
     frozenRows: 1,
     columns: PREGAME_PACKET_HISTORY_COLUMNS,
+  },
+
+  {
+    name: "OPERATOR_EVIDENCE_OVERLAY",
+    description: "Operator-owned, field-level pregame evidence input. One row supplies one named fact and timestamp. Only explicitly supplied fields are authoritative for packet provenance; this sheet never silently changes the active projection or authorization.",
+    section: "INPUT",
+    frozenRows: 1,
+    columns: diagnosticColumns(OPERATOR_EVIDENCE_OVERLAY_COLUMN_NAMES, [], "OPERATOR", false),
+  },
+
+  {
+    name: "FULL_LADDER_AUDIT",
+    description: "Immutable shadow record of the manual price-blind full-game total ladder. OPEN rows may update from a legitimate packet before first pitch; FROZEN_PREGAME rows and their manual read are immutable. Settlement appends counterfactual grades only.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      FULL_LADDER_AUDIT_COLUMN_NAMES,
+      ["Run_Band_Low", "Run_Band_Center", "Run_Band_High"],
+      "MODULE_20b",
+    ),
   },
 
   {

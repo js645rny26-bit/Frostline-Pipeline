@@ -26,6 +26,7 @@ import type { ShadowAuditRow } from "./module09s_statcastShadow.js";
 import type { StarterSurvivalRow } from "./module09t_starterSurvivalShadow.js";
 import type { StarterSurvivalV2Row } from "./module09u_starterSurvivalV2Shadow.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
+import type { OperatorEvidenceSnapshot, OperatorOverlayField } from "./module20b_operatorEvidence.js";
 
 export const PREGAME_PACKET_HISTORY_SHEET = "PREGAME_PACKET_HISTORY";
 
@@ -49,6 +50,8 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Collision_Away_Evidence_Projection", "Collision_Home_Evidence_Projection",
   "Low_Center_Status", "Low_Center_Primary", "Low_Center_Sensitivity", "Low_Center_Upper_Band",
   "SSAT_V1_Status", "SSAT_V1_Total", "SSAT_V2_Status", "SSAT_V2_Total",
+  "Operator_Evidence_Status", "Operator_Evidence_Fields", "Operator_Evidence_Source",
+  "Operator_Evidence_TS", "Operator_Reauthorization_Status",
 ] as const;
 
 export const PREGAME_PACKET_HISTORY_COLS = PREGAME_PACKET_HISTORY_HEADERS.length;
@@ -92,14 +95,43 @@ function blank(value: number | null | undefined): number | "" {
   return value === null || value === undefined || !Number.isFinite(value) ? "" : value;
 }
 
-function packetCoreStatus(board: SlateBoardEntry): string {
-  return board.market_line === null ? "MARKET_SNAPSHOT_MISSING" : "COMPLETE";
+function packetCoreStatus(marketLine: number | null): string {
+  return marketLine === null ? "MARKET_SNAPSHOT_MISSING" : "COMPLETE";
 }
 
 function collisionStatus(row: ShadowAuditRow | undefined): string {
   if (!row) return "SOURCE_UNAVAILABLE";
   if (row.preview_availability !== "AVAILABLE") return "SOURCE_UNAVAILABLE";
   return row.tail_estimate_status === "AVAILABLE" ? "PROSPECTIVE_SHADOW_CANDIDATE" : "INSUFFICIENT_INPUT";
+}
+
+function operatorValue(
+  snapshot: OperatorEvidenceSnapshot | undefined,
+  field: OperatorOverlayField,
+): string | undefined {
+  return snapshot?.fields.get(field);
+}
+
+function operatorNumber(
+  snapshot: OperatorEvidenceSnapshot | undefined,
+  field: OperatorOverlayField,
+): number | undefined {
+  const value = operatorValue(snapshot, field);
+  const parsed = value === undefined ? Number.NaN : Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function operatorPacketProvenance(snapshot: OperatorEvidenceSnapshot | undefined): unknown[] {
+  if (!snapshot || snapshot.fields.size === 0) {
+    return ["NO_OPERATOR_OVERLAY", "", "", "", "NOT_REQUIRED"];
+  }
+  return [
+    "MANUAL_OPERATOR_CAPTURED",
+    [...snapshot.fields.entries()].map(([field, value]) => `${field}=${value}`).join("; "),
+    snapshot.source,
+    snapshot.supplied_ts,
+    snapshot.reauthorization_status,
+  ];
 }
 
 export function buildPregamePacketInputs(
@@ -109,6 +141,7 @@ export function buildPregamePacketInputs(
   collisionRows: ShadowAuditRow[],
   ssatV1Rows: StarterSurvivalRow[],
   ssatV2Rows: StarterSurvivalV2Row[],
+  operatorEvidenceByGame: ReadonlyMap<string, OperatorEvidenceSnapshot> = new Map(),
 ): PregamePacketInput[] {
   const boardByGame = new Map(board.map((row) => [row.legacy_game_id, row]));
   const gameById = new Map(games.map((row) => [row.legacy_game_id, row]));
@@ -123,23 +156,40 @@ export function buildPregamePacketInputs(
     const collision = collisionByGame.get(summary.game_id);
     const v1 = v1ByGame.get(summary.game_id);
     const v2 = v2ByGame.get(summary.game_id);
+    const operator = operatorEvidenceByGame.get(summary.game_id);
+    const operatorMarketLine = operatorNumber(operator, "CURRENT_HARD_ROCK_LINE");
+    const packetMarketLine = operatorMarketLine ?? boardRow.market_line;
+    const awayLineupOverride = operatorValue(operator, "AWAY_LINEUP");
+    const homeLineupOverride = operatorValue(operator, "HOME_LINEUP");
     const frozen = boardRow.lock_status === "LOCKED_IN" || boardRow.lock_status === "LOCKED_OUT";
     const status: PregamePacketStatus = frozen ? "FROZEN_PREGAME" : "OPEN_PROSPECTIVE";
     const values: unknown[] = [
       summary.date, summary.game_id, summary.away_team, summary.home_team, game.scheduled_utc_time,
       status, boardRow.run_id, boardRow.model_version, boardRow.projection_generated_ts ?? "",
-      boardRow.final_decision_ts ?? "", "", "", packetCoreStatus(boardRow),
-      summary.projected_away_runs, summary.projected_home_runs, summary.projected_total_runs, blank(boardRow.market_line),
-      boardRow.market_line === null ? "MISSING" : "CAPTURED", boardRow.direction, boardRow.vehicle_type,
+      boardRow.final_decision_ts ?? "", "", "", packetCoreStatus(packetMarketLine),
+      summary.projected_away_runs, summary.projected_home_runs, summary.projected_total_runs, blank(packetMarketLine),
+      packetMarketLine === null ? "MISSING" : operatorMarketLine === undefined ? "CAPTURED" : "MANUAL_OPERATOR_CAPTURED", boardRow.direction, boardRow.vehicle_type,
       boardRow.final_decision, boardRow.core_blocker, boardRow.confidence, blank(boardRow.variance), boardRow.lock_status,
-      summary.away_pitcher, summary.home_pitcher, summary.away_pitcher_role, summary.home_pitcher_role,
+      operatorValue(operator, "AWAY_STARTER") ?? summary.away_pitcher,
+      operatorValue(operator, "HOME_STARTER") ?? summary.home_pitcher,
+      operatorValue(operator, "AWAY_STARTER_ROLE") ?? summary.away_pitcher_role,
+      operatorValue(operator, "HOME_STARTER_ROLE") ?? summary.home_pitcher_role,
       blank(summary.away_expected_innings), blank(summary.home_expected_innings), summary.away_starter_quality,
       summary.home_starter_quality, summary.bullpen_available ? "AVAILABLE" : "UNAVAILABLE", summary.starter_attack_runs,
       summary.bullpen_continuation_runs, summary.baseball_only_projection, summary.environment_run_adjustment,
-      summary.away_lineup_status, summary.home_lineup_status, summary.away_lineup_source ?? "",
-      summary.home_lineup_source ?? "", summary.away_lineup_coverage, summary.home_lineup_coverage,
-      summary.stadium, summary.park_multiplier, summary.weather_multiplier, summary.combined_run_multiplier,
-      summary.roof_status, summary.wind_disposition, summary.environment_certainty, summary.weather_vehicle_status,
+      awayLineupOverride ? "MANUAL_OPERATOR_CONFIRMED" : summary.away_lineup_status,
+      homeLineupOverride ? "MANUAL_OPERATOR_CONFIRMED" : summary.home_lineup_status,
+      awayLineupOverride ? "MANUAL_OPERATOR" : summary.away_lineup_source ?? "",
+      homeLineupOverride ? "MANUAL_OPERATOR" : summary.home_lineup_source ?? "",
+      awayLineupOverride ? 100 : summary.away_lineup_coverage,
+      homeLineupOverride ? 100 : summary.home_lineup_coverage,
+      operatorValue(operator, "STADIUM") ?? summary.stadium,
+      operatorNumber(operator, "PARK_MULTIPLIER") ?? summary.park_multiplier,
+      summary.weather_multiplier, summary.combined_run_multiplier,
+      operatorValue(operator, "ROOF_STATUS") ?? summary.roof_status,
+      operatorValue(operator, "WIND_DISPOSITION") ?? summary.wind_disposition,
+      operatorValue(operator, "ENVIRONMENT_CERTAINTY") ?? summary.environment_certainty,
+      summary.weather_vehicle_status,
       collision?.preview_availability ?? "UNAVAILABLE", collisionStatus(collision),
       blank(collision?.shadow_projection), blank(collision?.traffic_conversion_estimate), blank(collision?.hr_xbh_damage_estimate),
       blank(collision?.combined_tail_adjustment), blank(collision?.estimated_projection),
@@ -148,6 +198,7 @@ export function buildPregamePacketInputs(
       blank(collision?.low_center_sensitivity_projection), blank(collision?.low_center_upper_tail_band),
       v1?.calibration_status ?? "INSUFFICIENT_INPUT", blank(v1?.starter_survival_adjusted_total),
       v2?.calibration_status ?? "INSUFFICIENT_INPUT", blank(v2?.ssat_v2_total),
+      ...operatorPacketProvenance(operator),
     ];
     return [{
       date: summary.date,
@@ -240,7 +291,11 @@ export async function writePregamePacketHistory(
   collisionRows: ShadowAuditRow[],
   ssatV1Rows: StarterSurvivalRow[],
   ssatV2Rows: StarterSurvivalV2Row[],
-  options: { workbookId?: string; snapshotTs?: string } = {},
+  options: {
+    workbookId?: string;
+    snapshotTs?: string;
+    operatorEvidenceByGame?: ReadonlyMap<string, OperatorEvidenceSnapshot>;
+  } = {},
 ): Promise<PregamePacketResult> {
   const workbookId = options.workbookId ?? WORKBOOK_ID;
   const snapshotTs = options.snapshotTs ?? new Date().toISOString();
@@ -248,12 +303,20 @@ export async function writePregamePacketHistory(
   const errors: string[] = [];
   try {
     await ensurePacketSheet(workbookId);
-    const response = await readRange(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!A1:BR5000`);
+    const response = await readRange(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!A1:CA5000`);
     const raw = (response.values ?? []) as unknown[][];
     const existing = raw.length > 0 ? raw.slice(1) : [];
     const mutation = upsertPregamePacketRows(
       existing,
-      buildPregamePacketInputs(summaries, board, games, collisionRows, ssatV1Rows, ssatV2Rows),
+      buildPregamePacketInputs(
+        summaries,
+        board,
+        games,
+        collisionRows,
+        ssatV1Rows,
+        ssatV2Rows,
+        options.operatorEvidenceByGame,
+      ),
       snapshotTs,
     );
     if (mutation.rowsSkippedAfterFirstPitch > 0) {

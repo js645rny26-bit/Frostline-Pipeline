@@ -94,6 +94,34 @@ state, environment identity, and every shadow companion then available
 This packet is provenance infrastructure only. It cannot change the active
 projection, authorization, vehicle selection, or market interpretation.
 
+## Operator evidence and the full-game ladder
+
+`OPERATOR_EVIDENCE_OVERLAY` is the durable intake surface for a fact supplied
+by the operator before first pitch. One row represents **one field**, not an
+entire game override. Use `MANUAL_OPERATOR` as the source and an ISO
+`Supplied_TS` strictly before scheduled first pitch. Blank or late values do
+nothing. The captured packet records the field, source, timestamp, and a
+`REAUTHORIZATION_REQUIRED` marker so a later postmortem can distinguish a
+model miss from stale upstream evidence.
+
+Operator evidence is intentionally not an automatic projection coefficient.
+It changes only the explicitly supplied packet representation and requires a
+fresh human review of the affected game; it cannot silently rewrite unrelated
+lineup, starter, park, weather, bullpen, market, vehicle, or authorization
+fields.
+
+`FULL_LADDER_AUDIT` freezes the independent full-game total review beside that
+packet. Record the price-blind directional truth, low/center/high run band,
+available Hard Rock half-number totals, preferred total vehicle, BET/PASS
+decision, blocker, and reasoning source before first pitch. Current price is
+execution metadata only. The ledger records `NO_WAGER_REPORTED` unless a wager
+is explicitly reported; it must never infer a ticket.
+
+At settlement, `FULL_LADDER_SETTLEMENT` grades every recorded half-number
+threshold. That separates a direction failure from selecting a line that was
+too aggressive, and also flags a winning vehicle whose allocation/mechanism
+was wrong.
+
 ## How data actually moves
 
 The operational tabs are pipeline-written value snapshots, not a network of spreadsheet formulas. “Feeds” below means that the pipeline consumes the same source or a prior module’s in-memory result and then writes the downstream snapshot.
@@ -155,6 +183,8 @@ Final results + frozen prospective state
 | `BOARD_LOCK_STATE` | At each game’s lock, Module 11 | Immutable record of final authorization and lock provenance. | Records the single authorization source. | Use to resolve contradictory displays; lock never invents CORE/BET. |
 | `VEHICLE_LOG` | Frozen after board publication, Module 17 | Prospective vehicle, projection, line, direction, and decision. | Preserves what the board actually published. | Historical grading must use this, not a later recalculation. |
 | `PREGAME_PACKET_HISTORY` | Every legitimate pre-first-pitch publish, Module 20a | Complete active projection, market, allocation, starter/bullpen, lineup, environment, and shadow-dependency packet. | Provenance only; it is written before vehicle publication and cannot alter authorization. | `OPEN_PROSPECTIVE` may refresh before first pitch; `FROZEN_PREGAME` is immutable; missing market is explicit. |
+| `OPERATOR_EVIDENCE_OVERLAY` | Operator input before first pitch; Module 20b captures it on publish | Durable field-level authoritative operator evidence. | No direct board input; it marks the packet for reauthorization/review without changing active math. | One row per supplied fact; use `MANUAL_OPERATOR` and an ISO pre-first-pitch timestamp. |
+| `FULL_LADDER_AUDIT` | Pregame publish / freeze, Module 20b | Immutable manual full-game half-number total ladder and BET/PASS rationale. | Shadow decision evidence only; cannot create a ticket or live authorization. | Record run band and available lines before first pitch; price is metadata, not truth. |
 | `DECISION_AUDIT_LOG` | Pregame publish and settlement, Module 20 | Model, manual overlay, authorization, result, and independent grades. | Consumes the authoritative decision and records why. | OPEN may update; frozen pregame evidence may not. |
 
 ## Run-health and documentation tabs
@@ -175,6 +205,10 @@ Final results + frozen prospective state
 | `PROJECTION_REPLAY` | Daily settlement, Module 14 | Frozen-published per-game replay. | Measures the board that actually existed. | Compare frozen and repaired projections explicitly. |
 | `VEHICLE_POSTMORTEM` | After settlement, Module 17 | Ticket, truth, capture, blocker, and mechanism grades. | Grades vehicle and authorization separately. | Pushes are neutral; passed winners are not automatically bad passes. |
 | `SURVIVAL_GATE_REPLAY` | Settlement/replay, Module 18 | Over survival-floor regrading with provenance. | Audits one gate without rewriting history. | Distinguish baseball-supported and environment-dependent Overs. |
+| `ALLOCATION_SETTLEMENT_DIAGNOSTICS` | Daily settlement, Module 24 | Frozen away/home/total/margin versus actuals and raw allocation reversals. | Diagnostic only. | Read alongside total error; canceled allocation errors can hide a wrong game read. |
+| `STARTER_OUTCOME_DIAGNOSTICS` | Daily settlement, Module 24 | Separate workload, traffic, contact availability, damage, run prevention, K/whiff, and exit evidence. | Diagnostic only. | Never treat a workload shortfall as a generic pitcher failure. |
+| `BULLPEN_TIMING_DIAGNOSTICS` | Daily settlement, Module 24 | Starter-window, post-exit, inning-band, and extra-inning run shape. | Diagnostic only. | Use it to identify starter versus bullpen/timing mechanisms. |
+| `FULL_LADDER_SETTLEMENT` | Daily settlement, Module 24 | Every frozen half-number total counterfactual plus selected/adjacent vehicle grade. | Diagnostic only; `NO_WAGER_REPORTED` remains distinct from result. | Use it to separate direction, threshold, and mechanism outcomes. |
 | `STARTER_AUDIT` | After settlement, Module 16 | Starter-level error and provenance. | Learning only. | Study repeated survival/failure patterns, not one result. |
 | `REGRESSION_REPORT` | After settlement, Module 15 | MAE, median error, bias, miss rate, and projection direction summaries. | Reliability evidence only. | Separate total accuracy from allocation and winner accuracy. |
 | `MONOTONICITY` | With regression, Module 15 | Directional hit rate by frozen edge tier. | Its adequately sampled verdict governs authorization availability. | Verify sample size before trusting the verdict. |

@@ -9,7 +9,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
 
-**Schema v2 · updated 2026-07-23 · one page — this is the whole procedure.**
+**Schema v32 · updated 2026-08-25 · operational procedure; exact fields live in `SCHEMA_REFERENCE`.**
 
 ## Daily sequence (all times ET)
 
@@ -19,10 +19,29 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 4. **Your entries.** After the final publish, fill SLATE_INPUT columns O–W (vehicle, line, odds, notes). Blank cells are back-filled from consensus odds; anything you type is **never overwritten** (the pipeline maintains only the Market_Available flag).
 5. **Board is FINAL when:** final publish done → lineups show `official` in TODAY_LINEUPS → Plate_Umpire filled → your SLATE_INPUT entries are in. Then read SLATE_BOARD / ACTIVE_BOARD_SNAPSHOT. The RUN_LOG row is the audit record for the day.
 
+### Durable operator facts and ladder review
+
+- If you supply a corrected lineup, starter role, venue/park, weather, umpire,
+  bullpen state, or executable Hard Rock market before first pitch, add **one
+  field per row** to `OPERATOR_EVIDENCE_OVERLAY` with `Source` set to
+  `MANUAL_OPERATOR` and an ISO `Supplied_TS` before the game starts.
+- That input is authoritative only for the named field. The packet records it
+  and marks the game for fresh review; it does not silently change projection
+  coefficients, BET/PASS, vehicle choice, or unrelated fields.
+- Record the independent full-game total review in `FULL_LADDER_AUDIT` before
+  first pitch: directional truth, run band, available half-number totals,
+  preferred vehicle, BET/PASS, and blocker. Price is execution metadata, not
+  game truth. Leave ticket status as `NO_WAGER_REPORTED` unless a wager is
+  explicitly reported.
+
 ## What auto-runs vs. what you do
 
 - **Auto, every publish** (dashboard **Run Pipeline** button, or `POST /api/pipeline/publish`): schedule, pitcher workloads and roles, weather, bullpen usage + quality tiers, posted lineups, starter previous outings, umpires, team run rates, odds snapshot → ODDS_HISTORY, pitcher season stats, all sheet writes, boards, RUN_LOG.
 - **You:** trigger the three publishes above; own SLATE_INPUT O–W.
+- **Settlement:** run the daily settlement workflow for the completed slate
+  date. It reads frozen packets only and adds allocation, starter-dimension,
+  bullpen-timing, and ladder diagnostics; it must never rerun mutable pregame
+  calculation for that date.
 - **Warning:** the Notes columns in DAILY_MATCHUPS (col Y) and BULLPEN_USAGE_DAILY (col I) are **cleared on every publish**. Durable notes belong in SLATE_INPUT.
 
 ## Source authority (when feeds disagree or fail)

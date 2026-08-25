@@ -41,6 +41,7 @@ import { runStarterAudit, type StarterAuditResult } from "./module16_starterAudi
 import { runSurvivalGateReplay, type SurvivalReplayResult } from "./module18_survivalGateReplay.js";
 import { runCollisionReplayV1, type CollisionReplayResult } from "./module22_collisionReplay.js";
 import { runMonotonicityV2, type MonotonicityV2Result } from "./module23_monotonicityV2.js";
+import { runPostgameDiagnostics, type PostgameDiagnosticsResult } from "./module24_postgameDiagnostics.js";
 import {
   logDecisionAuditPregame,
   settleDecisionAuditLog,
@@ -50,6 +51,12 @@ import {
   writePregamePacketHistory,
   type PregamePacketResult,
 } from "./module20a_pregamePacket.js";
+import {
+  loadOperatorEvidence,
+  syncFullLadderAudit,
+  type FullLadderAuditResult,
+  type OperatorEvidenceLoadResult,
+} from "./module20b_operatorEvidence.js";
 import { WORKBOOK_ID } from "../sheets/client.js";
 import {
   repairWorkbookSchemaReference,
@@ -240,6 +247,8 @@ export interface PublishResult {
   module_20_decision_audit: DecisionAuditWriteResult;
   /** Module 20a: immutable, self-contained dependent pregame packet. */
   module_20a_pregame_packet: PregamePacketResult;
+  /** Module 20b: durable manual/operator evidence and full-total-ladder ledger. */
+  module_20b_full_ladder_audit: FullLadderAuditResult;
   /** Schema/reference documentation refreshed from the runtime workbook schema. */
   module_schema_documentation: RepairSchemaResult;
   workbook_url: string;
@@ -485,6 +494,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_17: { status: "failure", date, publish_ts: new Date().toISOString(), rows_written: 0, rows_skipped: 0, errors: ["Skipped: Module 08 failed"] },
       module_20_decision_audit: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, duplicates_removed: 0, audit_gaps: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_20a_pregame_packet: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_skipped_after_first_pitch: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
+      module_20b_full_ladder_audit: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_schema_documentation: { workbook_id: workbookId, schema_reference_rows: 0, readme_rows: 0, errors: [{ step: "schema_documentation", error: "Skipped: Module 08 failed" }] },
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
@@ -727,26 +737,56 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // One self-contained packet preserves the exact state held by all dependent
   // pregame surfaces. It must exist before vehicle publication, otherwise a
   // later settlement could only see fragments of a valid board decision.
-  const mod20a: PregamePacketResult = mod20.status === "success"
-    ? await writePregamePacketHistory(
-      date,
-      mod09.game_summary_rows,
-      mod11.slate_board,
-      slate.games,
-      mod09s.shadow_rows,
-      mod09t.rows,
-      mod09u.rows,
-      { workbookId },
-    )
-    : {
-      status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0,
-      rows_skipped_after_first_pitch: 0, warnings: [],
-      errors: ["Pregame packet blocked: decision-audit freeze did not complete"],
-    };
+  // Packet lifecycle must not depend on whether the decision-audit writer had
+  // fresh board rows for every protected game.  A delayed first post-start run
+  // often has no mutable TEX-CHW-style board input, but it may still hold a
+  // legitimate OPEN_PROSPECTIVE packet that must be promoted unchanged.  The
+  // packet writer only reads its own stored pre-first-pitch snapshot for that
+  // transition; it never copies current/live inputs into a protected game.
+  const operatorEvidence: OperatorEvidenceLoadResult = await loadOperatorEvidence(
+    date,
+    slate.games,
+    { workbookId },
+  ).catch((err: unknown): OperatorEvidenceLoadResult => {
+    const msg = err instanceof Error ? err.message : String(err);
+    allErrors.push({ module: "20b_operator_evidence", error: msg, timestamp: new Date().toISOString() });
+    return { snapshots: new Map(), warnings: [`OPERATOR_EVIDENCE_UNAVAILABLE: ${msg}`] };
+  });
+  for (const warning of operatorEvidence.warnings) {
+    logger.warn({ warning }, "Full pipeline: Module 20b operator evidence warning");
+  }
+
+  const mod20a: PregamePacketResult = await writePregamePacketHistory(
+    date,
+    mod09.game_summary_rows,
+    mod11.slate_board,
+    slate.games,
+    mod09s.shadow_rows,
+    mod09t.rows,
+    mod09u.rows,
+    { workbookId, operatorEvidenceByGame: operatorEvidence.snapshots },
+  );
   if (mod20a.status !== "success") {
     allErrors.push({
       module: "20a_pregame_packet",
       error: mod20a.errors.join("; ") || "Pregame packet write failed",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // This is a shadow-only, immutable record of the price-blind manual full
+  // total ladder. It uses the packet just written above, never current/live
+  // game state, and does not participate in projection or authorization.
+  const mod20b: FullLadderAuditResult = mod20a.status === "success"
+    ? await syncFullLadderAudit(date, { workbookId })
+    : {
+      status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0,
+      warnings: [], errors: ["Full ladder audit blocked: pregame packet write did not complete"],
+    };
+  if (mod20b.status !== "success") {
+    allErrors.push({
+      module: "20b_full_ladder_audit",
+      error: mod20b.errors.join("; ") || "Full ladder audit write failed",
       timestamp: new Date().toISOString(),
     });
   }
@@ -803,7 +843,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   const overallStatus =
     mod10.status === "failure"
       ? "failure"
-      : mod09.status === "error" || mod11.status === "failure" || mod11.slate_board.length === 0 || mod20.status !== "success" || mod20a.status !== "success" || schemaDocumentation.errors.length > 0
+      : mod09.status === "error" || mod11.status === "failure" || mod11.slate_board.length === 0 || mod20.status !== "success" || mod20a.status !== "success" || mod20b.status !== "success" || schemaDocumentation.errors.length > 0
         ? "partial_success"
         : mod08.status === "partial_failure"
           ? "partial_success"
@@ -848,6 +888,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_17: mod17,
     module_20_decision_audit: mod20,
     module_20a_pregame_packet: mod20a,
+    module_20b_full_ladder_audit: mod20b,
     module_schema_documentation: schemaDocumentation,
     workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
     errors: allErrors,
@@ -868,6 +909,7 @@ export interface DailySettlementResult {
   collision_replay_status: CollisionReplayResult["status"];
   monotonicity_v2_status: MonotonicityV2Result["status"];
   decision_audit_status: DecisionAuditWriteResult["status"];
+  postgame_diagnostics_status: PostgameDiagnosticsResult["status"];
   schema_documentation_status: "success" | "failure";
   settlement: SettlementResult;
   regression: RegressionReportResult;
@@ -877,6 +919,7 @@ export interface DailySettlementResult {
   collision_replay: CollisionReplayResult;
   monotonicity_v2: MonotonicityV2Result;
   decision_audit: DecisionAuditWriteResult;
+  postgame_diagnostics: PostgameDiagnosticsResult;
   schema_documentation: RepairSchemaResult;
   module_statuses: Array<{ module: string; status: string }>;
   /**
@@ -974,6 +1017,21 @@ export async function runDailySettlement(
         status: "failure", phase: "settlement", date,
         rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
         duplicates_removed: 0, audit_gaps: 0, warnings: [], errors: [msg],
+      };
+    },
+  );
+
+  // Module 24 is observational only: it joins the frozen packet to official
+  // final detail so allocation, starter, bullpen, and full-ladder learning no
+  // longer depends on conversation memory or a repaired projection.
+  const postgame_diagnostics = await runPostgameDiagnostics(date, settlement.rows, { workbookId }).catch(
+    (err: unknown): PostgameDiagnosticsResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`postgame_diagnostics: ${msg}`);
+      return {
+        status: "failure", date, allocation_rows_written: 0, starter_rows_written: 0,
+        timing_rows_written: 0, ladder_rows_written: 0, frozen_packet_games: 0,
+        warnings: [], errors: [msg],
       };
     },
   );
@@ -1082,6 +1140,7 @@ export async function runDailySettlement(
     { module: "MODULE_22_COLLISION_REPLAY_V1", status: collision_replay.status },
     { module: "MODULE_23_MONOTONICITY_V2", status: monotonicity_v2.status },
     { module: "MODULE_20_DECISION_AUDIT_SETTLEMENT", status: decision_audit.status },
+    { module: "MODULE_24_POSTGAME_DIAGNOSTICS", status: postgame_diagnostics.status },
     { module: "WORKBOOK_SCHEMA_DOCUMENTATION", status: schema_documentation_status },
   ];
   errors.push(...settlement.errors.map((message) => `settlement: ${message}`));
@@ -1092,6 +1151,7 @@ export async function runDailySettlement(
   errors.push(...collision_replay.errors.map((message) => `collision_replay: ${message}`));
   errors.push(...monotonicity_v2.errors.map((message) => `monotonicity_v2: ${message}`));
   errors.push(...decision_audit.errors.map((message) => `decision_audit: ${message}`));
+  errors.push(...postgame_diagnostics.errors.map((message) => `postgame_diagnostics: ${message}`));
   errors.push(...schema_documentation.errors.map(
     ({ step, error }) => `schema_documentation:${step}: ${error}`,
   ));
@@ -1115,6 +1175,7 @@ export async function runDailySettlement(
       collision_replay_status: collision_replay.status,
       monotonicity_v2_status: monotonicity_v2.status,
       decision_audit_status: decision_audit.status,
+      postgame_diagnostics_status: postgame_diagnostics.status,
       schema_documentation_status,
       gate_hit_rate_pct,
       gate_denominator,
@@ -1140,6 +1201,7 @@ export async function runDailySettlement(
     collision_replay_status: collision_replay.status,
     monotonicity_v2_status: monotonicity_v2.status,
     decision_audit_status: decision_audit.status,
+    postgame_diagnostics_status: postgame_diagnostics.status,
     schema_documentation_status,
     settlement,
     regression,
@@ -1149,6 +1211,7 @@ export async function runDailySettlement(
     collision_replay,
     monotonicity_v2,
     decision_audit,
+    postgame_diagnostics,
     schema_documentation,
     module_statuses,
     gate_hit_rate_pct,
