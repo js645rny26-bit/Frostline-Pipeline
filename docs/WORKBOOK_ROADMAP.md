@@ -65,6 +65,21 @@ cost. It does not silently reapply the v1 `IP / 9` proxy when history is thin;
 instead it records an explicit insufficiency. Its outputs are never board,
 vehicle, market, projection, or authorization inputs.
 
+### SSAT family interpretation
+
+`STARTER_SURVIVAL_DIFFERENTIATION_AUDIT` tests whether v2 has earned separate
+interpretive weight from v1. It records v1/v2 total correlation and distance,
+the share of games within 0.10, 0.25, and 0.50 runs, repeated survival-
+probability profiles across distinct games, frozen cohort sizes/failures, and
+descriptive associations with the captured starter-quality and opponent-
+pressure fields.
+
+Until that audit is reviewed and a future commissioning decision explicitly
+says otherwise, **read v1 and v2 as one SSAT family—not two independent votes.**
+State the base total and the SSAT family range; do not treat apparent v1/v2
+agreement as extra corroboration. The audit is observational only and cannot
+retire, promote, or alter either challenger automatically.
+
 ## Collision calibration ledger
 
 `COLLISION_CALIBRATION_HISTORY` freezes the actual pre-first-pitch Statcast
@@ -177,6 +192,7 @@ Final results + frozen prospective state
 | `STARTER_SURVIVAL_CALIBRATION_REPORT` | Settlement, Module 14 | Actual-total comparison and starter survival grading from history. | No board input; challenger evidence only. | Cannot reconstruct or backdate a missing pregame candidate. |
 | `STARTER_SURVIVAL_V2_CALIBRATION_HISTORY` | Every pre-first-pitch Module 09u run | Empirical survival probability and conditional workload-failure severity. | No board input; v2 shadow evidence only. | Uses strictly earlier settled records only; no v1 proxy fallback. |
 | `STARTER_SURVIVAL_V2_CALIBRATION_REPORT` | Settlement, Module 14 | Base vs SSAT v1 vs SSAT v2 outcome comparison. | No board input; calibration evidence only. | Inspect cohort provenance and actual starter workload before interpreting results. |
+| `STARTER_SURVIVAL_DIFFERENTIATION_AUDIT` | Every pregame Module 09v run | Correlation/difference, repeated-probability, cohort-provenance, and descriptive-input audit for SSAT v1/v2. | No board input; it cannot alter a challenger or decision. | Treat V1/V2 as one SSAT evidence family until an explicit commissioning review demonstrates material differentiation. |
 | `SLATE_INPUT` | Every publish, Module 10 | Model scores plus operator vehicle, line, odds, notes, and frozen market state. | Direct input to Module 11. | Operator owns O–W; authoritative pregame line outranks stale display Line after freeze. |
 | `SLATE_BOARD` | Every publish for mutable games, Module 11 | Complete decision output, blockers, gate, lock, and lineage. | It is the full decision board. | Never read Decision without projection, line, tentative range, blocker, and lock state. |
 | `ACTIVE_BOARD_SNAPSHOT` | Every publish, Module 11 | Condensed currently authorized entries. | Filtered view; does not create authorization. | Execution shortcut only after reviewing `SLATE_BOARD`. |

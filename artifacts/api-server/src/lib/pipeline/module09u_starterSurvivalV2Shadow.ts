@@ -26,6 +26,8 @@ export const STARTER_SURVIVAL_V2_HISTORY_HEADERS = [
   "Away_Starter_FDS", "Home_Starter_FDS", "Game_FDS", "Calibration_Cohort", "Snapshot_TS", "Calibration_Status",
   "Away_Expected_Pitches", "Home_Expected_Pitches", "Away_Workload_Flags", "Home_Workload_Flags",
   "Away_Starter_Quality", "Home_Starter_Quality", "Away_Opponent_Pressure", "Home_Opponent_Pressure",
+  "Away_Calibration_Cohort", "Home_Calibration_Cohort", "Away_Cohort_Observations", "Home_Cohort_Observations",
+  "Away_Cohort_Failures", "Home_Cohort_Failures",
 ];
 
 export type StarterSurvivalV2Status =
@@ -93,6 +95,12 @@ export interface StarterSurvivalV2Row {
   home_starter_quality: number;
   away_opponent_pressure: number;
   home_opponent_pressure: number;
+  away_calibration_cohort: string;
+  home_calibration_cohort: string;
+  away_cohort_observations: number | null;
+  home_cohort_observations: number | null;
+  away_cohort_failures: number | null;
+  home_cohort_failures: number | null;
 }
 
 export interface StarterSurvivalV2Result {
@@ -204,6 +212,9 @@ function blankRow(summary: GameSummaryRow, scheduledFirstPitch: string, snapshot
     away_starter_quality: summary.away_starter_quality, home_starter_quality: summary.home_starter_quality,
     away_opponent_pressure: round(summary.home_offense_rate_used * summary.home_lineup_factor),
     home_opponent_pressure: round(summary.away_offense_rate_used * summary.away_lineup_factor),
+    away_calibration_cohort: "", home_calibration_cohort: "",
+    away_cohort_observations: null, home_cohort_observations: null,
+    away_cohort_failures: null, home_cohort_failures: null,
   };
 }
 
@@ -256,6 +267,9 @@ export function computeStarterSurvivalV2Row(
     home_starter_fds: round(Math.max(homeFailureTotal - homeSurvivalTotal, 0) / Math.max(homeFailureTotal, 1)),
     game_fds: round(Math.max(ssat - tSS, 0) / Math.max(ssat, 1)),
     calibration_cohort: `${awayCalibration.cohort}|${homeCalibration.cohort}`,
+    away_calibration_cohort: awayCalibration.cohort, home_calibration_cohort: homeCalibration.cohort,
+    away_cohort_observations: awayCalibration.observations, home_cohort_observations: homeCalibration.observations,
+    away_cohort_failures: awayCalibration.failures, home_cohort_failures: homeCalibration.failures,
     calibration_status: "PROSPECTIVE_SHADOW_CANDIDATE",
   };
 }
@@ -299,7 +313,10 @@ function rowValues(row: StarterSurvivalV2Row): unknown[] {
     row.p_ss ?? "", row.p_fs ?? "", row.p_sf ?? "", row.p_ff ?? "", row.t_ss ?? "", row.t_fs ?? "", row.t_sf ?? "", row.t_ff ?? "",
     row.away_starter_fds ?? "", row.home_starter_fds ?? "", row.game_fds ?? "", row.calibration_cohort, row.snapshot_ts, row.calibration_status,
     row.away_expected_pitches ?? "", row.home_expected_pitches ?? "", row.away_workload_flags, row.home_workload_flags,
-    row.away_starter_quality, row.home_starter_quality, row.away_opponent_pressure, row.home_opponent_pressure];
+    row.away_starter_quality, row.home_starter_quality, row.away_opponent_pressure, row.home_opponent_pressure,
+    row.away_calibration_cohort, row.home_calibration_cohort,
+    row.away_cohort_observations ?? "", row.home_cohort_observations ?? "",
+    row.away_cohort_failures ?? "", row.home_cohort_failures ?? ""];
 }
 
 export async function computeAndWriteStarterSurvivalV2Shadow(
@@ -334,7 +351,7 @@ export async function computeAndWriteStarterSurvivalV2Shadow(
       .filter((row) => !protection?.protected_game_ids.has(row.game_id));
     let existing: unknown[][] = [];
     try {
-      existing = (await readRange(workbookId, `${STARTER_SURVIVAL_V2_HISTORY_SHEET}!A1:AN10000`)).values ?? [];
+      existing = (await readRange(workbookId, `${STARTER_SURVIVAL_V2_HISTORY_SHEET}!A1:AT10000`)).values ?? [];
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;

@@ -75,3 +75,11 @@ The system may store manual game truth, away/home/total views, preferred vehicle
 ## Calibration boundary
 
 No projection coefficient, threshold, or automatic manual-reasoning rule may be changed from these cases. First repair provenance, pass the August 10 and August 11 lifecycle regressions, gather clean prospective samples, and demonstrate repeated layer-specific error. Trust is earned separately for total environment, team allocation, starter survival, bullpen continuation, side selection, vehicle selection, and authorization.
+
+## SSAT evidence-family rule
+
+Treat SSAT v1 and SSAT v2 as one starter-survival evidence family until
+`STARTER_SURVIVAL_DIFFERENTIATION_AUDIT` has been reviewed and a later
+commissioning decision demonstrates material differentiation. State the base
+total beside the SSAT family range; do not count v1/v2 agreement as two
+independent confirmations of a game truth, vehicle, BET, or PASS.

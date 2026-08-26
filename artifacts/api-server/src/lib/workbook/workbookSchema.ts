@@ -87,8 +87,12 @@
  *  v33 (2026-08-26): conversion and game-truth replay diagnostics join only
  *      legitimate frozen pregame packets to official outcomes. They retain
  *      total/allocation/starter/bullpen mechanisms without changing live math.
+ *  v34 (2026-08-26): SSAT v1/v2 differentiation audit measures output
+ *      correlation, total deltas, repeated empirical probability profiles, and
+ *      cohort metadata. It is observational only; v1/v2 remain one evidence
+ *      family until a later commissioning decision proves otherwise.
  */
-export const WORKBOOK_SCHEMA_VERSION = 33;
+export const WORKBOOK_SCHEMA_VERSION = 34;
 
 export interface ColumnDef {
   name: string;
@@ -99,7 +103,7 @@ export interface ColumnDef {
   format?: string;
   readOnly?: boolean;
   description?: string;
-  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "MODULE_20a" | "MODULE_20b" | "MODULE_22" | "MODULE_23" | "MODULE_24" | "FORMULA" | "OPERATOR" | "SYSTEM";
+  filledBy?: "MODULE_05d" | "MODULE_08" | "MODULE_08b" | "MODULE_09" | "MODULE_09s" | "MODULE_09t" | "MODULE_09u" | "MODULE_09v" | "MODULE_10" | "MODULE_11" | "MODULE_12" | "MODULE_13" | "MODULE_14" | "MODULE_15" | "MODULE_16" | "MODULE_17" | "MODULE_18" | "MODULE_20" | "MODULE_20a" | "MODULE_20b" | "MODULE_22" | "MODULE_23" | "MODULE_24" | "FORMULA" | "OPERATOR" | "SYSTEM";
   exampleValue?: string;
 }
 
@@ -1923,6 +1927,49 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Home_Starter_Quality", index: 37, type: "number", width: 175, format: "0.0000", filledBy: "MODULE_09u", readOnly: true, description: "Existing FIP/K-BB starter quality captured without a new v2 coefficient." },
       { name: "Away_Opponent_Pressure", index: 38, type: "number", width: 190, format: "0.0000", filledBy: "MODULE_09u", readOnly: true, description: "Opponent offense rate times lineup factor faced by the away starter; capture-only until evidence supports use." },
       { name: "Home_Opponent_Pressure", index: 39, type: "number", width: 190, format: "0.0000", filledBy: "MODULE_09u", readOnly: true, description: "Opponent offense rate times lineup factor faced by the home starter; capture-only until evidence supports use." },
+      { name: "Away_Calibration_Cohort", index: 40, type: "string", width: 190, filledBy: "MODULE_09u", readOnly: true, description: "Exact empirical cohort selected for the away starter; recorded so the differentiation audit can expose generic-cohort reuse." },
+      { name: "Home_Calibration_Cohort", index: 41, type: "string", width: 190, filledBy: "MODULE_09u", readOnly: true, description: "Exact empirical cohort selected for the home starter; recorded so the differentiation audit can expose generic-cohort reuse." },
+      { name: "Away_Cohort_Observations", index: 42, type: "number", width: 180, format: "0", filledBy: "MODULE_09u", readOnly: true, description: "Count of strictly earlier settled observations in the away starter’s selected empirical cohort." },
+      { name: "Home_Cohort_Observations", index: 43, type: "number", width: 180, format: "0", filledBy: "MODULE_09u", readOnly: true, description: "Count of strictly earlier settled observations in the home starter’s selected empirical cohort." },
+      { name: "Away_Cohort_Failures", index: 44, type: "number", width: 155, format: "0", filledBy: "MODULE_09u", readOnly: true, description: "Observed workload failures in the away starter’s selected empirical cohort." },
+      { name: "Home_Cohort_Failures", index: 45, type: "number", width: 155, format: "0", filledBy: "MODULE_09u", readOnly: true, description: "Observed workload failures in the home starter’s selected empirical cohort." },
+    ],
+  },
+
+  {
+    name: "STARTER_SURVIVAL_DIFFERENTIATION_AUDIT",
+    description: "Observational SSAT v1/v2 differentiation audit. It measures output correlation, total deltas, repeated survival-probability profiles, cohort metadata, and descriptive input associations without changing either challenger or any live decision.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: [
+      { name: "Scope", index: 0, type: "string", width: 195, filledBy: "MODULE_09v", readOnly: true, description: "CURRENT_DATE or ALL_PROSPECTIVE_HISTORY; each scope is refreshed in place." },
+      { name: "Scope_Date", index: 1, type: "string", width: 125, filledBy: "MODULE_09v", readOnly: true },
+      { name: "Analysis_TS", index: 2, type: "string", width: 200, filledBy: "MODULE_09v", readOnly: true },
+      { name: "Eligible_Game_Count", index: 3, type: "number", width: 155, format: "0", filledBy: "MODULE_09v", readOnly: true, description: "Prospective v2 candidates with both frozen v1 and v2 totals." },
+      { name: "V1_V2_Pearson_R", index: 4, type: "number", width: 155, format: "0.0000", filledBy: "MODULE_09v", readOnly: true, description: "Descriptive total-output correlation only; blank when either series has no variation." },
+      { name: "Mean_Abs_V1_V2_Diff", index: 5, type: "number", width: 190, format: "0.0000", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Identical_Total_Count", index: 6, type: "number", width: 160, format: "0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Identical_Total_Pct", index: 7, type: "number", width: 145, format: "0.0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Within_0_10_Count", index: 8, type: "number", width: 150, format: "0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Within_0_10_Pct", index: 9, type: "number", width: 140, format: "0.0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Within_0_25_Count", index: 10, type: "number", width: 150, format: "0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Within_0_25_Pct", index: 11, type: "number", width: 140, format: "0.0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Within_0_50_Count", index: 12, type: "number", width: 150, format: "0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Within_0_50_Pct", index: 13, type: "number", width: 140, format: "0.0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Starter_Probability_Slot_Count", index: 14, type: "number", width: 205, format: "0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Unique_Survival_Probability_Count", index: 15, type: "number", width: 210, format: "0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Repeated_Probability_Group_Count", index: 16, type: "number", width: 210, format: "0", filledBy: "MODULE_09v", readOnly: true, description: "Groups reused across two or more distinct games." },
+      { name: "Repeated_Probability_Slot_Count", index: 17, type: "number", width: 205, format: "0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Repeated_Probability_Slot_Pct", index: 18, type: "number", width: 200, format: "0.0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Largest_Probability_Value", index: 19, type: "number", width: 175, format: "0.0000", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Largest_Probability_Starter_Count", index: 20, type: "number", width: 225, format: "0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Largest_Probability_Game_Count", index: 21, type: "number", width: 215, format: "0", filledBy: "MODULE_09v", readOnly: true },
+      { name: "Cohort_Metadata_Status", index: 22, type: "string", width: 185, filledBy: "MODULE_09v", readOnly: true, description: "COMPLETE, PARTIAL, UNAVAILABLE, or NOT_APPLICABLE. Legacy snapshots without cohort counts stay explicit gaps." },
+      { name: "Repeated_Probability_Profile_Summary", index: 23, type: "string", width: 650, filledBy: "MODULE_09v", readOnly: true, description: "Repeated probability values with starter-slot/game counts and frozen cohort size/failure provenance." },
+      { name: "Starter_Quality_Probability_R", index: 24, type: "number", width: 205, format: "0.0000", filledBy: "MODULE_09v", readOnly: true, description: "Descriptive association only; it does not prove a v2 quality weight." },
+      { name: "Opponent_Pressure_Probability_R", index: 25, type: "number", width: 220, format: "0.0000", filledBy: "MODULE_09v", readOnly: true, description: "Descriptive association only; it does not prove an opponent-pressure weight." },
+      { name: "Analysis_Status", index: 26, type: "string", width: 190, filledBy: "MODULE_09v", readOnly: true },
+      { name: "Interpretation", index: 27, type: "string", width: 600, filledBy: "MODULE_09v", readOnly: true, description: "Static commissioning rule: v1/v2 are one SSAT evidence family until an explicit future decision demonstrates material differentiation." },
     ],
   },
 

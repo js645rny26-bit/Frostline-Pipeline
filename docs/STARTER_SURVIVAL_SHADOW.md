@@ -62,3 +62,17 @@ v2 records `INSUFFICIENT_EMPIRICAL_HISTORY` rather than manufacturing a number.
 
 The v2 settlement report compares base, preserved v1, and v2 separately. No
 candidate may promote itself into a projection, vehicle, market, or decision.
+
+## V1/V2 differentiation audit
+
+`STARTER_SURVIVAL_DIFFERENTIATION_AUDIT` is the required check against treating
+two related SSAT outputs as independent confirmation. It records total-output
+correlation and distance, the shares within 0.10/0.25/0.50 runs, repeated
+survival-probability profiles across distinct games, frozen cohort provenance,
+and descriptive quality/pressure associations.
+
+Until a future commissioning review demonstrates material differentiation,
+v1 and v2 are **one SSAT evidence family**. Manual review should describe the
+base total and SSAT family range, never count v1/v2 agreement as two separate
+votes. The audit contains no automatic retirement threshold and cannot alter
+projections, vehicles, market handling, BET/PASS, or authorization.

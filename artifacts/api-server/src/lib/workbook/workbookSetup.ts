@@ -62,7 +62,6 @@ function headerCell(text: string, bgColor: { red: number; green: number; blue: n
     },
   };
 }
-
 function numberFormatForType(col: ColumnDef): { type: string; pattern: string } | null {
   switch (col.type) {
     case "date":
@@ -316,7 +315,8 @@ export async function repairWorkbookSchemaReference(
       + "v30 (2026-08-24): COLLISION_REPLAY_V1 compares preserved base, xwOBA, traffic, damage, tail-only, and combined shadow candidates; it remains entirely non-operational. "
       + "v31 (2026-08-24): MONOTONICITY_V2 and MONOTONICITY_V2_REPLAY pool nearby frozen edge observations for shadow calibration; UNVERIFIED is not a blocker and V1 authorization remains unchanged. "
         + "v32 (2026-08-25): OPERATOR_EVIDENCE_OVERLAY and FULL_LADDER_AUDIT preserve timestamped field-level operator evidence and price-blind manual total-ladder reads; allocation, starter-dimension, bullpen-timing, and ladder settlement diagnostics are observational only. "
-        + "v33 (2026-08-26): GAME_TRUTH_REPLAY_V1 and CONVERSION_SETTLEMENT_DIAGNOSTICS join only frozen packets to official outcomes, separating total center, allocation, starter dimensions, traffic/damage/conversion, and bullpen timing without changing live math."],
+        + "v33 (2026-08-26): GAME_TRUTH_REPLAY_V1 and CONVERSION_SETTLEMENT_DIAGNOSTICS join only frozen packets to official outcomes, separating total center, allocation, starter dimensions, traffic/damage/conversion, and bullpen timing without changing live math. "
+        + "v34 (2026-08-26): STARTER_SURVIVAL_DIFFERENTIATION_AUDIT measures whether SSAT v2 is materially distinct from v1; both remain one evidence family until later commissioning review."],
     ["Workbook_Purpose",    "Frostline Pipeline — MLB totals projection and DA-1.1.0 BET/PASS decision publication."],
     ["Operator_Columns",    "Cells highlighted amber are operator-editable. All other cells are pipeline-maintained — do not edit."],
     ["Decision_Doctrine",   "Decision vocabulary is BET | PASS. CORE / NO_CORE remain historical compatibility values in legacy ledgers only."],
@@ -326,7 +326,8 @@ export async function repairWorkbookSchemaReference(
     ["Efficient_Read_Order", "RUN_LOG → DAILY_MATCHUPS/TODAY_LINEUPS/BULLPEN_USAGE_DAILY/RUN_ENVIRONMENT → GAME_SUMMARY/GAME_INTEGRATION → STATCAST_SHADOW_AUDIT → SLATE_INPUT → SLATE_BOARD → ACTIVE_BOARD_SNAPSHOT → DECISION_AUDIT_LOG."],
     ["Tentative_Total_Range", "Use min/max of GAME_SUMMARY.Projected_Total_Runs and STATCAST_SHADOW_AUDIT.Estimated_Projection as the ordinary tentative decision range. LOW_CENTER_VOLATILITY is a separate shadow-only distribution warning: inspect its challenger and upper-tail band during manual review, but neither may authorize or change a wager."],
     ["Starter_Survival_Shadow", "STARTER_SURVIVAL_CALIBRATION_HISTORY records a separate four-state workload challenger. Its temporary probability is clamp(Projected_Starter_Innings / 9, 0, 1). Treat its branch totals and FDS as manual-review evidence only; they cannot change the active total, vehicle, market, CORE/NO CORE decision, or authorization."],
-    ["Starter_Survival_V2_Shadow", "STARTER_SURVIVAL_V2_CALIBRATION_HISTORY is a separate empirical challenger. It uses strictly earlier settled starter survival and shortfall evidence; it never silently reuses the v1 Projected_Innings/9 proxy. Missing empirical history is an explicit gap, never a backfilled candidate."],
+    ["Starter_Survival_V2_Shadow", "STARTER_SURVIVAL_V2_CALIBRATION_HISTORY is a separate empirical challenger. It uses strictly earlier settled starter survival and shortfall evidence; it never silently reuses the v1 Projected_Innings/9 proxy. Missing empirical history is an explicit gap, never a backfilled candidate. Until the differentiation audit demonstrates otherwise, read V1/V2 as one SSAT evidence family, not two independent confirmations."],
+    ["Starter_Survival_Differentiation", "STARTER_SURVIVAL_DIFFERENTIATION_AUDIT measures V1/V2 correlation and total distance, repeated survival-probability profiles across distinct games, cohort size/failure provenance, and descriptive quality/pressure association. It is observational only and cannot promote, retire, or alter either challenger automatically."],
     ["Collision_Calibration", "COLLISION_CALIBRATION_HISTORY freezes the actual pre-first-pitch Statcast collision candidate. SOURCE_UNAVAILABLE and INSUFFICIENT_INPUT never mean neutral zero; COLLISION_CALIBRATION_REPORT grades only preserved available candidates after settlement. Neither sheet may change the active projection, vehicle, market, or authorization."],
     ["Pregame_Packet_History", "PREGAME_PACKET_HISTORY is the complete provenance packet for every legitimate pregame model state: allocation, market, starter/bullpen, lineup, environment, collision, low-center, and starter-survival evidence. It is written before VEHICLE_LOG. OPEN_PROSPECTIVE updates only before first pitch; FROZEN_PREGAME is never overwritten. A missing market remains MARKET_SNAPSHOT_MISSING, never a later substitute."],
     ["Operator_Evidence", "OPERATOR_EVIDENCE_OVERLAY accepts one explicit timestamped MANUAL_OPERATOR field per row. It is authoritative only for that supplied field, is captured in PREGAME_PACKET_HISTORY, and requires human reauthorization/review; it never silently changes active projection math."],

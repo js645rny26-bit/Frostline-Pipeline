@@ -62,3 +62,10 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 
 - **Doubleheaders share one game ID**, so odds, umpire, and platoon joins collapse to a single entry for both games. Handle DH days manually until the ID format is extended.
 - Column dictionary lives in the SCHEMA_REFERENCE tab (generated from the code schema). Version history: **v1** initial workbook · **v2** (2026-07-23) totals expansion — starter outings, umpires, season stats, line movement, platoon, bullpen tiers, ODDS_HISTORY.
+
+## SSAT family reading
+
+Treat SSAT v1 and v2 as one starter-survival evidence family until the
+`STARTER_SURVIVAL_DIFFERENTIATION_AUDIT` demonstrates material differentiation
+through commissioning review. Read the base projection beside the SSAT family
+range; do not count v1/v2 agreement as separate confirmation.
