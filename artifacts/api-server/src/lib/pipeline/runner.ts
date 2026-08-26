@@ -1030,7 +1030,8 @@ export async function runDailySettlement(
       errors.push(`postgame_diagnostics: ${msg}`);
       return {
         status: "failure", date, allocation_rows_written: 0, starter_rows_written: 0,
-        timing_rows_written: 0, ladder_rows_written: 0, frozen_packet_games: 0,
+          timing_rows_written: 0, conversion_rows_written: 0, game_truth_rows_written: 0,
+          ladder_rows_written: 0, frozen_packet_games: 0,
         warnings: [], errors: [msg],
       };
     },

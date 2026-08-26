@@ -9,7 +9,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
 
-**Schema v32 · updated 2026-08-25 · operational procedure; exact fields live in `SCHEMA_REFERENCE`.**
+**Schema v33 · updated 2026-08-26 · operational procedure; exact fields live in `SCHEMA_REFERENCE`.**
 
 ## Daily sequence (all times ET)
 
@@ -40,8 +40,8 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - **You:** trigger the three publishes above; own SLATE_INPUT O–W.
 - **Settlement:** run the daily settlement workflow for the completed slate
   date. It reads frozen packets only and adds allocation, starter-dimension,
-  bullpen-timing, and ladder diagnostics; it must never rerun mutable pregame
-  calculation for that date.
+  traffic/damage/conversion, bullpen-timing, game-truth replay, and ladder
+  diagnostics; it must never rerun mutable pregame calculation for that date.
 - **Warning:** the Notes columns in DAILY_MATCHUPS (col Y) and BULLPEN_USAGE_DAILY (col I) are **cleared on every publish**. Durable notes belong in SLATE_INPUT.
 
 ## Source authority (when feeds disagree or fail)

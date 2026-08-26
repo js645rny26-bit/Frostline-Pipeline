@@ -84,8 +84,11 @@
  *      history, allocation, starter-dimension, bullpen-timing, and
  *      full-ladder settlement diagnostics. All new surfaces are observational
  *      and consume only frozen pregame packets plus official final data.
+ *  v33 (2026-08-26): conversion and game-truth replay diagnostics join only
+ *      legitimate frozen pregame packets to official outcomes. They retain
+ *      total/allocation/starter/bullpen mechanisms without changing live math.
  */
-export const WORKBOOK_SCHEMA_VERSION = 32;
+export const WORKBOOK_SCHEMA_VERSION = 33;
 
 export interface ColumnDef {
   name: string;
@@ -179,6 +182,7 @@ const STARTER_OUTCOME_DIAGNOSTIC_COLUMN_NAMES = [
   "Contact_Data_Status", "xBA", "Hard_Hit_Pct", "Balls_In_Play", "Damage_Data_Status",
   "HR", "Barrels", "XBH", "Run_Prevention_Data_Status", "R", "ER", "Starter_Window_Runs_Allowed", "K", "Whiffs",
   "Starter_Exit_Inning", "Diagnostic_Status", "Settlement_TS",
+  "Command_Traffic_Result", "Contact_Result", "Damage_Result", "Run_Prevention_Result", "Starter_Path_Summary",
 ] as const;
 const BULLPEN_TIMING_DIAGNOSTIC_COLUMN_NAMES = [
   "Date", "Game_ID", "Away_Team", "Home_Team", "Away_Starter_Exit_Inning", "Home_Starter_Exit_Inning",
@@ -187,12 +191,33 @@ const BULLPEN_TIMING_DIAGNOSTIC_COLUMN_NAMES = [
   "Away_Runs_1_3", "Away_Runs_4_6", "Away_Runs_7Plus", "Away_Extra_Inning_Runs",
   "Home_Runs_1_3", "Home_Runs_4_6", "Home_Runs_7Plus", "Home_Extra_Inning_Runs",
   "Timing_Granularity", "Diagnostic_Status", "Settlement_TS",
+  "Frozen_Bullpen_Data_Status", "Expected_Leverage_Bridge_Status", "Away_Bullpen_Chain", "Home_Bullpen_Chain",
+  "Away_First_Reliever", "Home_First_Reliever", "Away_First_Reliever_Entry_Inning", "Home_First_Reliever_Entry_Inning",
+  "Away_Starter_Exit_vs_Expected", "Home_Starter_Exit_vs_Expected", "Bullpen_Deployment_Status",
 ] as const;
 const FULL_LADDER_SETTLEMENT_COLUMN_NAMES = [
   "Date", "Game_ID", "Directional_Truth", "Available_Line", "Actual_Total", "Counterfactual_Result",
   "Is_Preferred_Vehicle", "Selected_Vehicle_Result", "Adjacent_Lower_Line_Result", "Adjacent_Higher_Line_Result",
   "Tighter_Line_Also_Captured", "Wider_Line_Required", "All_Reasonable_Vehicles_Failed",
   "Vehicle_Grade", "Ticket_Status", "Current_Price", "Reasoning_Source", "Diagnostic_Status", "Settlement_TS",
+] as const;
+const CONVERSION_SETTLEMENT_DIAGNOSTIC_COLUMN_NAMES = [
+  "Date", "Game_ID", "Team_Side", "Team", "Frozen_Packet_Snapshot_TS", "Frozen_Team_Projection",
+  "Frozen_Collision_Status", "Frozen_Collision_Traffic_Estimate", "Frozen_Collision_Damage_Estimate",
+  "Actual_Runs", "Hits", "BB", "HBP", "Baserunners", "HR", "XBH", "Runs_Per_Baserunner",
+  "Contact_Data_Status", "xBA", "Hard_Hit_Pct", "Pregame_Traffic_Signal_Status", "Traffic_Conversion_Flag",
+  "Conversion_Outcome", "Diagnostic_Status", "Settlement_TS",
+] as const;
+const GAME_TRUTH_REPLAY_V1_COLUMN_NAMES = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Frozen_Packet_Snapshot_TS",
+  "Frozen_Projected_Away_Runs", "Frozen_Projected_Home_Runs", "Frozen_Projected_Total",
+  "Actual_Away_Runs", "Actual_Home_Runs", "Actual_Total", "Total_Error", "Total_Abs_Error", "Allocation_MAE",
+  "Projected_Higher_Scoring_Team", "Actual_Higher_Scoring_Team", "Allocation_Sign_Reversal", "Allocation_Rank_Reversal",
+  "Allocation_Observed_Mechanism", "Allocation_Reason_Tags", "Away_Starter_Path", "Home_Starter_Path",
+  "Away_Starter_Window_Runs_Allowed", "Home_Starter_Window_Runs_Allowed", "Away_Bullpen_Runs_Allowed", "Home_Bullpen_Runs_Allowed",
+  "Starter_Window_Runs_Total", "Bullpen_Window_Runs_Total", "Primary_Scoring_Mechanism", "Both_Starter_And_Bullpen_Contributed",
+  "Away_Conversion_Outcome", "Home_Conversion_Outcome", "Frozen_Collision_Status", "Frozen_Collision_Traffic_Estimate",
+  "Frozen_Collision_Damage_Estimate", "Replay_Status", "Settlement_TS",
 ] as const;
 
 function diagnosticColumns(
@@ -1256,12 +1281,36 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
 
   {
     name: "BULLPEN_TIMING_DIAGNOSTICS",
-    description: "One legitimate settled game row with starter-exit, starter-window, bullpen, early/middle/late, and extra-inning scoring shape. Raw timing evidence only; it does not create bullpen-quality coefficients.",
+    description: "One legitimate settled game row with starter-exit, starter-window, bullpen, early/middle/late, extra-inning scoring, and actual bullpen-chain shape. A named pregame bridge remains explicitly not evaluable unless frozen. Raw timing evidence only; it does not create bullpen-quality coefficients.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(
       BULLPEN_TIMING_DIAGNOSTIC_COLUMN_NAMES,
-      ["Away_Starter_Exit_Inning", "Home_Starter_Exit_Inning", "Away_Starter_Window_Runs_Allowed", "Home_Starter_Window_Runs_Allowed", "Away_Bullpen_Runs_Allowed", "Home_Bullpen_Runs_Allowed", "Away_Runs_1_3", "Away_Runs_4_6", "Away_Runs_7Plus", "Away_Extra_Inning_Runs", "Home_Runs_1_3", "Home_Runs_4_6", "Home_Runs_7Plus", "Home_Extra_Inning_Runs"],
+      ["Away_Starter_Exit_Inning", "Home_Starter_Exit_Inning", "Away_Starter_Window_Runs_Allowed", "Home_Starter_Window_Runs_Allowed", "Away_Bullpen_Runs_Allowed", "Home_Bullpen_Runs_Allowed", "Away_Runs_1_3", "Away_Runs_4_6", "Away_Runs_7Plus", "Away_Extra_Inning_Runs", "Home_Runs_1_3", "Home_Runs_4_6", "Home_Runs_7Plus", "Home_Extra_Inning_Runs", "Away_First_Reliever_Entry_Inning", "Home_First_Reliever_Entry_Inning"],
+      "MODULE_24",
+    ),
+  },
+
+  {
+    name: "CONVERSION_SETTLEMENT_DIAGNOSTICS",
+    description: "Two rows per legitimate settled packet, one per offense. Preserves hits, walks/HBP, baserunners, damage, realized runs, and the frozen collision signal so access can be separated from conversion without creating a run coefficient.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      CONVERSION_SETTLEMENT_DIAGNOSTIC_COLUMN_NAMES,
+      ["Frozen_Team_Projection", "Frozen_Collision_Traffic_Estimate", "Frozen_Collision_Damage_Estimate", "Actual_Runs", "Hits", "BB", "HBP", "Baserunners", "HR", "XBH", "Runs_Per_Baserunner", "xBA", "Hard_Hit_Pct"],
+      "MODULE_24",
+    ),
+  },
+
+  {
+    name: "GAME_TRUTH_REPLAY_V1",
+    description: "One strictly frozen-packet postgame replay row per legitimate settled game. Joins total/allocation error, starter dimensions, bullpen timing, conversion outcomes, and observed allocation mechanism without producing a replacement projection or decision score.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      GAME_TRUTH_REPLAY_V1_COLUMN_NAMES,
+      ["Frozen_Projected_Away_Runs", "Frozen_Projected_Home_Runs", "Frozen_Projected_Total", "Actual_Away_Runs", "Actual_Home_Runs", "Actual_Total", "Total_Error", "Total_Abs_Error", "Allocation_MAE", "Away_Starter_Window_Runs_Allowed", "Home_Starter_Window_Runs_Allowed", "Away_Bullpen_Runs_Allowed", "Home_Bullpen_Runs_Allowed", "Starter_Window_Runs_Total", "Bullpen_Window_Runs_Total", "Frozen_Collision_Traffic_Estimate", "Frozen_Collision_Damage_Estimate"],
       "MODULE_24",
     ),
   },
