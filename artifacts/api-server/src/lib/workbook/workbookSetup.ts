@@ -356,7 +356,8 @@ export async function repairWorkbookSchemaReference(
         "v33 (2026-08-26): GAME_TRUTH_REPLAY_V1 and CONVERSION_SETTLEMENT_DIAGNOSTICS join only frozen packets to official outcomes, separating total center, allocation, starter dimensions, traffic/damage/conversion, and bullpen timing without changing live math. " +
         "v34 (2026-08-26): STARTER_SURVIVAL_DIFFERENTIATION_AUDIT measures whether SSAT v2 is materially distinct from v1; both remain one evidence family until later commissioning review. " +
         "v35 (2026-08-26): active team-run math now separates central starter quality, exact lineup-pitcher traffic/damage conversion, bounded effective starter workload, and resulting bullpen exposure. The same fields freeze in the pregame packet; no new shadow surface was added. " +
-        "v36 (2026-08-27): active offense center is league-anchored and uses exact lineup quality; recent realized scoring is capped as form. FIP/ERA owns starter run prevention, while command/traffic and HR/damage are applied once in their own paths. New center fields freeze with the same pregame packet.",
+        "v36 (2026-08-27): active offense center is league-anchored and uses exact lineup quality; recent realized scoring is capped as form. FIP/ERA owns starter run prevention, while command/traffic and HR/damage are applied once in their own paths. New center fields freeze with the same pregame packet. " +
+        "v37 (2026-08-27): BULLPEN_USAGE_DAILY uses MLB Starting Nine as the daily availability and five-day pitch-count source; Inside The Pen only enriches matched seven-day innings history and never replaces explicit daily availability.",
     ],
     [
       "Workbook_Purpose",

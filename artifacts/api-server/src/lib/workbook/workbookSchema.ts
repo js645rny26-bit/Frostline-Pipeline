@@ -100,8 +100,11 @@
  *      not the center itself. Starter quality is FIP/ERA-only; traffic and
  *      damage are de-duplicated and traffic must earn direct runs through
  *      conversion evidence. Center components freeze in the pregame packet.
+ *  v37 (2026-08-27): BULLPEN_USAGE_DAILY preserves MLB Starting Nine's
+ *      explicit daily availability, L5 appearances, five-day pitch-count map,
+ *      source identity, and source snapshot alongside seven-day inning history.
  */
-export const WORKBOOK_SCHEMA_VERSION = 36;
+export const WORKBOOK_SCHEMA_VERSION = 37;
 
 export interface ColumnDef {
   name: string;
@@ -1482,6 +1485,88 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         filledBy: "MODULE_08",
         description: "ERA tier: A <3.20, B <4.00, C <5.00, D otherwise",
         exampleValue: "A",
+      },
+      {
+        name: "Availability_Status",
+        index: 12,
+        type: "string",
+        width: 120,
+        filledBy: "MODULE_08",
+        description: "Explicit daily report status: AVAILABLE, TIRED, UNAVAILABLE, or UNKNOWN fallback",
+        exampleValue: "AVAILABLE",
+      },
+      {
+        name: "Appearances_Last_5",
+        index: 13,
+        type: "number",
+        width: 120,
+        format: "0",
+        filledBy: "MODULE_08",
+        description: "Relief appearances in the report's five-day workload window",
+        exampleValue: "3",
+      },
+      {
+        name: "Pitches_Yesterday",
+        index: 14,
+        type: "number",
+        width: 115,
+        format: "0",
+        filledBy: "MODULE_08",
+        exampleValue: "18",
+      },
+      {
+        name: "Pitches_2_Days_Ago",
+        index: 15,
+        type: "number",
+        width: 125,
+        format: "0",
+        filledBy: "MODULE_08",
+        exampleValue: "15",
+      },
+      {
+        name: "Pitches_3_Days_Ago",
+        index: 16,
+        type: "number",
+        width: 125,
+        format: "0",
+        filledBy: "MODULE_08",
+        exampleValue: "",
+      },
+      {
+        name: "Pitches_4_Days_Ago",
+        index: 17,
+        type: "number",
+        width: 125,
+        format: "0",
+        filledBy: "MODULE_08",
+        exampleValue: "20",
+      },
+      {
+        name: "Pitches_5_Days_Ago",
+        index: 18,
+        type: "number",
+        width: 125,
+        format: "0",
+        filledBy: "MODULE_08",
+        exampleValue: "",
+      },
+      {
+        name: "Workload_Source",
+        index: 19,
+        type: "string",
+        width: 185,
+        filledBy: "MODULE_08",
+        description: "MLBSTARTINGNINE_BULLPEN_REPORT primary, or INSIDETHEPEN_FALLBACK",
+        exampleValue: "MLBSTARTINGNINE_BULLPEN_REPORT",
+      },
+      {
+        name: "Source_Snapshot_TS",
+        index: 20,
+        type: "string",
+        width: 185,
+        filledBy: "MODULE_08",
+        description: "UTC timestamp when the daily workload source was fetched",
+        exampleValue: "2026-08-27T15:00:00.000Z",
       },
     ],
   },

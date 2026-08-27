@@ -9,7 +9,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
 
-**Schema v36 - updated 2026-08-27 - active offensive center uses lineup quality plus bounded recent form; exact fields live in SCHEMA_REFERENCE.**
+**Schema v37 - updated 2026-08-27 - active offensive center uses lineup quality plus bounded recent form; daily bullpen availability and five-day pitch workload use MLB Starting Nine. Exact fields live in SCHEMA_REFERENCE.**
 
 ## Daily sequence (all times ET)
 
@@ -50,6 +50,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - **Odds:** consensus total = most common point across all books (median as tiebreak); the source book is recorded per game. Movement = current − first snapshot of the day. Each publish spends 1 Odds API request — remaining quota is printed in the run logs.
 - **Weather:** weathermlb.com daily file. If it isn't published yet, the run uses neutral defaults and flags Weather_Source — treat run environment as low-confidence.
 - **Lineups:** `official` beats `projected` — the status is per game in TODAY_LINEUPS. Platoon numbers are computed from whatever lineup is posted.
+- **Bullpen workload:** MLB Starting Nine's daily `AVAILABLE` / `TIRED` / `UNAVAILABLE` report and five-day pitch map are authoritative for usable-arm state. Inside The Pen may enrich matched seven-day innings history but cannot override that daily status.
 - **Umpires:** MLB boxscore assignments only. Blank before ~noon ET is normal, not an error.
 - **Pitcher/team stats:** MLB Stats API, regular-season splits only.
 

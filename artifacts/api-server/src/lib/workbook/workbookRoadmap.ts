@@ -56,11 +56,11 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "PREGAME_INPUT",
     timing: "Every publish (Module 08)",
     purpose:
-      "Reliever usage, availability, workload, and bullpen quality context.",
+      "Daily reliever availability, five-day pitch workload, matched seven-day innings history, and bullpen quality context.",
     boardRelationship:
       "Feeds Module 09 bullpen innings and continuation components.",
     readNote:
-      "Read role importance and workload together; the Notes column is not durable.",
+      "Start with explicit AVAILABLE/TIRED/UNAVAILABLE status and the five-day pitch map. Inside The Pen is innings-history fallback only; Notes are not durable.",
   },
   {
     sheet: "RUN_ENVIRONMENT",

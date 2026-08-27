@@ -590,12 +590,17 @@ function computeTeamBullpenERA(
   relievers: RelieverStat[],
   statsMap: Map<number, PitcherSeasonStats>,
 ): number | null {
-  const available = relievers.filter(
-    (r) =>
-      r.team_abbr === teamAbbr &&
-      r.days_rest >= 1 &&
-      r.role !== "HIGH_WORKLOAD",
-  );
+  const available = relievers.filter((r) => {
+    if (r.team_abbr !== teamAbbr) return false;
+    // The Starting Nine report directly declares whether an arm is usable
+    // today. Preserve that richer state instead of replacing it with a
+    // generic days-rest / workload heuristic. Legacy fallback rows retain
+    // the prior logic because they have no explicit availability status.
+    if (r.workload_source === "MLBSTARTINGNINE_BULLPEN_REPORT") {
+      return r.availability_status === "AVAILABLE";
+    }
+    return r.days_rest >= 1 && r.role !== "HIGH_WORKLOAD";
+  });
 
   let weightedERASum = 0;
   let totalWeight = 0;
@@ -604,7 +609,8 @@ function computeTeamBullpenERA(
     if (!r.player_id) continue;
     const era = statsMap.get(r.player_id)?.era;
     if (era === null || era === undefined) continue;
-    const weight = Math.max(0.1, r.innings_last_7);
+    const workloadWeight = r.innings_last_7 > 0 ? r.innings_last_7 : r.games_last_7;
+    const weight = Math.max(0.1, workloadWeight);
     weightedERASum += clampERA(era) * weight;
     totalWeight += weight;
   }

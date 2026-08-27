@@ -1,13 +1,24 @@
 /**
  * Module 04b: Bullpen Usage
- * Scrapes https://insidethepen.com/bullpen-usage.html — all 30 teams in one
- * server-side-rendered page. Extracts per-reliever last-7-day IP, appearances,
- * days rest, and last outing date. No API key required.
+ * Primary: https://mlbstartingnine.com/reports/bullpens/ — all 30 teams in a
+ * server-rendered report with MLB player IDs, availability, L5 appearances,
+ * and a five-day pitch-count heat map.
+ *
+ * Secondary: insidethepen.com keeps the prior last-seven-day innings history
+ * available when its rows can be matched by MLB ID. The daily Starting Nine
+ * status and pitch counts remain authoritative whenever present.
  */
 
 import { logger } from "../../lib/logger.js";
+import { SOURCE_MAPPINGS } from "./config.js";
 
-const SOURCE_URL = "https://insidethepen.com/bullpen-usage.html";
+const STARTING_NINE_REPORT_URL = "https://mlbstartingnine.com/reports/bullpens/";
+const INSIDE_THE_PEN_URL = "https://insidethepen.com/bullpen-usage.html";
+
+export type BullpenAvailability = "AVAILABLE" | "TIRED" | "UNAVAILABLE" | "UNKNOWN";
+export type BullpenWorkloadSource =
+  | "MLBSTARTINGNINE_BULLPEN_REPORT"
+  | "INSIDETHEPEN_FALLBACK";
 
 // ─── Canonical abbr mapping (insidethepen → our SOURCE_MAPPINGS keys) ─────────
 const SITE_ABBR_MAP: Record<string, string> = {
@@ -31,6 +42,16 @@ export interface RelieverStat {
   last_outing_date: string | null;
   role: string;
   notes: string;
+  /** Daily source availability, never inferred from generic days-rest logic. */
+  availability_status: BullpenAvailability;
+  appearances_last_5: number | null;
+  pitches_yesterday: number | null;
+  pitches_2_days_ago: number | null;
+  pitches_3_days_ago: number | null;
+  pitches_4_days_ago: number | null;
+  pitches_5_days_ago: number | null;
+  workload_source: BullpenWorkloadSource;
+  source_snapshot_utc: string | null;
 }
 
 export interface BullpenResult {
@@ -40,6 +61,8 @@ export interface BullpenResult {
   teams_fetched: number;
   teams_failed: number;
   errors: string[];
+  primary_source: BullpenWorkloadSource | null;
+  source_snapshot_utc: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -70,6 +93,116 @@ function deriveRole(inningsPerGame: number, games7: number): string {
   return "RELIEF";
 }
 
+function stripHtml(raw: string): string {
+  return raw
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseNumericCell(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const cleaned = stripHtml(raw).replace(/,/g, "");
+  if (!cleaned || cleaned === "-") return null;
+  const value = Number(cleaned);
+  return Number.isFinite(value) ? value : null;
+}
+
+function isoDateDaysBefore(date: string, days: number): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const parsed = new Date(`${date}T12:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate() - days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function buildStartingNineTeamSlugMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const { canonical_abbr, full_name } of Object.values(SOURCE_MAPPINGS)) {
+    map.set(full_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), canonical_abbr);
+  }
+  // The site uses the current short franchise identity for the Athletics.
+  map.set("athletics", "OAK");
+  return map;
+}
+
+const STARTING_NINE_TEAM_SLUGS = buildStartingNineTeamSlugMap();
+
+/**
+ * Parses the public MLB Starting Nine bullpen report without relying on its
+ * expand/collapse JavaScript. The full heat-map tables are server rendered.
+ */
+export function parseMlbStartingNineBullpenHtml(
+  html: string,
+  date: string,
+  snapshotUtc: string,
+): RelieverStat[] {
+  const groupStarts = [...html.matchAll(/<tbody\s+class="team-group"[^>]*>/g)];
+  const relievers: RelieverStat[] = [];
+
+  for (let index = 0; index < groupStarts.length; index++) {
+    const start = groupStarts[index]!.index!;
+    const end = groupStarts[index + 1]?.index ?? html.length;
+    const groupHtml = html.slice(start, end);
+    const slug = groupHtml.match(/data-bs-target="#collapse-([^"]+)"/)?.[1] ?? "";
+    const teamAbbr = STARTING_NINE_TEAM_SLUGS.get(slug);
+    if (!teamAbbr) continue;
+
+    const heatMapAt = groupHtml.indexOf("5-Day Pitch Count Heat Map");
+    if (heatMapAt < 0) continue;
+    const heatMapHtml = groupHtml.slice(heatMapAt);
+
+    for (const rowMatch of heatMapHtml.matchAll(/<tr\s+class="bg-white"[^>]*>([\s\S]*?)<\/tr>/g)) {
+      const rowHtml = rowMatch[1]!;
+      const cells = [...rowHtml.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((match) => match[1]!);
+      if (cells.length < 10) continue;
+
+      const name = cells[0] ? stripHtml(cells[0]) : "";
+      const playerIdRaw = rowHtml.match(/\/people\/(\d+)\/headshot/i)?.[1];
+      const playerId = playerIdRaw ? Number(playerIdRaw) : null;
+      const availability = stripHtml(cells[3] ?? "").toUpperCase();
+      const availabilityStatus: BullpenAvailability =
+        availability === "AVAILABLE" || availability === "TIRED" || availability === "UNAVAILABLE"
+          ? availability
+          : "UNKNOWN";
+      const appearancesLast5 = parseNumericCell(cells[4]);
+      const pitches = [5, 6, 7, 8, 9].map((cellIndex) => parseNumericCell(cells[cellIndex]));
+      const firstRecentAppearance = pitches.findIndex((pitchesOnDay) => pitchesOnDay !== null && pitchesOnDay > 0);
+      // Preserve the established Days_Rest convention: a pitcher used
+      // yesterday has one day between his last outing and this slate date.
+      const daysRest = firstRecentAppearance >= 0 ? firstRecentAppearance + 1 : 6;
+      const lastOutingDate = firstRecentAppearance >= 0
+        ? isoDateDaysBefore(date, firstRecentAppearance + 1)
+        : null;
+
+      if (!name || !playerId || !Number.isFinite(playerId)) continue;
+      relievers.push({
+        player_id: playerId,
+        full_name: name,
+        team_abbr: teamAbbr,
+        innings_last_7: 0,
+        games_last_7: appearancesLast5 ?? 0,
+        days_rest: daysRest,
+        last_outing_date: lastOutingDate,
+        role: deriveRole(0, appearancesLast5 ?? 0),
+        notes: `Availability: ${availabilityStatus}; L5 pitches: ${pitches.map((value) => value ?? "-").join("/")}`,
+        availability_status: availabilityStatus,
+        appearances_last_5: appearancesLast5,
+        pitches_yesterday: pitches[0] ?? null,
+        pitches_2_days_ago: pitches[1] ?? null,
+        pitches_3_days_ago: pitches[2] ?? null,
+        pitches_4_days_ago: pitches[3] ?? null,
+        pitches_5_days_ago: pitches[4] ?? null,
+        workload_source: "MLBSTARTINGNINE_BULLPEN_REPORT",
+        source_snapshot_utc: snapshotUtc,
+      });
+    }
+  }
+
+  return relievers;
+}
+
 // ─── HTML parsing ─────────────────────────────────────────────────────────────
 
 interface TeamBlock {
@@ -95,7 +228,7 @@ function parseDateHeader(raw: string, year: string): string {
   return `${year}-${months[m[1]!] ?? "01"}-${m[2]!.padStart(2, "0")}`;
 }
 
-function parseHtml(html: string, runDate: string): TeamBlock[] {
+function parseInsideThePenHtml(html: string, runDate: string): TeamBlock[] {
   const year = runDate.slice(0, 4);
   const blocks: TeamBlock[] = [];
 
@@ -153,7 +286,7 @@ function parseHtml(html: string, runDate: string): TeamBlock[] {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export async function fetchBullpenUsage(
+async function fetchInsideThePenUsage(
   date: string,
   _teamIds: number[] = [],   // kept for interface compatibility; unused — scraper gets all 30
 ): Promise<BullpenResult> {
@@ -166,13 +299,15 @@ export async function fetchBullpenUsage(
     teams_fetched: 0,
     teams_failed: 0,
     errors: [],
+    primary_source: "INSIDETHEPEN_FALLBACK",
+    source_snapshot_utc: null,
   };
 
   let html: string;
   try {
     const ctrl  = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15_000);
-    const res   = await fetch(SOURCE_URL, {
+    const res   = await fetch(INSIDE_THE_PEN_URL, {
       signal: ctrl.signal,
       headers: { "User-Agent": "Mozilla/5.0 (compatible; FrostlinePipeline/1.0)" },
     });
@@ -185,7 +320,7 @@ export async function fetchBullpenUsage(
     return { ...result, status: "failure", errors: [`Fetch: ${msg}`] };
   }
 
-  const blocks = parseHtml(html, date);
+  const blocks = parseInsideThePenHtml(html, date);
   logger.info({ blocks: blocks.length }, "MODULE_04b: Team blocks parsed");
 
   if (blocks.length === 0) {
@@ -226,6 +361,15 @@ export async function fetchBullpenUsage(
         last_outing_date: lastDate,
         role:             deriveRole(ipPerGame, gamesTotal),
         notes:            "",
+        availability_status: "UNKNOWN",
+        appearances_last_5: gamesTotal,
+        pitches_yesterday: null,
+        pitches_2_days_ago: null,
+        pitches_3_days_ago: null,
+        pitches_4_days_ago: null,
+        pitches_5_days_ago: null,
+        workload_source: "INSIDETHEPEN_FALLBACK",
+        source_snapshot_utc: null,
       });
     }
   }
@@ -241,6 +385,128 @@ export async function fetchBullpenUsage(
     "MODULE_04b: Bullpen usage complete",
   );
   return result;
+}
+
+async function fetchMlbStartingNineBullpenUsage(date: string): Promise<BullpenResult> {
+  const snapshotUtc = new Date().toISOString();
+  const result: BullpenResult = {
+    status: "success",
+    date,
+    relievers: [],
+    teams_fetched: 0,
+    teams_failed: 0,
+    errors: [],
+    primary_source: "MLBSTARTINGNINE_BULLPEN_REPORT",
+    source_snapshot_utc: snapshotUtc,
+  };
+
+  logger.info({ date, source: STARTING_NINE_REPORT_URL }, "MODULE_04b: Fetching primary bullpen availability report");
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15_000);
+    const response = await fetch(STARTING_NINE_REPORT_URL, {
+      signal: ctrl.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; FrostlinePipeline/1.0)" },
+    });
+    clearTimeout(timer);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    result.relievers = parseMlbStartingNineBullpenHtml(await response.text(), date, snapshotUtc);
+    const teams = new Set(result.relievers.map((reliever) => reliever.team_abbr));
+    result.teams_fetched = teams.size;
+    result.teams_failed = Math.max(0, Object.keys(SOURCE_MAPPINGS).length - teams.size);
+    if (result.relievers.length === 0) {
+      result.status = "failure";
+      result.errors.push("No reliever rows found in MLB Starting Nine bullpen report");
+    } else if (result.teams_failed > 0) {
+      result.status = "partial";
+      result.errors.push(`Missing bullpen report rows for ${result.teams_failed} team(s)`);
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ err: message }, "MODULE_04b: MLB Starting Nine bullpen fetch failed");
+    result.status = "failure";
+    result.errors.push(`MLB Starting Nine fetch: ${message}`);
+  }
+
+  logger.info(
+    { relievers: result.relievers.length, teams: result.teams_fetched, status: result.status },
+    "MODULE_04b: Primary bullpen availability report complete",
+  );
+  return result;
+}
+
+/**
+ * Starting Nine owns same-day availability and pitch-count state. Inside The
+ * Pen contributes seven-day innings history only when it can be matched to
+ * the same MLB player ID. This prevents a generic rest heuristic from
+ * overriding the source's explicit AVAILABLE / TIRED / UNAVAILABLE status.
+ */
+function mergeBullpenSources(primary: BullpenResult, fallback: BullpenResult): BullpenResult {
+  if (primary.relievers.length === 0) {
+    return {
+      ...fallback,
+      errors: [...primary.errors, ...fallback.errors],
+    };
+  }
+
+  const fallbackByPlayer = new Map(
+    fallback.relievers
+      .filter((reliever) => reliever.player_id !== null)
+      .map((reliever) => [`${reliever.team_abbr}:${reliever.player_id}`, reliever]),
+  );
+  const primaryTeams = new Set(primary.relievers.map((reliever) => reliever.team_abbr));
+  const primaryRelievers = primary.relievers.map((reliever) => {
+    const fallbackReliever = reliever.player_id === null
+      ? undefined
+      : fallbackByPlayer.get(`${reliever.team_abbr}:${reliever.player_id}`);
+    if (!fallbackReliever) return reliever;
+    return {
+      ...reliever,
+      innings_last_7: fallbackReliever.innings_last_7,
+      games_last_7: fallbackReliever.games_last_7,
+      role: fallbackReliever.role,
+      notes: `${reliever.notes}; ITP innings history matched`,
+    };
+  });
+  const fallbackOnly = fallback.relievers.filter((reliever) => !primaryTeams.has(reliever.team_abbr));
+  const completePrimary = primary.status === "success" && primary.teams_failed === 0;
+
+  return {
+    ...primary,
+    status: completePrimary ? "success" : "partial",
+    relievers: [...primaryRelievers, ...fallbackOnly],
+    teams_fetched: new Set([...primaryTeams, ...fallbackOnly.map((reliever) => reliever.team_abbr)]).size,
+    teams_failed: primary.teams_failed,
+    errors: [...primary.errors, ...fallback.errors],
+  };
+}
+
+/**
+ * Primary daily workload feed: MLB Starting Nine's availability and five-day
+ * pitch-count report. Seven-day innings history is enriched from the former
+ * Inside The Pen source when available; it never replaces a primary status.
+ */
+export async function fetchBullpenUsage(
+  date: string,
+  teamIds: number[] = [],
+): Promise<BullpenResult> {
+  const [primary, fallback] = await Promise.all([
+    fetchMlbStartingNineBullpenUsage(date),
+    fetchInsideThePenUsage(date, teamIds),
+  ]);
+  const merged = mergeBullpenSources(primary, fallback);
+  logger.info(
+    {
+      relievers: merged.relievers.length,
+      teams: merged.teams_fetched,
+      primary_status: primary.status,
+      fallback_status: fallback.status,
+      status: merged.status,
+    },
+    "MODULE_04b: Bullpen availability and innings history resolved",
+  );
+  return merged;
 }
 
 /** Build a Map<game_id, RelieverStat[]> keyed by team_abbr for quick lookups */

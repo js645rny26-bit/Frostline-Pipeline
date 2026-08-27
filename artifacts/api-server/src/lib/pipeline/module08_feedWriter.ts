@@ -5,6 +5,7 @@
 
 import {
   clearRange,
+  expandSheetColumns,
   readRange,
   writeRange,
   WORKBOOK_ID,
@@ -280,6 +281,15 @@ function buildBullpenRows(
       stats?.era  ?? "",                          // J: ERA
       stats?.whip ?? "",                          // K: WHIP
       qualityTier(stats?.era),                    // L: Quality_Tier
+      r.availability_status,                       // M: Availability_Status
+      r.appearances_last_5 ?? "",                 // N: Appearances_Last_5
+      r.pitches_yesterday ?? "",                  // O: Pitches_Yesterday
+      r.pitches_2_days_ago ?? "",                 // P: Pitches_2_Days_Ago
+      r.pitches_3_days_ago ?? "",                 // Q: Pitches_3_Days_Ago
+      r.pitches_4_days_ago ?? "",                 // R: Pitches_4_Days_Ago
+      r.pitches_5_days_ago ?? "",                 // S: Pitches_5_Days_Ago
+      r.workload_source,                           // T: Workload_Source
+      r.source_snapshot_utc ?? "",                // U: Source_Snapshot_TS
     ];
   });
 }
@@ -489,13 +499,19 @@ export async function writeGoogleSheetsFeed(
   }
 
   // 4. BULLPEN_USAGE_DAILY — reliever workload (04b) + season quality (02b)
-  let buResult: SheetWriteStatus = { status: "skipped", rows_written: 0, range: "BULLPEN_USAGE_DAILY!A2:L300" };
+  let buResult: SheetWriteStatus = { status: "skipped", rows_written: 0, range: "BULLPEN_USAGE_DAILY!A2:U300" };
   try {
+    await expandSheetColumns(workbookId, "BULLPEN_USAGE_DAILY", 21);
+    await writeRange(workbookId, "BULLPEN_USAGE_DAILY!M1:U1", [[
+      "Availability_Status", "Appearances_Last_5", "Pitches_Yesterday",
+      "Pitches_2_Days_Ago", "Pitches_3_Days_Ago", "Pitches_4_Days_Ago",
+      "Pitches_5_Days_Ago", "Workload_Source", "Source_Snapshot_TS",
+    ]]);
     const buRows = buildBullpenRows(runDate, bullpenData, statsMap);
     buResult = await safeWrite(
       "BULLPEN_USAGE_DAILY",
-      "BULLPEN_USAGE_DAILY!A2:L300",
-      `BULLPEN_USAGE_DAILY!A2:L${1 + Math.max(buRows.length, 1)}`,
+      "BULLPEN_USAGE_DAILY!A2:U300",
+      `BULLPEN_USAGE_DAILY!A2:U${1 + Math.max(buRows.length, 1)}`,
       buRows,
       workbookId,
       protection ? { keyColumn: 1, protectedKeys: protection.protected_team_abbrs } : undefined,
@@ -505,7 +521,7 @@ export async function writeGoogleSheetsFeed(
     const message = err instanceof Error ? err.message : String(err);
     failed.push("bullpen_usage_daily");
     errors.push({ module: "08_bullpen_usage_daily", error: message, timestamp: new Date().toISOString() });
-    buResult = { status: "failure", rows_written: 0, range: "BULLPEN_USAGE_DAILY!A2:L300", error: message };
+    buResult = { status: "failure", rows_written: 0, range: "BULLPEN_USAGE_DAILY!A2:U300", error: message };
   }
 
   // 5. RUN_ENVIRONMENT — 12 cols A–L, starts row 2
