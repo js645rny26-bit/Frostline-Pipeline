@@ -9,7 +9,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
 
-**Schema v35 · updated 2026-08-26 · operational procedure; exact fields live in `SCHEMA_REFERENCE`.**
+**Schema v36 - updated 2026-08-27 - active offensive center uses lineup quality plus bounded recent form; exact fields live in SCHEMA_REFERENCE.**
 
 ## Daily sequence (all times ET)
 

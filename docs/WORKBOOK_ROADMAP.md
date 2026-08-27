@@ -33,13 +33,40 @@ This range must be considered whenever the Statcast estimate is available:
 - `PARTIAL`, `UNAVAILABLE`, or capped estimates reduce confidence in the range.
 - The range should trigger the vehicle tournament: a narrower structural event may capture more common scripts than the full-game total.
 
-`GAME_SUMMARY.Traffic_Conversion_Runs` and `HR_XBH_Damage_Runs` are now active, signed components of the same team-run calculation. They are not additive Statcast-tail bonuses: traffic is moderated by damage/conversion capacity, and damage is moderated by traffic capacity. Read them beside `Away/Home_Traffic_Matchup_Factor`, `Away/Home_Damage_Matchup_Factor`, `Away/Home_Pitcher_Effective_IP`, and `Away/Home_Bullpen_Exposure_IP`.
+`GAME_SUMMARY.Traffic_Conversion_Runs` and `HR_XBH_Damage_Runs` are active,
+signed components of the same team-run calculation. They are not additive
+Statcast-tail bonuses: positive traffic first affects workload and bullpen
+exposure, then earns a direct run effect only when damage/conversion evidence
+co-signs it. Damage can retain a smaller independent effect. Read them beside
+`Away/Home_Traffic_Matchup_Factor`, `Away/Home_Damage_Matchup_Factor`,
+`Away/Home_Pitcher_Effective_IP`, and `Away/Home_Bullpen_Exposure_IP`.
 
 `NEUTRAL` matchup-profile status means the required exact pregame lineup **and matching starter** data was unavailable, so the existing rate/quality model was preserved for that team. `PARTIAL` means a projected or incomplete lineup attenuated the effect. Neither state should be interpreted as a baseball conclusion.
 
-### Active team-run calculation (v35)
+### Active team-run calculation (v36)
 
-For each batting team, Frostline now calculates:
+For each batting team, the live center is now:
+
+```text
+league scoring environment * exact lineup OPS/xwOBA quality
+  * capped recent L30/L10 realized-scoring form
+  -> active offense center
+  -> starter run-prevention window (FIP/ERA)
+  + bullpen continuation after traffic-adjusted workload
+  + bounded direct damage / conversion effects
+  -> baseball-only team runs
+  * already-resolved park/weather multiplier
+  -> projected team runs
+```
+
+Recent runs scored are not the team talent center. They remain visible as a
+bounded form modifier (maximum 8% in either direction). BB/K/WHIP inform the
+traffic and workload path; hard-hit and HR/9 inform the damage path; starter
+FIP/ERA owns run prevention. Positive traffic alone can shorten expected
+starter workload, but it does not earn a meaningful direct-run addition unless
+damage/conversion evidence co-signs it.
+
+The retired v35 formulation was:
 
 ```text
 recent offense × existing lineup quality

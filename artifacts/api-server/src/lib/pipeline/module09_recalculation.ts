@@ -5,13 +5,10 @@
  *
  * Projection inputs (commissioning v2, 2026-07-24):
  *
- * Offensive rate:
- *   Primary:  MLB Stats API L30 actual RS/G back-calculated as wRC+-equivalent
- *             (module05_fangraphs: l30_wrc_plus = (rs_per_game / 4.5) × 100)
- *             Teams with < 15 L30 finals are excluded; module09 falls back per team.
- *   Modifier: Actual L10 RS/game from module05c_teamRunRates
- *   Blend:    L30_WEIGHT × L30 rate + L10_WEIGHT × L10 rate (test parameters, not canon)
- *   Fallback: League-average 4.5 runs/9; generates a logger.warn — must not be silent.
+ * Offensive center:
+ *   Latent:   League scoring environment × exact lineup OPS/xwOBA quality.
+ *   Form:     L30/L10 actual RS/G blend, shrunk and capped as a form modifier.
+ *   Fallback: League-average latent center; missing recent-form data is neutral.
  *
  * Run multiplier:
  *   Park baseline:  1 + (park_runs_pct / 100) from module04c_startingNine park_factors
@@ -20,10 +17,9 @@
  *   Fallback:       park_multiplier = 1.0 when park data absent (MISSING_PARK_DATA)
  *
  * Lineup / matchup:
- *   A batting-order-weighted OPS/xwOBA factor remains part of each team's
- *   baseline rate. The active v35 trunk separately preserves weighted OBP,
- *   SLG, BB%, K%, xwOBA, and hard-hit inputs to form bounded exact-lineup ×
- *   starter traffic/damage conversion and bullpen-exposure effects.
+ *   A batting-order-weighted OPS/xwOBA factor defines each team's latent
+ *   lineup center. The active v36 trunk uses BB/K for traffic, hard-hit for
+ *   damage, and keeps direct traffic scoring conditional on conversion evidence.
  */
 
 import {
@@ -67,6 +63,7 @@ import {
   type WindDisposition,
 } from "./module09_environment.js";
 import {
+  computeActiveOffenseCenter,
   computeActiveTeamProjection,
   type ActiveLineupProfile,
   type ActiveStarterProfile,
@@ -95,24 +92,6 @@ const LEAGUE_AVG_ERA = 4.2;
  */
 const PARK_WEATHER_MAX_RUN_ADDITION = 1.5;
 
-/**
- * League-average K-BB% (strikeout rate minus walk rate).
- * 2024–2026 MLB average is approximately 14.8 percentage points.
- */
-const LEAGUE_AVG_K_BB_PCT = 0.148;
-
-/**
- * Weight applied to K-BB% deviation from league average when adjusting the
- * FIP-based quality factor.
- *
- * Interpretation: each 10-point K-BB% advantage over league average reduces
- * the projected run allowance by (0.10 × K_BB_BLEND_WEIGHT) multiplicatively.
- *
- * Set conservatively at 0.70. Do not raise above 1.0 without replay validation —
- * over-weighting K-BB% can over-suppress run projections for strikeout pitchers
- * whose batted-ball profile is merely average.
- */
-const K_BB_BLEND_WEIGHT = 0.7;
 
 /** League-average run rate (runs per 9 innings) used as the last-resort fallback. */
 const LEAGUE_AVG_RS = 4.5;
@@ -213,7 +192,7 @@ export interface OffensiveRateResolution {
   l30_rs_estimate: number | null;
   /** Actual RS/game from the last 10 completed games. Null when unavailable or sparse. */
   l10_rs_actual: number | null;
-  /** The rate fed into the projection formula (blended, single-source, or fallback). */
+  /** Recent realized-scoring form blend; v36 applies it only as a bounded center modifier. */
   rate_used: number;
   source_status: OffenseSourceStatus;
 }
@@ -543,33 +522,12 @@ function computeLineupStrength(
 }
 
 /**
- * Composite starter quality multiplier: how many runs per inning does this
- * pitcher allow relative to a league-average pitcher?
+ * Starter run-prevention multiplier.
  *
- * Two-component model:
- *
- * 1. FIP-based baseline — FIP removes defence/luck noise from ERA and is a
- *    better predictor of future run allowance. Falls back to ERA when FIP is
- *    unavailable (e.g. very few innings pitched so far this season).
- *
- *    fipFactor = clamp(FIP ?? ERA, 2.0, 7.0) / 4.20
- *
- * 2. K-BB% deviation adjustment — K-BB% (strikeout rate minus walk rate) is
- *    one of the strongest single-season indicators of true pitching skill. An
- *    elite K-BB% pitcher generates more outs per batter faced and creates less
- *    traffic, both of which suppress runs beyond what FIP captures for small
- *    samples.
- *
- *    kBBAdj = (pitcher_K_BB_pct − LEAGUE_AVG_K_BB_PCT) × K_BB_BLEND_WEIGHT
- *    composite = fipFactor × (1 − kBBAdj)
- *
- * Final result clamped to [0.40, 1.80]:
- *   0.40 ≈ elite (e.g. FIP 2.0, K-BB% 28%) → ~0.75 runs/9 below league avg
- *   1.00 = league average
- *   1.80 ≈ very poor (e.g. FIP 7.0, K-BB% 0%) → significant run-scoring boost
- *
- * When k_pct or bb_pct is absent (e.g. opener with <20 BF), the factor falls
- * back to FIP-only to avoid noisy small-sample K-BB% distorting the model.
+ * V36 deliberately assigns only FIP/ERA to this component. Command and
+ * traffic evidence (BB%, K%, WHIP) belongs to the traffic path, while HR/9
+ * belongs to the damage path. A correlated pitcher signal must not be paid
+ * into the team-run center twice.
  */
 function starterQualityFactor(
   pitcherId: number | null,
@@ -579,24 +537,11 @@ function starterQualityFactor(
   const stats = statsMap.get(pitcherId);
   if (!stats) return 1.0;
 
-  // Component 1: FIP-based baseline (prefer FIP; fall back to ERA)
   const fipOrEra = stats.fip ?? stats.era ?? LEAGUE_AVG_ERA;
   const fipFactor = clampERA(fipOrEra) / LEAGUE_AVG_ERA;
-
-  // Component 2: K-BB% adjustment (only when both rates are available)
-  const kPct = stats.k_pct;
-  const bbPct = stats.bb_pct;
-  if (kPct === null || bbPct === null) {
-    // Insufficient data for K-BB% — use FIP-only
-    return Math.max(0.4, Math.min(1.8, fipFactor));
-  }
-
-  const kBBPct = kPct - bbPct;
-  const kBBAdj = (kBBPct - LEAGUE_AVG_K_BB_PCT) * K_BB_BLEND_WEIGHT;
-  const composite = fipFactor * (1 - kBBAdj);
-
-  return Math.max(0.4, Math.min(1.8, parseFloat(composite.toFixed(4))));
+  return Math.max(0.4, Math.min(1.8, parseFloat(fipFactor.toFixed(4))));
 }
+
 
 /** Converts the already-resolved lineup evidence into the active matchup profile. */
 function activeLineupProfile(
@@ -673,7 +618,7 @@ function computeTeamBullpenERA(
 }
 
 /**
- * Resolves the offensive rate for a team using the L30/L10 blend.
+ * Resolves the recent realized-scoring form rate for a team using the L30/L10 blend.
  * Logs a warning when falling back to league average — this state must not
  * be silent in the output.
  */
@@ -866,6 +811,15 @@ export interface GameSummaryRow {
   home_offense_rate_used: number;
   away_offense_source_status: OffenseSourceStatus;
   home_offense_source_status: OffenseSourceStatus;
+  /** League environment × exact lineup quality, before recent form. */
+  away_latent_lineup_rate: number;
+  home_latent_lineup_rate: number;
+  /** Small capped modifier derived from recent realized RS/G. Neutral = 1.0. */
+  away_recent_form_multiplier: number;
+  home_recent_form_multiplier: number;
+  /** Active team-run center passed into starter/bullpen calculation. */
+  away_active_offense_center: number;
+  home_active_offense_center: number;
   // ── Park / weather multiplier audit (Repair 2) ──
   park_runs_pct: number | null;
   park_multiplier: number;
@@ -1095,10 +1049,6 @@ export async function verifyRecalculation(
         offRate.rate_used,
         oppRate.rate_used,
       );
-      const adjRate = parseFloat(
-        (offRate.rate_used * cappedMultiplier).toFixed(2),
-      );
-
       // Lineup strength for the batting team (away team bats against home pitcher)
       const bSg = lineupMap.get(g.legacy_game_id) ?? null;
       const bLineup =
@@ -1114,6 +1064,14 @@ export async function verifyRecalculation(
         bLStatus,
         bOppPitHand,
         statcastBatterMap,
+      );
+      const giOffenseCenter = computeActiveOffenseCenter({
+        recent_form_rate: offRate.rate_used,
+        lineup_factor: giLineup.factor,
+        lineup: activeLineupProfile(giLineup),
+      });
+      const adjRate = parseFloat(
+        (giOffenseCenter.active_offense_center * cappedMultiplier).toFixed(2),
       );
 
       giRows.push([
@@ -1169,14 +1127,7 @@ export async function verifyRecalculation(
     const runMult = resolveRunMultiplier(g.environment, parkData, parkSource);
     // Cap the park × weather addition — must not add more than PARK_WEATHER_MAX_RUN_ADDITION
     // runs to the total projection. The raw multiplier is preserved in audit columns.
-    const cappedMult = capRunMultiplierAddition(
-      runMult.combined_multiplier,
-      awayOff.rate_used,
-      homeOff.rate_used,
-    );
-
-    const awayAdj = awayOff.rate_used * cappedMult;
-    const homeAdj = homeOff.rate_used * cappedMult;
+    let cappedMult = runMult.combined_multiplier;
 
     // ── Lineup strength (Step 2 commissioning) ──
     // Away team bats against the HOME pitcher → apply away lineup factor.
@@ -1204,17 +1155,28 @@ export async function verifyRecalculation(
       statcastBatterMap,
     );
 
-    // Apply the established lineup factor to the park/weather-adjusted rates.
-    // The live team-run model below uses the same no-environment rates so its
-    // baseball components reconcile before park/weather is applied.
-    const awayAdjFinal = parseFloat((awayAdj * awayLineup.factor).toFixed(3));
-    const homeAdjFinal = parseFloat((homeAdj * homeLineup.factor).toFixed(3));
-    const awayBaselineRate = parseFloat(
-      (awayOff.rate_used * awayLineup.factor).toFixed(3),
+    // Recent actual scoring is form evidence, not today's run center. Build
+    // the center from the league environment and exact lineup quality first;
+    // then apply the small capped form modifier once.
+    const awayOffenseCenter = computeActiveOffenseCenter({
+      recent_form_rate: awayOff.rate_used,
+      lineup_factor: awayLineup.factor,
+      lineup: activeLineupProfile(awayLineup),
+    });
+    const homeOffenseCenter = computeActiveOffenseCenter({
+      recent_form_rate: homeOff.rate_used,
+      lineup_factor: homeLineup.factor,
+      lineup: activeLineupProfile(homeLineup),
+    });
+    cappedMult = capRunMultiplierAddition(
+      runMult.combined_multiplier,
+      awayOffenseCenter.active_offense_center,
+      homeOffenseCenter.active_offense_center,
     );
-    const homeBaselineRate = parseFloat(
-      (homeOff.rate_used * homeLineup.factor).toFixed(3),
-    );
+    const awayBaselineRate = awayOffenseCenter.active_offense_center;
+    const homeBaselineRate = homeOffenseCenter.active_offense_center;
+    const awayAdjFinal = parseFloat((awayBaselineRate * cappedMult).toFixed(3));
+    const homeAdjFinal = parseFloat((homeBaselineRate * cappedMult).toFixed(3));
 
     // Away team bats against HOME pitcher; home team bats against AWAY pitcher.
     // The active trunk keeps starter quality, traffic/conversion, damage, and
@@ -1337,6 +1299,12 @@ export async function verifyRecalculation(
       home_offense_rate_used: homeOff.rate_used,
       away_offense_source_status: awayOff.source_status,
       home_offense_source_status: homeOff.source_status,
+      away_latent_lineup_rate: awayOffenseCenter.latent_lineup_rate,
+      home_latent_lineup_rate: homeOffenseCenter.latent_lineup_rate,
+      away_recent_form_multiplier: awayOffenseCenter.recent_form_multiplier,
+      home_recent_form_multiplier: homeOffenseCenter.recent_form_multiplier,
+      away_active_offense_center: awayOffenseCenter.active_offense_center,
+      home_active_offense_center: homeOffenseCenter.active_offense_center,
       // Park / weather audit (raw uncapped values for traceability)
       park_runs_pct: runMult.park_runs_pct,
       park_multiplier: runMult.park_multiplier,
@@ -1458,6 +1426,12 @@ export async function verifyRecalculation(
       homeRunProjection.damage_matchup_factor, // BK: Home_Damage_Matchup_Factor
       awayRunProjection.matchup_profile_status, // BL: Away_Matchup_Profile_Status
       homeRunProjection.matchup_profile_status, // BM: Home_Matchup_Profile_Status
+      awayOffenseCenter.latent_lineup_rate, // BN: Away_Latent_Lineup_Rate
+      homeOffenseCenter.latent_lineup_rate, // BO: Home_Latent_Lineup_Rate
+      awayOffenseCenter.recent_form_multiplier, // BP: Away_Recent_Form_Multiplier
+      homeOffenseCenter.recent_form_multiplier, // BQ: Home_Recent_Form_Multiplier
+      awayOffenseCenter.active_offense_center, // BR: Away_Active_Offense_Center
+      homeOffenseCenter.active_offense_center, // BS: Home_Active_Offense_Center
     ]);
   }
 
@@ -1581,11 +1555,11 @@ export async function verifyRecalculation(
     logger.error({ err: msg }, "MODULE_09: GAME_INTEGRATION write failed");
   }
 
-  // ── Write GAME_SUMMARY (65 cols A–BM) ──
+  // Write GAME_SUMMARY (71 columns, A through BS).
   let gsStatus: "verified" | "error" = "verified";
   const gsErrors: string[] = [];
   try {
-    await expandSheetColumns(workbookId, "GAME_SUMMARY", 65).catch(
+    await expandSheetColumns(workbookId, "GAME_SUMMARY", 71).catch(
       (err: unknown) => {
         logger.warn(
           { err: err instanceof Error ? err.message : String(err) },
@@ -1660,21 +1634,31 @@ export async function verifyRecalculation(
         "Home_Matchup_Profile_Status",
       ],
     ]).catch(() => {});
+    await writeRange(workbookId, "GAME_SUMMARY!BN1:BS1", [
+      [
+        "Away_Latent_Lineup_Rate",
+        "Home_Latent_Lineup_Rate",
+        "Away_Recent_Form_Multiplier",
+        "Home_Recent_Form_Multiplier",
+        "Away_Active_Offense_Center",
+        "Home_Active_Offense_Center",
+      ],
+    ]).catch(() => {});
     const gsRowsToWrite =
       protection && protection.protected_game_ids.size > 0
         ? mergeProtectedRows(
-            (await readRange(workbookId, "GAME_SUMMARY!A2:BM100")).values ?? [],
+            (await readRange(workbookId, "GAME_SUMMARY!A2:BS100")).values ?? [],
             gsRows,
             1,
             protection.protected_game_ids,
             protection.expected_game_ids,
           )
         : gsRows;
-    await clearRange(workbookId, "GAME_SUMMARY!A2:BM100");
+    await clearRange(workbookId, "GAME_SUMMARY!A2:BS100");
     if (gsRowsToWrite.length > 0) {
       await writeRange(
         workbookId,
-        `GAME_SUMMARY!A2:BM${1 + gsRowsToWrite.length}`,
+        `GAME_SUMMARY!A2:BS${1 + gsRowsToWrite.length}`,
         gsRowsToWrite,
       );
     }

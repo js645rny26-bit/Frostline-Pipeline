@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  computeActiveOffenseCenter,
   computeActiveTeamProjection,
+  MAX_RECENT_FORM_EFFECT,
+  RECENT_FORM_WEIGHT,
   type ActiveTeamProjectionInput,
 } from "./module09_gameTruthMath.js";
 
@@ -48,6 +51,39 @@ test("neutral or unavailable matchup inputs preserve the established rate split"
   assert.equal(result.baseball_only_runs, 4.5);
   assert.equal(result.projected_runs, 4.95);
   assert.equal(result.matchup_profile_status, "NEUTRAL");
+});
+
+test("recent scoring is a bounded form modifier rather than the active offensive center", () => {
+  const hot = computeActiveOffenseCenter({
+    recent_form_rate: 6.3,
+    lineup_factor: 1.04,
+    lineup: { coverage: 1, source: "official" },
+  });
+  const cold = computeActiveOffenseCenter({
+    recent_form_rate: 3.3,
+    lineup_factor: 0.96,
+    lineup: { coverage: 1, source: "official" },
+  });
+
+  assert.equal(hot.latent_lineup_rate, 4.68);
+  assert.ok(hot.recent_form_multiplier <= 1 + MAX_RECENT_FORM_EFFECT);
+  assert.ok(hot.active_offense_center < 5.1);
+  assert.equal(cold.latent_lineup_rate, 4.32);
+  assert.ok(cold.recent_form_multiplier >= 1 - MAX_RECENT_FORM_EFFECT);
+  assert.ok(cold.active_offense_center > 3.97);
+  assert.equal(RECENT_FORM_WEIGHT, 0.2);
+});
+
+test("missing exact lineup evidence uses a league center rather than recent conversion as talent", () => {
+  const center = computeActiveOffenseCenter({
+    recent_form_rate: 6.5,
+    lineup_factor: 1.18,
+    lineup: { coverage: 0, source: null },
+  });
+
+  assert.equal(center.latent_lineup_rate, 4.5);
+  assert.equal(center.recent_form_multiplier, 1.08);
+  assert.equal(center.active_offense_center, 4.86);
 });
 
 test("traffic and damage only strengthen a starter window when both sides of the matchup support them", () => {
@@ -107,6 +143,35 @@ test("a lineup without matching starter evidence stays neutral instead of posing
   assert.equal(result.hr_xbh_damage_runs, 0);
   assert.equal(result.effective_starter_innings, 6);
   assert.equal(result.matchup_profile_status, "NEUTRAL");
+});
+
+test("positive traffic moves workload before it earns a direct run boost", () => {
+  const trafficOnly = computeActiveTeamProjection(
+    input({
+      lineup: {
+        coverage: 1,
+        source: "official",
+        weighted_obp: 0.35,
+        weighted_slg: 0.4,
+        weighted_bb_pct: 0.12,
+        weighted_k_pct: 0.18,
+        weighted_xwoba: 0.315,
+        weighted_hard_hit_pct: 40,
+      },
+      opposing_starter: {
+        quality_factor: 1,
+        expected_innings: 6,
+        bb_pct: 0.12,
+        k_pct: 0.18,
+        whip: 1.55,
+        hr_per_9: 1.15,
+      },
+    }),
+  );
+
+  assert.ok(trafficOnly.effective_starter_innings < 6);
+  assert.ok(trafficOnly.bullpen_exposure_innings > 3);
+  assert.equal(trafficOnly.traffic_conversion_runs, 0);
 });
 
 test("suppression evidence can lower the starter window rather than making every profile an Over bonus", () => {

@@ -95,8 +95,13 @@
  *      run-prevention quality from exact lineup × pitcher traffic, damage,
  *      conversion, and resulting bullpen exposure.  The components are
  *      captured in the same frozen packet; no new shadow tab is created.
+ *  v36 (2026-08-27): Active offense center is league-anchored and driven by
+ *      exact lineup quality. L30/L10 realized RS/G is a bounded form modifier,
+ *      not the center itself. Starter quality is FIP/ERA-only; traffic and
+ *      damage are de-duplicated and traffic must earn direct runs through
+ *      conversion evidence. Center components freeze in the pregame packet.
  */
-export const WORKBOOK_SCHEMA_VERSION = 35;
+export const WORKBOOK_SCHEMA_VERSION = 36;
 
 export interface ColumnDef {
   name: string;
@@ -233,6 +238,12 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Home_Matchup_Profile_Status",
   "Traffic_Conversion_Runs",
   "HR_XBH_Damage_Runs",
+  "Away_Latent_Lineup_Rate",
+  "Home_Latent_Lineup_Rate",
+  "Away_Recent_Form_Multiplier",
+  "Home_Recent_Form_Multiplier",
+  "Away_Active_Offense_Center",
+  "Home_Active_Offense_Center",
 ] as const;
 
 const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
@@ -277,6 +288,12 @@ const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
   "Home_Damage_Matchup_Factor",
   "Traffic_Conversion_Runs",
   "HR_XBH_Damage_Runs",
+  "Away_Latent_Lineup_Rate",
+  "Home_Latent_Lineup_Rate",
+  "Away_Recent_Form_Multiplier",
+  "Home_Recent_Form_Multiplier",
+  "Away_Active_Offense_Center",
+  "Home_Active_Offense_Center",
 ]);
 
 const PREGAME_PACKET_HISTORY_COLUMNS: ColumnDef[] =
@@ -2310,7 +2327,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         filledBy: "MODULE_09",
         description:
-          "Blended offensive rate fed into the projection formula. = L30_WEIGHT × L30_RS_Estimate + L10_WEIGHT × L10_RS_Actual when both present; see Offense_Source_Status for fallback hierarchy.",
+          "Recent realized-scoring form blend. = L30_WEIGHT × L30_RS_Estimate + L10_WEIGHT × L10_RS_Actual when both present. V36 uses it only as a bounded modifier to the lineup-quality center.",
         exampleValue: "4.512",
       },
       {
@@ -2321,7 +2338,8 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         format: "0.000",
         readOnly: true,
         filledBy: "MODULE_09",
-        description: "Opponent team's blended offensive rate.",
+        description:
+          "Opponent recent realized-scoring form blend; v36 preserves it for provenance rather than treating it as the talent center.",
         exampleValue: "4.320",
       },
       {
@@ -2364,7 +2382,8 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         format: "0.00",
         readOnly: true,
         filledBy: "MODULE_09",
-        description: "Offense_Rate_Used × Combined_Run_Multiplier",
+        description:
+          "V36 active lineup-quality center × Combined_Run_Multiplier; recent scoring is only a bounded form modifier.",
         exampleValue: "4.70",
       },
       {
@@ -2711,7 +2730,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         filledBy: "MODULE_09",
         description:
-          "Blended rate used in Away projection formula (before × run multiplier).",
+          "Away recent realized-scoring form blend. V36 records it for provenance but uses it only as a bounded modifier to the active lineup-quality center.",
         exampleValue: "4.552",
       },
       {
@@ -2723,7 +2742,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         filledBy: "MODULE_09",
         description:
-          "Blended rate used in Home projection formula (before × run multiplier).",
+          "Home recent realized-scoring form blend. V36 records it for provenance but uses it only as a bounded modifier to the active lineup-quality center.",
         exampleValue: "4.812",
       },
       {
@@ -3176,6 +3195,78 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         description:
           "ACTIVE for a sufficiently complete official lineup profile; PARTIAL for attenuated projected/partial evidence; NEUTRAL when the new exact matchup input was unavailable.",
         exampleValue: "PARTIAL",
+      },
+      {
+        name: "Away_Latent_Lineup_Rate",
+        index: 65,
+        type: "number",
+        width: 190,
+        format: "0.0000",
+        readOnly: true,
+        filledBy: "MODULE_09",
+        description:
+          "League scoring environment × exact away-lineup quality before recent form. This is the latent center, not recent conversion.",
+        exampleValue: "4.6125",
+      },
+      {
+        name: "Home_Latent_Lineup_Rate",
+        index: 66,
+        type: "number",
+        width: 190,
+        format: "0.0000",
+        readOnly: true,
+        filledBy: "MODULE_09",
+        description:
+          "League scoring environment × exact home-lineup quality before recent form. This is the latent center, not recent conversion.",
+        exampleValue: "4.3650",
+      },
+      {
+        name: "Away_Recent_Form_Multiplier",
+        index: 67,
+        type: "number",
+        width: 205,
+        format: "0.0000",
+        readOnly: true,
+        filledBy: "MODULE_09",
+        description:
+          "Bounded L30/L10 realized-RS/G adjustment to the away latent lineup center; neutral 1.0. It cannot define the center by itself.",
+        exampleValue: "1.0340",
+      },
+      {
+        name: "Home_Recent_Form_Multiplier",
+        index: 68,
+        type: "number",
+        width: 205,
+        format: "0.0000",
+        readOnly: true,
+        filledBy: "MODULE_09",
+        description:
+          "Bounded L30/L10 realized-RS/G adjustment to the home latent lineup center; neutral 1.0. It cannot define the center by itself.",
+        exampleValue: "0.9720",
+      },
+      {
+        name: "Away_Active_Offense_Center",
+        index: 69,
+        type: "number",
+        width: 200,
+        format: "0.0000",
+        readOnly: true,
+        filledBy: "MODULE_09",
+        description:
+          "Away latent lineup rate × bounded recent-form multiplier. This is the active center passed into the home starter/bullpen calculation before environment.",
+        exampleValue: "4.7693",
+      },
+      {
+        name: "Home_Active_Offense_Center",
+        index: 70,
+        type: "number",
+        width: 200,
+        format: "0.0000",
+        readOnly: true,
+        filledBy: "MODULE_09",
+        description:
+          "Home latent lineup rate × bounded recent-form multiplier. This is the active center passed into the away starter/bullpen calculation before environment.",
+        exampleValue: "4.2428",
       },
     ],
   },
@@ -5271,7 +5362,8 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         format: "0.000",
         filledBy: "MODULE_09",
         readOnly: true,
-        description: "Blended rate used in repaired model",
+        description:
+          "Recent realized-scoring form blend retained for provenance; v36 uses it only as a bounded modifier to the active lineup-quality center.",
         exampleValue: "4.877",
       },
       {

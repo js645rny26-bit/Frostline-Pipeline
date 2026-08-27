@@ -131,6 +131,12 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Traffic_Conversion_Runs",
     "HR_XBH_Damage_Runs",
     "Away_Pitcher_Effective_IP",
+    "Away_Latent_Lineup_Rate",
+    "Home_Latent_Lineup_Rate",
+    "Away_Recent_Form_Multiplier",
+    "Home_Recent_Form_Multiplier",
+    "Away_Active_Offense_Center",
+    "Home_Active_Offense_Center",
   ])
     assert.ok(PREGAME_PACKET_HISTORY_HEADERS.includes(required as never));
 });

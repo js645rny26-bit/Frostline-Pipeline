@@ -2,8 +2,9 @@
  * Module 09 active game-truth mathematics.
  *
  * This is the live team-run calculation, not a challenger.  It retains the
- * established offense, lineup, starter-quality, bullpen-quality, and
- * environment inputs, then makes their interaction explicit:
+ * league-anchored lineup center, recent-form modifier, starter run-prevention,
+ * bullpen-quality, and environment inputs, then makes their interaction
+ * explicit:
  *
  *   lineup traffic × pitcher traffic  -> starter-window traffic pressure
  *   lineup damage  × pitcher damage   -> conversion / damage pressure
@@ -11,9 +12,10 @@
  *   effective workload               -> bullpen exposure
  *
  * The interaction terms are deliberately zero-centred and capped.  They are
- * not additive tail bonuses: a traffic signal has limited scoring influence
- * unless the same matchup has conversion capacity, and the model never
- * invents an effect when the required pregame inputs are absent.
+ * not additive tail bonuses: traffic primarily changes expected starter
+ * workload and only earns a direct run effect when damage/conversion evidence
+ * co-signs it. The model never invents an effect when the required pregame
+ * inputs are absent.
  */
 
 export interface ActiveLineupProfile {
@@ -37,12 +39,31 @@ export interface ActiveStarterProfile {
 }
 
 export interface ActiveTeamProjectionInput {
-  /** Team runs per nine before park/weather, after the existing lineup factor. */
+  /** Active team-run center before park/weather. */
   baseline_offense_rate: number;
   environment_multiplier: number;
   lineup: ActiveLineupProfile;
   opposing_starter: ActiveStarterProfile;
   opposing_bullpen_quality: number;
+}
+
+/** Inputs used to build the active team-run center before pitching is applied. */
+export interface ActiveOffenseCenterInput {
+  /** Recent realized RS/G blend. It is form evidence, not the offensive center. */
+  recent_form_rate: number | null;
+  /** Existing exact-lineup OPS/xwOBA quality factor. */
+  lineup_factor: number;
+  lineup: Pick<ActiveLineupProfile, "coverage" | "source">;
+}
+
+/** Auditable decomposition of the active offense center. */
+export interface ActiveOffenseCenter {
+  /** League environment × exact lineup quality before recent form. */
+  latent_lineup_rate: number;
+  /** Bounded recent-results adjustment; neutral = 1.0. */
+  recent_form_multiplier: number;
+  /** The live center passed into starter/bullpen calculation. */
+  active_offense_center: number;
 }
 
 export interface ActiveTeamProjection {
@@ -69,20 +90,26 @@ export interface ActiveTeamProjection {
   matchup_profile_status: "ACTIVE" | "PARTIAL" | "NEUTRAL";
 }
 
-const LEAGUE_AVG_OBP = 0.32;
-const LEAGUE_AVG_SLG = 0.4;
 const LEAGUE_AVG_BB_PCT = 0.085;
 const LEAGUE_AVG_K_PCT = 0.225;
-const LEAGUE_AVG_XWOBA = 0.315;
 const LEAGUE_AVG_HARD_HIT_PCT = 40;
 const LEAGUE_AVG_WHIP = 1.3;
 const LEAGUE_AVG_HR_PER_9 = 1.15;
+/** League scoring environment used as the latent team-run baseline. */
+export const LEAGUE_AVG_RUNS_PER_GAME = 4.5;
 
-// These are guardrails, not learned coefficients.  They keep a new exact
-// matchup input from overwhelming the established rate model before the
+/**
+ * Recent RS/G is inherently a conversion outcome. It is deliberately a small,
+ * capped modifier to the lineup-quality center rather than the center itself.
+ */
+export const RECENT_FORM_WEIGHT = 0.2;
+export const MAX_RECENT_FORM_EFFECT = 0.08;
+
+// These are guardrails, not learned coefficients. They prevent correlated
+// lineup/pitcher evidence from overwhelming the active center before the
 // preserved prospective sample is large enough to calibrate its strength.
-const MAX_TRAFFIC_EFFECT = 0.06;
-const MAX_DAMAGE_EFFECT = 0.06;
+const MAX_TRAFFIC_EFFECT = 0.025;
+const MAX_DAMAGE_EFFECT = 0.04;
 const MAX_STARTER_SHORTFALL = 0.75;
 
 function clamp(value: number, low: number, high: number): number {
@@ -128,15 +155,17 @@ function lineupConfidence(lineup: ActiveLineupProfile): number {
 
 function lineupTrafficIndex(lineup: ActiveLineupProfile): number | null {
   return weightedIndex([
-    { value: lineup.weighted_obp, baseline: LEAGUE_AVG_OBP, weight: 0.5 },
-    { value: lineup.weighted_bb_pct, baseline: LEAGUE_AVG_BB_PCT, weight: 0.3 },
+    // OPS/xwOBA already own the lineup-quality center. Traffic keeps the
+    // comparatively distinct plate-discipline shape rather than paying OBP
+    // a second time here.
+    { value: lineup.weighted_bb_pct, baseline: LEAGUE_AVG_BB_PCT, weight: 0.65 },
     {
       value:
         valid(lineup.weighted_k_pct) && lineup.weighted_k_pct > 0
           ? LEAGUE_AVG_K_PCT / lineup.weighted_k_pct
           : null,
       baseline: 1,
-      weight: 0.2,
+      weight: 0.35,
     },
   ]);
 }
@@ -157,14 +186,11 @@ function pitcherTrafficIndex(starter: ActiveStarterProfile): number | null {
 }
 
 function lineupDamageIndex(lineup: ActiveLineupProfile): number | null {
+  // SLG and xwOBA already inform the lineup-quality center. Hard-hit rate is
+  // retained here as a separate damage/tail characteristic rather than a
+  // second payment for the same broad offensive-quality inputs.
   return weightedIndex([
-    { value: lineup.weighted_slg, baseline: LEAGUE_AVG_SLG, weight: 0.45 },
-    { value: lineup.weighted_xwoba, baseline: LEAGUE_AVG_XWOBA, weight: 0.3 },
-    {
-      value: lineup.weighted_hard_hit_pct,
-      baseline: LEAGUE_AVG_HARD_HIT_PCT,
-      weight: 0.25,
-    },
+    { value: lineup.weighted_hard_hit_pct, baseline: LEAGUE_AVG_HARD_HIT_PCT, weight: 1 },
   ]);
 }
 
@@ -172,6 +198,44 @@ function pitcherDamageIndex(starter: ActiveStarterProfile): number | null {
   return valid(starter.hr_per_9) && starter.hr_per_9 >= 0
     ? starter.hr_per_9 / LEAGUE_AVG_HR_PER_9
     : null;
+}
+
+/**
+ * Builds the live team offense center.
+ *
+ * Recent scoring stays visible and useful, but it cannot independently label
+ * a team a five- or six-run offense before today's exact lineup and pitching
+ * tree have been considered. When lineup quality is unavailable, the center
+ * truthfully returns to league average and retains only the small form shift.
+ */
+export function computeActiveOffenseCenter(
+  input: ActiveOffenseCenterInput,
+): ActiveOffenseCenter {
+  const coverage = clamp(input.lineup.coverage, 0, 1);
+  const lineupEvidence =
+    input.lineup.source === "official" ? coverage : coverage * 0.6;
+  const lineupFactor =
+    lineupEvidence > 0 && Number.isFinite(input.lineup_factor)
+      ? clamp(input.lineup_factor, 0.82, 1.18)
+      : 1;
+  const latentLineupRate = LEAGUE_AVG_RUNS_PER_GAME * lineupFactor;
+  const recentRate =
+    valid(input.recent_form_rate) && input.recent_form_rate > 0
+      ? input.recent_form_rate
+      : LEAGUE_AVG_RUNS_PER_GAME;
+  const recentDeviation = recentRate / LEAGUE_AVG_RUNS_PER_GAME - 1;
+  const recentFormEffect = clamp(
+    recentDeviation * RECENT_FORM_WEIGHT,
+    -MAX_RECENT_FORM_EFFECT,
+    MAX_RECENT_FORM_EFFECT,
+  );
+  const recentFormMultiplier = 1 + recentFormEffect;
+
+  return {
+    latent_lineup_rate: round(latentLineupRate, 4),
+    recent_form_multiplier: round(recentFormMultiplier, 4),
+    active_offense_center: round(latentLineupRate * recentFormMultiplier, 4),
+  };
 }
 
 /**
@@ -200,18 +264,25 @@ export function computeActiveTeamProjection(
   const trafficIndex = geometricMatchup(lineupTraffic, pitcherTraffic);
   const damageIndex = geometricMatchup(lineupDamage, pitcherDamage);
 
-  // Traffic becomes scoring only to the extent the same matchup has damage
-  // capacity; damage likewise needs traffic to convert reliably.  This is the
-  // opposite of the old shadow approach that simply added both signals.
+  // Traffic primarily changes workload/bullpen exposure. A positive traffic
+  // read becomes direct runs only when damage evidence co-signs conversion.
+  // Damage can retain a smaller independent direct effect because an XBH/HR
+  // can score without an extended traffic sequence.
   const trafficSignal = trafficIndex - 1;
   const damageSignal = damageIndex - 1;
+  const positiveTraffic = Math.max(trafficSignal, 0);
+  const positiveDamage = Math.max(damageSignal, 0);
+  const sharedConversionSignal = positiveTraffic * positiveDamage;
   const trafficEffect = clamp(
-    trafficSignal * (1 + damageSignal * 0.5) * confidence,
+    (trafficSignal < 0 ? trafficSignal * 0.5 : sharedConversionSignal) *
+      confidence,
     -MAX_TRAFFIC_EFFECT,
     MAX_TRAFFIC_EFFECT,
   );
   const damageEffect = clamp(
-    damageSignal * (1 + trafficSignal * 0.5) * confidence,
+    (damageSignal < 0
+      ? damageSignal * 0.5
+      : damageSignal * (0.35 + Math.min(positiveTraffic, 0.5))) * confidence,
     -MAX_DAMAGE_EFFECT,
     MAX_DAMAGE_EFFECT,
   );
@@ -220,7 +291,7 @@ export function computeActiveTeamProjection(
   // moves that exact workload to the bullpen.  It never claims a postgame
   // failure occurred and it cannot remove more than three quarters of an IP.
   const pressureShortfall = clamp(
-    (Math.max(trafficSignal, 0) * 1.5 + Math.max(damageSignal, 0) * 0.75) *
+    (positiveTraffic * 1.5 + positiveDamage * 0.4) *
       confidence,
     0,
     MAX_STARTER_SHORTFALL,

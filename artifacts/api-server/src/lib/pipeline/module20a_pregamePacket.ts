@@ -120,6 +120,12 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Home_Matchup_Profile_Status",
   "Traffic_Conversion_Runs",
   "HR_XBH_Damage_Runs",
+  "Away_Latent_Lineup_Rate",
+  "Home_Latent_Lineup_Rate",
+  "Away_Recent_Form_Multiplier",
+  "Home_Recent_Form_Multiplier",
+  "Away_Active_Offense_Center",
+  "Home_Active_Offense_Center",
 ] as const;
 
 export const PREGAME_PACKET_HISTORY_COLS =
@@ -350,6 +356,12 @@ export function buildPregamePacketInputs(
       summary.home_matchup_profile_status,
       summary.traffic_conversion_runs,
       summary.hr_xbh_damage_runs,
+      summary.away_latent_lineup_rate,
+      summary.home_latent_lineup_rate,
+      summary.away_recent_form_multiplier,
+      summary.home_recent_form_multiplier,
+      summary.away_active_offense_center,
+      summary.home_active_offense_center,
     ];
     return [
       {
