@@ -37,11 +37,11 @@ import {
 
 /** A fully-eligible game context (all pitcher roles resolved, innings present). */
 const ELIGIBLE_CTX: GameEligibilityContext = {
-  awayPitcherRole:     "CONVENTIONAL_STARTER",
-  homePitcherRole:     "CONVENTIONAL_STARTER",
+  awayPitcherRole: "CONVENTIONAL_STARTER",
+  homePitcherRole: "CONVENTIONAL_STARTER",
   awayExpectedInnings: 5.5,
   homeExpectedInnings: 6.0,
-  bullpenAvailable:    true,
+  bullpenAvailable: true,
 };
 
 /**
@@ -80,13 +80,13 @@ const ELIGIBLE_CTX: GameEligibilityContext = {
  *   floor = 4.4 + 3.375 = 7.775  → floor edge = 0.275 ≥ 0.25 ✓  → PASS!
  */
 const PASS_COMPONENTS = {
-  starterAttackRuns:       5.5,
+  starterAttackRuns: 5.5,
   bullpenContinuationRuns: 4.5,
-  trafficConversionRuns:   0,
-  hrXbhDamageRuns:         0,
-  baseballOnlyProjection:  10.0,   // = starter + bullpen
-  environmentRunAdjustment: 0.5,   // env adds 0.5 → projected_total = 10.5
-  marketLine:              7.5,
+  trafficConversionRuns: 0,
+  hrXbhDamageRuns: 0,
+  baseballOnlyProjection: 10.0, // = starter + bullpen
+  environmentRunAdjustment: 0.5, // env adds 0.5 → projected_total = 10.5
+  marketLine: 7.5,
 };
 
 // ─── §1: overSurvivalCheck unit tests ────────────────────────────────────────
@@ -114,12 +114,13 @@ describe("overSurvivalCheck", () => {
   it("ENVIRONMENT_DEPENDENT_OVER: blocks when baseball_only < market_line", () => {
     // baseball_only (6.0) < market_line (8.5) — environment manufactured the thesis
     const result = overSurvivalCheck(
-      3.5,   // starterAttack
-      2.5,   // bullpen
-      0, 0,
-      6.0,   // baseball_only_projection (below line)
-      2.5,   // env compensates: projected_total = 8.5
-      8.5,   // market_line
+      3.5, // starterAttack
+      2.5, // bullpen
+      0,
+      0,
+      6.0, // baseball_only_projection (below line)
+      2.5, // env compensates: projected_total = 8.5
+      8.5, // market_line
     );
     assert.equal(result.survival_check, "FAIL");
     assert.equal(result.survival_failure_reason, "ENVIRONMENT_DEPENDENT_OVER");
@@ -128,32 +129,40 @@ describe("overSurvivalCheck", () => {
   it("BASEBALL_ONLY_EDGE_BELOW_THRESHOLD: blocks when 0 ≤ edge < 1.25", () => {
     // baseball_only (8.6) just above line (8.5) but edge = 0.10 < 1.25
     const result = overSurvivalCheck(
-      4.3,   // starter
-      4.3,   // bullpen
-      0, 0,
-      8.6,   // baseball_only
-      0.0,   // no env
-      8.5,   // line
+      4.3, // starter
+      4.3, // bullpen
+      0,
+      0,
+      8.6, // baseball_only
+      0.0, // no env
+      8.5, // line
     );
     assert.equal(result.survival_check, "FAIL");
-    assert.equal(result.survival_failure_reason, "BASEBALL_ONLY_EDGE_BELOW_THRESHOLD");
+    assert.equal(
+      result.survival_failure_reason,
+      "BASEBALL_ONLY_EDGE_BELOW_THRESHOLD",
+    );
   });
 
   it("SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD: blocks when baseball edge is adequate but floor is too low", () => {
     // baseball_only = 10.0, line = 8.5 → edge = 1.5 ≥ 1.25 ✓
     // floor = 5.0×0.80 + 4.5×0.75 = 4.0 + 3.375 = 7.375 → edge = 7.375 − 8.5 = −1.125 → FAIL
     const result = overSurvivalCheck(
-      5.0,   // starter (passes baseball edge)
-      4.5,   // bullpen (but floor is too low at line 8.5)
-      0, 0,
-      9.5,   // baseball_only = 5.0 + 4.5
-      0.5,   // small env boost
-      8.5,   // line — floor 7.375 cannot clear 8.5 + 0.25
+      5.0, // starter (passes baseball edge)
+      4.5, // bullpen (but floor is too low at line 8.5)
+      0,
+      0,
+      9.5, // baseball_only = 5.0 + 4.5
+      0.5, // small env boost
+      8.5, // line — floor 7.375 cannot clear 8.5 + 0.25
     );
     // baseball edge = 9.5 − 8.5 = 1.0 → still < 1.25 → actually BASEBALL_ONLY_EDGE_BELOW_THRESHOLD
     // need baseball_only ≥ 8.5 + 1.25 = 9.75
     // use baseball_only = 9.8, starter=5.3, bullpen=4.5 → floor = 4.24 + 3.375 = 7.615 → edge = −0.885
-    assert.equal(result.survival_failure_reason, "BASEBALL_ONLY_EDGE_BELOW_THRESHOLD");
+    assert.equal(
+      result.survival_failure_reason,
+      "BASEBALL_ONLY_EDGE_BELOW_THRESHOLD",
+    );
   });
 
   it("SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD at higher baseball edge", () => {
@@ -167,17 +176,24 @@ describe("overSurvivalCheck", () => {
     //   floor = 6×0.80 + 5×0.75 = 4.8 + 3.75 = 8.55  → edge = 8.55 − 9.5 = −0.95 → FAIL
     //   reason: floor edge < 0? Yes, −0.95 < 0.25 → SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD ✓
     const result = overSurvivalCheck(
-      6.0,   // starter
-      5.0,   // bullpen
-      0, 0,
-      11.0,  // baseball_only (starter + bullpen)
-      0.2,   // small env
-      9.5,   // line — floor 8.55, edge −0.95 → FAIL
+      6.0, // starter
+      5.0, // bullpen
+      0,
+      0,
+      11.0, // baseball_only (starter + bullpen)
+      0.2, // small env
+      9.5, // line — floor 8.55, edge −0.95 → FAIL
     );
     assert.equal(result.survival_check, "FAIL");
-    assert.equal(result.survival_failure_reason, "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD");
+    assert.equal(
+      result.survival_failure_reason,
+      "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD",
+    );
     // Confirm floor is populated (non-zero) — the gate ran even though FAIL
-    assert.ok(result.survival_floor > 0, "survival_floor must be computed even on FAIL");
+    assert.ok(
+      result.survival_floor > 0,
+      "survival_floor must be computed even on FAIL",
+    );
   });
 
   it("survival_floor is always computed (positive) regardless of check outcome", () => {
@@ -186,7 +202,8 @@ describe("overSurvivalCheck", () => {
     const passResult = overSurvivalCheck(
       PASS_COMPONENTS.starterAttackRuns,
       PASS_COMPONENTS.bullpenContinuationRuns,
-      0, 0,
+      0,
+      0,
       PASS_COMPONENTS.baseballOnlyProjection,
       PASS_COMPONENTS.environmentRunAdjustment,
       PASS_COMPONENTS.marketLine,
@@ -254,8 +271,16 @@ describe("PENDING → re-run with line: survival gate fires on second pass", () 
     survivalFloorEdge: number | null;
     baseballOnlyProjection: number | null;
   } {
-    const { decision: rawDecision, direction, coreBlocker: rawBlocker } =
-      computeDecision(params.projectedTotal, params.marketLine, params.vehicle, params.ctx);
+    const {
+      decision: rawDecision,
+      direction,
+      coreBlocker: rawBlocker,
+    } = computeDecision(
+      params.projectedTotal,
+      params.marketLine,
+      params.vehicle,
+      params.ctx,
+    );
 
     let decision = rawDecision;
     let coreBlocker = rawBlocker;
@@ -278,64 +303,96 @@ describe("PENDING → re-run with line: survival gate fires on second pass", () 
         params.marketLine,
       );
       baseballOnlyProjection = sr.baseball_only_projection;
-      survivalFloor    = sr.survival_floor;
+      survivalFloor = sr.survival_floor;
       survivalFloorEdge = sr.survival_floor_edge;
-      survivalCheck    = sr.survival_check;
+      survivalCheck = sr.survival_check;
       survivalFailureReason = sr.survival_failure_reason;
 
       if (decision === "CORE" && sr.survival_check === "FAIL") {
-        decision    = "NO_CORE";
+        decision = "NO_CORE";
         coreBlocker = sr.survival_failure_reason;
       }
     }
 
     return {
-      decision, direction, coreBlocker,
-      survivalCheck, survivalFailureReason,
-      survivalFloor, survivalFloorEdge, baseballOnlyProjection,
+      decision,
+      direction,
+      coreBlocker,
+      survivalCheck,
+      survivalFailureReason,
+      survivalFloor,
+      survivalFloorEdge,
+      baseballOnlyProjection,
     };
   }
 
   it("Pass 1 (no line): decision is PENDING, survival gate is N_A", () => {
     const pass1 = simulateModule11Loop({
-      projectedTotal:          10.5,
-      marketLine:              null,   // no line yet
-      vehicle:                 "FULL_GAME_OU",
-      ctx:                     ELIGIBLE_CTX,
-      starterAttackRuns:       5.5,
+      projectedTotal: 10.5,
+      marketLine: null, // no line yet
+      vehicle: "FULL_GAME_OU",
+      ctx: ELIGIBLE_CTX,
+      starterAttackRuns: 5.5,
       bullpenContinuationRuns: 4.5,
-      trafficConversionRuns:   0,
-      hrXbhDamageRuns:         0,
-      baseballOnlyProjection:  10.0,
+      trafficConversionRuns: 0,
+      hrXbhDamageRuns: 0,
+      baseballOnlyProjection: 10.0,
       environmentRunAdjustment: 0.5,
     });
 
     assert.equal(pass1.decision, "PENDING", "should be PENDING with no line");
-    assert.equal(pass1.survivalCheck, "N_A", "gate must not run when line is absent");
-    assert.equal(pass1.survivalFloor, null, "survival_floor must be null with no line");
-    assert.equal(pass1.baseballOnlyProjection, null, "baseball_only must be null with no line");
+    assert.equal(
+      pass1.survivalCheck,
+      "N_A",
+      "gate must not run when line is absent",
+    );
+    assert.equal(
+      pass1.survivalFloor,
+      null,
+      "survival_floor must be null with no line",
+    );
+    assert.equal(
+      pass1.baseballOnlyProjection,
+      null,
+      "baseball_only must be null with no line",
+    );
   });
 
   it("Pass 2 (line posted, gate PASS): decision becomes CORE", () => {
     // Market line arrives at 7.5 — baseball edge = 10.0 − 7.5 = 2.5 ≥ 1.25 ✓
     // floor = 5.5×0.80 + 4.5×0.75 = 4.4 + 3.375 = 7.775 → edge = 0.275 ≥ 0.25 ✓
     const pass2 = simulateModule11Loop({
-      projectedTotal:          10.5,
-      marketLine:              7.5,    // line now posted
-      vehicle:                 "FULL_GAME_OU",
-      ctx:                     ELIGIBLE_CTX,
-      starterAttackRuns:       5.5,
+      projectedTotal: 10.5,
+      marketLine: 7.5, // line now posted
+      vehicle: "FULL_GAME_OU",
+      ctx: ELIGIBLE_CTX,
+      starterAttackRuns: 5.5,
       bullpenContinuationRuns: 4.5,
-      trafficConversionRuns:   0,
-      hrXbhDamageRuns:         0,
-      baseballOnlyProjection:  10.0,
+      trafficConversionRuns: 0,
+      hrXbhDamageRuns: 0,
+      baseballOnlyProjection: 10.0,
       environmentRunAdjustment: 0.5,
     });
 
-    assert.equal(pass2.decision, "CORE", "should be CORE when line posted and gate passes");
-    assert.equal(pass2.survivalCheck, "PASS", "survival gate must fire and return PASS");
-    assert.notEqual(pass2.survivalFloor, null, "survival_floor must be populated");
-    assert.ok((pass2.survivalFloor ?? 0) > 0, "survival_floor must be positive");
+    assert.equal(
+      pass2.decision,
+      "CORE",
+      "should be CORE when line posted and gate passes",
+    );
+    assert.equal(
+      pass2.survivalCheck,
+      "PASS",
+      "survival gate must fire and return PASS",
+    );
+    assert.notEqual(
+      pass2.survivalFloor,
+      null,
+      "survival_floor must be populated",
+    );
+    assert.ok(
+      (pass2.survivalFloor ?? 0) > 0,
+      "survival_floor must be positive",
+    );
     assert.equal(pass2.coreBlocker, "", "no blocker for a passing CORE");
   });
 
@@ -344,29 +401,42 @@ describe("PENDING → re-run with line: survival gate fires on second pass", () 
     // baseball edge = 11.0 − 9.5 = 1.5 ≥ 1.25 → passes first check
     // floor edge = 8.55 − 9.5 = −0.95 < 0.25 → SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD
     const pass2Fail = simulateModule11Loop({
-      projectedTotal:          11.2,   // model projects Over
-      marketLine:              9.5,    // line arrives mid-day
-      vehicle:                 "FULL_GAME_OU",
-      ctx:                     ELIGIBLE_CTX,
-      starterAttackRuns:       6.0,
+      projectedTotal: 11.2, // model projects Over
+      marketLine: 9.5, // line arrives mid-day
+      vehicle: "FULL_GAME_OU",
+      ctx: ELIGIBLE_CTX,
+      starterAttackRuns: 6.0,
       bullpenContinuationRuns: 5.0,
-      trafficConversionRuns:   0,
-      hrXbhDamageRuns:         0,
-      baseballOnlyProjection:  11.0,
+      trafficConversionRuns: 0,
+      hrXbhDamageRuns: 0,
+      baseballOnlyProjection: 11.0,
       environmentRunAdjustment: 0.2,
     });
 
     assert.equal(
-      pass2Fail.decision, "NO_CORE",
+      pass2Fail.decision,
+      "NO_CORE",
       "CORE must be downgraded to NO_CORE when survival gate fails",
     );
-    assert.equal(pass2Fail.survivalCheck, "FAIL", "survival gate must be recorded as FAIL");
     assert.equal(
-      pass2Fail.coreBlocker, "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD",
+      pass2Fail.survivalCheck,
+      "FAIL",
+      "survival gate must be recorded as FAIL",
+    );
+    assert.equal(
+      pass2Fail.coreBlocker,
+      "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD",
       "CORE_Blocker must be the survival failure reason (not a generic string)",
     );
-    assert.notEqual(pass2Fail.survivalFloor, null, "survival_floor must be populated even on FAIL");
-    assert.ok((pass2Fail.survivalFloor ?? 0) > 0, "survival_floor must be a positive number");
+    assert.notEqual(
+      pass2Fail.survivalFloor,
+      null,
+      "survival_floor must be populated even on FAIL",
+    );
+    assert.ok(
+      (pass2Fail.survivalFloor ?? 0) > 0,
+      "survival_floor must be a positive number",
+    );
   });
 
   it("Pass 2 (environment-manufactured Over): blocked with ENVIRONMENT_DEPENDENT_OVER", () => {
@@ -374,15 +444,15 @@ describe("PENDING → re-run with line: survival gate fires on second pass", () 
     // BUT baseball_only = 7.0 < market_line = 8.5 → environment manufactured the thesis
     // gate must downgrade to NO_CORE with ENVIRONMENT_DEPENDENT_OVER
     const result = simulateModule11Loop({
-      projectedTotal:          10.2,  // env inflated; variance 1.7 ≥ threshold → CORE candidate
-      marketLine:              8.5,
-      vehicle:                 "FULL_GAME_OU",
-      ctx:                     ELIGIBLE_CTX,
-      starterAttackRuns:       3.5,
+      projectedTotal: 10.2, // env inflated; variance 1.7 ≥ threshold → CORE candidate
+      marketLine: 8.5,
+      vehicle: "FULL_GAME_OU",
+      ctx: ELIGIBLE_CTX,
+      starterAttackRuns: 3.5,
       bullpenContinuationRuns: 3.5,
-      trafficConversionRuns:   0,
-      hrXbhDamageRuns:         0,
-      baseballOnlyProjection:  7.0,   // below market line → env is the entire thesis
+      trafficConversionRuns: 0,
+      hrXbhDamageRuns: 0,
+      baseballOnlyProjection: 7.0, // below market line → env is the entire thesis
       environmentRunAdjustment: 3.2,
     });
 
@@ -409,7 +479,10 @@ describe("Survival_Floor populated for all Over games with a market line", () =>
     baseballOnlyProjection: number;
   }): { survivalFloor: number | null; survivalCheck: "PASS" | "FAIL" | "N_A" } {
     const { direction } = computeDecision(
-      params.projectedTotal, params.marketLine, "FULL_GAME_OU", params.ctx,
+      params.projectedTotal,
+      params.marketLine,
+      "FULL_GAME_OU",
+      params.ctx,
     );
 
     let survivalFloor: number | null = null;
@@ -419,7 +492,8 @@ describe("Survival_Floor populated for all Over games with a market line", () =>
       const sr = overSurvivalCheck(
         params.starterAttackRuns,
         params.bullpenContinuationRuns,
-        0, 0,
+        0,
+        0,
         params.baseballOnlyProjection,
         0,
         params.marketLine,
@@ -436,49 +510,69 @@ describe("Survival_Floor populated for all Over games with a market line", () =>
     // → computeDecision: NO_CORE (INSUFFICIENT_PROJECTION_SEPARATION)
     // But direction = OVER, line != null → survival gate should still run
     const { survivalFloor, survivalCheck } = simulateFor({
-      projectedTotal:          9.0,
-      marketLine:              8.5,   // variance 0.5 < threshold
-      ctx:                     ELIGIBLE_CTX,
-      starterAttackRuns:       5.0,
+      projectedTotal: 9.0,
+      marketLine: 8.5, // variance 0.5 < threshold
+      ctx: ELIGIBLE_CTX,
+      starterAttackRuns: 5.0,
       bullpenContinuationRuns: 4.5,
-      baseballOnlyProjection:  9.5,
+      baseballOnlyProjection: 9.5,
     });
 
     assert.notEqual(
-      survivalFloor, null,
+      survivalFloor,
+      null,
       "survival_floor must be non-null for a NO_CORE Over with a market line",
     );
-    assert.ok((survivalFloor ?? 0) > 0, "survival_floor must be a positive computed value");
+    assert.ok(
+      (survivalFloor ?? 0) > 0,
+      "survival_floor must be a positive computed value",
+    );
     // survivalCheck must be PASS or FAIL — never N_A — because the gate ran
-    assert.notEqual(survivalCheck, "N_A", "survival_check must not be N_A when gate runs");
+    assert.notEqual(
+      survivalCheck,
+      "N_A",
+      "survival_check must not be N_A when gate runs",
+    );
   });
 
   it("survival_floor is null for a game with no market line (PENDING)", () => {
     const { survivalFloor, survivalCheck } = simulateFor({
-      projectedTotal:          9.5,
-      marketLine:              null,  // no line → PENDING
-      ctx:                     ELIGIBLE_CTX,
-      starterAttackRuns:       5.0,
+      projectedTotal: 9.5,
+      marketLine: null, // no line → PENDING
+      ctx: ELIGIBLE_CTX,
+      starterAttackRuns: 5.0,
       bullpenContinuationRuns: 4.5,
-      baseballOnlyProjection:  9.5,
+      baseballOnlyProjection: 9.5,
     });
 
-    assert.equal(survivalFloor, null, "survival_floor must be null when there is no market line");
-    assert.equal(survivalCheck, "N_A", "survival_check must be N_A when gate does not run");
+    assert.equal(
+      survivalFloor,
+      null,
+      "survival_floor must be null when there is no market line",
+    );
+    assert.equal(
+      survivalCheck,
+      "N_A",
+      "survival_check must be N_A when gate does not run",
+    );
   });
 
   it("survival_floor is null for an Under game (gate does not apply)", () => {
     // Projected = 7.0, line = 9.0 → direction = UNDER → gate skipped
     const { survivalFloor, survivalCheck } = simulateFor({
-      projectedTotal:          7.0,
-      marketLine:              9.0,
-      ctx:                     ELIGIBLE_CTX,
-      starterAttackRuns:       3.5,
+      projectedTotal: 7.0,
+      marketLine: 9.0,
+      ctx: ELIGIBLE_CTX,
+      starterAttackRuns: 3.5,
       bullpenContinuationRuns: 3.5,
-      baseballOnlyProjection:  7.0,
+      baseballOnlyProjection: 7.0,
     });
 
-    assert.equal(survivalFloor, null, "survival_floor must be null for Under direction");
+    assert.equal(
+      survivalFloor,
+      null,
+      "survival_floor must be null for Under direction",
+    );
     assert.equal(survivalCheck, "N_A");
   });
 
@@ -486,15 +580,19 @@ describe("Survival_Floor populated for all Over games with a market line", () =>
     // projected=10.5, line=7.5 → variance=3.0 ≥ threshold → CORE candidate
     // floor = 5.5×0.80 + 4.5×0.75 = 4.4 + 3.375 = 7.775 > 7.5+0.25=7.75 → PASS
     const { survivalFloor, survivalCheck } = simulateFor({
-      projectedTotal:          10.5,
-      marketLine:              7.5,
-      ctx:                     ELIGIBLE_CTX,
-      starterAttackRuns:       5.5,
+      projectedTotal: 10.5,
+      marketLine: 7.5,
+      ctx: ELIGIBLE_CTX,
+      starterAttackRuns: 5.5,
       bullpenContinuationRuns: 4.5,
-      baseballOnlyProjection:  10.0,
+      baseballOnlyProjection: 10.0,
     });
 
-    assert.notEqual(survivalFloor, null, "survival_floor must be populated for a CORE Over");
+    assert.notEqual(
+      survivalFloor,
+      null,
+      "survival_floor must be populated for a CORE Over",
+    );
     assert.equal(survivalCheck, "PASS", "gate must PASS for a strong Over");
   });
 });
@@ -522,25 +620,33 @@ describe("COMPONENT_DATA_UNAVAILABLE — survival gate blocks when components ar
    * test-only reimplementation.
    */
   function simulateOverWithGate(params: {
-    projectedTotal:           number;
-    marketLine:               number | null;
-    ctx:                      GameEligibilityContext;
-    baseballOnlyProjection:   number | undefined;
-    starterAttackRuns:        number | undefined;
-    bullpenContinuationRuns:  number;
-    trafficConversionRuns:    number;
-    hrXbhDamageRuns:          number;
+    projectedTotal: number;
+    marketLine: number | null;
+    ctx: GameEligibilityContext;
+    baseballOnlyProjection: number | undefined;
+    starterAttackRuns: number | undefined;
+    bullpenContinuationRuns: number;
+    trafficConversionRuns: number;
+    hrXbhDamageRuns: number;
     environmentRunAdjustment: number;
   }): {
-    decision:    "CORE" | "NO_CORE" | "PENDING";
-    direction:   "OVER" | "UNDER" | "NONE";
+    decision: "CORE" | "NO_CORE" | "PENDING";
+    direction: "OVER" | "UNDER" | "NONE";
     coreBlocker: string;
-    gate:        OverSurvivalGateResult | null;  // null when gate didn't run
+    gate: OverSurvivalGateResult | null; // null when gate didn't run
   } {
-    const { decision: rawDecision, direction, coreBlocker: rawBlocker } =
-      computeDecision(params.projectedTotal, params.marketLine, "FULL_GAME_OU", params.ctx);
+    const {
+      decision: rawDecision,
+      direction,
+      coreBlocker: rawBlocker,
+    } = computeDecision(
+      params.projectedTotal,
+      params.marketLine,
+      "FULL_GAME_OU",
+      params.ctx,
+    );
 
-    let decision    = rawDecision;
+    let decision = rawDecision;
     let coreBlocker = rawBlocker;
     let gate: OverSurvivalGateResult | null = null;
 
@@ -556,7 +662,7 @@ describe("COMPONENT_DATA_UNAVAILABLE — survival gate blocks when components ar
         params.marketLine,
       );
       if (decision === "CORE" && gate.survival_check === "FAIL") {
-        decision    = "NO_CORE";
+        decision = "NO_CORE";
         coreBlocker = gate.survival_failure_reason;
       }
     }
@@ -568,39 +674,68 @@ describe("COMPONENT_DATA_UNAVAILABLE — survival gate blocks when components ar
 
   it("returns FAIL/COMPONENT_DATA_UNAVAILABLE when both components are undefined", () => {
     const gate = applyOverSurvivalGate(
-      undefined,   // baseball_only_projection
-      undefined,   // starter_attack_runs
-      4.5, 0, 0, 0.5,
-      7.5,         // market line
+      undefined, // baseball_only_projection
+      undefined, // starter_attack_runs
+      4.5,
+      0,
+      0,
+      0.5,
+      7.5, // market line
     );
-    assert.equal(gate.survival_check,          "FAIL",                       "survival_check must be FAIL");
-    assert.equal(gate.survival_failure_reason,  "COMPONENT_DATA_UNAVAILABLE", "survival_failure_reason must be COMPONENT_DATA_UNAVAILABLE");
-    assert.equal(gate.survival_floor,           null,                         "survival_floor must be null — gate aborted before overSurvivalCheck");
-    assert.equal(gate.baseball_only_projection, null,                         "baseball_only_projection must be null");
+    assert.equal(gate.survival_check, "FAIL", "survival_check must be FAIL");
+    assert.equal(
+      gate.survival_failure_reason,
+      "COMPONENT_DATA_UNAVAILABLE",
+      "survival_failure_reason must be COMPONENT_DATA_UNAVAILABLE",
+    );
+    assert.equal(
+      gate.survival_floor,
+      null,
+      "survival_floor must be null — gate aborted before overSurvivalCheck",
+    );
+    assert.equal(
+      gate.baseball_only_projection,
+      null,
+      "baseball_only_projection must be null",
+    );
   });
 
   it("returns FAIL/COMPONENT_DATA_UNAVAILABLE when only baseball_only_projection is undefined", () => {
     const gate = applyOverSurvivalGate(
-      undefined,   // baseball_only_projection missing
-      5.5,         // starter_attack_runs present
-      4.5, 0, 0, 0.5,
+      undefined, // baseball_only_projection missing
+      5.5, // starter_attack_runs present
+      4.5,
+      0,
+      0,
+      0.5,
       7.5,
     );
-    assert.equal(gate.survival_check,         "FAIL",                       "survival_check must be FAIL");
-    assert.equal(gate.survival_failure_reason, "COMPONENT_DATA_UNAVAILABLE", "survival_failure_reason must be COMPONENT_DATA_UNAVAILABLE");
-    assert.equal(gate.survival_floor,          null,                         "survival_floor must be null");
+    assert.equal(gate.survival_check, "FAIL", "survival_check must be FAIL");
+    assert.equal(
+      gate.survival_failure_reason,
+      "COMPONENT_DATA_UNAVAILABLE",
+      "survival_failure_reason must be COMPONENT_DATA_UNAVAILABLE",
+    );
+    assert.equal(gate.survival_floor, null, "survival_floor must be null");
   });
 
   it("returns FAIL/COMPONENT_DATA_UNAVAILABLE when only starter_attack_runs is undefined", () => {
     const gate = applyOverSurvivalGate(
-      10.0,        // baseball_only_projection present
-      undefined,   // starter_attack_runs missing
-      4.5, 0, 0, 0.5,
+      10.0, // baseball_only_projection present
+      undefined, // starter_attack_runs missing
+      4.5,
+      0,
+      0,
+      0.5,
       7.5,
     );
-    assert.equal(gate.survival_check,         "FAIL",                       "survival_check must be FAIL");
-    assert.equal(gate.survival_failure_reason, "COMPONENT_DATA_UNAVAILABLE", "survival_failure_reason must be COMPONENT_DATA_UNAVAILABLE");
-    assert.equal(gate.survival_floor,          null,                         "survival_floor must be null");
+    assert.equal(gate.survival_check, "FAIL", "survival_check must be FAIL");
+    assert.equal(
+      gate.survival_failure_reason,
+      "COMPONENT_DATA_UNAVAILABLE",
+      "survival_failure_reason must be COMPONENT_DATA_UNAVAILABLE",
+    );
+    assert.equal(gate.survival_floor, null, "survival_floor must be null");
   });
 
   it("delegates to overSurvivalCheck (PASS) when both components are present", () => {
@@ -608,10 +743,25 @@ describe("COMPONENT_DATA_UNAVAILABLE — survival gate blocks when components ar
     //   baseball edge = 2.5 ≥ 1.25 ✓
     //   floor = 5.5×0.80 + 4.5×0.75 = 7.775, floor edge = 0.275 ≥ 0.25 ✓ → PASS
     const gate = applyOverSurvivalGate(10.0, 5.5, 4.5, 0, 0, 0.5, 7.5);
-    assert.notEqual(gate.survival_failure_reason, "COMPONENT_DATA_UNAVAILABLE", "must not hit component guard when data is present");
-    assert.equal(gate.survival_check,             "PASS",                        "gate must PASS with valid components");
-    assert.notEqual(gate.survival_floor,           null,                          "survival_floor must be populated");
-    assert.ok((gate.survival_floor ?? 0) > 0,                                    "survival_floor must be a positive number");
+    assert.notEqual(
+      gate.survival_failure_reason,
+      "COMPONENT_DATA_UNAVAILABLE",
+      "must not hit component guard when data is present",
+    );
+    assert.equal(
+      gate.survival_check,
+      "PASS",
+      "gate must PASS with valid components",
+    );
+    assert.notEqual(
+      gate.survival_floor,
+      null,
+      "survival_floor must be populated",
+    );
+    assert.ok(
+      (gate.survival_floor ?? 0) > 0,
+      "survival_floor must be a positive number",
+    );
   });
 
   // ── Combined decision path tests ────────────────────────────────────────────
@@ -619,51 +769,68 @@ describe("COMPONENT_DATA_UNAVAILABLE — survival gate blocks when components ar
   it("blocks a CORE candidate with NO_CORE when both components are undefined", () => {
     // projected=10.5, line=7.5 → variance=3.0 ≥ 1.5 threshold → CORE candidate before gate
     const { decision, coreBlocker, gate } = simulateOverWithGate({
-      projectedTotal:           10.5,
-      marketLine:               7.5,
-      ctx:                      ELIGIBLE_CTX,
-      baseballOnlyProjection:   undefined,
-      starterAttackRuns:        undefined,
-      bullpenContinuationRuns:  4.5,
-      trafficConversionRuns:    0,
-      hrXbhDamageRuns:          0,
+      projectedTotal: 10.5,
+      marketLine: 7.5,
+      ctx: ELIGIBLE_CTX,
+      baseballOnlyProjection: undefined,
+      starterAttackRuns: undefined,
+      bullpenContinuationRuns: 4.5,
+      trafficConversionRuns: 0,
+      hrXbhDamageRuns: 0,
       environmentRunAdjustment: 0.5,
     });
 
-    assert.equal(decision,    "NO_CORE",                    "decision must flip to NO_CORE");
-    assert.equal(coreBlocker, "COMPONENT_DATA_UNAVAILABLE", "CORE_Blocker must be COMPONENT_DATA_UNAVAILABLE");
-    assert.ok(gate !== null,                                "gate must have run (direction=OVER, line present)");
-    assert.equal(gate!.survival_check,         "FAIL",                       "gate survival_check must be FAIL");
-    assert.equal(gate!.survival_failure_reason, "COMPONENT_DATA_UNAVAILABLE", "gate reason must be COMPONENT_DATA_UNAVAILABLE");
+    assert.equal(decision, "NO_CORE", "decision must flip to NO_CORE");
+    assert.equal(
+      coreBlocker,
+      "COMPONENT_DATA_UNAVAILABLE",
+      "CORE_Blocker must be COMPONENT_DATA_UNAVAILABLE",
+    );
+    assert.ok(
+      gate !== null,
+      "gate must have run (direction=OVER, line present)",
+    );
+    assert.equal(
+      gate!.survival_check,
+      "FAIL",
+      "gate survival_check must be FAIL",
+    );
+    assert.equal(
+      gate!.survival_failure_reason,
+      "COMPONENT_DATA_UNAVAILABLE",
+      "gate reason must be COMPONENT_DATA_UNAVAILABLE",
+    );
   });
 
   it("gate does not run (null) for an Under game — missing components are irrelevant", () => {
     // projected=7.0, line=9.0 → direction=UNDER → gate skipped entirely
     const { gate, decision } = simulateOverWithGate({
-      projectedTotal:           7.0,
-      marketLine:               9.0,
-      ctx:                      ELIGIBLE_CTX,
-      baseballOnlyProjection:   undefined,
-      starterAttackRuns:        undefined,
-      bullpenContinuationRuns:  3.5,
-      trafficConversionRuns:    0,
-      hrXbhDamageRuns:          0,
+      projectedTotal: 7.0,
+      marketLine: 9.0,
+      ctx: ELIGIBLE_CTX,
+      baseballOnlyProjection: undefined,
+      starterAttackRuns: undefined,
+      bullpenContinuationRuns: 3.5,
+      trafficConversionRuns: 0,
+      hrXbhDamageRuns: 0,
       environmentRunAdjustment: 0,
     });
 
     assert.equal(gate, null, "gate must not run for Under direction");
-    assert.notEqual(decision, "PENDING", "game has a market line; must not be PENDING");
+    assert.notEqual(
+      decision,
+      "PENDING",
+      "game has a market line; must not be PENDING",
+    );
   });
 });
 
 // ─── §6: Non-zero traffic and HR/XBH components ───────────────────────────────
 //
-// module09 currently sets traffic_conversion_runs = 0 and hr_xbh_damage_runs = 0
-// as reserved stubs (see module09_recalculation.ts ~lines 1014–1015).  When those
-// components are eventually populated with real values the survival floor will
-// shift, potentially changing game outcomes.  These tests pin the expected formula
-// behaviour with non-zero inputs so a future stub replacement will surface any
-// formula regression immediately.
+// Module 09 now provides traffic_conversion_runs and hr_xbh_damage_runs as
+// active, signed matchup components. These tests pin the expected survival-floor
+// behavior with non-zero inputs so future calculation changes cannot silently
+// drop them from the decision path.
 //
 // Full survival floor formula:
 //   floor = starter × 0.80 + bullpen × 0.75 + traffic × 0.70 + HR_XBH × 0.90
@@ -699,24 +866,31 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
   // this test will immediately detect it.
   it("PASS: traffic + HR/XBH components are the deciding factor (stub-zero would FAIL)", () => {
     const result = overSurvivalCheck(
-      4.0,   // starterAttackRuns
-      3.5,   // bullpenContinuationRuns
-      2.5,   // trafficConversionRuns  ← non-zero (future real value)
-      1.5,   // hrXbhDamageRuns        ← non-zero (future real value)
-      11.5,  // baseballOnlyProjection (starter+bullpen+traffic+hr_xbh)
-      0.3,   // environmentRunAdjustment
-      8.5,   // marketLine
+      4.0, // starterAttackRuns
+      3.5, // bullpenContinuationRuns
+      2.5, // trafficConversionRuns  ← non-zero (future real value)
+      1.5, // hrXbhDamageRuns        ← non-zero (future real value)
+      11.5, // baseballOnlyProjection (starter+bullpen+traffic+hr_xbh)
+      0.3, // environmentRunAdjustment
+      8.5, // marketLine
     );
 
     // Verify the outcome
-    assert.equal(result.survival_check, "PASS",
-      "gate must PASS when traffic + HR components push floor above threshold");
-    assert.equal(result.survival_failure_reason, "",
-      "failure reason must be empty for a PASS");
+    assert.equal(
+      result.survival_check,
+      "PASS",
+      "gate must PASS when traffic + HR components push floor above threshold",
+    );
+    assert.equal(
+      result.survival_failure_reason,
+      "",
+      "failure reason must be empty for a PASS",
+    );
 
     // Pin the exact floor arithmetic so any formula or constant change is visible
     assert.equal(
-      result.survival_floor, 8.93,
+      result.survival_floor,
+      8.93,
       "floor must be 4.0×0.80 + 3.5×0.75 + 2.5×0.70 + 1.5×0.90 = 8.925 → rounded to 8.93",
     );
     assert.ok(
@@ -726,14 +900,19 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
 
     // Confirm that zeroing traffic + HR flips this exact game to FAIL
     const stubResult = overSurvivalCheck(
-      4.0, 3.5,
-      0, 0,   // current stub values
-      11.5, 0.3, 8.5,
+      4.0,
+      3.5,
+      0,
+      0, // current stub values
+      11.5,
+      0.3,
+      8.5,
     );
     assert.equal(
-      stubResult.survival_check, "FAIL",
+      stubResult.survival_check,
+      "FAIL",
       "zeroing traffic + HR (stub state) must flip this game to FAIL — " +
-      "confirms those components are the deciding factor",
+        "confirms those components are the deciding factor",
     );
   });
 
@@ -762,23 +941,30 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
   // penalty even when values are non-zero.
   it("FAIL: traffic + HR contribute to floor but cannot overcome a high market line", () => {
     const result = overSurvivalCheck(
-      5.0,   // starterAttackRuns
-      4.0,   // bullpenContinuationRuns
-      1.5,   // trafficConversionRuns  ← non-zero
-      1.0,   // hrXbhDamageRuns        ← non-zero
-      11.5,  // baseballOnlyProjection
-      0.0,   // environmentRunAdjustment
-      10.0,  // marketLine — high enough that even the improved floor fails
+      5.0, // starterAttackRuns
+      4.0, // bullpenContinuationRuns
+      1.5, // trafficConversionRuns  ← non-zero
+      1.0, // hrXbhDamageRuns        ← non-zero
+      11.5, // baseballOnlyProjection
+      0.0, // environmentRunAdjustment
+      10.0, // marketLine — high enough that even the improved floor fails
     );
 
-    assert.equal(result.survival_check, "FAIL",
-      "gate must FAIL when floor cannot clear the high market line even with traffic + HR");
-    assert.equal(result.survival_failure_reason, "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD",
-      "failure reason must be SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD (baseball edge clears; floor does not)");
+    assert.equal(
+      result.survival_check,
+      "FAIL",
+      "gate must FAIL when floor cannot clear the high market line even with traffic + HR",
+    );
+    assert.equal(
+      result.survival_failure_reason,
+      "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD",
+      "failure reason must be SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD (baseball edge clears; floor does not)",
+    );
 
     // Pin the exact floor so a future formula change is detected
     assert.equal(
-      result.survival_floor, 8.95,
+      result.survival_floor,
+      8.95,
       "floor must be 5.0×0.80 + 4.0×0.75 + 1.5×0.70 + 1.0×0.90 = 8.95",
     );
     assert.ok(
@@ -788,10 +974,19 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
 
     // Confirm the stub state also fails (but with a lower floor) — regression guard
     const stubResult = overSurvivalCheck(
-      5.0, 4.0, 0, 0,   // current stub values
-      11.5, 0.0, 10.0,
+      5.0,
+      4.0,
+      0,
+      0, // current stub values
+      11.5,
+      0.0,
+      10.0,
     );
-    assert.equal(stubResult.survival_check, "FAIL", "stub-zero state must also FAIL at this line");
+    assert.equal(
+      stubResult.survival_check,
+      "FAIL",
+      "stub-zero state must also FAIL at this line",
+    );
     assert.ok(
       (stubResult.survival_floor ?? 0) < result.survival_floor,
       "stub-zero floor must be lower than the non-zero floor (confirms components add value)",
@@ -819,41 +1014,45 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
     // Scenario A: if baseball_only were computed as starter+bullpen only (5.0),
     // this game would be wrongly classified ENVIRONMENT_DEPENDENT_OVER because 5.0 < 8.5.
     const wrongResult = overSurvivalCheck(
-      3.0,   // starterAttackRuns
-      2.0,   // bullpenContinuationRuns
-      2.5,   // trafficConversionRuns   — non-zero (future real value)
-      1.5,   // hrXbhDamageRuns         — non-zero (future real value)
-      5.0,   // baseball_only_projection = starter+bullpen only (WRONG — excludes traffic/HR)
-      3.5,   // environmentRunAdjustment
-      8.5,   // marketLine
+      3.0, // starterAttackRuns
+      2.0, // bullpenContinuationRuns
+      2.5, // trafficConversionRuns   — non-zero (future real value)
+      1.5, // hrXbhDamageRuns         — non-zero (future real value)
+      5.0, // baseball_only_projection = starter+bullpen only (WRONG — excludes traffic/HR)
+      3.5, // environmentRunAdjustment
+      8.5, // marketLine
     );
     assert.equal(
-      wrongResult.survival_check, "FAIL",
+      wrongResult.survival_check,
+      "FAIL",
       "exclusive (starter+bullpen only) baseball_only triggers ENVIRONMENT_DEPENDENT_OVER",
     );
     assert.equal(
-      wrongResult.survival_failure_reason, "ENVIRONMENT_DEPENDENT_OVER",
+      wrongResult.survival_failure_reason,
+      "ENVIRONMENT_DEPENDENT_OVER",
       "exclusive definition misclassifies this game as env-dependent",
     );
 
     // Scenario B: with the CORRECT inclusive baseball_only (all 4 components = 9.0),
     // the game is NOT env-dependent because the baseball thesis (9.0 > 8.5) stands alone.
     const correctResult = overSurvivalCheck(
-      3.0,   // starterAttackRuns
-      2.0,   // bullpenContinuationRuns
-      2.5,   // trafficConversionRuns   — non-zero (future real value)
-      1.5,   // hrXbhDamageRuns         — non-zero (future real value)
-      9.0,   // baseball_only_projection = 3.0+2.0+2.5+1.5 (CORRECT — includes traffic+HR)
-      0.0,   // environmentRunAdjustment — env adds nothing in this scenario
-      8.5,   // marketLine
+      3.0, // starterAttackRuns
+      2.0, // bullpenContinuationRuns
+      2.5, // trafficConversionRuns   — non-zero (future real value)
+      1.5, // hrXbhDamageRuns         — non-zero (future real value)
+      9.0, // baseball_only_projection = 3.0+2.0+2.5+1.5 (CORRECT — includes traffic+HR)
+      0.0, // environmentRunAdjustment — env adds nothing in this scenario
+      8.5, // marketLine
     );
     assert.notEqual(
-      correctResult.survival_failure_reason, "ENVIRONMENT_DEPENDENT_OVER",
+      correctResult.survival_failure_reason,
+      "ENVIRONMENT_DEPENDENT_OVER",
       "inclusive definition must NOT classify this game as env-dependent (baseball_only=9.0 > line=8.5)",
     );
     // baseball edge = 9.0 − 8.5 = 0.5 < 1.25 → BASEBALL_ONLY_EDGE_BELOW_THRESHOLD (not env-dependent)
     assert.equal(
-      correctResult.survival_failure_reason, "BASEBALL_ONLY_EDGE_BELOW_THRESHOLD",
+      correctResult.survival_failure_reason,
+      "BASEBALL_ONLY_EDGE_BELOW_THRESHOLD",
       "correct reason: baseball edge exists but is below threshold, not env-manufactured",
     );
 
@@ -865,16 +1064,19 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
     //   Increase line to 7.5 for a clean PASS:
     //   baseball edge = 11.0 − 7.5 = 3.5 ✓ floor edge = 8.55 − 7.5 = 1.05 ≥ 0.25 ✓
     const passResult = overSurvivalCheck(
-      4.0,   // starterAttackRuns
-      3.0,   // bullpenContinuationRuns
-      2.5,   // trafficConversionRuns   — non-zero
-      1.5,   // hrXbhDamageRuns         — non-zero
-      11.0,  // baseball_only_projection = 4.0+3.0+2.5+1.5 (inclusive)
-      0.2,   // environmentRunAdjustment
-      7.5,   // marketLine
+      4.0, // starterAttackRuns
+      3.0, // bullpenContinuationRuns
+      2.5, // trafficConversionRuns   — non-zero
+      1.5, // hrXbhDamageRuns         — non-zero
+      11.0, // baseball_only_projection = 4.0+3.0+2.5+1.5 (inclusive)
+      0.2, // environmentRunAdjustment
+      7.5, // marketLine
     );
-    assert.equal(passResult.survival_check, "PASS",
-      "inclusive baseball_only allows a legitimate baseball Over to PASS (not misclassified as env-dependent)");
+    assert.equal(
+      passResult.survival_check,
+      "PASS",
+      "inclusive baseball_only allows a legitimate baseball Over to PASS (not misclassified as env-dependent)",
+    );
     assert.equal(passResult.survival_failure_reason, "");
   });
 
@@ -904,20 +1106,24 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
   // this test will break.
   it("PASS: HR/XBH component alone flips a borderline game from FAIL to PASS", () => {
     const result = overSurvivalCheck(
-      5.5,   // starterAttackRuns
-      4.5,   // bullpenContinuationRuns
-      0,     // trafficConversionRuns — kept at 0 to isolate HR component
-      0.7,   // hrXbhDamageRuns       ← non-zero (future real value)
-      10.7,  // baseballOnlyProjection (starter+bullpen+hr_xbh)
-      0.0,   // environmentRunAdjustment
-      8.0,   // marketLine
+      5.5, // starterAttackRuns
+      4.5, // bullpenContinuationRuns
+      0, // trafficConversionRuns — kept at 0 to isolate HR component
+      0.7, // hrXbhDamageRuns       ← non-zero (future real value)
+      10.7, // baseballOnlyProjection (starter+bullpen+hr_xbh)
+      0.0, // environmentRunAdjustment
+      8.0, // marketLine
     );
 
-    assert.equal(result.survival_check, "PASS",
-      "gate must PASS when HR/XBH component pushes floor above threshold");
+    assert.equal(
+      result.survival_check,
+      "PASS",
+      "gate must PASS when HR/XBH component pushes floor above threshold",
+    );
     assert.equal(result.survival_failure_reason, "");
     assert.equal(
-      result.survival_floor, 8.41,
+      result.survival_floor,
+      8.41,
       "floor must be 5.5×0.80 + 4.5×0.75 + 0×0.70 + 0.7×0.90 = 8.405 → rounded to 8.41",
     );
     assert.ok(
@@ -927,17 +1133,23 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
 
     // Confirm that zeroing HR/XBH (stub state) flips this game to FAIL
     const stubResult = overSurvivalCheck(
-      5.5, 4.5,
-      0, 0,   // current stub values — HR also 0
-      10.7, 0.0, 8.0,
+      5.5,
+      4.5,
+      0,
+      0, // current stub values — HR also 0
+      10.7,
+      0.0,
+      8.0,
     );
     assert.equal(
-      stubResult.survival_check, "FAIL",
+      stubResult.survival_check,
+      "FAIL",
       "zeroing HR/XBH (stub state) must flip this game to FAIL — " +
-      "confirms SURVIVAL_HR_XBH_PENALTY = 0.90 constant is load-bearing",
+        "confirms SURVIVAL_HR_XBH_PENALTY = 0.90 constant is load-bearing",
     );
     assert.equal(
-      stubResult.survival_failure_reason, "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD",
+      stubResult.survival_failure_reason,
+      "SURVIVAL_FLOOR_EDGE_BELOW_THRESHOLD",
       "stub state fails on floor edge, not baseball edge — isolates the HR component",
     );
   });
@@ -964,36 +1176,40 @@ describe("Non-zero traffic and HR/XBH components — formula regression guard", 
 
 describe("Monotonicity gate — sole CORE authorization chokepoint", () => {
   const ELIGIBLE_CTX: GameEligibilityContext = {
-    awayPitcherRole:     "CONVENTIONAL_STARTER",
-    homePitcherRole:     "CONVENTIONAL_STARTER",
+    awayPitcherRole: "CONVENTIONAL_STARTER",
+    homePitcherRole: "CONVENTIONAL_STARTER",
     awayExpectedInnings: 6.0,
     homeExpectedInnings: 6.0,
-    bullpenAvailable:    true,
+    bullpenAvailable: true,
   };
 
   /** Mirrors the monotonicity gate + survival gate portion of the module11 loop. */
   function simulateMonotonicityGate(params: {
-    projectedTotal:    number;
-    marketLine:        number;
-    coreAuthEnabled:   boolean;
-    coreAuthStatus:    string;
+    projectedTotal: number;
+    marketLine: number;
+    coreAuthEnabled: boolean;
+    coreAuthStatus: string;
     /** Optional side-edge for the separate side-bet signal (informational only). */
-    sideEdge?:         number;
+    sideEdge?: number;
   }): {
-    decision:    "CORE" | "NO_CORE" | "PENDING";
+    decision: "CORE" | "NO_CORE" | "PENDING";
     coreBlocker: string;
     /** Simulated side_decision — computed after the monotonicity gate, independently. */
     sideDecision: "CORE" | "NO_CORE" | "NO_MARKET";
   } {
-    const { decision: rawDecision, coreBlocker: rawBlocker } =
-      computeDecision(params.projectedTotal, params.marketLine, "FULL_GAME_OU", ELIGIBLE_CTX);
+    const { decision: rawDecision, coreBlocker: rawBlocker } = computeDecision(
+      params.projectedTotal,
+      params.marketLine,
+      "FULL_GAME_OU",
+      ELIGIBLE_CTX,
+    );
 
-    let decision    = rawDecision;
+    let decision = rawDecision;
     let coreBlocker = rawBlocker;
 
     // ── Monotonicity gate (exact copy of module11 line ~932) ──────────────────
     if (!params.coreAuthEnabled && decision === "CORE") {
-      decision    = "NO_CORE";
+      decision = "NO_CORE";
       coreBlocker = params.coreAuthStatus;
     }
 
@@ -1005,8 +1221,11 @@ describe("Monotonicity gate — sole CORE authorization chokepoint", () => {
     const SIDE_CORE_THRESHOLD = 1.5;
     const sideEdge = params.sideEdge ?? null;
     const sideDecision: "CORE" | "NO_CORE" | "NO_MARKET" =
-      sideEdge === null            ? "NO_MARKET" :
-      Math.abs(sideEdge) >= SIDE_CORE_THRESHOLD ? "CORE"     : "NO_CORE";
+      sideEdge === null
+        ? "NO_MARKET"
+        : Math.abs(sideEdge) >= SIDE_CORE_THRESHOLD
+          ? "CORE"
+          : "NO_CORE";
 
     return { decision, coreBlocker, sideDecision };
   }
@@ -1014,37 +1233,56 @@ describe("Monotonicity gate — sole CORE authorization chokepoint", () => {
   it("converts CORE→NO_CORE when coreAuthEnabled=false (DISABLED_MONOTONICITY_NOT_COMPUTED)", () => {
     // projected=11.5, line=8.0 → variance=3.5 ≥ 1.5 → rawDecision=CORE before gate
     const r = simulateMonotonicityGate({
-      projectedTotal:  11.5,
-      marketLine:      8.0,
+      projectedTotal: 11.5,
+      marketLine: 8.0,
       coreAuthEnabled: false,
-      coreAuthStatus:  "DISABLED_MONOTONICITY_NOT_COMPUTED",
+      coreAuthStatus: "DISABLED_MONOTONICITY_NOT_COMPUTED",
     });
-    assert.equal(r.decision,    "NO_CORE",                          "gate must downgrade CORE to NO_CORE");
-    assert.equal(r.coreBlocker, "DISABLED_MONOTONICITY_NOT_COMPUTED", "blocker must mirror auth status exactly");
+    assert.equal(r.decision, "NO_CORE", "gate must downgrade CORE to NO_CORE");
+    assert.equal(
+      r.coreBlocker,
+      "DISABLED_MONOTONICITY_NOT_COMPUTED",
+      "blocker must mirror auth status exactly",
+    );
   });
 
   it("preserves CORE when coreAuthEnabled=true (gate is a no-op)", () => {
     const r = simulateMonotonicityGate({
-      projectedTotal:  11.5,
-      marketLine:      8.0,
+      projectedTotal: 11.5,
+      marketLine: 8.0,
       coreAuthEnabled: true,
-      coreAuthStatus:  "ENABLED",
+      coreAuthStatus: "ENABLED",
     });
-    assert.equal(r.decision,    "CORE", "enabled gate must not downgrade a valid CORE");
-    assert.equal(r.coreBlocker, "",     "coreBlocker must be empty for an unblocked CORE");
+    assert.equal(
+      r.decision,
+      "CORE",
+      "enabled gate must not downgrade a valid CORE",
+    );
+    assert.equal(
+      r.coreBlocker,
+      "",
+      "coreBlocker must be empty for an unblocked CORE",
+    );
   });
 
   it("preserves NO_CORE unchanged when coreAuthEnabled=false (gate only downgrades CORE)", () => {
     // projected=7.0, line=8.0 → variance=−1.0 → Under, absVar < 1.5 → NO_CORE
     const r = simulateMonotonicityGate({
-      projectedTotal:  7.0,
-      marketLine:      8.0,
+      projectedTotal: 7.0,
+      marketLine: 8.0,
       coreAuthEnabled: false,
-      coreAuthStatus:  "DISABLED_MONOTONICITY_FAIL",
+      coreAuthStatus: "DISABLED_MONOTONICITY_FAIL",
     });
-    assert.equal(r.decision, "NO_CORE", "NO_CORE games are unaffected by the monotonicity gate");
-    assert.notEqual(r.coreBlocker, "DISABLED_MONOTONICITY_FAIL",
-      "blocker must not be overwritten for already-NO_CORE games");
+    assert.equal(
+      r.decision,
+      "NO_CORE",
+      "NO_CORE games are unaffected by the monotonicity gate",
+    );
+    assert.notEqual(
+      r.coreBlocker,
+      "DISABLED_MONOTONICITY_FAIL",
+      "blocker must not be overwritten for already-NO_CORE games",
+    );
   });
 
   it("sideDecision=CORE does not affect decision when monotonicity gate blocks", () => {
@@ -1053,14 +1291,22 @@ describe("Monotonicity gate — sole CORE authorization chokepoint", () => {
     // The sideDecision must remain CORE (it is informational), while decision
     // is correctly downgraded to NO_CORE.
     const r = simulateMonotonicityGate({
-      projectedTotal:  11.5,
-      marketLine:      8.0,
+      projectedTotal: 11.5,
+      marketLine: 8.0,
       coreAuthEnabled: false,
-      coreAuthStatus:  "DISABLED_MONOTONICITY_NOT_COMPUTED",
-      sideEdge:        2.5,   // ≥ 1.5 → sideDecision=CORE (informational)
+      coreAuthStatus: "DISABLED_MONOTONICITY_NOT_COMPUTED",
+      sideEdge: 2.5, // ≥ 1.5 → sideDecision=CORE (informational)
     });
-    assert.equal(r.decision,     "NO_CORE", "main decision must be gated to NO_CORE");
-    assert.equal(r.sideDecision, "CORE",    "sideDecision is informational and is not gated");
+    assert.equal(
+      r.decision,
+      "NO_CORE",
+      "main decision must be gated to NO_CORE",
+    );
+    assert.equal(
+      r.sideDecision,
+      "CORE",
+      "sideDecision is informational and is not gated",
+    );
     // The distinction proves that sideDecision independence cannot become a
     // silent authorization bypass: sideDecision is a separate signal on the
     // SlateBoardEntry and is never counted in core_count or final_decision.
@@ -1075,13 +1321,21 @@ describe("Monotonicity gate — sole CORE authorization chokepoint", () => {
     ];
     for (const status of variants) {
       const r = simulateMonotonicityGate({
-        projectedTotal:  11.5,
-        marketLine:      8.0,
+        projectedTotal: 11.5,
+        marketLine: 8.0,
         coreAuthEnabled: false,
-        coreAuthStatus:  status,
+        coreAuthStatus: status,
       });
-      assert.equal(r.decision,    "NO_CORE", `${status}: decision must be NO_CORE`);
-      assert.equal(r.coreBlocker, status,    `${status}: blocker must mirror auth status exactly`);
+      assert.equal(
+        r.decision,
+        "NO_CORE",
+        `${status}: decision must be NO_CORE`,
+      );
+      assert.equal(
+        r.coreBlocker,
+        status,
+        `${status}: blocker must mirror auth status exactly`,
+      );
     }
   });
 });
@@ -1102,29 +1356,37 @@ describe("Monotonicity gate — sole CORE authorization chokepoint", () => {
 
 describe("Survival gate guard — CORE UNDER picks bypass the gate (#30)", () => {
   const ELIGIBLE_CTX: GameEligibilityContext = {
-    awayPitcherRole:     "CONVENTIONAL_STARTER",
-    homePitcherRole:     "CONVENTIONAL_STARTER",
+    awayPitcherRole: "CONVENTIONAL_STARTER",
+    homePitcherRole: "CONVENTIONAL_STARTER",
     awayExpectedInnings: 6.0,
     homeExpectedInnings: 6.0,
-    bullpenAvailable:    true,
+    bullpenAvailable: true,
   };
 
   /** Simulates the module11 loop gate sequence for one game. */
   function simulateGateSequence(params: {
-    projectedTotal:          number;
-    marketLine:              number | null;
-    baseballOnlyProjection:  number | undefined;
-    starterAttackRuns:       number | undefined;
+    projectedTotal: number;
+    marketLine: number | null;
+    baseballOnlyProjection: number | undefined;
+    starterAttackRuns: number | undefined;
   }): {
-    decision:    "CORE" | "NO_CORE" | "PENDING";
-    direction:   "OVER" | "UNDER" | "NONE";
+    decision: "CORE" | "NO_CORE" | "PENDING";
+    direction: "OVER" | "UNDER" | "NONE";
     survivalCheck: "PASS" | "FAIL" | "N_A";
-    gateRan:     boolean;
+    gateRan: boolean;
   } {
-    const { decision: rawDecision, direction, coreBlocker: rawBlocker } =
-      computeDecision(params.projectedTotal, params.marketLine, "FULL_GAME_OU", ELIGIBLE_CTX);
+    const {
+      decision: rawDecision,
+      direction,
+      coreBlocker: rawBlocker,
+    } = computeDecision(
+      params.projectedTotal,
+      params.marketLine,
+      "FULL_GAME_OU",
+      ELIGIBLE_CTX,
+    );
 
-    let decision    = rawDecision;
+    let decision = rawDecision;
     let survivalCheck: "PASS" | "FAIL" | "N_A" = "N_A";
     let gateRan = false;
 
@@ -1133,11 +1395,15 @@ describe("Survival gate guard — CORE UNDER picks bypass the gate (#30)", () =>
       const sg = applyOverSurvivalGate(
         params.baseballOnlyProjection,
         params.starterAttackRuns,
-        4.5, 0, 0, 0.5,
+        4.5,
+        0,
+        0,
+        0.5,
         params.marketLine,
       );
       survivalCheck = sg.survival_check;
-      if (decision === "CORE" && sg.survival_check === "FAIL") decision = "NO_CORE";
+      if (decision === "CORE" && sg.survival_check === "FAIL")
+        decision = "NO_CORE";
     }
 
     return { decision, direction, survivalCheck, gateRan };
@@ -1146,42 +1412,69 @@ describe("Survival gate guard — CORE UNDER picks bypass the gate (#30)", () =>
   it("CORE UNDER with large variance: gate does not run, survivalCheck stays N_A", () => {
     // projected=5.0, line=9.5 → variance=−4.5, UNDER, absVar=4.5 ≥ 1.5 → rawDecision=CORE
     const r = simulateGateSequence({
-      projectedTotal:         5.0,
-      marketLine:             9.5,
+      projectedTotal: 5.0,
+      marketLine: 9.5,
       baseballOnlyProjection: 4.5,
-      starterAttackRuns:      2.5,
+      starterAttackRuns: 2.5,
     });
-    assert.equal(r.direction,     "UNDER", "direction must be UNDER for this projection");
-    assert.equal(r.decision,      "CORE",  "a large UNDER qualifies as CORE before the gate");
-    assert.equal(r.survivalCheck, "N_A",   "survival gate must not run for UNDER direction");
-    assert.equal(r.gateRan,       false,   "gate must be skipped entirely for UNDER picks");
+    assert.equal(
+      r.direction,
+      "UNDER",
+      "direction must be UNDER for this projection",
+    );
+    assert.equal(
+      r.decision,
+      "CORE",
+      "a large UNDER qualifies as CORE before the gate",
+    );
+    assert.equal(
+      r.survivalCheck,
+      "N_A",
+      "survival gate must not run for UNDER direction",
+    );
+    assert.equal(
+      r.gateRan,
+      false,
+      "gate must be skipped entirely for UNDER picks",
+    );
   });
 
   it("CORE OVER with a market line: gate runs and can block", () => {
     // projected=11.5, line=7.5 → OVER CORE candidate; components designed to PASS
     const r = simulateGateSequence({
-      projectedTotal:         11.5,
-      marketLine:             7.5,
+      projectedTotal: 11.5,
+      marketLine: 7.5,
       baseballOnlyProjection: 10.0,
-      starterAttackRuns:      5.5,
+      starterAttackRuns: 5.5,
     });
     assert.equal(r.direction, "OVER", "direction must be OVER");
-    assert.equal(r.gateRan,   true,   "gate must run for OVER with a market line");
-    assert.notEqual(r.survivalCheck, "N_A",
-      "survivalCheck must be PASS or FAIL — not N_A — when the gate runs");
+    assert.equal(r.gateRan, true, "gate must run for OVER with a market line");
+    assert.notEqual(
+      r.survivalCheck,
+      "N_A",
+      "survivalCheck must be PASS or FAIL — not N_A — when the gate runs",
+    );
   });
 
   it("PENDING (no market line): gate does not run, survivalCheck stays N_A", () => {
     // computeDecision returns PENDING when marketLine=null; the guard also requires
     // market.line !== null — both independently prevent the gate from running.
     const r = simulateGateSequence({
-      projectedTotal:         11.5,
-      marketLine:             null,
+      projectedTotal: 11.5,
+      marketLine: null,
       baseballOnlyProjection: 10.0,
-      starterAttackRuns:      5.5,
+      starterAttackRuns: 5.5,
     });
-    assert.equal(r.decision,      "PENDING", "no market line → PENDING, not CORE");
-    assert.equal(r.gateRan,       false,     "gate must not run when market line is null");
-    assert.equal(r.survivalCheck, "N_A",     "survivalCheck must stay N_A for PENDING games");
+    assert.equal(r.decision, "PENDING", "no market line → PENDING, not CORE");
+    assert.equal(
+      r.gateRan,
+      false,
+      "gate must not run when market line is null",
+    );
+    assert.equal(
+      r.survivalCheck,
+      "N_A",
+      "survivalCheck must stay N_A for PENDING games",
+    );
   });
 });

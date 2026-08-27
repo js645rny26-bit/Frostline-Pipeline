@@ -54,138 +54,150 @@ import type { StatcastPreviewGameResult } from "./module02e_statcastPreview.js";
 
 function makeSummary(overrides: Partial<GameSummaryRow> = {}): GameSummaryRow {
   return {
-    game_id:                   "2026-07-26_NYY@BOS",
-    date:                      "2026-07-26",
-    away_team:                  "NYY",
-    home_team:                  "BOS",
-    away_pitcher:               "Gerrit Cole",
-    home_pitcher:               "Brayan Bello",
-    away_pitcher_role:          "CONVENTIONAL_STARTER",
-    home_pitcher_role:          "CONVENTIONAL_STARTER",
-    away_expected_innings:      6.0,
-    home_expected_innings:      5.5,
-    projected_away_runs:        2.80,
-    projected_home_runs:        3.20,
-    projected_total_runs:       6.00,
-    run_multiplier:             1.0,
-    stadium:                    "Fenway Park",
-    environment_quality:        "good",
-    bullpen_available:          true,
-    away_l30_rs_estimate:       4.500,
-    home_l30_rs_estimate:       4.800,
-    away_l10_rs_actual:         4.600,
-    home_l10_rs_actual:         4.900,
-    away_offense_rate_used:     4.550,
-    home_offense_rate_used:     4.820,
+    game_id: "2026-07-26_NYY@BOS",
+    date: "2026-07-26",
+    away_team: "NYY",
+    home_team: "BOS",
+    away_pitcher: "Gerrit Cole",
+    home_pitcher: "Brayan Bello",
+    away_pitcher_role: "CONVENTIONAL_STARTER",
+    home_pitcher_role: "CONVENTIONAL_STARTER",
+    away_expected_innings: 6.0,
+    home_expected_innings: 5.5,
+    projected_away_runs: 2.8,
+    projected_home_runs: 3.2,
+    projected_total_runs: 6.0,
+    run_multiplier: 1.0,
+    stadium: "Fenway Park",
+    environment_quality: "good",
+    bullpen_available: true,
+    away_l30_rs_estimate: 4.5,
+    home_l30_rs_estimate: 4.8,
+    away_l10_rs_actual: 4.6,
+    home_l10_rs_actual: 4.9,
+    away_offense_rate_used: 4.55,
+    home_offense_rate_used: 4.82,
     away_offense_source_status: "BLENDED",
     home_offense_source_status: "BLENDED",
-    park_runs_pct:              8,
-    park_multiplier:            1.0800,
-    weather_multiplier:         1.0000,
-    combined_run_multiplier:    1.0800,
-    park_source_status:         "VENUE_FACTOR_USED",
-    home_run_factor:            1.0500,
-    weather_source_status:      "LIVE",
-    roof_status:                "OPEN_OR_OUTDOOR",
-    wind_disposition:           "UNKNOWN",
-    environment_certainty:      "HIGH",
-    weather_vehicle_status:     "ACTIVE",
-    away_lineup_factor:         1.000,
-    home_lineup_factor:         1.000,
-    away_lineup_weighted_ops:   0.730,
-    home_lineup_weighted_ops:   0.730,
-    away_lineup_coverage:       0.9,
-    home_lineup_coverage:       0.9,
-    away_lineup_status:         "FULL",
-    home_lineup_status:         "FULL",
-    away_lineup_source:         "official",
-    home_lineup_source:         "official",
+    park_runs_pct: 8,
+    park_multiplier: 1.08,
+    weather_multiplier: 1.0,
+    combined_run_multiplier: 1.08,
+    park_source_status: "VENUE_FACTOR_USED",
+    home_run_factor: 1.05,
+    weather_source_status: "LIVE",
+    roof_status: "OPEN_OR_OUTDOOR",
+    wind_disposition: "UNKNOWN",
+    environment_certainty: "HIGH",
+    weather_vehicle_status: "ACTIVE",
+    away_lineup_factor: 1.0,
+    home_lineup_factor: 1.0,
+    away_lineup_weighted_ops: 0.73,
+    home_lineup_weighted_ops: 0.73,
+    away_lineup_coverage: 0.9,
+    home_lineup_coverage: 0.9,
+    away_lineup_status: "FULL",
+    home_lineup_status: "FULL",
+    away_lineup_source: "official",
+    home_lineup_source: "official",
     away_lineup_xwoba_coverage: 0.8,
     home_lineup_xwoba_coverage: 0.8,
-    proj_run_diff:              -0.40,
-    away_starter_quality:       0.900,   // slightly better than league avg
-    home_starter_quality:       1.050,   // slightly worse than league avg
-    starter_attack_runs:        4.50,
-    bullpen_continuation_runs:  1.00,
-    baseline_offense_runs:      9.37,
-    traffic_conversion_runs:    0,
-    hr_xbh_damage_runs:         0,
-    baseball_only_projection:   5.50,
-    environment_run_adjustment: 0.50,
+    away_pitcher_effective_innings: 5.5,
+    home_pitcher_effective_innings: 6.0,
+    away_bullpen_exposure_innings: 3.5,
+    home_bullpen_exposure_innings: 3.0,
+    away_traffic_matchup_factor: 1.0,
+    home_traffic_matchup_factor: 1.0,
+    away_damage_matchup_factor: 1.0,
+    home_damage_matchup_factor: 1.0,
+    away_matchup_profile_status: "NEUTRAL",
+    home_matchup_profile_status: "NEUTRAL",
+    proj_run_diff: -0.4,
+    away_starter_quality: 0.9, // slightly better than league avg
+    home_starter_quality: 1.05, // slightly worse than league avg
+    starter_attack_runs: 4.5,
+    bullpen_continuation_runs: 1.0,
+    baseline_offense_runs: 9.37,
+    traffic_conversion_runs: 0,
+    hr_xbh_damage_runs: 0,
+    baseball_only_projection: 5.5,
+    environment_run_adjustment: 0.5,
     ...overrides,
   };
 }
 
-function makePreview(overrides: Partial<StatcastPreviewGameResult> = {}): StatcastPreviewGameResult {
+function makePreview(
+  overrides: Partial<StatcastPreviewGameResult> = {},
+): StatcastPreviewGameResult {
   return {
-    gamePk:                   717514,
-    date:                     "2026-07-26",
-    game_id:                  "2026-07-26_NYY@BOS",
-    away_team:                 "NYY",
-    home_team:                 "BOS",
-    scheduled_first_pitch:    "2026-07-26T19:10:00Z",
-    fetch_ts:                  "2026-07-26T06:00:00.000Z",
-    source_url:                "https://baseballsavant.mlb.com/preview?game_pk=717514",
-    preview_availability:      "AVAILABLE",
-    fetch_status:              "success",
-    raw_payload_path:          null,
-    payload_hash:              "abc123",
-    parser_version:            "1.0.0",
-    has_lineup_away:           false,
-    has_lineup_home:           false,
-    has_probable_away:         true,
-    has_probable_home:         true,
+    gamePk: 717514,
+    date: "2026-07-26",
+    game_id: "2026-07-26_NYY@BOS",
+    away_team: "NYY",
+    home_team: "BOS",
+    scheduled_first_pitch: "2026-07-26T19:10:00Z",
+    fetch_ts: "2026-07-26T06:00:00.000Z",
+    source_url: "https://baseballsavant.mlb.com/preview?game_pk=717514",
+    preview_availability: "AVAILABLE",
+    fetch_status: "success",
+    raw_payload_path: null,
+    payload_hash: "abc123",
+    parser_version: "1.0.0",
+    has_lineup_away: false,
+    has_lineup_home: false,
+    has_probable_away: true,
+    has_probable_home: true,
     starting_pitcher_match_status: "MATCHED",
-    lineup_match_status:       "LINEUP_NOT_POSTED",
-    stale_data_flag:           false,
-    parse_warnings:            [],
-    parse_error:               null,
+    lineup_match_status: "LINEUP_NOT_POSTED",
+    stale_data_flag: false,
+    parse_warnings: [],
+    parse_error: null,
     preview_used_in_projection: "NO",
     projection_influence_notes: "Phase 1 — ingestion only",
     away_pitcher_stats: {
-      player_id:          543037,
-      player_name:        "Gerrit Cole",
-      did_not_qualify:    false,
-      k_percent:          29.0,
-      bb_percent:         5.5,
-      exit_velocity_avg:  87.2,
-      whiff_percent:      35.0,
-      hard_hit_percent:   38.0,
-      xwoba:              0.290,      // better than league avg → lower factor
+      player_id: 543037,
+      player_name: "Gerrit Cole",
+      did_not_qualify: false,
+      k_percent: 29.0,
+      bb_percent: 5.5,
+      exit_velocity_avg: 87.2,
+      whiff_percent: 35.0,
+      hard_hit_percent: 38.0,
+      xwoba: 0.29, // better than league avg → lower factor
       barrel_batted_rate: 7.0,
-      launch_angle_avg:   12.4,
-      xba:                0.248,
-      xslg:               0.392,
+      launch_angle_avg: 12.4,
+      xba: 0.248,
+      xslg: 0.392,
     },
     home_pitcher_stats: {
-      player_id:          669477,
-      player_name:        "Brayan Bello",
-      did_not_qualify:    false,
-      k_percent:          22.0,
-      bb_percent:         8.0,
-      exit_velocity_avg:  88.8,
-      whiff_percent:      26.0,
-      hard_hit_percent:   42.0,
-      xwoba:              0.330,      // slightly worse than league avg → factor > 1
+      player_id: 669477,
+      player_name: "Brayan Bello",
+      did_not_qualify: false,
+      k_percent: 22.0,
+      bb_percent: 8.0,
+      exit_velocity_avg: 88.8,
+      whiff_percent: 26.0,
+      hard_hit_percent: 42.0,
+      xwoba: 0.33, // slightly worse than league avg → factor > 1
       barrel_batted_rate: 10.5,
-      launch_angle_avg:   13.8,
-      xba:                0.261,
-      xslg:               0.415,
+      launch_angle_avg: 13.8,
+      xba: 0.261,
+      xslg: 0.415,
     },
-    away_hitters_total:        26,
-    away_hitters_qualified:    14,
-    away_hitters_xwoba_avg:    0.318,
-    away_hitters_ev_avg:       88.4,
+    away_hitters_total: 26,
+    away_hitters_qualified: 14,
+    away_hitters_xwoba_avg: 0.318,
+    away_hitters_ev_avg: 88.4,
     away_hitters_hard_hit_avg: 37.2,
-    away_hitters_k_pct_avg:    21.4,
-    away_hitters_bb_pct_avg:   8.1,
-    home_hitters_total:        25,
-    home_hitters_qualified:    13,
-    home_hitters_xwoba_avg:    0.305,
-    home_hitters_ev_avg:       87.9,
+    away_hitters_k_pct_avg: 21.4,
+    away_hitters_bb_pct_avg: 8.1,
+    home_hitters_total: 25,
+    home_hitters_qualified: 13,
+    home_hitters_xwoba_avg: 0.305,
+    home_hitters_ev_avg: 87.9,
     home_hitters_hard_hit_avg: 35.8,
-    home_hitters_k_pct_avg:    20.1,
-    home_hitters_bb_pct_avg:   7.6,
+    home_hitters_k_pct_avg: 20.1,
+    home_hitters_bb_pct_avg: 7.6,
     ...overrides,
   };
 }
@@ -209,25 +221,31 @@ describe("xwobaQualityFactor", () => {
   });
 
   it("returns < 1.0 for below-average xwOBA (better pitcher)", () => {
-    const factor = xwobaQualityFactor(0.270, false);
-    assert.ok(factor !== null && factor < 1.0, `Expected factor < 1.0, got ${factor}`);
+    const factor = xwobaQualityFactor(0.27, false);
+    assert.ok(
+      factor !== null && factor < 1.0,
+      `Expected factor < 1.0, got ${factor}`,
+    );
     // 0.270 / 0.315 ≈ 0.857
-    assert.ok(Math.abs(factor! - 0.270 / 0.315) < 0.001);
+    assert.ok(Math.abs(factor! - 0.27 / 0.315) < 0.001);
   });
 
   it("returns > 1.0 for above-average xwOBA (worse pitcher)", () => {
-    const factor = xwobaQualityFactor(0.360, false);
-    assert.ok(factor !== null && factor > 1.0, `Expected factor > 1.0, got ${factor}`);
+    const factor = xwobaQualityFactor(0.36, false);
+    assert.ok(
+      factor !== null && factor > 1.0,
+      `Expected factor > 1.0, got ${factor}`,
+    );
   });
 
   it("clamps to 0.40 at the lower bound", () => {
     // Extremely elite pitcher — xwOBA / 0.315 would be << 0.40
-    assert.strictEqual(xwobaQualityFactor(0.050, false), 0.40);
+    assert.strictEqual(xwobaQualityFactor(0.05, false), 0.4);
   });
 
   it("clamps to 1.80 at the upper bound", () => {
     // Extremely poor pitcher
-    assert.strictEqual(xwobaQualityFactor(0.650, false), 1.80);
+    assert.strictEqual(xwobaQualityFactor(0.65, false), 1.8);
   });
 });
 
@@ -235,36 +253,43 @@ describe("xwobaQualityFactor", () => {
 
 describe("shadowStarterQuality", () => {
   it("returns null when xwOBA factor is null", () => {
-    assert.strictEqual(shadowStarterQuality(0.900, null), null);
+    assert.strictEqual(shadowStarterQuality(0.9, null), null);
   });
 
   it("blends at SHADOW_BLEND_WEIGHT correctly", () => {
-    const currentQual = 0.900;
-    const xwobaFactor = 1.100;
+    const currentQual = 0.9;
+    const xwobaFactor = 1.1;
     const expected = parseFloat(
-      (currentQual * (1 - SHADOW_BLEND_WEIGHT) + xwobaFactor * SHADOW_BLEND_WEIGHT).toFixed(4),
+      (
+        currentQual * (1 - SHADOW_BLEND_WEIGHT) +
+        xwobaFactor * SHADOW_BLEND_WEIGHT
+      ).toFixed(4),
     );
     const result = shadowStarterQuality(currentQual, xwobaFactor);
     assert.strictEqual(result, expected);
   });
 
   it("when xwOBA factor equals current qual, shadow qual equals current qual", () => {
-    const qual = 0.950;
+    const qual = 0.95;
     const result = shadowStarterQuality(qual, qual);
     assert.strictEqual(result, parseFloat(qual.toFixed(4)));
   });
 
   it("shadow qual is clamped to 0.40 minimum", () => {
     // Pathological case: current very low, xwOBA factor also very low
-    const result = shadowStarterQuality(0.40, 0.40);
-    assert.strictEqual(result, 0.40);
+    const result = shadowStarterQuality(0.4, 0.4);
+    assert.strictEqual(result, 0.4);
   });
 });
 
 describe("preview hitter tail estimates", () => {
   it("returns neutral traffic and damage adjustments at league-average inputs", () => {
     assert.strictEqual(
-      estimateTrafficAdjustment(4.5, LEAGUE_AVG_HITTER_BB_PCT, LEAGUE_AVG_HITTER_K_PCT),
+      estimateTrafficAdjustment(
+        4.5,
+        LEAGUE_AVG_HITTER_BB_PCT,
+        LEAGUE_AVG_HITTER_K_PCT,
+      ),
       0,
     );
     assert.strictEqual(
@@ -287,8 +312,14 @@ describe("preview hitter tail estimates", () => {
     assert.strictEqual(estimateTrafficAdjustment(4.5, null, 20), null);
     assert.strictEqual(estimateTrafficAdjustment(4.5, 10, null), null);
     assert.strictEqual(estimateDamageAdjustment(4.5, null), null);
-    assert.equal(Math.abs(estimateTrafficAdjustment(12, 25, 5) ?? 0), SHADOW_TAIL_TEAM_CAP);
-    assert.equal(Math.abs(estimateDamageAdjustment(12, 90) ?? 0), SHADOW_TAIL_TEAM_CAP);
+    assert.equal(
+      Math.abs(estimateTrafficAdjustment(12, 25, 5) ?? 0),
+      SHADOW_TAIL_TEAM_CAP,
+    );
+    assert.equal(
+      Math.abs(estimateDamageAdjustment(12, 90) ?? 0),
+      SHADOW_TAIL_TEAM_CAP,
+    );
   });
 });
 
@@ -314,8 +345,14 @@ describe("computeShadowAuditRow — preview unavailable", () => {
 describe("computeShadowAuditRow — pitchers did not qualify", () => {
   it("zero adjustment when both pitchers are didNotQualify", () => {
     const preview = makePreview({
-      away_pitcher_stats: { ...makePreview().away_pitcher_stats!, did_not_qualify: true },
-      home_pitcher_stats: { ...makePreview().home_pitcher_stats!, did_not_qualify: true },
+      away_pitcher_stats: {
+        ...makePreview().away_pitcher_stats!,
+        did_not_qualify: true,
+      },
+      home_pitcher_stats: {
+        ...makePreview().home_pitcher_stats!,
+        did_not_qualify: true,
+      },
     });
     const row = computeShadowAuditRow(makeSummary(), preview, TS);
     assert.strictEqual(row.shadow_xwoba_adjustment, 0);
@@ -325,11 +362,18 @@ describe("computeShadowAuditRow — pitchers did not qualify", () => {
 
   it("partial adjustment when only one pitcher qualifies", () => {
     const preview = makePreview({
-      away_pitcher_stats: { ...makePreview().away_pitcher_stats!, did_not_qualify: true },
+      away_pitcher_stats: {
+        ...makePreview().away_pitcher_stats!,
+        did_not_qualify: true,
+      },
     });
     const row = computeShadowAuditRow(makeSummary(), preview, TS);
     // away pitcher DNQ → away pitcher xwOBA is excluded → no impact on HOME run scoring
-    assert.strictEqual(row.home_starter_delta, 0, "home delta should be 0 when away pitcher DNQ");
+    assert.strictEqual(
+      row.home_starter_delta,
+      0,
+      "home delta should be 0 when away pitcher DNQ",
+    );
     // away_starter_delta depends on the HOME pitcher (which still qualifies) — may be non-zero
     assert.ok(row.missing_fields.includes("away_pitcher_xwoba"));
     assert.ok(!row.missing_fields.includes("home_pitcher_xwoba"));
@@ -345,8 +389,14 @@ describe("computeShadowAuditRow — both starters have xwOBA data", () => {
   it("shadow_projection = current_projection when adjustment is zero", () => {
     // Use league-average xwOBA for both pitchers → shadow quals ≈ current quals → delta ≈ 0
     const preview = makePreview({
-      away_pitcher_stats: { ...makePreview().away_pitcher_stats!, xwoba: LEAGUE_AVG_XWOBA_ALLOWED },
-      home_pitcher_stats: { ...makePreview().home_pitcher_stats!, xwoba: LEAGUE_AVG_XWOBA_ALLOWED },
+      away_pitcher_stats: {
+        ...makePreview().away_pitcher_stats!,
+        xwoba: LEAGUE_AVG_XWOBA_ALLOWED,
+      },
+      home_pitcher_stats: {
+        ...makePreview().home_pitcher_stats!,
+        xwoba: LEAGUE_AVG_XWOBA_ALLOWED,
+      },
     });
     const summary = makeSummary({
       away_starter_quality: 1.0,
@@ -366,12 +416,22 @@ describe("computeShadowAuditRow — both starters have xwOBA data", () => {
       home_starter_quality: 1.0,
     });
     const preview = makePreview({
-      away_pitcher_stats: { ...makePreview().away_pitcher_stats!, xwoba: LEAGUE_AVG_XWOBA_ALLOWED },
-      home_pitcher_stats: { ...makePreview().home_pitcher_stats!, xwoba: 0.380 },  // worse
+      away_pitcher_stats: {
+        ...makePreview().away_pitcher_stats!,
+        xwoba: LEAGUE_AVG_XWOBA_ALLOWED,
+      },
+      home_pitcher_stats: { ...makePreview().home_pitcher_stats!, xwoba: 0.38 }, // worse
     });
     const row = computeShadowAuditRow(summary, preview, TS);
-    assert.strictEqual(row.home_starter_delta, 0, "away pitcher is league-avg → home delta should be 0");
-    assert.ok(row.away_starter_delta > 0, "bad home pitcher → more away runs → positive away_starter_delta");
+    assert.strictEqual(
+      row.home_starter_delta,
+      0,
+      "away pitcher is league-avg → home delta should be 0",
+    );
+    assert.ok(
+      row.away_starter_delta > 0,
+      "bad home pitcher → more away runs → positive away_starter_delta",
+    );
   });
 
   it("away pitcher xwOBA drives home_starter_delta, not away_starter_delta", () => {
@@ -380,35 +440,46 @@ describe("computeShadowAuditRow — both starters have xwOBA data", () => {
       home_starter_quality: 1.0,
     });
     const preview = makePreview({
-      away_pitcher_stats: { ...makePreview().away_pitcher_stats!, xwoba: 0.260 }, // elite
-      home_pitcher_stats: { ...makePreview().home_pitcher_stats!, xwoba: LEAGUE_AVG_XWOBA_ALLOWED },
+      away_pitcher_stats: { ...makePreview().away_pitcher_stats!, xwoba: 0.26 }, // elite
+      home_pitcher_stats: {
+        ...makePreview().home_pitcher_stats!,
+        xwoba: LEAGUE_AVG_XWOBA_ALLOWED,
+      },
     });
     const row = computeShadowAuditRow(summary, preview, TS);
-    assert.strictEqual(row.away_starter_delta, 0, "home pitcher is league-avg → away delta should be 0");
-    assert.ok(row.home_starter_delta < 0, "elite away pitcher → fewer home runs → negative home_starter_delta");
+    assert.strictEqual(
+      row.away_starter_delta,
+      0,
+      "home pitcher is league-avg → away delta should be 0",
+    );
+    assert.ok(
+      row.home_starter_delta < 0,
+      "elite away pitcher → fewer home runs → negative home_starter_delta",
+    );
   });
 
   it("cap is applied and flagged when uncapped adjustment exceeds SHADOW_ADJUSTMENT_CAP", () => {
     // Force an extreme case: very bad pitchers on both sides, large offense rates
     const summary = makeSummary({
-      away_offense_rate_used:  8.0,
-      home_offense_rate_used:  8.0,
-      away_starter_quality:    0.80,
-      home_starter_quality:    0.80,
+      away_offense_rate_used: 8.0,
+      home_offense_rate_used: 8.0,
+      away_starter_quality: 0.8,
+      home_starter_quality: 0.8,
       combined_run_multiplier: 1.0,
-      away_lineup_factor:      1.0,
-      home_lineup_factor:      1.0,
-      home_expected_innings:   6.0,
-      away_expected_innings:   6.0,
+      away_lineup_factor: 1.0,
+      home_lineup_factor: 1.0,
+      home_expected_innings: 6.0,
+      away_expected_innings: 6.0,
     });
     const preview = makePreview({
-      away_pitcher_stats: { ...makePreview().away_pitcher_stats!, xwoba: 0.450 },  // terrible
-      home_pitcher_stats: { ...makePreview().home_pitcher_stats!, xwoba: 0.450 },
+      away_pitcher_stats: { ...makePreview().away_pitcher_stats!, xwoba: 0.45 }, // terrible
+      home_pitcher_stats: { ...makePreview().home_pitcher_stats!, xwoba: 0.45 },
     });
     const row = computeShadowAuditRow(summary, preview, TS);
     if (row.cap_applied) {
       assert.ok(
-        Math.abs(row.shadow_projection - row.current_projection) <= SHADOW_ADJUSTMENT_CAP + 0.001,
+        Math.abs(row.shadow_projection - row.current_projection) <=
+          SHADOW_ADJUSTMENT_CAP + 0.001,
         "capped shadow should be within CAP of current projection",
       );
       // Uncapped should be larger than capped
@@ -436,11 +507,15 @@ describe("computeShadowAuditRow — both starters have xwOBA data", () => {
     assert.equal(row.tail_estimate_status, "AVAILABLE");
     assert.equal(
       row.traffic_conversion_estimate,
-      parseFloat((row.away_traffic_adjustment + row.home_traffic_adjustment).toFixed(4)),
+      parseFloat(
+        (row.away_traffic_adjustment + row.home_traffic_adjustment).toFixed(4),
+      ),
     );
     assert.equal(
       row.hr_xbh_damage_estimate,
-      parseFloat((row.away_damage_adjustment + row.home_damage_adjustment).toFixed(4)),
+      parseFloat(
+        (row.away_damage_adjustment + row.home_damage_adjustment).toFixed(4),
+      ),
     );
     assert.ok(Math.abs(row.combined_tail_adjustment) <= SHADOW_TAIL_GAME_CAP);
     const starterCapped = Math.max(
@@ -449,7 +524,13 @@ describe("computeShadowAuditRow — both starters have xwOBA data", () => {
     );
     assert.equal(
       row.estimated_projection,
-      parseFloat((row.current_projection + starterCapped + row.combined_tail_adjustment).toFixed(2)),
+      parseFloat(
+        (
+          row.current_projection +
+          starterCapped +
+          row.combined_tail_adjustment
+        ).toFixed(2),
+      ),
     );
   });
 
@@ -462,7 +543,9 @@ describe("computeShadowAuditRow — both starters have xwOBA data", () => {
 
   it("identity_warnings populated from parse_warnings", () => {
     const preview = makePreview({
-      parse_warnings: ["Away pitcher ID mismatch: page 123 vs pipeline 456 (Gerrit Cole)"],
+      parse_warnings: [
+        "Away pitcher ID mismatch: page 123 vs pipeline 456 (Gerrit Cole)",
+      ],
     });
     const row = computeShadowAuditRow(makeSummary(), preview, TS);
     assert.strictEqual(row.identity_warnings.length, 1);
@@ -473,15 +556,18 @@ describe("computeShadowAuditRow — both starters have xwOBA data", () => {
 describe("computeShadowAuditRow — numerical correctness", () => {
   it("away_starter_delta matches manual calculation", () => {
     const summary = makeSummary({
-      away_offense_rate_used:  4.550,
+      away_offense_rate_used: 4.55,
       combined_run_multiplier: 1.0,
-      away_lineup_factor:      1.0,
-      home_starter_quality:    1.0,
-      home_expected_innings:   5.5,
+      away_lineup_factor: 1.0,
+      home_starter_quality: 1.0,
+      home_expected_innings: 5.5,
     });
     // Home pitcher xwOBA = 0.315 (league avg) → xwobaFactor = 1.0, shadowQual = 1.0 → delta = 0
     const preview = makePreview({
-      home_pitcher_stats: { ...makePreview().home_pitcher_stats!, xwoba: LEAGUE_AVG_XWOBA_ALLOWED },
+      home_pitcher_stats: {
+        ...makePreview().home_pitcher_stats!,
+        xwoba: LEAGUE_AVG_XWOBA_ALLOWED,
+      },
       away_pitcher_stats: null,
     });
     const row = computeShadowAuditRow(summary, preview, TS);
@@ -495,7 +581,11 @@ describe("computeShadowAuditRow — numerical correctness", () => {
   });
 
   it("game identity fields are passed through from GameSummaryRow", () => {
-    const summary = makeSummary({ game_id: "2026-07-26_CLE@CHC", away_team: "CLE", home_team: "CHC" });
+    const summary = makeSummary({
+      game_id: "2026-07-26_CLE@CHC",
+      away_team: "CLE",
+      home_team: "CHC",
+    });
     const row = computeShadowAuditRow(summary, null, TS);
     assert.strictEqual(row.game_id, "2026-07-26_CLE@CHC");
     assert.strictEqual(row.away_team, "CLE");
@@ -508,43 +598,76 @@ describe("low-center volatility shadow", () => {
     const existing = [
       ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "old", 7.03],
       ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "duplicate", 7.02],
-      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.50],
+      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.5],
     ];
     const rows = upsertCollisionCalibrationHistory(existing, [
       ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "fresh", 7.06],
     ]);
     assert.deepEqual(rows, [
       ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "fresh", 7.06],
-      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.50],
+      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.5],
     ]);
   });
 
   it("keeps collision allocation evidence separate from the active projections", () => {
-    const summary = makeSummary({ projected_away_runs: 2.8, projected_home_runs: 3.2 });
+    const summary = makeSummary({
+      projected_away_runs: 2.8,
+      projected_home_runs: 3.2,
+    });
     const row = computeShadowAuditRow(summary, makePreview(), TS);
     assert.equal(row.base_away_projection, 2.8);
     assert.equal(row.base_home_projection, 3.2);
     assert.equal(row.current_projection, 6.0);
     assert.equal(
       row.collision_away_evidence_projection,
-      parseFloat((2.8 + row.away_starter_delta + row.away_traffic_adjustment + row.away_damage_adjustment).toFixed(2)),
+      parseFloat(
+        (
+          2.8 +
+          row.away_starter_delta +
+          row.away_traffic_adjustment +
+          row.away_damage_adjustment
+        ).toFixed(2),
+      ),
     );
     assert.equal(
       row.collision_home_evidence_projection,
-      parseFloat((3.2 + row.home_starter_delta + row.home_traffic_adjustment + row.home_damage_adjustment).toFixed(2)),
+      parseFloat(
+        (
+          3.2 +
+          row.home_starter_delta +
+          row.home_traffic_adjustment +
+          row.home_damage_adjustment
+        ).toFixed(2),
+      ),
     );
     assert.equal(
       row.estimated_projection,
-      parseFloat((row.shadow_projection + row.combined_tail_adjustment).toFixed(2)),
+      parseFloat(
+        (row.shadow_projection + row.combined_tail_adjustment).toFixed(2),
+      ),
     );
   });
 
   it("migrates older collision history by header without erasing prospective evidence", () => {
-    const oldHeader = Array.from(COLLISION_CALIBRATION_HISTORY_HEADERS).slice(0, 19);
-    const oldRow = oldHeader.map((_, index) => index === 0 ? "2026-08-23" : index === 1 ? "20260823_ATL_MIL" : `old-${index}`);
-    const migrated = migrateCollisionCalibrationHistoryRows(oldHeader, [oldRow]);
+    const oldHeader = Array.from(COLLISION_CALIBRATION_HISTORY_HEADERS).slice(
+      0,
+      19,
+    );
+    const oldRow = oldHeader.map((_, index) =>
+      index === 0
+        ? "2026-08-23"
+        : index === 1
+          ? "20260823_ATL_MIL"
+          : `old-${index}`,
+    );
+    const migrated = migrateCollisionCalibrationHistoryRows(oldHeader, [
+      oldRow,
+    ]);
     assert.equal(migrated.length, 1);
-    assert.equal(migrated[0]!.length, COLLISION_CALIBRATION_HISTORY_HEADERS.length);
+    assert.equal(
+      migrated[0]!.length,
+      COLLISION_CALIBRATION_HISTORY_HEADERS.length,
+    );
     assert.equal(migrated[0]![0], "2026-08-23");
     assert.equal(migrated[0]![1], "20260823_ATL_MIL");
     assert.equal(migrated[0]![19], "");
@@ -553,21 +676,23 @@ describe("low-center volatility shadow", () => {
   it("keeps one mutable prospective history row per Date + Game_ID", () => {
     const prior = [
       ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "old", 7.03],
-      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.50],
+      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.5],
       ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "duplicate", 7.02],
     ];
-    const fresh = [["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "fresh", 7.06]];
+    const fresh = [
+      ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "fresh", 7.06],
+    ];
     const rows = upsertLowCenterCalibrationHistory(prior, fresh);
     assert.deepEqual(rows, [
       ["2026-08-23", "20260823_ATL_MIL", "ATL", "MIL", "fresh", 7.06],
-      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.50],
+      ["2026-08-22", "20260822_NYY_BOS", "NYY", "BOS", "kept", 7.5],
     ]);
   });
 
   it("flags sub-eight active totals and records only shadow candidates", () => {
     const summary = makeSummary({
       projected_total_runs: 7.58,
-      away_starter_quality: 0.90,
+      away_starter_quality: 0.9,
       home_starter_quality: 0.92,
       combined_run_multiplier: 0.96,
       roof_status: "CLOSED",
@@ -577,19 +702,32 @@ describe("low-center volatility shadow", () => {
     assert.equal(row.low_center_volatility_flag, "LOW_CENTER_VOLATILITY");
     assert.equal(
       row.low_center_challenger_projection,
-      parseFloat((summary.projected_total_runs + LOW_CENTER_CHALLENGER_LIFT).toFixed(2)),
+      parseFloat(
+        (summary.projected_total_runs + LOW_CENTER_CHALLENGER_LIFT).toFixed(2),
+      ),
     );
     assert.equal(
       row.low_center_sensitivity_projection,
-      parseFloat((summary.projected_total_runs + LOW_CENTER_SENSITIVITY_LIFT).toFixed(2)),
+      parseFloat(
+        (summary.projected_total_runs + LOW_CENTER_SENSITIVITY_LIFT).toFixed(2),
+      ),
     );
     assert.equal(
       row.low_center_upper_tail_band,
-      parseFloat((summary.projected_total_runs + LOW_CENTER_UPPER_TAIL_RESIDUAL).toFixed(2)),
+      parseFloat(
+        (summary.projected_total_runs + LOW_CENTER_UPPER_TAIL_RESIDUAL).toFixed(
+          2,
+        ),
+      ),
     );
-    assert.equal(row.low_center_upper_tail_residual, LOW_CENTER_UPPER_TAIL_RESIDUAL);
+    assert.equal(
+      row.low_center_upper_tail_residual,
+      LOW_CENTER_UPPER_TAIL_RESIDUAL,
+    );
     assert.ok(row.low_center_reason_tags.includes("BASE_PROJECTION_LT_8"));
-    assert.ok(row.low_center_reason_tags.includes("BOTH_STARTERS_BELOW_LEAGUE_QUALITY"));
+    assert.ok(
+      row.low_center_reason_tags.includes("BOTH_STARTERS_BELOW_LEAGUE_QUALITY"),
+    );
     assert.ok(row.low_center_reason_tags.includes("SUB_NEUTRAL_ENVIRONMENT"));
     assert.ok(row.low_center_reason_tags.includes("CLOSED_ROOF"));
     assert.ok(row.low_center_reason_tags.includes("NO_POSITIVE_TAIL_ESTIMATE"));
@@ -599,7 +737,9 @@ describe("low-center volatility shadow", () => {
   });
 
   it("does not flag an eight-run-or-higher total or invent challenger values", () => {
-    const summary = makeSummary({ projected_total_runs: LOW_CENTER_VOLATILITY_THRESHOLD });
+    const summary = makeSummary({
+      projected_total_runs: LOW_CENTER_VOLATILITY_THRESHOLD,
+    });
     const row = computeShadowAuditRow(summary, makePreview(), TS);
 
     assert.equal(row.low_center_volatility_flag, "STANDARD_RANGE");

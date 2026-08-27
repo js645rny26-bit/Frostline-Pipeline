@@ -9,7 +9,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
 
-**Schema v33 · updated 2026-08-26 · operational procedure; exact fields live in `SCHEMA_REFERENCE`.**
+**Schema v35 · updated 2026-08-26 · operational procedure; exact fields live in `SCHEMA_REFERENCE`.**
 
 ## Daily sequence (all times ET)
 
@@ -38,6 +38,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 
 - **Auto, every publish** (dashboard **Run Pipeline** button, or `POST /api/pipeline/publish`): schedule, pitcher workloads and roles, weather, bullpen usage + quality tiers, posted lineups, starter previous outings, umpires, team run rates, odds snapshot → ODDS_HISTORY, pitcher season stats, all sheet writes, boards, RUN_LOG.
 - **You:** trigger the three publishes above; own SLATE_INPUT O–W.
+- **Active math:** `GAME_SUMMARY` now uses the exact confirmed/prospective lineup against the opposing starter to separate traffic, damage/conversion, expected starter workload, and inherited bullpen exposure. Read `*_Matchup_Profile_Status` first: `NEUTRAL` means the formula intentionally preserved the prior rate/quality path because exact evidence was unavailable.
 - **Settlement:** run the daily settlement workflow for the completed slate
   date. It reads frozen packets only and adds allocation, starter-dimension,
   traffic/damage/conversion, bullpen-timing, game-truth replay, and ladder
