@@ -124,23 +124,55 @@ jobs:
             exit 1
           fi
 
+          # Capture the endpoint body even for HTTP failures.  A 500 can mean
+          # that one post-settlement module returned `partial` after the
+          # immutable outcome writes completed; curl's generic exit 22 alone
+          # is not enough evidence to distinguish that from an endpoint crash.
+          # The report is printed and retained before this workflow exits so
+          # the exact module statuses and errors are visible in the job log.
           set +e
-          curl \
+          settlement_http_status="$(curl \
             --silent \
             --show-error \
-            --fail-with-body \
             --request GET \
+            --write-out '%{http_code}' \
             "http://127.0.0.1:3000/api/pipeline/settle?date=${SETTLEMENT_DATE}&workbook_id=${FROSTLINE_WORKBOOK_ID}" \
-            --output frostline-settlement-report.json
-          settlement_status=$?
+            --output frostline-settlement-report.json)"
+          curl_status=$?
           set -e
 
-          cat frostline-settlement-report.json
+          SETTLEMENT_HTTP_STATUS="${settlement_http_status:-}" node <<'NODE'
+          const fs = require("fs");
+          const path = "frostline-settlement-report.json";
+          try {
+            const report = JSON.parse(fs.readFileSync(path, "utf8"));
+            console.log(JSON.stringify({
+              settlement_http_status: process.env.SETTLEMENT_HTTP_STATUS ?? null,
+              status: report.status ?? null,
+              date: report.date ?? null,
+              module_statuses: report.module_statuses ?? null,
+              errors: report.errors ?? null,
+              settlement_errors: report.settlement?.errors ?? null,
+              regression_errors: report.regression?.errors ?? null,
+              starter_audit_errors: report.starter_audit?.errors ?? null,
+              vehicle_postmortem_errors: report.vehicle_postmortem?.errors ?? null,
+              survival_replay_errors: report.survival_replay?.errors ?? null,
+              collision_replay_errors: report.collision_replay?.errors ?? null,
+              monotonicity_v2_errors: report.monotonicity_v2?.errors ?? null,
+              decision_audit_errors: report.decision_audit?.errors ?? null,
+              postgame_diagnostics_errors: report.postgame_diagnostics?.errors ?? null,
+              schema_documentation_errors: report.schema_documentation?.errors ?? null,
+            }, null, 2));
+          } catch (error) {
+            console.error(`Settlement response was not valid JSON: ${error.message}`);
+            try { console.error(fs.readFileSync(path, "utf8")); } catch {}
+          }
+          NODE
 
-          if [ "$settlement_status" -ne 0 ]; then
-            echo "::error title=Isolated settlement request failed::The settlement endpoint returned a failure."
+          if [ "$curl_status" -ne 0 ] || [ "${settlement_http_status:-0}" -lt 200 ] || [ "${settlement_http_status:-0}" -ge 300 ]; then
+            echo "::error title=Isolated settlement request failed::HTTP ${settlement_http_status:-unavailable}; see the structured settlement status above."
             cat frostline-api-server.log
-            exit "$settlement_status"
+            exit 1
           fi
 
           node <<'NODE'
