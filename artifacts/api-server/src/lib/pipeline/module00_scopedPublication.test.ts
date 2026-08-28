@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildSheetRowNumberMap,
   buildPublicationProtection,
+  clearDecommissionedDisplayColumns,
   filterMutablePublicationGames,
   mergeProtectedRows,
 } from "./module00_scopedPublication.js";
@@ -43,6 +44,23 @@ test("shared team inputs preserve teams already involved in a started game", () 
     mergeProtectedRows(existing, incoming, 1, new Set(["BAL"])),
     [existing[0], incoming[1]],
   );
+});
+
+test("decommissioned TEAM_FORM fields stay blank after protected-team preservation", () => {
+  const existing = [
+    ["2026-08-27", "ATL", 4.1, 3.9, 0.303, "MEDIUM", 1, "FROZEN"],
+    ["2026-08-27", "ARI", 4.8, 4.2, 0.312, "MEDIUM", 1, "OLD"],
+  ];
+  const incoming = [
+    ["2026-08-27", "ATL", 9.9, 9.9, "", "", "", "ILLEGAL_LATE_VALUE"],
+    ["2026-08-27", "ARI", 5.0, 4.0, "", "", "", "REFRESHED"],
+  ];
+
+  const merged = mergeProtectedRows(existing, incoming, 1, new Set(["ATL"]));
+  const cleaned = clearDecommissionedDisplayColumns(merged, [4, 5, 6]);
+
+  assert.deepEqual(cleaned[0], ["2026-08-27", "ATL", 4.1, 3.9, "", "", "", "FROZEN"]);
+  assert.deepEqual(cleaned[1], incoming[1]);
 });
 
 test("pre-write guard protects a game that could cross first pitch during the write", () => {

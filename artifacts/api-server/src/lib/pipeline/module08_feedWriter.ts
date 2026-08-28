@@ -24,7 +24,11 @@ import type { PitcherSeasonStatsResult, PitcherSeasonStats } from "./module02b_p
 import type { TeamRunRatesResult } from "./module05c_teamRunRates.js";
 import type { LineMovementResult } from "./module05d_oddsHistory.js";
 import type { LineupPlayer } from "./module04c_startingNine.js";
-import { mergeProtectedRows, type PublicationProtection } from "./module00_scopedPublication.js";
+import {
+  clearDecommissionedDisplayColumns,
+  mergeProtectedRows,
+  type PublicationProtection,
+} from "./module00_scopedPublication.js";
 
 export interface SheetWriteStatus {
   status: "success" | "failure" | "skipped";
@@ -365,12 +369,13 @@ async function safeWrite(
     keyColumn: number;
     protectedKeys: ReadonlySet<string>;
     orderedKeys?: readonly string[];
+    postMergeTransform?: (rows: unknown[][]) => unknown[][];
   },
 ): Promise<SheetWriteStatus> {
   const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const rowsToWrite = protection && protection.protectedKeys.size > 0
+      const mergedRows = protection && protection.protectedKeys.size > 0
         ? mergeProtectedRows(
             (await readRange(workbookId, clearRng)).values ?? [],
             rows,
@@ -379,6 +384,9 @@ async function safeWrite(
             protection.orderedKeys,
           )
         : rows;
+      const rowsToWrite = protection?.postMergeTransform
+        ? protection.postMergeTransform(mergedRows)
+        : mergedRows;
       await clearRange(workbookId, clearRng);
       if (rowsToWrite.length === 0) {
         return { status: "success", rows_written: 0, range: writeRng };
@@ -492,7 +500,15 @@ export async function writeGoogleSheetsFeed(
     `TEAM_FORM_INPUT!A2:H${1 + Math.max(tfRows.length, 1)}`,
     tfRows,
     workbookId,
-    protection ? { keyColumn: 1, protectedKeys: protection.protected_team_abbrs } : undefined,
+    protection
+      ? {
+          keyColumn: 1,
+          protectedKeys: protection.protected_team_abbrs,
+          // E:G were decorative placeholders, never game truth. Clear them
+          // after scoped preservation so protected teams cannot revive them.
+          postMergeTransform: (rows) => clearDecommissionedDisplayColumns(rows, [4, 5, 6]),
+        }
+      : undefined,
   );
   if (tfResult.status === "failure") {
     failed.push("team_form_input");

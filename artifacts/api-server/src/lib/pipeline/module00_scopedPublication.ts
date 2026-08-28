@@ -129,3 +129,20 @@ export function mergeProtectedRows(
     })
     .map(({ row }) => row);
 }
+
+/**
+ * Preserve immutable game evidence while allowing an explicitly decommissioned
+ * display-only field to be removed from every row after a scoped merge. This
+ * stays separate from mergeProtectedRows so callers must explicitly name the
+ * non-evidence columns they are retiring.
+ */
+export function clearDecommissionedDisplayColumns(
+  rows: readonly unknown[][],
+  columns: readonly number[],
+): unknown[][] {
+  return rows.map((row) => {
+    const cleaned = [...row];
+    for (const column of columns) cleaned[column] = "";
+    return cleaned;
+  });
+}
