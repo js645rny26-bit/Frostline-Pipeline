@@ -21,6 +21,7 @@ import type { PostmortemEventEvidence } from "./module21_postmortemMechanism.js"
 const MLB_API = "https://statsapi.mlb.com/api/v1";
 const HISTORY_SHEET = "SHADOW_HISTORY";
 const OUTCOMES_SHEET = "SHADOW_OUTCOMES";
+const PREGAME_PACKET_HISTORY_SHEET = "PREGAME_PACKET_HISTORY";
 const VEHICLE_LOG_SHEET = "VEHICLE_LOG";
 const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
 const PROJECTION_REPLAY_SHEET = "PROJECTION_REPLAY";
@@ -98,6 +99,18 @@ const H_REPAIRED = 6;
 const H_AWAY_SRC = 9;
 const H_HOME_SRC = 10;
 const H_PARK_SRC = 21;
+
+// PREGAME_PACKET_HISTORY is the canonical freeze boundary. Keep these local
+// indexes explicit because settlement consumes only the small provenance
+// subset, not the packet's active-model fields.
+const P_DATE = 0;
+const P_GAME_ID = 1;
+const P_SCHEDULED_FIRST_PITCH = 4;
+const P_PACKET_STATUS = 5;
+const P_FREEZE_TS = 10;
+const P_SNAPSHOT_TS = 11;
+const P_AWAY_STARTER = 25;
+const P_HOME_STARTER = 26;
 
 const O_SETTLEMENT_TS = 11;
 const O_FROZEN_SOURCE = 15;
@@ -206,11 +219,97 @@ export interface ProspectiveSnapshotParseResult {
   warnings: string[];
 }
 
+/**
+ * The packet is the authoritative pregame record once it has frozen.  This
+ * narrow type deliberately excludes all current-model inputs so settlement
+ * cannot accidentally import a postgame projection while repairing starter
+ * provenance.
+ */
+export interface FrozenPacketStarterSnapshot {
+  away_starter: string;
+  home_starter: string;
+  packet_snapshot_ts: string;
+  freeze_ts: string;
+}
+
 export function selectProspectiveProjection(
   vehicle: FrozenProjection | undefined,
   auditSnapshot: FrozenProjection | undefined,
 ): FrozenProjection | undefined {
   return vehicle ?? auditSnapshot;
+}
+
+function starterName(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function isResolvedStarter(value: unknown): boolean {
+  const normalized = starterName(value).toLowerCase();
+  return normalized !== ""
+    && normalized !== "unresolved"
+    && normalized !== "unknown"
+    && normalized !== "tbd"
+    && normalized !== "n/a";
+}
+
+/**
+ * Read only legitimately frozen packet snapshots. An OPEN packet remains
+ * mutable evidence and a post-first-pitch snapshot is never eligible to
+ * repair a settled row.
+ */
+export function parseFrozenPacketStarterSnapshots(
+  rows: unknown[][],
+  date: string,
+): Map<string, FrozenPacketStarterSnapshot> {
+  const snapshots = new Map<string, FrozenPacketStarterSnapshot>();
+  const latestSnapshotMs = new Map<string, number>();
+  for (const row of rows) {
+    if (String(row[P_DATE] ?? "") !== date) continue;
+    const gameId = starterName(row[P_GAME_ID]);
+    const scheduledFirstPitch = starterName(row[P_SCHEDULED_FIRST_PITCH]);
+    const packetSnapshotTs = starterName(row[P_SNAPSHOT_TS]);
+    const freezeTs = starterName(row[P_FREEZE_TS]);
+    const firstPitchMs = Date.parse(scheduledFirstPitch);
+    const packetSnapshotMs = Date.parse(packetSnapshotTs);
+    const freezeMs = Date.parse(freezeTs);
+    if (
+      !gameId
+      || starterName(row[P_PACKET_STATUS]) !== "FROZEN_PREGAME"
+      || !Number.isFinite(firstPitchMs)
+      || !Number.isFinite(packetSnapshotMs)
+      || !Number.isFinite(freezeMs)
+      || packetSnapshotMs >= firstPitchMs
+      || freezeMs < packetSnapshotMs
+      || packetSnapshotMs < (latestSnapshotMs.get(gameId) ?? Number.NEGATIVE_INFINITY)
+    ) continue;
+
+    snapshots.set(gameId, {
+      away_starter: starterName(row[P_AWAY_STARTER]),
+      home_starter: starterName(row[P_HOME_STARTER]),
+      packet_snapshot_ts: packetSnapshotTs,
+      freeze_ts: freezeTs,
+    });
+    latestSnapshotMs.set(gameId, packetSnapshotMs);
+  }
+  return snapshots;
+}
+
+/**
+ * Existing resolved outcome fields are immutable. A blank or explicitly
+ * unresolved legacy value is not legitimate starter evidence, so it may be
+ * repaired from the canonical frozen packet. SHADOW_HISTORY is only a legacy
+ * fallback when no frozen packet exists; it must never override a packet.
+ */
+export function resolveProjectedStarter(
+  existing: unknown,
+  packetStarter: string | undefined,
+  historyStarter: unknown,
+): string {
+  const existingStarter = starterName(existing);
+  if (isResolvedStarter(existingStarter)) return existingStarter;
+  if (packetStarter !== undefined) return starterName(packetStarter);
+  const history = starterName(historyStarter);
+  return isResolvedStarter(history) ? history : existingStarter || history;
 }
 
 export interface SettlementRow {
@@ -1050,6 +1149,23 @@ export async function runShadowSettlement(
     return { ...failedResult(date, ts, []), status: "success", games_found: 0 };
   }
 
+  // SHADOW_HISTORY is retained for legacy settlement compatibility, but a
+  // FROZEN_PREGAME packet is the canonical provenance surface for starters.
+  // This read is deliberately best-effort so pre-packet historical dates can
+  // still settle truthfully as incomplete rather than failing wholesale.
+  const frozenPacketStartersByGame = new Map<string, FrozenPacketStarterSnapshot>();
+  try {
+    const response = await readRange(wbId, `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ5000`);
+    for (const [gameId, snapshot] of parseFrozenPacketStarterSnapshots(
+      ((response.values ?? []) as unknown[][]).slice(1),
+      date,
+    )) {
+      frozenPacketStartersByGame.set(gameId, snapshot);
+    }
+  } catch (error: unknown) {
+    warnings.push(`PREGAME_PACKET_HISTORY starter provenance read unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   const vehiclesByGame = new Map<string, FrozenProjection>();
   try {
     const response = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:N5000`);
@@ -1187,15 +1303,25 @@ export async function runShadowSettlement(
     }
 
     const existing = existingByGame.get(gameId);
-    // Once an outcome row exists, preserve every pregame-origin field from that
-    // row. Settlement reruns may refresh actual/provenance fields only.
+    // Once an outcome row exists, preserve every resolved pregame-origin field
+    // from that row. Settlement reruns may repair only blank/UNRESOLVED starter
+    // fields from the canonical frozen packet, never from current/live data.
     const projection = existing
       ? numberOrNull(existing.values[4]) ?? 0
       : Number.parseFloat(history[H_REPAIRED] ?? "0") || 0;
     const error = Number.parseFloat((projection - final.actual_total).toFixed(2));
     const provenance = final.provenance;
-    const projectedAwayStarter = String(existing?.values[22] || history[H_AWAY_PITCHER] || "");
-    const projectedHomeStarter = String(existing?.values[23] || history[H_HOME_PITCHER] || "");
+    const packetStarters = frozenPacketStartersByGame.get(gameId);
+    const projectedAwayStarter = resolveProjectedStarter(
+      existing?.values[22],
+      packetStarters?.away_starter,
+      history[H_AWAY_PITCHER],
+    );
+    const projectedHomeStarter = resolveProjectedStarter(
+      existing?.values[23],
+      packetStarters?.home_starter,
+      history[H_HOME_PITCHER],
+    );
     const awayMatch = comparePitcherNames(projectedAwayStarter, provenance.away.actual_starter);
     const homeMatch = comparePitcherNames(projectedHomeStarter, provenance.home.actual_starter);
     const combinedStatus = combinedProvenanceStatus(provenance.status, awayMatch, homeMatch);

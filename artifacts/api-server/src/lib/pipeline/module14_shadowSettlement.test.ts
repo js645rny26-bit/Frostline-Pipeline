@@ -12,6 +12,8 @@ import {
   parseStarterSurvivalProspectiveSnapshots,
   parseStarterSurvivalV2ProspectiveSnapshots,
   parseProspectiveDecisionAuditSnapshots,
+  parseFrozenPacketStarterSnapshots,
+  resolveProjectedStarter,
   selectProspectiveProjection,
   settlementRowToValues,
   starterSurvivalCalibrationValues,
@@ -298,6 +300,52 @@ test("OPEN decision audit row is a valid prospective fallback only before first 
   assert.equal(parsed.snapshots.has("20260813_PHI_MIN"), false);
   assert.equal(parsed.warnings.length, 1);
   assert.match(parsed.warnings[0] ?? "", /non-prospective timestamp/);
+});
+
+test("frozen packet starter provenance repairs an unresolved legacy outcome without overwriting valid evidence", () => {
+  const valid = Array(95).fill("");
+  valid[0] = "2026-08-27";
+  valid[1] = "20260827_BAL_STL";
+  valid[4] = "2026-08-27T23:45:00.000Z";
+  valid[5] = "FROZEN_PREGAME";
+  valid[10] = "2026-08-27T23:46:00.000Z";
+  valid[11] = "2026-08-27T20:00:00.000Z";
+  valid[25] = "Trevor Rogers";
+  valid[26] = "Gordon Graceffo";
+
+  const open = [...valid];
+  open[1] = "20260827_OPEN_PACKET";
+  open[5] = "OPEN_PROSPECTIVE";
+  const postFirstPitch = [...valid];
+  postFirstPitch[1] = "20260827_POST_START";
+  postFirstPitch[11] = "2026-08-27T23:45:00.000Z";
+
+  const snapshots = parseFrozenPacketStarterSnapshots(
+    [valid, open, postFirstPitch],
+    "2026-08-27",
+  );
+  const balStl = snapshots.get("20260827_BAL_STL");
+  assert.deepEqual(balStl, {
+    away_starter: "Trevor Rogers",
+    home_starter: "Gordon Graceffo",
+    packet_snapshot_ts: "2026-08-27T20:00:00.000Z",
+    freeze_ts: "2026-08-27T23:46:00.000Z",
+  });
+  assert.equal(snapshots.has("20260827_OPEN_PACKET"), false);
+  assert.equal(snapshots.has("20260827_POST_START"), false);
+
+  assert.equal(
+    resolveProjectedStarter("UNRESOLVED", balStl?.home_starter, "Legacy Home Starter"),
+    "Gordon Graceffo",
+  );
+  assert.equal(
+    resolveProjectedStarter("Existing Frozen Starter", balStl?.home_starter, "Legacy Home Starter"),
+    "Existing Frozen Starter",
+  );
+  assert.equal(
+    resolveProjectedStarter("UNRESOLVED", undefined, "Legacy Home Starter"),
+    "Legacy Home Starter",
+  );
 });
 
 test("vehicle log wins while validated audit evidence can repair an unresolved outcome", () => {
