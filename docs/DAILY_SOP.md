@@ -9,7 +9,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
 
-**Schema v38 - updated 2026-08-27 - active offensive center uses lineup quality plus bounded recent form; daily bullpen availability and five-day pitch workload use MLB Starting Nine. MODEL_INPUT_CATALOG now identifies each source/input window, active versus shadow status, freshness surface, correlation family, and missing behavior. Exact fields live in SCHEMA_REFERENCE.**
+**Schema v39 - updated 2026-08-28 - board authorization finalizes 30 minutes before first pitch; the independent pregame packet stays refreshable through legitimate pre-first-pitch runs and freezes only at first pitch. Active offensive center uses lineup quality plus bounded recent form; daily bullpen availability and five-day pitch workload use MLB Starting Nine. Exact fields live in SCHEMA_REFERENCE.**
 
 ## Daily sequence (all times ET)
 

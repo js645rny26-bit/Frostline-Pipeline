@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildPregamePacketInputs,
   PREGAME_PACKET_HISTORY_COLS,
   PREGAME_PACKET_HISTORY_HEADERS,
   upsertPregamePacketRows,
@@ -60,6 +61,64 @@ test("pregame packet updates while OPEN then freezes atomically by Date + Game_I
   assert.equal(frozen.rows[0]![5], "FROZEN_PREGAME");
   assert.equal(frozen.rows[0]![15], 8.8);
   assert.equal(frozen.rows[0]![10], "2026-08-24T20:00:00.000Z");
+});
+
+test("a board-locked decision still permits pre-first-pitch packet refresh", () => {
+  const packets = buildPregamePacketInputs(
+    [{
+      date: "2026-08-24",
+      game_id: "20260824_AAA_BBB",
+      away_team: "AAA",
+      home_team: "BBB",
+      projected_away_runs: 4,
+      projected_home_runs: 4.5,
+      projected_total_runs: 8.5,
+    }] as never,
+    [{
+      legacy_game_id: "20260824_AAA_BBB",
+      lock_status: "LOCKED_OUT",
+      market_line: 8.5,
+      run_id: "board-lock-run",
+      model_version: "test",
+      direction: "OVER",
+      vehicle_type: "GAME_TOTAL",
+      final_decision: "NO_CORE",
+      core_blocker: "BOARD_LOCKED_POST_CUTOFF",
+      confidence: 50,
+      variance: 0,
+    }] as never,
+    [{ legacy_game_id: "20260824_AAA_BBB", scheduled_utc_time: firstPitch }] as never,
+    [],
+    [],
+    [],
+  );
+
+  assert.equal(packets[0]?.packet_status, "OPEN_PROSPECTIVE");
+  const lockedBoardSnapshot = upsertPregamePacketRows(
+    [],
+    packets,
+    "2026-08-24T22:45:00.000Z", // 25 minutes before first pitch
+  );
+  const refreshedInput = {
+    ...packets[0]!,
+    values: [...packets[0]!.values],
+  };
+  refreshedInput.values[15] = 8.8;
+  const refreshed = upsertPregamePacketRows(
+    lockedBoardSnapshot.rows,
+    [refreshedInput],
+    "2026-08-24T23:05:00.000Z", // five minutes before first pitch
+  );
+
+  assert.equal(refreshed.rows[0]?.[5], "OPEN_PROSPECTIVE");
+  assert.equal(refreshed.rows[0]?.[15], 8.8);
+  const frozen = upsertPregamePacketRows(
+    refreshed.rows,
+    [],
+    "2026-08-24T23:11:00.000Z",
+  );
+  assert.equal(frozen.rows[0]?.[5], "FROZEN_PREGAME");
+  assert.equal(frozen.rows[0]?.[15], 8.8);
 });
 
 test("a frozen pregame packet remains byte-for-byte unchanged on later refresh", () => {

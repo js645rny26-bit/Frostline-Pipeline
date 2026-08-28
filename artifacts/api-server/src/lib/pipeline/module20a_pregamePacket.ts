@@ -254,12 +254,11 @@ export function buildPregamePacketInputs(
     const packetMarketLine = operatorMarketLine ?? boardRow.market_line;
     const awayLineupOverride = operatorValue(operator, "AWAY_LINEUP");
     const homeLineupOverride = operatorValue(operator, "HOME_LINEUP");
-    const frozen =
-      boardRow.lock_status === "LOCKED_IN" ||
-      boardRow.lock_status === "LOCKED_OUT";
-    const status: PregamePacketStatus = frozen
-      ? "FROZEN_PREGAME"
-      : "OPEN_PROSPECTIVE";
+    // Board authorization finalizes before first pitch; forecast provenance
+    // does not. Keep the packet refreshable for every legitimate pregame run,
+    // then promote the last stored pregame snapshot after first pitch without
+    // ever reading post-start state.
+    const status: PregamePacketStatus = "OPEN_PROSPECTIVE";
     const values: unknown[] = [
       summary.date,
       summary.game_id,

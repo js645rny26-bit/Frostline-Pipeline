@@ -109,8 +109,11 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      lineage registry. It distinguishes active forecasts and components from
  *      frozen snapshots, shadow challengers, replay aliases, display-only fields,
  *      and missing inputs; it records slate-scoped materialization freshness.
+ *  v39 (2026-08-28): Board authorization finalizes at T-minus-30 minutes, while
+ *      PREGAME_PACKET_HISTORY remains mutable through legitimate pre-first-pitch
+ *      refreshes and freezes its final stored snapshot only after first pitch.
  */
-export const WORKBOOK_SCHEMA_VERSION = 38;
+export const WORKBOOK_SCHEMA_VERSION = 39;
 
 export interface ColumnDef {
   name: string;
@@ -4685,7 +4688,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         filledBy: "MODULE_11",
         description:
           "ISO 8601 UTC timestamp at which this game's board lock fires. " +
-          "= Scheduled_First_Pitch − BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH (default 2.0 h). " +
+          "= Scheduled_First_Pitch − BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH (default 0.5 h / 30 minutes). " +
           "Blank when Scheduled_First_Pitch is unavailable.",
         exampleValue: "2026-07-25T16:07:00Z",
       },

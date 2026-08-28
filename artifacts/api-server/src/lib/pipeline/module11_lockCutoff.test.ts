@@ -60,6 +60,11 @@ function msBeforePitch(cutoff: Date, scheduledIso: string): number {
 
 const LOCK_MS = BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH * 60 * 60 * 1000;
 
+it("uses a thirty-minute board authorization cutoff", () => {
+  assert.equal(BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH, 0.5);
+  assert.equal(LOCK_MS, 30 * 60 * 1000);
+});
+
 // ── §1: all games have scheduled times ───────────────────────────────────────
 
 describe("buildGameLockCutoffs — all games have scheduled times", () => {

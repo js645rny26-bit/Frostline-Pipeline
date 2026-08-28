@@ -374,7 +374,8 @@ export async function repairWorkbookSchemaReference(
         "v35 (2026-08-26): active team-run math now separates central starter quality, exact lineup-pitcher traffic/damage conversion, bounded effective starter workload, and resulting bullpen exposure. The same fields freeze in the pregame packet; no new shadow surface was added. " +
         "v36 (2026-08-27): active offense center is league-anchored and uses exact lineup quality; recent realized scoring is capped as form. FIP/ERA owns starter run prevention, while command/traffic and HR/damage are applied once in their own paths. New center fields freeze with the same pregame packet. " +
         "v37 (2026-08-27): BULLPEN_USAGE_DAILY uses MLB Starting Nine as the daily availability and five-day pitch-count source; Inside The Pen only enriches matched seven-day innings history and never replaces explicit daily availability. " +
-        "v38 (2026-08-27): MODEL_INPUT_CATALOG provides source/window/game-window/freshness lineage and explicitly labels active forecasts, components, frozen snapshots, shadow challengers, replay aliases, display-only fields, placeholders, and known input gaps. Recent L30 scoring is slate-date scoped and TEAM_FORM synthetic placeholders are blank/decommissioned.",
+        "v38 (2026-08-27): MODEL_INPUT_CATALOG provides source/window/game-window/freshness lineage and explicitly labels active forecasts, components, frozen snapshots, shadow challengers, replay aliases, display-only fields, placeholders, and known input gaps. Recent L30 scoring is slate-date scoped and TEAM_FORM synthetic placeholders are blank/decommissioned. " +
+        "v39 (2026-08-28): board authorization locks at T-minus-30 minutes, but the independent pregame packet refreshes through legitimate pre-first-pitch runs and freezes only when first pitch is observed.",
     ],
     [
       "Workbook_Purpose",
@@ -390,7 +391,7 @@ export async function repairWorkbookSchemaReference(
     ],
     [
       "Lock_Rules",
-      "Each game locks independently BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH (default 2 h) before its own first pitch. LOCKED_OUT games cannot be promoted to CORE without a named Late_Change_Reason.",
+      "Each game finalizes board authorization independently 30 minutes before its own first pitch. LOCKED_OUT games cannot be promoted to CORE without a named Late_Change_Reason. PREGAME_PACKET_HISTORY remains independently refreshable through legitimate pre-first-pitch runs, then freezes at first pitch.",
     ],
     [
       "Schema_Reference",

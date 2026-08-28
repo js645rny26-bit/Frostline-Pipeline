@@ -134,7 +134,7 @@ export const VALIDATION_RULES = {
  * BOARD_LOCK_STATE.  Existing CORE picks may still be downgraded if a
  * disqualifying signal arrives (starter scratch, bullpen data lost, etc.).
  */
-export const BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH = 2.0;
+export const BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH = 0.5;
 
 /**
  * Grace window (ms) within which a first-lock-fire is considered "on-time."
