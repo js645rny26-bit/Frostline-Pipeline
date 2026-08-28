@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   MODEL_INPUT_CATALOG_HEADER,
   buildModelInputCatalogRows,
+  ensureModelInputCatalogSheet,
   getModelInputCatalogEntries,
 } from "./modelInputCatalog.js";
 
@@ -13,7 +14,9 @@ test("model input catalog has one complete, uniquely identified row per registry
 
   assert.equal(rows.length, entries.length);
   assert.equal(new Set(entries.map((entry) => entry.id)).size, entries.length);
-  assert.ok(rows.every((row) => row.length === MODEL_INPUT_CATALOG_HEADER.length));
+  assert.ok(
+    rows.every((row) => row.length === MODEL_INPUT_CATALOG_HEADER.length),
+  );
 });
 
 test("each active model input declares window, source, cadence, freshness surface, and missing behavior", () => {
@@ -37,7 +40,10 @@ test("catalog labels the active forecast once and does not treat components, sha
   const activeForecasts = entries.filter(
     (entry) => entry.outputClass === "ACTIVE_FORECAST",
   );
-  assert.deepEqual(activeForecasts.map((entry) => entry.id), ["ACTIVE_GAME_FORECAST"]);
+  assert.deepEqual(
+    activeForecasts.map((entry) => entry.id),
+    ["ACTIVE_GAME_FORECAST"],
+  );
 
   for (const id of [
     "ACTIVE_BASEBALL_SUBTOTAL",
@@ -73,9 +79,61 @@ test("catalog renders source materialization separately from the static registry
   });
   const entries = getModelInputCatalogEntries();
   const rows = buildModelInputCatalogRows(observations);
-  const sourceIndex = entries.findIndex((entry) => entry.id === "SOURCE_MLB_RECENT_SCORING");
+  const sourceIndex = entries.findIndex(
+    (entry) => entry.id === "SOURCE_MLB_RECENT_SCORING",
+  );
 
   assert.equal(rows[sourceIndex]?.[13], "2026-08-27");
   assert.equal(rows[sourceIndex]?.[14], "2026-08-27T16:00:00.000Z");
   assert.equal(rows[sourceIndex]?.[15], "CURRENT_MATERIALIZED (30)");
+});
+
+test("catalog sheet existence is determined from workbook metadata, not a cell-range probe", async () => {
+  let addCalls = 0;
+  await ensureModelInputCatalogSheet("workbook", {
+    getSpreadsheetSheetProperties: async () => [
+      { sheetId: 1, title: "MODEL_INPUT_CATALOG" },
+    ],
+    addSheet: async () => {
+      addCalls++;
+    },
+  });
+  assert.equal(addCalls, 0);
+});
+
+test("catalog sheet creation tolerates only a proven duplicate-add race", async () => {
+  let metadataReads = 0;
+  let addCalls = 0;
+  await ensureModelInputCatalogSheet("workbook", {
+    getSpreadsheetSheetProperties: async () => {
+      metadataReads++;
+      return metadataReads === 1
+        ? []
+        : [{ sheetId: 1, title: "MODEL_INPUT_CATALOG" }];
+    },
+    addSheet: async () => {
+      addCalls++;
+      throw new Error(
+        'A sheet with the name "MODEL_INPUT_CATALOG" already exists',
+      );
+    },
+  });
+  assert.equal(addCalls, 1);
+  assert.equal(metadataReads, 2);
+});
+
+test("catalog sheet metadata failures do not attempt a blind addSheet", async () => {
+  let addCalls = 0;
+  await assert.rejects(
+    ensureModelInputCatalogSheet("workbook", {
+      getSpreadsheetSheetProperties: async () => {
+        throw new Error("metadata unavailable");
+      },
+      addSheet: async () => {
+        addCalls++;
+      },
+    }),
+    /metadata unavailable/,
+  );
+  assert.equal(addCalls, 0);
 });
