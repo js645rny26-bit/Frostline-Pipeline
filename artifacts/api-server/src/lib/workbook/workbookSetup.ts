@@ -375,7 +375,8 @@ export async function repairWorkbookSchemaReference(
         "v36 (2026-08-27): active offense center is league-anchored and uses exact lineup quality; recent realized scoring is capped as form. FIP/ERA owns starter run prevention, while command/traffic and HR/damage are applied once in their own paths. New center fields freeze with the same pregame packet. " +
         "v37 (2026-08-27): BULLPEN_USAGE_DAILY uses MLB Starting Nine as the daily availability and five-day pitch-count source; Inside The Pen only enriches matched seven-day innings history and never replaces explicit daily availability. " +
         "v38 (2026-08-27): MODEL_INPUT_CATALOG provides source/window/game-window/freshness lineage and explicitly labels active forecasts, components, frozen snapshots, shadow challengers, replay aliases, display-only fields, placeholders, and known input gaps. Recent L30 scoring is slate-date scoped and TEAM_FORM synthetic placeholders are blank/decommissioned. " +
-        "v39 (2026-08-28): board authorization locks at T-minus-30 minutes, but the independent pregame packet refreshes through legitimate pre-first-pitch runs and freezes only when first pitch is observed.",
+        "v39 (2026-08-28): board authorization locks at T-minus-30 minutes, but the independent pregame packet refreshes through legitimate pre-first-pitch runs and freezes only when first pitch is observed. " +
+        "v40 (2026-08-28): DISTRIBUTION_WIDTH_REPLAY_V1 and SUMMARY test frozen bullpen exposure, starter pressure, SSAT-family, collision, low-center, and allocation-separation evidence against settled total, starter-window, bullpen-window, and allocation error. They are research-only and create no coefficients, forecasts, bands, vehicles, or BET/PASS outcomes.",
     ],
     [
       "Workbook_Purpose",

@@ -112,8 +112,11 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *  v39 (2026-08-28): Board authorization finalizes at T-minus-30 minutes, while
  *      PREGAME_PACKET_HISTORY remains mutable through legitimate pre-first-pitch
  *      refreshes and freezes its final stored snapshot only after first pitch.
+ *  v40 (2026-08-28): DISTRIBUTION_WIDTH_REPLAY_V1 and SUMMARY replay only
+ *      frozen-packet uncertainty evidence against settled center, starter-window,
+ *      bullpen-window, and allocation error. They remain research-only.
  */
-export const WORKBOOK_SCHEMA_VERSION = 39;
+export const WORKBOOK_SCHEMA_VERSION = 40;
 
 export interface ColumnDef {
   name: string;
@@ -148,6 +151,7 @@ export interface ColumnDef {
     | "MODULE_22"
     | "MODULE_23"
     | "MODULE_24"
+    | "MODULE_25"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -554,6 +558,58 @@ const GAME_TRUTH_REPLAY_V1_COLUMN_NAMES = [
   "Frozen_Collision_Damage_Estimate",
   "Replay_Status",
   "Settlement_TS",
+] as const;
+const DISTRIBUTION_WIDTH_REPLAY_V1_COLUMN_NAMES = [
+  "Date",
+  "Game_ID",
+  "Frozen_Packet_Snapshot_TS",
+  "Frozen_Projected_Total",
+  "Actual_Total",
+  "Total_Error",
+  "Total_Abs_Error",
+  "Total_Squared_Error",
+  "Frozen_Starter_Attack_Runs",
+  "Actual_Starter_Window_Runs",
+  "Starter_Window_Error",
+  "Starter_Window_Abs_Error",
+  "Frozen_Bullpen_Continuation_Runs",
+  "Actual_Bullpen_Window_Runs",
+  "Bullpen_Window_Error",
+  "Bullpen_Window_Abs_Error",
+  "Frozen_Away_Bullpen_Exposure_IP",
+  "Frozen_Home_Bullpen_Exposure_IP",
+  "Frozen_Combined_Bullpen_Exposure_IP",
+  "Frozen_Away_Starter_Pressure_Shortfall_IP",
+  "Frozen_Home_Starter_Pressure_Shortfall_IP",
+  "Frozen_Combined_Starter_Pressure_Shortfall_IP",
+  "Frozen_SSAT_Family_Base_Spread",
+  "Frozen_Collision_Status",
+  "Frozen_Collision_Traffic_Estimate",
+  "Frozen_Collision_Damage_Estimate",
+  "Frozen_Collision_Tail_Adjustment",
+  "Frozen_Low_Center_Status",
+  "Frozen_Low_Center_Upper_Band_Delta",
+  "Frozen_Allocation_Separation",
+  "Actual_Bullpen_Run_Share",
+  "Actual_Starter_Run_Share",
+  "Allocation_MAE",
+  "Allocation_Sign_Reversal",
+  "Primary_Scoring_Mechanism",
+  "Away_Conversion_Outcome",
+  "Home_Conversion_Outcome",
+  "Replay_Status",
+  "Settlement_TS",
+] as const;
+const DISTRIBUTION_WIDTH_REPLAY_SUMMARY_COLUMN_NAMES = [
+  "Feature",
+  "Outcome_Metric",
+  "Eligible_N",
+  "Pearson_Correlation",
+  "Feature_Min",
+  "Feature_Max",
+  "Outcome_Mean",
+  "Research_Status",
+  "Replay_TS",
 ] as const;
 
 function diagnosticColumns(
@@ -6713,6 +6769,67 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Frozen_Collision_Damage_Estimate",
       ],
       "MODULE_24",
+    ),
+  },
+
+  {
+    name: "DISTRIBUTION_WIDTH_REPLAY_V1",
+    description:
+      "Frozen-packet research replay of total, starter-window, bullpen-window, and allocation error alongside pregame bullpen exposure, starter pressure, SSAT-family spread, collision, low-center, and allocation-separation evidence. It never produces a replacement projection, run-band coefficient, vehicle, or authorization state.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      DISTRIBUTION_WIDTH_REPLAY_V1_COLUMN_NAMES,
+      [
+        "Frozen_Projected_Total",
+        "Actual_Total",
+        "Total_Error",
+        "Total_Abs_Error",
+        "Total_Squared_Error",
+        "Frozen_Starter_Attack_Runs",
+        "Actual_Starter_Window_Runs",
+        "Starter_Window_Error",
+        "Starter_Window_Abs_Error",
+        "Frozen_Bullpen_Continuation_Runs",
+        "Actual_Bullpen_Window_Runs",
+        "Bullpen_Window_Error",
+        "Bullpen_Window_Abs_Error",
+        "Frozen_Away_Bullpen_Exposure_IP",
+        "Frozen_Home_Bullpen_Exposure_IP",
+        "Frozen_Combined_Bullpen_Exposure_IP",
+        "Frozen_Away_Starter_Pressure_Shortfall_IP",
+        "Frozen_Home_Starter_Pressure_Shortfall_IP",
+        "Frozen_Combined_Starter_Pressure_Shortfall_IP",
+        "Frozen_SSAT_Family_Base_Spread",
+        "Frozen_Collision_Traffic_Estimate",
+        "Frozen_Collision_Damage_Estimate",
+        "Frozen_Collision_Tail_Adjustment",
+        "Frozen_Low_Center_Upper_Band_Delta",
+        "Frozen_Allocation_Separation",
+        "Actual_Bullpen_Run_Share",
+        "Actual_Starter_Run_Share",
+        "Allocation_MAE",
+      ],
+      "MODULE_25",
+    ),
+  },
+
+  {
+    name: "DISTRIBUTION_WIDTH_REPLAY_SUMMARY",
+    description:
+      "Research-only correlation summary for whether frozen uncertainty features explain settled total, starter-window, bullpen-window, or allocation error. It reports raw sample size and never maps a result to a threshold, coefficient, or live decision.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      DISTRIBUTION_WIDTH_REPLAY_SUMMARY_COLUMN_NAMES,
+      [
+        "Eligible_N",
+        "Pearson_Correlation",
+        "Feature_Min",
+        "Feature_Max",
+        "Outcome_Mean",
+      ],
+      "MODULE_25",
     ),
   },
 

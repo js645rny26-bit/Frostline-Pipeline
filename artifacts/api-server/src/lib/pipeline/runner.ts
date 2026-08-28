@@ -43,6 +43,7 @@ import { runSurvivalGateReplay, type SurvivalReplayResult } from "./module18_sur
 import { runCollisionReplayV1, type CollisionReplayResult } from "./module22_collisionReplay.js";
 import { runMonotonicityV2, type MonotonicityV2Result } from "./module23_monotonicityV2.js";
 import { runPostgameDiagnostics, type PostgameDiagnosticsResult } from "./module24_postgameDiagnostics.js";
+import { runDistributionWidthReplay, type DistributionWidthReplayResult } from "./module25_distributionWidthReplay.js";
 import {
   logDecisionAuditPregame,
   settleDecisionAuditLog,
@@ -942,6 +943,7 @@ export interface DailySettlementResult {
   monotonicity_v2_status: MonotonicityV2Result["status"];
   decision_audit_status: DecisionAuditWriteResult["status"];
   postgame_diagnostics_status: PostgameDiagnosticsResult["status"];
+  distribution_width_replay_status: DistributionWidthReplayResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
   schema_documentation_status: "not_run";
   settlement: SettlementResult;
@@ -953,6 +955,7 @@ export interface DailySettlementResult {
   monotonicity_v2: MonotonicityV2Result;
   decision_audit: DecisionAuditWriteResult;
   postgame_diagnostics: PostgameDiagnosticsResult;
+  distribution_width_replay: DistributionWidthReplayResult;
   schema_documentation: RepairSchemaResult;
   module_statuses: Array<{ module: string; status: string }>;
   /**
@@ -981,7 +984,9 @@ export interface DailySettlementResult {
  *   6. Module 18 replays the survival gate.
  *   7. Module 22 aggregates only preserved collision candidates for replay.
  *   8. Module 23 records a shadow-only edge-magnitude calibration and replay.
- *   9. The schema reference and README are synchronized to the runtime schema.
+ *   9. Module 24 writes frozen-packet game-truth diagnostics.
+ *  10. Module 25 replays frozen uncertainty evidence against realized error
+ *      width. It remains research-only and never produces a live adjustment.
  *
  * The gate hit-rate (correct_blocks / (correct_blocks + collateral_blocks))
  * is logged and returned so operators can track threshold calibration over time.
@@ -1066,6 +1071,26 @@ export async function runDailySettlement(
           timing_rows_written: 0, conversion_rows_written: 0, game_truth_rows_written: 0,
           ladder_rows_written: 0, frozen_packet_games: 0,
         warnings: [], errors: [msg],
+      };
+    },
+  );
+
+  // Module 25 replays the complete frozen-packet history, including the
+  // current Module 24 rows, to test conditional error width without changing
+  // any current projection, distribution, or decision output.
+  const distribution_width_replay = await runDistributionWidthReplay({ workbookId }).catch(
+    (err: unknown): DistributionWidthReplayResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`distribution_width_replay: ${msg}`);
+      return {
+        status: "failure",
+        replay_timestamp_utc: new Date().toISOString(),
+        frozen_packets_seen: 0,
+        eligible_games: 0,
+        replay_rows_written: 0,
+        summary_rows_written: 0,
+        warnings: [],
+        errors: [msg],
       };
     },
   );
@@ -1174,6 +1199,7 @@ export async function runDailySettlement(
     { module: "MODULE_23_MONOTONICITY_V2", status: monotonicity_v2.status },
     { module: "MODULE_20_DECISION_AUDIT_SETTLEMENT", status: decision_audit.status },
     { module: "MODULE_24_POSTGAME_DIAGNOSTICS", status: postgame_diagnostics.status },
+    { module: "MODULE_25_DISTRIBUTION_WIDTH_REPLAY", status: distribution_width_replay.status },
   ];
   errors.push(...settlement.errors.map((message) => `settlement: ${message}`));
   errors.push(...regression.errors.map((message) => `regression: ${message}`));
@@ -1184,6 +1210,7 @@ export async function runDailySettlement(
   errors.push(...monotonicity_v2.errors.map((message) => `monotonicity_v2: ${message}`));
   errors.push(...decision_audit.errors.map((message) => `decision_audit: ${message}`));
   errors.push(...postgame_diagnostics.errors.map((message) => `postgame_diagnostics: ${message}`));
+  errors.push(...distribution_width_replay.errors.map((message) => `distribution_width_replay: ${message}`));
 
   const failedCount = module_statuses.filter((module) => module.status === "failure").length;
   const incompleteCount = module_statuses.filter((module) => module.status !== "success").length;
@@ -1205,6 +1232,7 @@ export async function runDailySettlement(
       monotonicity_v2_status: monotonicity_v2.status,
       decision_audit_status: decision_audit.status,
       postgame_diagnostics_status: postgame_diagnostics.status,
+      distribution_width_replay_status: distribution_width_replay.status,
       schema_documentation_status,
       gate_hit_rate_pct,
       gate_denominator,
@@ -1231,6 +1259,7 @@ export async function runDailySettlement(
     monotonicity_v2_status: monotonicity_v2.status,
     decision_audit_status: decision_audit.status,
     postgame_diagnostics_status: postgame_diagnostics.status,
+    distribution_width_replay_status: distribution_width_replay.status,
     schema_documentation_status,
     settlement,
     regression,
@@ -1241,6 +1270,7 @@ export async function runDailySettlement(
     monotonicity_v2,
     decision_audit,
     postgame_diagnostics,
+    distribution_width_replay,
     schema_documentation,
     module_statuses,
     gate_hit_rate_pct,

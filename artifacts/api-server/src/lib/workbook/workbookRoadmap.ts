@@ -447,6 +447,30 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Use the separate center, allocation, starter, bullpen, and conversion fields to identify the failed link before proposing a challenger.",
   },
   {
+    sheet: "DISTRIBUTION_WIDTH_REPLAY_V1",
+    stage: "REPLAY",
+    timing:
+      "Daily settlement after GAME_TRUTH_REPLAY_V1 refresh (Module 25)",
+    purpose:
+      "One frozen-packet research row per settled game, joining conditional uncertainty evidence to total, starter-window, bullpen-window, and allocation error.",
+    boardRelationship:
+      "Research-only. It cannot change a projection, run band, coefficient, vehicle, price, or BET/PASS result.",
+    readNote:
+      "Compare pregame bullpen exposure, starter pressure shortfall, SSAT-family spread, collision, low-center, and allocation separation with the observed error fields. Missing evidence stays blank rather than neutral.",
+  },
+  {
+    sheet: "DISTRIBUTION_WIDTH_REPLAY_SUMMARY",
+    stage: "REPLAY",
+    timing:
+      "Rebuilt with Distribution Width Replay during daily settlement (Module 25)",
+    purpose:
+      "Raw feature-to-error correlation table for conditional variance research, with each result's own eligible sample size.",
+    boardRelationship:
+      "No operational role. Correlation is descriptive evidence, not a threshold, promotion, or decision gate.",
+    readNote:
+      "Start with Eligible_N; then inspect the correlation against total, starter-window, bullpen-window, and allocation error before proposing any distribution change.",
+  },
+  {
     sheet: "FULL_LADDER_SETTLEMENT",
     stage: "SETTLEMENT",
     timing: "Daily settlement for frozen FULL_LADDER_AUDIT rows (Module 24)",
