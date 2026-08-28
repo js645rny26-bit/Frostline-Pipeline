@@ -93,7 +93,10 @@ class GoogleSheetsTransport implements SheetsTransport {
   async request(api: ApiKind, path: string, options: RequestOptions = {}): Promise<unknown> {
     const method = options.method ?? "GET";
     const isSheetsWrite = api === "sheets" && method !== "GET" && method !== "HEAD";
-    const maxAttempts = isSheetsWrite ? googleSheets429MaxAttempts() : 1;
+    // Google applies separate per-minute read and write quotas. Both kinds of
+    // Sheets requests are safe to retry after a 429; only writes need pacing.
+    const isSheetsRequest = api === "sheets";
+    const maxAttempts = isSheetsRequest ? googleSheets429MaxAttempts() : 1;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       if (isSheetsWrite) await waitForGoogleSheetsWriteSlot();

@@ -930,7 +930,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
 // ─── Daily settlement + survival-gate replay ──────────────────────────────────
 
 export interface DailySettlementResult {
-  /** Success requires Modules 14 through 18 to complete successfully. */
+  /** Success requires every settlement and postgame-diagnostic module to complete. */
   status: "success" | "partial_failure" | "failure";
   date: string;
   settlement_status: SettlementResult["status"];
@@ -942,7 +942,8 @@ export interface DailySettlementResult {
   monotonicity_v2_status: MonotonicityV2Result["status"];
   decision_audit_status: DecisionAuditWriteResult["status"];
   postgame_diagnostics_status: PostgameDiagnosticsResult["status"];
-  schema_documentation_status: "success" | "failure";
+  /** Schema documentation is refreshed by pregame publication, never settlement. */
+  schema_documentation_status: "not_run";
   settlement: SettlementResult;
   regression: RegressionReportResult;
   starter_audit: StarterAuditResult;
@@ -1139,22 +1140,19 @@ export async function runDailySettlement(
     } satisfies SurvivalReplayResult;
   });
 
-  const schema_documentation = await repairWorkbookSchemaReference(workbookId).catch(
-    (err: unknown): RepairSchemaResult => {
-      const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`schema_documentation: ${msg}`);
-      return {
-        workbook_id: workbookId,
-        schema_reference_rows: 0,
-        readme_rows: 0,
-        model_input_catalog_rows: 0,
-        source_freshness_gaps: [],
-        errors: [{ step: "schema_documentation", error: msg }],
-      };
-    },
-  );
-  const schema_documentation_status =
-    schema_documentation.errors.length === 0 ? "success" as const : "failure" as const;
+  // Settlement grades immutable prospective evidence. Schema/reference and
+  // catalog refreshes belong to the pregame publication or explicit repair
+  // path; running them here adds mutable work and can exhaust Sheets read
+  // quota after every settlement module has already completed.
+  const schema_documentation_status = "not_run" as const;
+  const schema_documentation: RepairSchemaResult = {
+    workbook_id: workbookId,
+    schema_reference_rows: 0,
+    readme_rows: 0,
+    model_input_catalog_rows: 0,
+    source_freshness_gaps: [],
+    errors: [],
+  };
 
   // Derive top-level summary fields from the replay result.
   const gate_denominator    = survival_replay.gate_denominator;
@@ -1176,7 +1174,6 @@ export async function runDailySettlement(
     { module: "MODULE_23_MONOTONICITY_V2", status: monotonicity_v2.status },
     { module: "MODULE_20_DECISION_AUDIT_SETTLEMENT", status: decision_audit.status },
     { module: "MODULE_24_POSTGAME_DIAGNOSTICS", status: postgame_diagnostics.status },
-    { module: "WORKBOOK_SCHEMA_DOCUMENTATION", status: schema_documentation_status },
   ];
   errors.push(...settlement.errors.map((message) => `settlement: ${message}`));
   errors.push(...regression.errors.map((message) => `regression: ${message}`));
@@ -1187,9 +1184,6 @@ export async function runDailySettlement(
   errors.push(...monotonicity_v2.errors.map((message) => `monotonicity_v2: ${message}`));
   errors.push(...decision_audit.errors.map((message) => `decision_audit: ${message}`));
   errors.push(...postgame_diagnostics.errors.map((message) => `postgame_diagnostics: ${message}`));
-  errors.push(...schema_documentation.errors.map(
-    ({ step, error }) => `schema_documentation:${step}: ${error}`,
-  ));
 
   const failedCount = module_statuses.filter((module) => module.status === "failure").length;
   const incompleteCount = module_statuses.filter((module) => module.status !== "success").length;

@@ -5,6 +5,7 @@ import {
   assertWorkbookWriteAllowed,
   resetSheetsTransportForTest,
   selectSheetsBackend,
+  readRange,
   writeRange,
 } from "./client.js";
 
@@ -80,6 +81,52 @@ test("Google Sheets transport retries a quota-exhausted write", async () => {
     else process.env.FROSTLINE_GOOGLE_ACCESS_TOKEN = originalToken;
     if (originalInterval === undefined) delete process.env.FROSTLINE_GOOGLE_SHEETS_WRITE_INTERVAL_MS;
     else process.env.FROSTLINE_GOOGLE_SHEETS_WRITE_INTERVAL_MS = originalInterval;
+    if (originalRetry === undefined) delete process.env.FROSTLINE_GOOGLE_SHEETS_429_RETRY_MS;
+    else process.env.FROSTLINE_GOOGLE_SHEETS_429_RETRY_MS = originalRetry;
+    resetSheetsTransportForTest();
+  }
+});
+
+test("Google Sheets transport retries a quota-exhausted read", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalBackend = process.env.FROSTLINE_SHEETS_BACKEND;
+  const originalCredentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const originalToken = process.env.FROSTLINE_GOOGLE_ACCESS_TOKEN;
+  const originalRetry = process.env.FROSTLINE_GOOGLE_SHEETS_429_RETRY_MS;
+  let calls = 0;
+
+  try {
+    process.env.FROSTLINE_SHEETS_BACKEND = "google";
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = "/tmp/frostline-test-adc.json";
+    process.env.FROSTLINE_GOOGLE_ACCESS_TOKEN = "short-lived-test-token";
+    process.env.FROSTLINE_GOOGLE_SHEETS_429_RETRY_MS = "0";
+    resetSheetsTransportForTest();
+
+    globalThis.fetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED" } }), {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ values: [["ok"]] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await readRange(isolatedWorkbook, "TEST!A1");
+    assert.equal(calls, 2);
+    assert.deepEqual(result, { values: [["ok"]] });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalBackend === undefined) delete process.env.FROSTLINE_SHEETS_BACKEND;
+    else process.env.FROSTLINE_SHEETS_BACKEND = originalBackend;
+    if (originalCredentials === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    else process.env.GOOGLE_APPLICATION_CREDENTIALS = originalCredentials;
+    if (originalToken === undefined) delete process.env.FROSTLINE_GOOGLE_ACCESS_TOKEN;
+    else process.env.FROSTLINE_GOOGLE_ACCESS_TOKEN = originalToken;
     if (originalRetry === undefined) delete process.env.FROSTLINE_GOOGLE_SHEETS_429_RETRY_MS;
     else process.env.FROSTLINE_GOOGLE_SHEETS_429_RETRY_MS = originalRetry;
     resetSheetsTransportForTest();
