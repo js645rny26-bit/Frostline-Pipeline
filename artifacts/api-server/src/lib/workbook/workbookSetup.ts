@@ -30,6 +30,7 @@ import {
   type ColumnDef,
 } from "./workbookSchema.js";
 import { buildWorkbookRoadmapReadmeRows } from "./workbookRoadmap.js";
+import { writeModelInputCatalog } from "./modelInputCatalog.js";
 
 export interface WorkbookCreateResult {
   workbook_id: string;
@@ -253,6 +254,18 @@ export async function createOptimizedWorkbook(
     errors.push({ step: "schema_reference", error: msg });
   }
 
+  // â”€â”€ Step 4: Populate the static source/input/projection catalog â”€â”€
+  try {
+    await writeModelInputCatalog(created.spreadsheetId);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      { err: msg },
+      "WORKBOOK_SETUP: MODEL_INPUT_CATALOG write failed (non-fatal)",
+    );
+    errors.push({ step: "model_input_catalog", error: msg });
+  }
+
   logger.info(
     { workbookName, id: created.spreadsheetId, errors: errors.length },
     "WORKBOOK_SETUP: Setup complete",
@@ -274,6 +287,8 @@ export interface RepairSchemaResult {
   workbook_id: string;
   schema_reference_rows: number;
   readme_rows: number;
+  model_input_catalog_rows: number;
+  source_freshness_gaps: string[];
   errors: Array<{ step: string; error: string }>;
 }
 
@@ -286,10 +301,11 @@ export interface RepairSchemaResult {
  */
 export async function repairWorkbookSchemaReference(
   workbookId = WORKBOOK_ID,
+  slateDate?: string,
 ): Promise<RepairSchemaResult> {
   logger.info(
-    { workbookId },
-    "WORKBOOK_REPAIR: Rewriting SCHEMA_REFERENCE + README",
+    { workbookId, slateDate: slateDate ?? null },
+    "WORKBOOK_REPAIR: Rewriting SCHEMA_REFERENCE + README + MODEL_INPUT_CATALOG",
   );
 
   const errors: Array<{ step: string; error: string }> = [];
@@ -357,7 +373,8 @@ export async function repairWorkbookSchemaReference(
         "v34 (2026-08-26): STARTER_SURVIVAL_DIFFERENTIATION_AUDIT measures whether SSAT v2 is materially distinct from v1; both remain one evidence family until later commissioning review. " +
         "v35 (2026-08-26): active team-run math now separates central starter quality, exact lineup-pitcher traffic/damage conversion, bounded effective starter workload, and resulting bullpen exposure. The same fields freeze in the pregame packet; no new shadow surface was added. " +
         "v36 (2026-08-27): active offense center is league-anchored and uses exact lineup quality; recent realized scoring is capped as form. FIP/ERA owns starter run prevention, while command/traffic and HR/damage are applied once in their own paths. New center fields freeze with the same pregame packet. " +
-        "v37 (2026-08-27): BULLPEN_USAGE_DAILY uses MLB Starting Nine as the daily availability and five-day pitch-count source; Inside The Pen only enriches matched seven-day innings history and never replaces explicit daily availability.",
+        "v37 (2026-08-27): BULLPEN_USAGE_DAILY uses MLB Starting Nine as the daily availability and five-day pitch-count source; Inside The Pen only enriches matched seven-day innings history and never replaces explicit daily availability. " +
+        "v38 (2026-08-27): MODEL_INPUT_CATALOG provides source/window/game-window/freshness lineage and explicitly labels active forecasts, components, frozen snapshots, shadow challengers, replay aliases, display-only fields, placeholders, and known input gaps. Recent L30 scoring is slate-date scoped and TEAM_FORM synthetic placeholders are blank/decommissioned.",
     ],
     [
       "Workbook_Purpose",
@@ -382,6 +399,14 @@ export async function repairWorkbookSchemaReference(
     [
       "Workbook_Roadmap",
       "Authoritative guide: docs/WORKBOOK_ROADMAP.md. Tab_* rows below provide an in-workbook summary for every page.",
+    ],
+    [
+      "Model_Input_Catalog",
+      "MODEL_INPUT_CATALOG is the fastest way to see what each source/stat means, its statistical and game window, whether it is active/shadow/display-only, how often it must refresh, where to verify freshness, and what happens when it is missing. It labels related evidence families so components or challengers are never counted as independent votes.",
+    ],
+    [
+      "Input_Catalog_Read_First",
+      "Before reading a projection, use MODEL_INPUT_CATALOG to verify the source window, game window, daily-refresh evidence, active/shadow status, correlation family, and missing-data behavior of every supporting value.",
     ],
     [
       "Efficient_Read_Order",
@@ -433,7 +458,7 @@ export async function repairWorkbookSchemaReference(
 
   let readmeRowsWritten = 0;
   try {
-    await clearRange(workbookId, "README!A2:B200");
+    await clearRange(workbookId, "README!A2:B300");
     await writeRange(workbookId, "README!A2", readmeRows);
     readmeRowsWritten = readmeRows.length;
     logger.info(
@@ -446,10 +471,31 @@ export async function repairWorkbookSchemaReference(
     errors.push({ step: "readme", error: msg });
   }
 
+  // â”€â”€ Step 3: Rebuild source/input/projection catalog â”€â”€
+  let modelInputCatalogRows = 0;
+  let sourceFreshnessGaps: string[] = [];
+  try {
+    const result = await writeModelInputCatalog(workbookId, slateDate);
+    modelInputCatalogRows = result.rows_written;
+    sourceFreshnessGaps = result.freshness_gaps;
+    if (sourceFreshnessGaps.length > 0) {
+      logger.warn(
+        { slateDate: slateDate ?? null, gaps: sourceFreshnessGaps },
+        "WORKBOOK_REPAIR: MODEL_INPUT_CATALOG reports source materialization gaps",
+      );
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err: msg }, "WORKBOOK_REPAIR: MODEL_INPUT_CATALOG write failed");
+    errors.push({ step: "model_input_catalog", error: msg });
+  }
+
   return {
     workbook_id: workbookId,
     schema_reference_rows: schemaRows,
     readme_rows: readmeRowsWritten,
+    model_input_catalog_rows: modelInputCatalogRows,
+    source_freshness_gaps: sourceFreshnessGaps,
     errors,
   };
 }

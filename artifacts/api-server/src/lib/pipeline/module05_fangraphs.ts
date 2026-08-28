@@ -1,8 +1,9 @@
 /**
  * Module 05: Team L30 Offensive Rates
  * Fetches real MLB Stats API schedule data to compute each team's actual
- * runs-scored per game over the trailing 30 days, then back-calculates a
- * wRC+-equivalent so module09 can consume it without interface changes.
+ * runs-scored per game over the trailing 30 days. The legacy interface still
+ * carries a wRC+-equivalent field for compatibility, but this module is not
+ * FanGraphs and the canonical meaning is L30 actual RS/G.
  *
  * Conversion:  l30_wrc_plus_equiv = (rs_per_game / LEAGUE_AVG_RS) × 100
  * Inverse:     rs_per_game = (l30_wrc_plus / 100) × LEAGUE_AVG_RS   ← module09 formula
@@ -12,7 +13,8 @@
  * the teams[] array; module09 treats their l30Valid = false and falls back to
  * L10_ONLY or LEAGUE_AVG_FALLBACK.
  *
- * Cache: in-memory, scoped to the calendar date (today's games reuse one fetch).
+ * Cache: in-memory, scoped to the requested Frostline slate date. A historical
+ * or late-night ET run must never silently use runtime UTC "today".
  */
 
 import { logger } from "../../lib/logger.js";
@@ -72,8 +74,10 @@ let cacheDate: string | null = null;
 
 // ─── Implementation ───────────────────────────────────────────────────────────
 
-export async function fetchTeamSplitsWithFallback(): Promise<FangraphsResult> {
-  const today = new Date().toISOString().split("T")[0]!;
+export async function fetchTeamSplitsWithFallback(
+  slateDate = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }),
+): Promise<FangraphsResult> {
+  const today = slateDate;
 
   if (cachedData && cacheDate === today) {
     logger.info(

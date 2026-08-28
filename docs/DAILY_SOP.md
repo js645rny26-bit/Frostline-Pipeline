@@ -9,7 +9,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
 
-**Schema v37 - updated 2026-08-27 - active offensive center uses lineup quality plus bounded recent form; daily bullpen availability and five-day pitch workload use MLB Starting Nine. Exact fields live in SCHEMA_REFERENCE.**
+**Schema v38 - updated 2026-08-27 - active offensive center uses lineup quality plus bounded recent form; daily bullpen availability and five-day pitch workload use MLB Starting Nine. MODEL_INPUT_CATALOG now identifies each source/input window, active versus shadow status, freshness surface, correlation family, and missing behavior. Exact fields live in SCHEMA_REFERENCE.**
 
 ## Daily sequence (all times ET)
 
@@ -39,6 +39,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - **Auto, every publish** (dashboard **Run Pipeline** button, or `POST /api/pipeline/publish`): schedule, pitcher workloads and roles, weather, bullpen usage + quality tiers, posted lineups, starter previous outings, umpires, team run rates, odds snapshot → ODDS_HISTORY, pitcher season stats, all sheet writes, boards, RUN_LOG.
 - **You:** trigger the three publishes above; own SLATE_INPUT O–W.
 - **Active math:** `GAME_SUMMARY` now uses the exact confirmed/prospective lineup against the opposing starter to separate traffic, damage/conversion, expected starter workload, and inherited bullpen exposure. Read `*_Matchup_Profile_Status` first: `NEUTRAL` means the formula intentionally preserved the prior rate/quality path because exact evidence was unavailable.
+- **Input check:** before interpreting a component or adding a source, read `MODEL_INPUT_CATALOG`. It distinguishes active inputs from shadows, frozen copies, legacy aliases, display-only fields, decommissioned placeholders, and known gaps. `Current_Observed_*` and `Freshness_State` show whether its source materialized for the requested slate.
 - **Settlement:** run the daily settlement workflow for the completed slate
   date. It reads frozen packets only and adds allocation, starter-dimension,
   traffic/damage/conversion, bullpen-timing, game-truth replay, and ladder
@@ -59,6 +60,10 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - **Benign, ignore:** validation FAIL "Game count below minimum" on small slates (fewer than 13 games); umpires blank before noon; platoon blank before lineups post.
 - **Investigate:** RUN_LOG Pipeline_Status of `failure` or `partial_success` (a sheet write went wrong — check the run logs); any module logging status `failure`; weather fallback on an outdoor slate; umpires still blank after ~2 PM ET; platoon still blank near first pitch; ODDS_HISTORY not growing (odds quota exhausted).
 - **Rule:** blanks always mean "feed unavailable" — the pipeline never fabricates a value.
+
+The former synthetic TEAM_FORM wOBA, strength-of-schedule, and bullpen-rest
+cells are intentionally blank and labeled `DECOMMISSIONED`. They were never
+active evidence and will not masquerade as it.
 
 ## Known limitations
 

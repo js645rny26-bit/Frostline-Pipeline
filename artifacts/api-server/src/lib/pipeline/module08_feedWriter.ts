@@ -125,7 +125,7 @@ function buildDailyMatchupsRows(
       g.venue.name ?? "",                                              // T: Stadium
       environment.combined_hr_factor,                                  // U: Park_Factor_HR (park + conservative weather)
       environment.combined_multiplier,                                 // V: Run_Multiplier (Module 09 later mirrors its effective capped value)
-      now,                                                             // W: FanGraphs_Last_Updated
+      now,                                                             // W: L30_RS_Observed_TS (pipeline-observed, not provider-published)
       now,                                                             // X: Pipeline_Last_Updated
       "",                                                              // Y: Notes
       // ── Away starter last outing (Baseball Savant) ─────────────────
@@ -211,19 +211,20 @@ function buildTodayLineupsRows(
 }
 
 // Schema: TEAM_FORM_INPUT — 8 cols A–H, 1 row per team (30 rows), data starts row 2
-// Runs scored/allowed come from ACTUAL last-10-game results (module 05c) when
-// available; falls back to the wRC+-based estimate if the fetch failed.
+// Runs scored/allowed come from actual last-10-game results (module 05c) when
+// available; the fallback is the canonical L30 actual-RS/G compatibility value.
 function buildTeamFormRows(
+  runDate: string,
   splits: FangraphsResult["teams"],
   runRates: TeamRunRatesResult | null,
 ): unknown[][] {
-  const date = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-  // Collapse two splits per team into one row, keyed by team abbr
-  const byTeam = new Map<string, { rsTotal: number; woba: number; n: number }>();
+  // Collapse the legacy L30 compatibility payload into its canonical actual
+  // runs-per-game meaning. Do not synthesize faux wOBA, strength-of-schedule,
+  // or bullpen-rest values merely to make unused cells look populated.
+  const byTeam = new Map<string, { rsTotal: number; n: number }>();
   for (const s of splits) {
-    const entry = byTeam.get(s.team) ?? { rsTotal: 0, woba: 0, n: 0 };
+    const entry = byTeam.get(s.team) ?? { rsTotal: 0, n: 0 };
     entry.rsTotal += (s.l30_wrc_plus / 100) * 4.5;
-    entry.woba += 0.315 + (s.l30_wrc_plus - 100) * 0.001; // rough wOBA from wRC+
     entry.n++;
     byTeam.set(s.team, entry);
   }
@@ -234,15 +235,15 @@ function buildTeamFormRows(
     const ra = actual ? actual.runs_allowed_per_game : 4.5;
     const note = actual
       ? `L10 actual (${actual.games}g)`
-      : "wRC+ estimate — L10 fetch unavailable";
+      : "L30 actual RS/G fallback; L10 fetch unavailable";
     return [
-      date,                                                  // A: Date
+      runDate,                                               // A: Date
       team,                                                  // B: Team
       rs,                                                    // C: Last_10_Runs_Scored
       ra,                                                    // D: Last_10_Runs_Allowed
-      parseFloat((d.woba / d.n).toFixed(3)),                 // E: Last_10_wOBA (est.)
-      "MEDIUM",                                              // F: Recent_Strength_of_Schedule
-      1,                                                     // G: Bullpen_Rest_Days (stub)
+      "",                                                    // E: decommissioned synthetic Last_10_wOBA
+      "",                                                    // F: decommissioned synthetic strength-of-schedule
+      "",                                                    // G: decommissioned synthetic bullpen-rest stub
       note,                                                  // H: Notes
     ];
   });
@@ -484,7 +485,7 @@ export async function writeGoogleSheetsFeed(
   }
 
   // 3. TEAM_FORM_INPUT — 8 cols A–H, 30 rows (1 per team), starts row 2
-  const tfRows = buildTeamFormRows(splits.teams, teamRunRates);
+  const tfRows = buildTeamFormRows(runDate, splits.teams, teamRunRates);
   const tfResult = await safeWrite(
     "TEAM_FORM_INPUT",
     "TEAM_FORM_INPUT!A2:H62",
@@ -497,6 +498,26 @@ export async function writeGoogleSheetsFeed(
     failed.push("team_form_input");
     errors.push({ module: "08_team_form_input", error: tfResult.error ?? "write failed", timestamp: new Date().toISOString() });
   }
+
+  // Keep visible labels honest without altering any active calculation.
+  await Promise.all([
+    writeRange(workbookId, "DAILY_MATCHUPS!W1:X1", [[
+      "L30_RS_Observed_TS", "Pipeline_Last_Updated",
+    ]]),
+    writeRange(workbookId, "TODAY_LINEUPS!M1", [[
+      "Uncommissioned_Player_Projection",
+    ]]),
+    writeRange(workbookId, "TEAM_FORM_INPUT!E1:G1", [[
+      "DECOMMISSIONED_Last_10_wOBA",
+      "DECOMMISSIONED_Recent_Strength_of_Schedule",
+      "DECOMMISSIONED_Bullpen_Rest_Days",
+    ]]),
+  ]).catch((err: unknown) => {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "MODULE_08: Input-label refresh failed; feed values remain valid",
+    );
+  });
 
   // 4. BULLPEN_USAGE_DAILY — reliever workload (04b) + season quality (02b)
   let buResult: SheetWriteStatus = { status: "skipped", rows_written: 0, range: "BULLPEN_USAGE_DAILY!A2:U300" };

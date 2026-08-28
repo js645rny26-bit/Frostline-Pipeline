@@ -153,7 +153,7 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
   const [workload, weather, splits] = await Promise.all([
     fetchPitcherWorkload(Array.from(pitcherIds), date),
     fetchWeatherForecasts(manifest),
-    fetchTeamSplitsWithFallback(),
+    fetchTeamSplitsWithFallback(date),
   ]);
 
   moduleStatuses.push({
@@ -285,7 +285,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     temporal_code: temporal.code,
   }, "Full pipeline: game-granular temporal scope established");
   const normalized = { games: mutableGames, normalization_timestamp_utc: slate.run_timestamp, status: "success" };
-  const splits = await fetchTeamSplitsWithFallback();
+  const splits = await fetchTeamSplitsWithFallback(date);
 
   const allErrors: Array<{ module: string; error: string; timestamp: string }> = [];
 
@@ -499,7 +499,14 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_20_decision_audit: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, duplicates_removed: 0, audit_gaps: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_20a_pregame_packet: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_skipped_after_first_pitch: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_20b_full_ladder_audit: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
-      module_schema_documentation: { workbook_id: workbookId, schema_reference_rows: 0, readme_rows: 0, errors: [{ step: "schema_documentation", error: "Skipped: Module 08 failed" }] },
+      module_schema_documentation: {
+        workbook_id: workbookId,
+        schema_reference_rows: 0,
+        readme_rows: 0,
+        model_input_catalog_rows: 0,
+        source_freshness_gaps: [],
+        errors: [{ step: "schema_documentation", error: "Skipped: Module 08 failed" }],
+      },
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
     };
@@ -816,13 +823,15 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // Keep the in-workbook road map and column reference synchronized with the
   // runtime schema during ordinary pregame publication as well as settlement.
   // This metadata write is idempotent and never touches game-state tabs.
-  const schemaDocumentation = await repairWorkbookSchemaReference(workbookId).catch(
+  const schemaDocumentation = await repairWorkbookSchemaReference(workbookId, date).catch(
     (err: unknown): RepairSchemaResult => {
       const msg = err instanceof Error ? err.message : String(err);
       return {
         workbook_id: workbookId,
         schema_reference_rows: 0,
         readme_rows: 0,
+        model_input_catalog_rows: 0,
+        source_freshness_gaps: [],
         errors: [{ step: "schema_documentation", error: msg }],
       };
     },
@@ -1138,6 +1147,8 @@ export async function runDailySettlement(
         workbook_id: workbookId,
         schema_reference_rows: 0,
         readme_rows: 0,
+        model_input_catalog_rows: 0,
+        source_freshness_gaps: [],
         errors: [{ step: "schema_documentation", error: msg }],
       };
     },

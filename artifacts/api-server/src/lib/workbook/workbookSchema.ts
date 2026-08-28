@@ -3,6 +3,8 @@
  * Canonical source of truth for sheet names, column layout, types, and formats.
  */
 
+import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
+
 /**
  * Schema version — bump whenever column layout changes; stamped into every
  * RUN_LOG row so each run records which schema wrote it.
@@ -103,8 +105,12 @@
  *  v37 (2026-08-27): BULLPEN_USAGE_DAILY preserves MLB Starting Nine's
  *      explicit daily availability, L5 appearances, five-day pitch-count map,
  *      source identity, and source snapshot alongside seven-day inning history.
+ *  v38 (2026-08-27): MODEL_INPUT_CATALOG is the compact source/input/projection
+ *      lineage registry. It distinguishes active forecasts and components from
+ *      frozen snapshots, shadow challengers, replay aliases, display-only fields,
+ *      and missing inputs; it records slate-scoped materialization freshness.
  */
-export const WORKBOOK_SCHEMA_VERSION = 37;
+export const WORKBOOK_SCHEMA_VERSION = 38;
 
 export interface ColumnDef {
   name: string;
@@ -932,12 +938,14 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         exampleValue: "1.0350",
       },
       {
-        name: "FanGraphs_Last_Updated",
+        name: "L30_RS_Observed_TS",
         index: 22,
         type: "date",
         width: 130,
         format: "mm/dd/yyyy hh:mm",
         filledBy: "MODULE_08",
+        description:
+          "Pipeline-observed timestamp for the slate-scoped MLB L30 actual runs-scored fetch. It is not a FanGraphs or provider-published timestamp.",
         exampleValue: "07/22/2026 08:00",
       },
       {
@@ -1278,12 +1286,14 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         exampleValue: "5800",
       },
       {
-        name: "FanGraphs_Projection",
+        name: "Uncommissioned_Player_Projection",
         index: 12,
         type: "number",
         width: 110,
         format: "0.000",
         filledBy: "MODULE_08",
+        description:
+          "Uncommissioned placeholder. Intentionally blank and never consumed by active projection or board logic.",
         exampleValue: "42.500",
       },
       {
@@ -1339,29 +1349,35 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         exampleValue: "3.8",
       },
       {
-        name: "Last_10_wOBA",
+        name: "DECOMMISSIONED_Last_10_wOBA",
         index: 4,
         type: "number",
         width: 100,
         format: "0.000",
         filledBy: "MODULE_08",
+        description:
+          "Decommissioned synthetic placeholder. Intentionally blank; no active consumer.",
         exampleValue: "0.342",
       },
       {
-        name: "Recent_Strength_of_Schedule",
+        name: "DECOMMISSIONED_Recent_Strength_of_Schedule",
         index: 5,
         type: "string",
         width: 120,
         filledBy: "MODULE_08",
+        description:
+          "Decommissioned synthetic placeholder. Intentionally blank; no active consumer.",
         exampleValue: "MEDIUM",
       },
       {
-        name: "Bullpen_Rest_Days",
+        name: "DECOMMISSIONED_Bullpen_Rest_Days",
         index: 6,
         type: "number",
         width: 110,
         format: "0",
         filledBy: "MODULE_08",
+        description:
+          "Decommissioned synthetic placeholder. Intentionally blank; no active consumer.",
         exampleValue: "2",
       },
       {
@@ -2489,7 +2505,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         filledBy: "MODULE_09",
         description:
-          "Fangraphs L30 wRC+ converted to runs/9: (wRC+/100) × 4.5. Null when Fangraphs data absent for this team.",
+          "Trailing-30-day MLB actual runs scored per game. It is a realized-scoring form input, not FanGraphs wRC+.",
         exampleValue: "4.365",
       },
       {
@@ -2767,7 +2783,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         filledBy: "MODULE_09",
         description:
-          "Away team Fangraphs L30 wRC+ → runs/9. Null when data absent.",
+          "Away trailing-30-day MLB actual runs scored per game; realized-scoring form input, not FanGraphs wRC+.",
         exampleValue: "4.365",
       },
       {
@@ -2779,7 +2795,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         filledBy: "MODULE_09",
         description:
-          "Home team Fangraphs L30 wRC+ → runs/9. Null when data absent.",
+          "Home trailing-30-day MLB actual runs scored per game; realized-scoring form input, not FanGraphs wRC+.",
         exampleValue: "4.725",
       },
       {
@@ -5547,7 +5563,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "PROJECTION_REPLAY",
     description:
-      "Frozen-published settlement replay. Module14 upserts one row per completed game from VEHICLE_LOG without reconstructing the pregame projection.",
+      "Frozen-published settlement replay. Module14 upserts one row per completed game from VEHICLE_LOG without reconstructing the pregame projection. The legacy/L30/blend-labelled projection and error columns are compatibility aliases of that same frozen published value, not independent projection variants.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: [
@@ -5605,7 +5621,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         format: "0.00",
         filledBy: "MODULE_12",
         readOnly: true,
-        description: "L30-only offense, park=1.0, weather=1.0",
+        description: "LEGACY ALIAS: same Frozen_Published_Total as the other variant-labelled columns; not an independent L30 replay.",
         exampleValue: "8.32",
       },
       {
@@ -5616,7 +5632,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         format: "0.00",
         filledBy: "MODULE_12",
         readOnly: true,
-        description: "L30-only offense + park factor",
+        description: "LEGACY ALIAS: same Frozen_Published_Total; not an independent L30 + park replay.",
         exampleValue: "8.98",
       },
       {
@@ -5627,7 +5643,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         format: "0.00",
         filledBy: "MODULE_12",
         readOnly: true,
-        description: "L10-actual offense + park factor",
+        description: "LEGACY ALIAS: same Frozen_Published_Total; not an independent L10 + park replay.",
         exampleValue: "9.14",
       },
       {
@@ -5638,7 +5654,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         format: "0.00",
         filledBy: "MODULE_12",
         readOnly: true,
-        description: "65%L30+35%L10 offense, park=1.0",
+        description: "LEGACY ALIAS: same Frozen_Published_Total; not an independent blended replay.",
         exampleValue: "8.55",
       },
       {
@@ -5650,7 +5666,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         filledBy: "MODULE_12",
         readOnly: true,
         description:
-          "65%L30+35%L10 offense + park factor — current repaired candidate",
+          "LEGACY ALIAS: same Frozen_Published_Total; not an independent repaired candidate.",
         exampleValue: "9.23",
       },
       {
@@ -5661,7 +5677,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         format: "0.00",
         filledBy: "MODULE_12",
         readOnly: true,
-        description: "Projected − Actual. Positive = overprojection.",
+        description: "LEGACY ALIAS ERROR: derived from the same Frozen_Published_Total. Positive = overprojection.",
         exampleValue: "1.32",
       },
       {
@@ -11519,6 +11535,25 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
       },
     ],
+  },
+
+  {
+    name: "MODEL_INPUT_CATALOG",
+    description:
+      "Canonical source, input-window, game-window, projection-class, freshness, and missing-behavior registry. It labels active math, shadows, aliases, display-only fields, and known gaps without changing projection logic.",
+    section: "META",
+    frozenRows: 1,
+    columns: MODEL_INPUT_CATALOG_HEADER.map((name, index) => ({
+      name,
+      index,
+      type: "string" as const,
+      width: index === 6 || index === 7 || index === 9 || index === 10 || index === 12 || index === 16 || index === 20 || index === 21 ? 260 : 155,
+      filledBy: "SYSTEM" as const,
+      readOnly: true,
+      description:
+        "Generated by MODEL_INPUT_CATALOG writer. Definitions are registry metadata; Current_Observed_* fields report materialization for the latest requested slate when available.",
+      exampleValue: index === 1 ? "ACTIVE_GAME_FORECAST" : "",
+    })),
   },
 
   {

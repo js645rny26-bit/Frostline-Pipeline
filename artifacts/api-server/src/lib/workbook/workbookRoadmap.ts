@@ -573,6 +573,17 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     readNote: "Use when a column name or ownership rule is unclear.",
   },
   {
+    sheet: "MODEL_INPUT_CATALOG",
+    stage: "META",
+    timing: "Every schema repair; current source materialization attached on every pregame publish",
+    purpose:
+      "Canonical source, statistical-window, game-window, freshness, projection-class, and missing-behavior registry for active math, shadows, frozen snapshots, aliases, display-only fields, and known gaps.",
+    boardRelationship:
+      "Documentation and source-health only. It cannot change projection, market comparison, vehicle, or BET/PASS output.",
+    readNote:
+      "Use before adding or trusting a statistic: verify ACTIVE versus SHADOW_ONLY/DISPLAY_ONLY, the correlation family, source cadence, freshness surface, and fallback behavior.",
+  },
+  {
     sheet: "README",
     stage: "META",
     timing: "Schema repair/settlement documentation step",

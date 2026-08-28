@@ -14,6 +14,33 @@ This is the operator map for reading Frostline efficiently. `SCHEMA_REFERENCE` r
 8. **DECISION_AUDIT_LOG** and **VEHICLE_LOG** — verify what reasoning and vehicle were actually frozen.
 9. After games: **SHADOW_OUTCOMES**, **VEHICLE_POSTMORTEM**, and **PROJECTION_REPLAY** first; aggregate learning tabs second.
 
+## Input and projection catalog
+
+Read `MODEL_INPUT_CATALOG` before treating a value as evidence. It is the
+canonical answer to five questions:
+
+- Is this `ACTIVE`, `SHADOW_ONLY`, `DISPLAY_ONLY`, a frozen copy, a legacy
+  alias, or a known missing input?
+- What is its statistical lookback and which game window does it affect:
+  allocation, starter, bullpen, environment, full game, or market only?
+- Which source supplies it, how often must it refresh, and which workbook
+  surface proves it was materialized for the requested slate?
+- What happens if it is unavailable or falls back?
+- Which other evidence is correlated with it and therefore must not be counted
+  as a second independent confirmation?
+
+The catalog is refreshed with documentation on every run. During a pregame
+publish it also records current slate materialization status. It is a source
+and lineage map, not an input to any projection or board decision.
+
+Two practical cleanup rules follow from this map:
+
+- `L30_RS_Observed_TS` denotes Frostline's slate-scoped observation of MLB
+  L30 actual runs scored per game. The old FanGraphs/wRC+ label was inaccurate.
+- `TEAM_FORM_INPUT` synthetic Last_10_wOBA, strength-of-schedule, and bullpen
+  rest fields are intentionally blank and labeled decommissioned until real
+  sources and a commissioned consumer exist.
+
 ## Tentative total range
 
 For manual decision-making, calculate:
@@ -262,6 +289,7 @@ Final results + frozen prospective state
 | `RUN_LOG`           | End of every publish, Module 12  | Run identity, schema, statuses, counts, errors, and warnings.          | Certifies the board-producing run. | Read before trusting any refreshed slate. |
 | `SHADOW_VALIDATION` | Every publish, Module 12s        | Current repaired-versus-legacy comparison.                             | Audit only.                        | Look for unexpected candidate drift.      |
 | `SHADOW_HISTORY`    | Append every publish, Module 12s | Historical validation snapshots.                                       | Audit only.                        | Use for drift over time, not execution.   |
+| `MODEL_INPUT_CATALOG` | Schema repair; source materialization checked on pregame publish | Canonical source, window, projection-class, freshness, correlation, and missing-input registry. | Documentation and source health only. | Start here before adding/trusting a stat; confirm it is active and not a correlated alias. |
 | `SCHEMA_REFERENCE`  | Schema documentation repair      | Column dictionary, ownership, formats, and descriptions.               | Documentation only.                | Use for exact column meaning.             |
 | `README`            | Schema documentation repair      | Orientation, quick order, cautions, and one-row summary for every tab. | Documentation only.                | Start here after time away.               |
 
