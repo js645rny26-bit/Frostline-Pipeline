@@ -260,7 +260,11 @@ export function parseSettledGameTruth(rows: unknown[][]): Map<string, SettledGam
       || actual === null
       || totalError === null
       || totalAbsError === null
-      || text(value(row, index, "Replay_Status")) !== "FROZEN_PACKET_VERIFIED"
+      // GAME_TRUTH_REPLAY_V1's canonical settled status explicitly confirms
+      // both the frozen packet and final official outcome.  Module 25 is a
+      // downstream replay of that canonical surface, not of the earlier
+      // per-diagnostic FROZEN_PACKET_VERIFIED rows.
+      || text(value(row, index, "Replay_Status")) !== "FROZEN_PACKET_AND_FINAL_VERIFIED"
     ) continue;
     games.set(key(date, gameId), {
       date,

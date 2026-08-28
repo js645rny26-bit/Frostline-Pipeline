@@ -104,7 +104,7 @@ function gameTruthRow(
     ["Primary_Scoring_Mechanism", "BULLPEN_TRANSITION_PRIMARY"],
     ["Away_Conversion_Outcome", "NO_FROZEN_TRAFFIC_CANDIDATE"],
     ["Home_Conversion_Outcome", "NO_FROZEN_TRAFFIC_CANDIDATE"],
-    ["Replay_Status", "FROZEN_PACKET_VERIFIED"],
+    ["Replay_Status", "FROZEN_PACKET_AND_FINAL_VERIFIED"],
     ["Settlement_TS", "2026-08-28T03:00:00.000Z"],
   ]);
   return header.map((name) => values.get(name) ?? "");
