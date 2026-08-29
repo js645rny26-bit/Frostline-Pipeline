@@ -62,6 +62,8 @@ const O_ABS    = 7;
 const O_FROZEN_ERROR = 13;
 const O_FROZEN_ABS = 14;
 const O_FROZEN_SOURCE = 15;
+const O_FROZEN_PUBLISHED_TOTAL = 12;
+const O_PRIMARY_GRADE_MARKET_LINE = 39;
 
 // VEHICLE_LOG column indices (0-based)
 // Date | Game_ID | Away_Team | Home_Team | Vehicle_Type | Market_Line | Direction |
@@ -501,7 +503,7 @@ async function joinVehicleOutcomes(wbId: string): Promise<{ joined: JoinedGame[]
 
   // Read SHADOW_OUTCOMES — keyed by game_id (col 1)
   try {
-    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A2:H20000`);
+    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A2:AR20000`);
     for (const row of (resp.values ?? []) as string[][]) {
       const gameId = row[O_GAME];
       if (!gameId) continue;
@@ -514,7 +516,21 @@ async function joinVehicleOutcomes(wbId: string): Promise<{ joined: JoinedGame[]
       const absE   = parseFloat(row[O_ABS]    ?? "");
       if (!Number.isFinite(actual)) continue;
 
-      const { direction, market_line, projected_total, variance } = vehicle;
+      // A frozen executable operator line is the primary directional grade.
+      // Historical rows without that evidence deliberately retain their
+      // vehicle/reference values as an explicit fallback.
+      const frozenPublished = parseFloat(row[O_FROZEN_PUBLISHED_TOTAL] ?? "");
+      const primaryMarketLine = parseFloat(row[O_PRIMARY_GRADE_MARKET_LINE] ?? "");
+      const projected_total = Number.isFinite(frozenPublished)
+        ? frozenPublished
+        : vehicle.projected_total;
+      const market_line = Number.isFinite(primaryMarketLine)
+        ? primaryMarketLine
+        : vehicle.market_line;
+      const direction = projected_total > market_line
+        ? "OVER" as const
+        : projected_total < market_line ? "UNDER" as const : vehicle.direction;
+      const variance = parseFloat((projected_total - market_line).toFixed(2));
       const edge  = Math.abs(variance);
       const push  = actual === market_line;
       const hit   = !push && (
@@ -623,7 +639,7 @@ export async function runRegressionReport(
   let totalOutcomes = 0;
 
   try {
-    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:AG5000`);
+    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:AR5000`);
     const raw  = (resp.values ?? []) as string[][];
     const data = raw.slice(1).filter(
       (r) => r[O_DATE] && r[O_ERROR] !== undefined && r[O_ABS] !== undefined,

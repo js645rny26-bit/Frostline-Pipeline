@@ -50,8 +50,20 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Base_Away_Projection",
   "Base_Home_Projection",
   "Base_Projection",
+  // `Market_Line` remains the backwards-compatible primary grading line. The
+  // following fields preserve the distinct reference and executable evidence
+  // that produced it; none are inputs to the price-blind projection.
   "Market_Line",
   "Market_Snapshot_Status",
+  "Reference_Market_Line",
+  "Reference_Market_Source",
+  "Reference_Market_TS",
+  "Executable_Market_Line",
+  "Executable_Market_Source",
+  "Executable_Market_TS",
+  "Primary_Grade_Market_Line",
+  "Primary_Grade_Market_Source",
+  "Primary_Grade_Market_Status",
   "Direction",
   "Vehicle",
   "Final_Decision",
@@ -158,6 +170,15 @@ export interface PregamePacketResult {
   errors: string[];
 }
 
+export interface PregamePacketFinalizationResult {
+  status: "success" | "failure";
+  date: string;
+  rows_frozen: number;
+  rows_rejected: number;
+  warnings: string[];
+  errors: string[];
+}
+
 function key(date: unknown, gameId: unknown): string {
   return `${String(date ?? "").trim()}|${String(gameId ?? "").trim()}`;
 }
@@ -166,6 +187,32 @@ function pad(raw: unknown[]): unknown[] {
   const row = raw.slice(0, PREGAME_PACKET_HISTORY_COLS);
   while (row.length < PREGAME_PACKET_HISTORY_COLS) row.push("");
   return row;
+}
+
+/**
+ * v41 inserted explicit reference/executable market lineage next to the old
+ * primary market fields. Re-index existing rows by their stored header before
+ * writing the canonical header, so prior frozen values cannot shift into a
+ * different column merely because the schema evolved.
+ */
+export function normalizePregamePacketHistoryRows(raw: unknown[][]): {
+  rows: unknown[][];
+  headerMigrated: boolean;
+} {
+  if (raw.length === 0) return { rows: [], headerMigrated: false };
+  const [header = [], ...data] = raw;
+  const existingHeader = header.map((value) => String(value ?? "").trim());
+  const headerIndex = new Map(existingHeader.map((name, index) => [name, index]));
+  const headerMigrated = PREGAME_PACKET_HISTORY_HEADERS.some(
+    (name, index) => existingHeader[index] !== name,
+  );
+  if (!headerMigrated) return { rows: data.map(pad), headerMigrated: false };
+  return {
+    rows: data.map((row) => PREGAME_PACKET_HISTORY_HEADERS.map(
+      (name) => row[headerIndex.get(name) ?? -1] ?? "",
+    )),
+    headerMigrated: true,
+  };
 }
 
 function blank(value: number | null | undefined): number | "" {
@@ -200,6 +247,13 @@ function operatorNumber(
   const value = operatorValue(snapshot, field);
   const parsed = value === undefined ? Number.NaN : Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function operatorFieldTimestamp(
+  snapshot: OperatorEvidenceSnapshot | undefined,
+  field: OperatorOverlayField,
+): string {
+  return snapshot?.field_supplied_ts.get(field) ?? "";
 }
 
 function operatorPacketProvenance(
@@ -251,7 +305,25 @@ export function buildPregamePacketInputs(
       operator,
       "CURRENT_HARD_ROCK_LINE",
     );
-    const packetMarketLine = operatorMarketLine ?? boardRow.market_line;
+    const referenceMarketLine = boardRow.market_line;
+    const packetMarketLine = operatorMarketLine ?? referenceMarketLine;
+    const referenceMarketTs = referenceMarketLine === null
+      ? ""
+      : boardRow.final_decision_ts ?? boardRow.projection_generated_ts ?? "";
+    const executableMarketTs = operatorFieldTimestamp(
+      operator,
+      "CURRENT_HARD_ROCK_LINE",
+    );
+    const primaryMarketSource = operatorMarketLine === undefined
+      ? referenceMarketLine === null
+        ? ""
+        : "AUTOMATED_REFERENCE_BOARD"
+      : "MANUAL_OPERATOR_HARD_ROCK";
+    const primaryMarketStatus = operatorMarketLine === undefined
+      ? referenceMarketLine === null
+        ? "MISSING_MARKET"
+        : "REFERENCE_ONLY_FALLBACK"
+      : "EXECUTABLE_OPERATOR_CAPTURED";
     const awayLineupOverride = operatorValue(operator, "AWAY_LINEUP");
     const homeLineupOverride = operatorValue(operator, "HOME_LINEUP");
     // Board authorization finalizes before first pitch; forecast provenance
@@ -277,11 +349,16 @@ export function buildPregamePacketInputs(
       summary.projected_home_runs,
       summary.projected_total_runs,
       blank(packetMarketLine),
-      packetMarketLine === null
-        ? "MISSING"
-        : operatorMarketLine === undefined
-          ? "CAPTURED"
-          : "MANUAL_OPERATOR_CAPTURED",
+      primaryMarketStatus,
+      blank(referenceMarketLine),
+      referenceMarketLine === null ? "" : "AUTOMATED_REFERENCE_BOARD",
+      referenceMarketTs,
+      blank(operatorMarketLine),
+      operatorMarketLine === undefined ? "" : "MANUAL_OPERATOR_HARD_ROCK",
+      executableMarketTs,
+      blank(packetMarketLine),
+      primaryMarketSource,
+      primaryMarketStatus,
       boardRow.direction,
       boardRow.vehicle_type,
       boardRow.final_decision,
@@ -387,45 +464,21 @@ export function upsertPregamePacketRows(
   rowsFrozen: number;
   rowsSkippedAfterFirstPitch: number;
 } {
-  const rows = existingRows.map(pad);
+  const finalized = finalizeOpenPregamePacketRows(
+    existingRows,
+    undefined,
+    snapshotTs,
+  );
+  const rows = finalized.rows;
   const byKey = new Map(
     rows.map((row, index) => [key(row[I.Date], row[I.Game_ID]), index]),
   );
   let rowsWritten = 0;
   let rowsUpdated = 0;
-  let rowsFrozen = 0;
+  let rowsFrozen = finalized.rowsFrozen;
   let rowsSkippedAfterFirstPitch = 0;
 
-  // A packet created while OPEN already contains the only evidence that may
-  // become prospective history: its own pre-first-pitch snapshot timestamp.
-  // When a later scoped run observes that the game has started, promote that
-  // stored packet to immutable history without reading or copying any current
-  // game inputs.  This is a lifecycle transition, not a late freeze/backfill:
-  // Packet_Snapshot_TS remains the original prospective timestamp and
-  // Freeze_TS truthfully records when this runner observed the transition.
-  for (const [rowIndex, existing] of rows.entries()) {
-    if (existing[I.Packet_Status] !== "OPEN_PROSPECTIVE") continue;
-    const scheduledFirstPitch = String(existing[I.Scheduled_First_Pitch] ?? "");
-    const packetSnapshot = String(existing[I.Packet_Snapshot_TS] ?? "");
-    const firstPitchMs = Date.parse(scheduledFirstPitch);
-    const packetSnapshotMs = Date.parse(packetSnapshot);
-    const hasLegitimateProspectiveSnapshot =
-      Number.isFinite(firstPitchMs) &&
-      Number.isFinite(packetSnapshotMs) &&
-      packetSnapshotMs < firstPitchMs;
-    if (
-      !hasLegitimateProspectiveSnapshot ||
-      !isAtOrAfterFirstPitch(scheduledFirstPitch, snapshotTs)
-    )
-      continue;
-
-    const frozen = pad(existing);
-    frozen[I.Packet_Status] = "FROZEN_PREGAME";
-    frozen[I.Freeze_TS] = snapshotTs;
-    rows[rowIndex] = frozen;
-    rowsUpdated++;
-    rowsFrozen++;
-  }
+  rowsUpdated += finalized.rowsUpdated;
 
   for (const input of incoming) {
     if (isAtOrAfterFirstPitch(input.scheduled_first_pitch, snapshotTs)) {
@@ -458,6 +511,51 @@ export function upsertPregamePacketRows(
     rowsFrozen,
     rowsSkippedAfterFirstPitch,
   };
+}
+
+/**
+ * Promote stored, legitimate OPEN snapshots without ever looking at a current
+ * game surface. `date` scopes settlement finalization to the requested slate;
+ * omit it only for the ordinary pregame writer's historical cleanup pass.
+ */
+export function finalizeOpenPregamePacketRows(
+  existingRows: unknown[][],
+  date: string | undefined,
+  snapshotTs: string,
+): {
+  rows: unknown[][];
+  rowsUpdated: number;
+  rowsFrozen: number;
+  rowsRejected: number;
+} {
+  const rows = existingRows.map(pad);
+  let rowsUpdated = 0;
+  let rowsFrozen = 0;
+  let rowsRejected = 0;
+  for (const [rowIndex, existing] of rows.entries()) {
+    if (date !== undefined && String(existing[I.Date] ?? "") !== date) continue;
+    if (existing[I.Packet_Status] !== "OPEN_PROSPECTIVE") continue;
+    const scheduledFirstPitch = String(existing[I.Scheduled_First_Pitch] ?? "");
+    const packetSnapshot = String(existing[I.Packet_Snapshot_TS] ?? "");
+    if (!isAtOrAfterFirstPitch(scheduledFirstPitch, snapshotTs)) continue;
+    const firstPitchMs = Date.parse(scheduledFirstPitch);
+    const packetSnapshotMs = Date.parse(packetSnapshot);
+    if (
+      !Number.isFinite(firstPitchMs) ||
+      !Number.isFinite(packetSnapshotMs) ||
+      packetSnapshotMs >= firstPitchMs
+    ) {
+      rowsRejected++;
+      continue;
+    }
+    const frozen = pad(existing);
+    frozen[I.Packet_Status] = "FROZEN_PREGAME";
+    frozen[I.Freeze_TS] = snapshotTs;
+    rows[rowIndex] = frozen;
+    rowsUpdated++;
+    rowsFrozen++;
+  }
+  return { rows, rowsUpdated, rowsFrozen, rowsRejected };
 }
 
 async function ensurePacketSheet(workbookId: string): Promise<void> {
@@ -499,7 +597,11 @@ export async function writePregamePacketHistory(
       `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ5000`,
     );
     const raw = (response.values ?? []) as unknown[][];
-    const existing = raw.length > 0 ? raw.slice(1) : [];
+    const existingPacketRows = normalizePregamePacketHistoryRows(raw);
+    const existing = existingPacketRows.rows;
+    if (existingPacketRows.headerMigrated) {
+      warnings.push("PREGAME_PACKET_HEADER_REINDEXED: existing rows aligned by stored column names before v41 rewrite");
+    }
     const mutation = upsertPregamePacketRows(
       existing,
       buildPregamePacketInputs(
@@ -541,6 +643,63 @@ export async function writePregamePacketHistory(
       rows_updated: 0,
       rows_frozen: 0,
       rows_skipped_after_first_pitch: 0,
+      warnings,
+      errors,
+    };
+  }
+}
+
+/**
+ * Settlement-only lifecycle completion. It can only freeze an already stored
+ * pre-first-pitch packet for this date; it never receives live inputs and
+ * therefore cannot create or reconstruct a prospective observation.
+ */
+export async function finalizePregamePacketHistory(
+  date: string,
+  options: { workbookId?: string; snapshotTs?: string } = {},
+): Promise<PregamePacketFinalizationResult> {
+  const workbookId = options.workbookId ?? WORKBOOK_ID;
+  const snapshotTs = options.snapshotTs ?? new Date().toISOString();
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  try {
+    await ensurePacketSheet(workbookId);
+    const response = await readRange(
+      workbookId,
+      `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ5000`,
+    );
+    const raw = (response.values ?? []) as unknown[][];
+    const existingPacketRows = normalizePregamePacketHistoryRows(raw);
+    const existing = existingPacketRows.rows;
+    const finalized = finalizeOpenPregamePacketRows(existing, date, snapshotTs);
+    if (finalized.rowsRejected > 0) {
+      warnings.push(
+        `PREGAME_PACKET_FINALIZE_REJECTED_NOT_PROSPECTIVE: ${finalized.rowsRejected}`,
+      );
+    }
+    if (finalized.rowsFrozen > 0 || existingPacketRows.headerMigrated) {
+      await writeRange(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!A1`, [
+        PREGAME_PACKET_HISTORY_HEADERS as unknown as string[],
+        ...finalized.rows,
+      ]);
+    }
+    return {
+      status: "success",
+      date,
+      rows_frozen: finalized.rowsFrozen,
+      rows_rejected: finalized.rowsRejected,
+      warnings: existingPacketRows.headerMigrated
+        ? [...warnings, "PREGAME_PACKET_HEADER_REINDEXED: existing rows aligned by stored column names before v41 rewrite"]
+        : warnings,
+      errors,
+    };
+  } catch (error: unknown) {
+    errors.push(error instanceof Error ? error.message : String(error));
+    return {
+      status: "failure",
+      date,
+      rows_frozen: 0,
+      rows_rejected: 0,
       warnings,
       errors,
     };

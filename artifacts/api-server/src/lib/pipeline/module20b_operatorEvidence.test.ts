@@ -39,6 +39,8 @@ test("operator overlays accept only explicit, timestamped pre-first-pitch fields
   const snapshot = resolved.snapshots.get(gameId);
   assert.equal(snapshot?.fields.get("HOME_STARTER"), "Operator Starter");
   assert.equal(snapshot?.fields.get("PARK_MULTIPLIER"), "1.07");
+  assert.equal(snapshot?.field_supplied_ts.get("HOME_STARTER"), "2026-08-24T22:00:00.000Z");
+  assert.equal(snapshot?.field_supplied_ts.get("PARK_MULTIPLIER"), "2026-08-24T22:01:00.000Z");
   assert.equal(snapshot?.fields.has("WEATHER"), false);
   assert.ok(resolved.warnings.some((warning) => warning.includes("NOT_PROSPECTIVE")));
 });

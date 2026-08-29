@@ -50,7 +50,9 @@ import {
   type DecisionAuditWriteResult,
 } from "./module20_decisionAuditLog.js";
 import {
+  finalizePregamePacketHistory,
   writePregamePacketHistory,
+  type PregamePacketFinalizationResult,
   type PregamePacketResult,
 } from "./module20a_pregamePacket.js";
 import {
@@ -944,6 +946,8 @@ export interface DailySettlementResult {
   decision_audit_status: DecisionAuditWriteResult["status"];
   postgame_diagnostics_status: PostgameDiagnosticsResult["status"];
   distribution_width_replay_status: DistributionWidthReplayResult["status"];
+  packet_finalization_status: PregamePacketFinalizationResult["status"];
+  full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
   schema_documentation_status: "not_run";
   settlement: SettlementResult;
@@ -956,6 +960,8 @@ export interface DailySettlementResult {
   decision_audit: DecisionAuditWriteResult;
   postgame_diagnostics: PostgameDiagnosticsResult;
   distribution_width_replay: DistributionWidthReplayResult;
+  packet_finalization: PregamePacketFinalizationResult;
+  full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
   module_statuses: Array<{ module: string; status: string }>;
   /**
@@ -1000,6 +1006,28 @@ export async function runDailySettlement(
 ): Promise<DailySettlementResult> {
   logger.info({ date, workbookId }, "Daily settlement: starting complete feedback loop");
   const errors: string[] = [];
+
+  // Settlement may only complete the lifecycle of a packet that was already
+  // written before first pitch. It never refreshes or reconstructs pregame
+  // evidence from current, live, or final-game surfaces.
+  const packet_finalization = await finalizePregamePacketHistory(date, { workbookId }).catch(
+    (err: unknown): PregamePacketFinalizationResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`packet_finalization: ${msg}`);
+      return { status: "failure", date, rows_frozen: 0, rows_rejected: 0, warnings: [], errors: [msg] };
+    },
+  );
+
+  // A ladder is a dependent pregame artifact. Once its backing packet freezes,
+  // expose only the already-stored prospective record; settlement never creates
+  // or fills a ladder after results are known.
+  const full_ladder_sync = await syncFullLadderAudit(date, { workbookId }).catch(
+    (err: unknown): FullLadderAuditResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`full_ladder_sync: ${msg}`);
+      return { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, warnings: [], errors: [msg] };
+    },
+  );
 
   // Step 1 — Shadow settlement (idempotent: already-settled games are skipped)
   const settlement = await runShadowSettlement(date, { workbookId }).catch(
@@ -1190,6 +1218,8 @@ export async function runDailySettlement(
 
   // Overall status is fail-closed: every module must report success.
   const module_statuses = [
+    { module: "MODULE_20A_PACKET_FINALIZATION", status: packet_finalization.status },
+    { module: "MODULE_20B_FULL_LADDER_FREEZE", status: full_ladder_sync.status },
     { module: "MODULE_14_SHADOW_SETTLEMENT", status: settlement.status },
     { module: "MODULE_15_REGRESSION_REPORT", status: regression.status },
     { module: "MODULE_16_STARTER_AUDIT", status: starter_audit.status },
@@ -1201,6 +1231,8 @@ export async function runDailySettlement(
     { module: "MODULE_24_POSTGAME_DIAGNOSTICS", status: postgame_diagnostics.status },
     { module: "MODULE_25_DISTRIBUTION_WIDTH_REPLAY", status: distribution_width_replay.status },
   ];
+  errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
+  errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
   errors.push(...settlement.errors.map((message) => `settlement: ${message}`));
   errors.push(...regression.errors.map((message) => `regression: ${message}`));
   errors.push(...starter_audit.errors.map((message) => `starter_audit: ${message}`));
@@ -1233,6 +1265,8 @@ export async function runDailySettlement(
       decision_audit_status: decision_audit.status,
       postgame_diagnostics_status: postgame_diagnostics.status,
       distribution_width_replay_status: distribution_width_replay.status,
+      packet_finalization_status: packet_finalization.status,
+      full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
       gate_hit_rate_pct,
       gate_denominator,
@@ -1260,6 +1294,8 @@ export async function runDailySettlement(
     decision_audit_status: decision_audit.status,
     postgame_diagnostics_status: postgame_diagnostics.status,
     distribution_width_replay_status: distribution_width_replay.status,
+    packet_finalization_status: packet_finalization.status,
+    full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
     settlement,
     regression,
@@ -1271,6 +1307,8 @@ export async function runDailySettlement(
     decision_audit,
     postgame_diagnostics,
     distribution_width_replay,
+    packet_finalization,
+    full_ladder_sync,
     schema_documentation,
     module_statuses,
     gate_hit_rate_pct,

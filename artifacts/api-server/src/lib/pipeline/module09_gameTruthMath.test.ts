@@ -53,6 +53,34 @@ test("neutral or unavailable matchup inputs preserve the established rate split"
   assert.equal(result.matchup_profile_status, "NEUTRAL");
 });
 
+test("same frozen active inputs reproduce the exact same price-blind team projection", () => {
+  const frozenInput = input({
+    environment_multiplier: 0.96,
+    lineup: {
+      coverage: 1,
+      source: "official",
+      weighted_obp: 0.337,
+      weighted_slg: 0.431,
+      weighted_bb_pct: 0.086,
+      weighted_k_pct: 0.217,
+      weighted_xwoba: 0.329,
+      weighted_hard_hit_pct: 42.1,
+    },
+    opposing_starter: {
+      quality_factor: 0.91,
+      expected_innings: 5.7,
+      bb_pct: 0.074,
+      k_pct: 0.239,
+      whip: 1.14,
+      hr_per_9: 0.91,
+    },
+    opposing_bullpen_quality: 1.04,
+  });
+  const first = computeActiveTeamProjection(frozenInput);
+  const replay = computeActiveTeamProjection({ ...frozenInput });
+  assert.deepEqual(replay, first);
+});
+
 test("recent scoring is a bounded form modifier rather than the active offensive center", () => {
   const hot = computeActiveOffenseCenter({
     recent_form_rate: 6.3,

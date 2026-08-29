@@ -16,6 +16,10 @@ import {
   type PitcherMatchStatus,
   type PitcherProvenanceStatus,
 } from "./module14_pitcherProvenance.js";
+import {
+  normalizePregamePacketHistoryRows,
+  PREGAME_PACKET_HISTORY_HEADERS,
+} from "./module20a_pregamePacket.js";
 import type { PostmortemEventEvidence } from "./module21_postmortemMechanism.js";
 
 const MLB_API = "https://statsapi.mlb.com/api/v1";
@@ -33,7 +37,7 @@ const STARTER_SURVIVAL_HISTORY_SHEET = "STARTER_SURVIVAL_CALIBRATION_HISTORY";
 const STARTER_SURVIVAL_REPORT_SHEET = "STARTER_SURVIVAL_CALIBRATION_REPORT";
 const STARTER_SURVIVAL_V2_HISTORY_SHEET = "STARTER_SURVIVAL_V2_CALIBRATION_HISTORY";
 const STARTER_SURVIVAL_V2_REPORT_SHEET = "STARTER_SURVIVAL_V2_CALIBRATION_REPORT";
-const OUTCOMES_COLS = 33; // A-AG
+const OUTCOMES_COLS = 44; // A-AR
 
 export const LOW_CENTER_CALIBRATION_REPORT_HEADER = [
   "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
@@ -100,20 +104,33 @@ const H_AWAY_SRC = 9;
 const H_HOME_SRC = 10;
 const H_PARK_SRC = 21;
 
-// PREGAME_PACKET_HISTORY is the canonical freeze boundary. Keep these local
-// indexes explicit because settlement consumes only the small provenance
-// subset, not the packet's active-model fields.
-const P_DATE = 0;
-const P_GAME_ID = 1;
-const P_SCHEDULED_FIRST_PITCH = 4;
-const P_PACKET_STATUS = 5;
-const P_FREEZE_TS = 10;
-const P_SNAPSHOT_TS = 11;
-const P_AWAY_STARTER = 25;
-const P_HOME_STARTER = 26;
+// PREGAME_PACKET_HISTORY is the canonical freeze boundary. Resolve names from
+// its exported schema rather than duplicating fragile column numbers here.
+const PACKET_INDEX = Object.fromEntries(
+  PREGAME_PACKET_HISTORY_HEADERS.map((name, index) => [name, index]),
+) as Record<(typeof PREGAME_PACKET_HISTORY_HEADERS)[number], number>;
+const P_DATE = PACKET_INDEX.Date;
+const P_GAME_ID = PACKET_INDEX.Game_ID;
+const P_SCHEDULED_FIRST_PITCH = PACKET_INDEX.Scheduled_First_Pitch;
+const P_PACKET_STATUS = PACKET_INDEX.Packet_Status;
+const P_FREEZE_TS = PACKET_INDEX.Freeze_TS;
+const P_SNAPSHOT_TS = PACKET_INDEX.Packet_Snapshot_TS;
+const P_AWAY_STARTER = PACKET_INDEX.Away_Starter;
+const P_HOME_STARTER = PACKET_INDEX.Home_Starter;
 
 const O_SETTLEMENT_TS = 11;
 const O_FROZEN_SOURCE = 15;
+const O_REFERENCE_MARKET_LINE = 33;
+const O_REFERENCE_MARKET_SOURCE = 34;
+const O_REFERENCE_MARKET_TS = 35;
+const O_EXECUTABLE_MARKET_LINE = 36;
+const O_EXECUTABLE_MARKET_SOURCE = 37;
+const O_EXECUTABLE_MARKET_TS = 38;
+const O_PRIMARY_MARKET_LINE = 39;
+const O_PRIMARY_MARKET_SOURCE = 40;
+const O_PRIMARY_MARKET_STATUS = 41;
+const O_PRIMARY_DIRECTIONAL_RESULT = 42;
+const O_REFERENCE_DIRECTIONAL_RESULT = 43;
 export const FROZEN_VEHICLE_REQUIRED_FROM_DATE = "2026-08-10";
 
 export const OUTCOMES_HEADER = [
@@ -129,6 +146,13 @@ export const OUTCOMES_HEADER = [
   "Away_Starter_Match_Status", "Home_Starter_Match_Status",
   "Away_Bulk_Pitcher", "Home_Bulk_Pitcher",
   "Away_Pitcher_Chain", "Home_Pitcher_Chain", "Pitcher_Provenance_Status",
+  // Preserve both market observations. Frozen_Market_Line remains the legacy
+  // reference/vehicle field; primary grading can use a legitimate executable
+  // operator line without rewriting historical reference evidence.
+  "Reference_Market_Line", "Reference_Market_Source", "Reference_Market_TS",
+  "Executable_Market_Line", "Executable_Market_Source", "Executable_Market_TS",
+  "Primary_Grade_Market_Line", "Primary_Grade_Market_Source", "Primary_Market_Grade_Status",
+  "Primary_Directional_Result", "Reference_Directional_Result",
 ];
 
 export const PROJECTION_REPLAY_HEADER = [
@@ -232,6 +256,42 @@ export interface FrozenPacketStarterSnapshot {
   freeze_ts: string;
 }
 
+/**
+ * A price-provenance snapshot carried from the immutable pregame packet.
+ * `reference_*` is the automated board observation; `executable_*` exists
+ * only when a timestamp-valid operator Hard Rock line was supplied before
+ * first pitch. Neither is a projection input.
+ */
+export interface FrozenPacketMarketSnapshot {
+  reference_market_line: number | null;
+  reference_market_source: string;
+  reference_market_ts: string;
+  executable_market_line: number | null;
+  executable_market_source: string;
+  executable_market_ts: string;
+  primary_grade_market_line: number | null;
+  primary_grade_market_source: string;
+  primary_grade_market_status: string;
+  packet_snapshot_ts: string;
+  freeze_ts: string;
+}
+
+function isLegitimateFrozenPacket(row: unknown[], date: string): boolean {
+  if (String(row[P_DATE] ?? "") !== date) return false;
+  const scheduledFirstPitch = starterName(row[P_SCHEDULED_FIRST_PITCH]);
+  const packetSnapshotTs = starterName(row[P_SNAPSHOT_TS]);
+  const freezeTs = starterName(row[P_FREEZE_TS]);
+  const firstPitchMs = Date.parse(scheduledFirstPitch);
+  const packetSnapshotMs = Date.parse(packetSnapshotTs);
+  const freezeMs = Date.parse(freezeTs);
+  return starterName(row[P_PACKET_STATUS]) === "FROZEN_PREGAME"
+    && Number.isFinite(firstPitchMs)
+    && Number.isFinite(packetSnapshotMs)
+    && Number.isFinite(freezeMs)
+    && packetSnapshotMs < firstPitchMs
+    && freezeMs >= packetSnapshotMs;
+}
+
 export function selectProspectiveProjection(
   vehicle: FrozenProjection | undefined,
   auditSnapshot: FrozenProjection | undefined,
@@ -264,22 +324,14 @@ export function parseFrozenPacketStarterSnapshots(
   const snapshots = new Map<string, FrozenPacketStarterSnapshot>();
   const latestSnapshotMs = new Map<string, number>();
   for (const row of rows) {
-    if (String(row[P_DATE] ?? "") !== date) continue;
     const gameId = starterName(row[P_GAME_ID]);
-    const scheduledFirstPitch = starterName(row[P_SCHEDULED_FIRST_PITCH]);
     const packetSnapshotTs = starterName(row[P_SNAPSHOT_TS]);
     const freezeTs = starterName(row[P_FREEZE_TS]);
-    const firstPitchMs = Date.parse(scheduledFirstPitch);
     const packetSnapshotMs = Date.parse(packetSnapshotTs);
-    const freezeMs = Date.parse(freezeTs);
     if (
       !gameId
-      || starterName(row[P_PACKET_STATUS]) !== "FROZEN_PREGAME"
-      || !Number.isFinite(firstPitchMs)
       || !Number.isFinite(packetSnapshotMs)
-      || !Number.isFinite(freezeMs)
-      || packetSnapshotMs >= firstPitchMs
-      || freezeMs < packetSnapshotMs
+      || !isLegitimateFrozenPacket(row, date)
       || packetSnapshotMs < (latestSnapshotMs.get(gameId) ?? Number.NEGATIVE_INFINITY)
     ) continue;
 
@@ -288,6 +340,52 @@ export function parseFrozenPacketStarterSnapshots(
       home_starter: starterName(row[P_HOME_STARTER]),
       packet_snapshot_ts: packetSnapshotTs,
       freeze_ts: freezeTs,
+    });
+    latestSnapshotMs.set(gameId, packetSnapshotMs);
+  }
+  return snapshots;
+}
+
+/** Read market lineage only from a legitimately frozen, prospective packet. */
+export function parseFrozenPacketMarketSnapshots(
+  rows: unknown[][],
+  date: string,
+): Map<string, FrozenPacketMarketSnapshot> {
+  const snapshots = new Map<string, FrozenPacketMarketSnapshot>();
+  const latestSnapshotMs = new Map<string, number>();
+  for (const row of rows) {
+    const gameId = starterName(row[P_GAME_ID]);
+    const packetSnapshotTs = starterName(row[P_SNAPSHOT_TS]);
+    const packetSnapshotMs = Date.parse(packetSnapshotTs);
+    if (
+      !gameId
+      || !Number.isFinite(packetSnapshotMs)
+      || !isLegitimateFrozenPacket(row, date)
+      || packetSnapshotMs < (latestSnapshotMs.get(gameId) ?? Number.NEGATIVE_INFINITY)
+    ) continue;
+
+    const referenceMarketLine = numberOrNull(row[PACKET_INDEX.Reference_Market_Line])
+      ?? numberOrNull(row[PACKET_INDEX.Market_Line]);
+    const executableMarketLine = numberOrNull(row[PACKET_INDEX.Executable_Market_Line]);
+    const primaryMarketLine = numberOrNull(row[PACKET_INDEX.Primary_Grade_Market_Line])
+      ?? executableMarketLine
+      ?? referenceMarketLine;
+    const hasExecutable = executableMarketLine !== null;
+    snapshots.set(gameId, {
+      reference_market_line: referenceMarketLine,
+      reference_market_source: starterName(row[PACKET_INDEX.Reference_Market_Source])
+        || (referenceMarketLine === null ? "" : "LEGACY_PACKET_REFERENCE_MARKET"),
+      reference_market_ts: starterName(row[PACKET_INDEX.Reference_Market_TS]) || packetSnapshotTs,
+      executable_market_line: executableMarketLine,
+      executable_market_source: starterName(row[PACKET_INDEX.Executable_Market_Source]),
+      executable_market_ts: starterName(row[PACKET_INDEX.Executable_Market_TS]),
+      primary_grade_market_line: primaryMarketLine,
+      primary_grade_market_source: starterName(row[PACKET_INDEX.Primary_Grade_Market_Source])
+        || (hasExecutable ? "MANUAL_OPERATOR_HARD_ROCK" : "LEGACY_PACKET_REFERENCE_MARKET"),
+      primary_grade_market_status: starterName(row[PACKET_INDEX.Primary_Grade_Market_Status])
+        || (hasExecutable ? "EXECUTABLE_OPERATOR_CAPTURED" : "REFERENCE_ONLY_FALLBACK"),
+      packet_snapshot_ts: packetSnapshotTs,
+      freeze_ts: starterName(row[P_FREEZE_TS]),
     });
     latestSnapshotMs.set(gameId, packetSnapshotMs);
   }
@@ -341,6 +439,17 @@ export interface SettlementRow {
   frozen_ticket_result: string;
   settlement_ticket_result: string;
   projection_audit_status: string;
+  reference_market_line?: number | null;
+  reference_market_source?: string;
+  reference_market_ts?: string;
+  executable_market_line?: number | null;
+  executable_market_source?: string;
+  executable_market_ts?: string;
+  primary_grade_market_line?: number | null;
+  primary_grade_market_source?: string;
+  primary_market_grade_status?: string;
+  primary_directional_result?: string;
+  reference_directional_result?: string;
   projected_away_starter: string;
   projected_home_starter: string;
   actual_away_starter: string;
@@ -500,6 +609,11 @@ export function settlementRowToValues(row: SettlementRow): unknown[] {
     row.away_starter_match_status, row.home_starter_match_status,
     row.away_bulk_pitcher, row.home_bulk_pitcher,
     row.away_pitcher_chain, row.home_pitcher_chain, row.pitcher_provenance_status,
+    row.reference_market_line ?? "", row.reference_market_source, row.reference_market_ts,
+    row.executable_market_line ?? "", row.executable_market_source, row.executable_market_ts,
+    row.primary_grade_market_line ?? "", row.primary_grade_market_source,
+    row.primary_market_grade_status, row.primary_directional_result,
+    row.reference_directional_result,
   ];
 }
 
@@ -611,6 +725,83 @@ export function parseLowCenterProspectiveSnapshots(
     latestTs.set(gameId, snapshotMs);
   }
   return snapshots;
+}
+
+function directionForProjection(projection: number | null, line: number | null): string {
+  if (projection === null || line === null) return "NONE";
+  if (projection > line) return "OVER";
+  if (projection < line) return "UNDER";
+  return "NONE";
+}
+
+export interface SettlementMarketGrade {
+  reference_market_line: number | null;
+  reference_market_source: string;
+  reference_market_ts: string;
+  executable_market_line: number | null;
+  executable_market_source: string;
+  executable_market_ts: string;
+  primary_grade_market_line: number | null;
+  primary_grade_market_source: string;
+  primary_market_grade_status: string;
+  primary_directional_result: string;
+  reference_directional_result: string;
+}
+
+/**
+ * Keep automated/reference and operator/executable market observations apart.
+ * The primary line is the operator Hard Rock line only when it was captured in
+ * the frozen packet; otherwise the reference line remains an explicit fallback.
+ */
+export function resolveSettlementMarketGrade(
+  frozenProjection: number | null,
+  actualTotal: number,
+  packet: FrozenPacketMarketSnapshot | undefined,
+  existing: unknown[] | undefined,
+): SettlementMarketGrade {
+  const legacyReferenceLine = numberOrNull(existing?.[O_REFERENCE_MARKET_LINE])
+    ?? numberOrNull(existing?.[17]);
+  const referenceMarketLine = packet?.reference_market_line
+    ?? legacyReferenceLine;
+  const referenceMarketSource = packet?.reference_market_source
+    || starterName(existing?.[O_REFERENCE_MARKET_SOURCE])
+    || (referenceMarketLine === null ? "" : "FROZEN_REFERENCE_MARKET");
+  const referenceMarketTs = packet?.reference_market_ts
+    || starterName(existing?.[O_REFERENCE_MARKET_TS]);
+  const executableMarketLine = packet?.executable_market_line
+    ?? numberOrNull(existing?.[O_EXECUTABLE_MARKET_LINE]);
+  const executableMarketSource = packet?.executable_market_source
+    || starterName(existing?.[O_EXECUTABLE_MARKET_SOURCE]);
+  const executableMarketTs = packet?.executable_market_ts
+    || starterName(existing?.[O_EXECUTABLE_MARKET_TS]);
+  const primaryMarketLine = packet?.primary_grade_market_line
+    ?? executableMarketLine
+    ?? referenceMarketLine;
+  const primaryMarketSource = packet?.primary_grade_market_source
+    || starterName(existing?.[O_PRIMARY_MARKET_SOURCE])
+    || (executableMarketLine === null
+      ? referenceMarketLine === null ? "" : "FROZEN_REFERENCE_MARKET"
+      : "MANUAL_OPERATOR_HARD_ROCK");
+  const primaryMarketStatus = packet?.primary_grade_market_status
+    || starterName(existing?.[O_PRIMARY_MARKET_STATUS])
+    || (executableMarketLine === null
+      ? referenceMarketLine === null ? "MISSING_MARKET" : "REFERENCE_ONLY_FALLBACK"
+      : "EXECUTABLE_OPERATOR_CAPTURED");
+  const primaryDirection = directionForProjection(frozenProjection, primaryMarketLine);
+  const referenceDirection = directionForProjection(frozenProjection, referenceMarketLine);
+  return {
+    reference_market_line: referenceMarketLine,
+    reference_market_source: referenceMarketSource,
+    reference_market_ts: referenceMarketTs,
+    executable_market_line: executableMarketLine,
+    executable_market_source: executableMarketSource,
+    executable_market_ts: executableMarketTs,
+    primary_grade_market_line: primaryMarketLine,
+    primary_grade_market_source: primaryMarketSource,
+    primary_market_grade_status: primaryMarketStatus,
+    primary_directional_result: gradeDirection(primaryDirection, primaryMarketLine, actualTotal),
+    reference_directional_result: gradeDirection(referenceDirection, referenceMarketLine, actualTotal),
+  };
 }
 
 /**
@@ -844,7 +1035,12 @@ export function normalizeOutcomeValues(
       : raw.slice(12, 23);
   while (pitcher.length < 11) pitcher.push("");
   const frozen = frozenAuditValues(repaired, actual, vehicle, raw);
-  return [...base, ...frozen, ...pitcher].slice(0, OUTCOMES_COLS);
+  // Market-provenance columns were added after the original 33-column
+  // outcome layout. Preserve them verbatim on normalization so a settlement
+  // rerun cannot erase a legitimately frozen executable line.
+  const market = raw.slice(O_REFERENCE_MARKET_LINE, OUTCOMES_COLS);
+  while (market.length < OUTCOMES_COLS - O_REFERENCE_MARKET_LINE) market.push("");
+  return [...base, ...frozen, ...pitcher, ...market].slice(0, OUTCOMES_COLS);
 }
 
 function combinedProvenanceStatus(
@@ -995,11 +1191,6 @@ async function upsertCollisionCalibrationReport(
 function survivalResult(actualIp: number | null, projectedWorkload: number): "SURVIVED" | "FAILED" | "UNAVAILABLE" {
   if (actualIp === null) return "UNAVAILABLE";
   return actualIp >= projectedWorkload ? "SURVIVED" : "FAILED";
-}
-
-function directionForProjection(projection: number, line: number | null): string {
-  if (line === null || Math.abs(projection - line) < 0.005) return "NONE";
-  return projection > line ? "OVER" : "UNDER";
 }
 
 export function starterSurvivalCalibrationValues(row: SettlementRow): unknown[] | null {
@@ -1154,16 +1345,24 @@ export async function runShadowSettlement(
   // This read is deliberately best-effort so pre-packet historical dates can
   // still settle truthfully as incomplete rather than failing wholesale.
   const frozenPacketStartersByGame = new Map<string, FrozenPacketStarterSnapshot>();
+  const frozenPacketMarketsByGame = new Map<string, FrozenPacketMarketSnapshot>();
   try {
     const response = await readRange(wbId, `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ5000`);
-    for (const [gameId, snapshot] of parseFrozenPacketStarterSnapshots(
-      ((response.values ?? []) as unknown[][]).slice(1),
-      date,
-    )) {
+    const normalizedPacketRows = normalizePregamePacketHistoryRows(
+      (response.values ?? []) as unknown[][],
+    );
+    const packetRows = normalizedPacketRows.rows;
+    if (normalizedPacketRows.headerMigrated) {
+      warnings.push("PREGAME_PACKET_HEADER_REINDEXED_IN_MEMORY: settlement used stored column names before packet parsing");
+    }
+    for (const [gameId, snapshot] of parseFrozenPacketStarterSnapshots(packetRows, date)) {
       frozenPacketStartersByGame.set(gameId, snapshot);
     }
+    for (const [gameId, snapshot] of parseFrozenPacketMarketSnapshots(packetRows, date)) {
+      frozenPacketMarketsByGame.set(gameId, snapshot);
+    }
   } catch (error: unknown) {
-    warnings.push(`PREGAME_PACKET_HISTORY starter provenance read unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    warnings.push(`PREGAME_PACKET_HISTORY provenance read unavailable: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const vehiclesByGame = new Map<string, FrozenProjection>();
@@ -1266,7 +1465,7 @@ export async function runShadowSettlement(
   const existingByGame = new Map<string, Existing>();
   let existingRows: unknown[][] = [];
   try {
-    const response = await readRange(wbId, `${OUTCOMES_SHEET}!A1:AG5000`);
+    const response = await readRange(wbId, `${OUTCOMES_SHEET}!A1:AR5000`);
     const all = (response.values ?? []) as unknown[][];
     existingRows = all.slice(1).map((row) => normalizeOutcomeValues(row, vehiclesByGame.get(String(row[1] ?? ""))));
     existingRows.forEach((row, index) => {
@@ -1343,6 +1542,12 @@ export async function runShadowSettlement(
     if (frozenGap.warning) warnings.push(frozenGap.warning);
     if (frozenGap.error) errors.push(frozenGap.error);
 
+    const marketGrade = resolveSettlementMarketGrade(
+      numberOrNull(frozen[0]),
+      final.actual_total,
+      frozenPacketMarketsByGame.get(gameId),
+      existing?.values,
+    );
     const row: SettlementRow = {
       date: String(existing?.values[0] || history[H_DATE] || date),
       game_id: gameId,
@@ -1369,6 +1574,7 @@ export async function runShadowSettlement(
       frozen_ticket_result: String(frozen[7] ?? ""),
       settlement_ticket_result: String(frozen[8] ?? ""),
       projection_audit_status: String(frozen[9] ?? ""),
+      ...marketGrade,
       projected_away_starter: projectedAwayStarter,
       projected_home_starter: projectedHomeStarter,
       actual_away_starter: provenance.away.actual_starter,

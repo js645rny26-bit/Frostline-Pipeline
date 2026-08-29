@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildPregamePacketInputs,
+  finalizeOpenPregamePacketRows,
+  normalizePregamePacketHistoryRows,
   PREGAME_PACKET_HISTORY_COLS,
   PREGAME_PACKET_HISTORY_HEADERS,
   upsertPregamePacketRows,
@@ -121,6 +123,41 @@ test("a board-locked decision still permits pre-first-pitch packet refresh", () 
   assert.equal(frozen.rows[0]?.[15], 8.8);
 });
 
+test("an executable market overlay changes only market provenance, never price-blind projections", () => {
+  const summary = [{
+    date: "2026-08-24", game_id: "20260824_AAA_BBB", away_team: "AAA", home_team: "BBB",
+    projected_away_runs: 4, projected_home_runs: 4.5, projected_total_runs: 8.5,
+  }] as never;
+  const board = [{
+    legacy_game_id: "20260824_AAA_BBB", market_line: 8, run_id: "run", model_version: "test",
+    direction: "OVER", vehicle_type: "GAME_TOTAL", final_decision: "PASS", core_blocker: "",
+    confidence: 50, variance: 0,
+  }] as never;
+  const games = [{ legacy_game_id: "20260824_AAA_BBB", scheduled_utc_time: firstPitch }] as never;
+  const reference = buildPregamePacketInputs(summary, board, games, [], [], []);
+  const executable = buildPregamePacketInputs(
+    summary,
+    board,
+    games,
+    [], [], [],
+    new Map([["20260824_AAA_BBB", {
+      fields: new Map([["CURRENT_HARD_ROCK_LINE", "7.5"]]),
+      field_supplied_ts: new Map([["CURRENT_HARD_ROCK_LINE", "2026-08-24T22:45:00.000Z"]]),
+      source: "MANUAL_OPERATOR",
+      supplied_ts: "2026-08-24T22:45:00.000Z",
+      provenance: "explicit",
+      reauthorization_status: "REAUTHORIZATION_REQUIRED",
+    }]]),
+  );
+  const index = Object.fromEntries(PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]));
+  assert.equal(reference[0]?.values[index.Base_Away_Projection], executable[0]?.values[index.Base_Away_Projection]);
+  assert.equal(reference[0]?.values[index.Base_Home_Projection], executable[0]?.values[index.Base_Home_Projection]);
+  assert.equal(reference[0]?.values[index.Base_Projection], executable[0]?.values[index.Base_Projection]);
+  assert.equal(executable[0]?.values[index.Reference_Market_Line], 8);
+  assert.equal(executable[0]?.values[index.Executable_Market_Line], 7.5);
+  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Line], 7.5);
+});
+
 test("a frozen pregame packet remains byte-for-byte unchanged on later refresh", () => {
   const frozen = upsertPregamePacketRows(
     [],
@@ -177,10 +214,59 @@ test("a legitimate OPEN packet becomes immutable after first pitch without chang
   );
 });
 
+test("settlement finalization is date-scoped and rejects non-prospective snapshots", () => {
+  const valid = upsertPregamePacketRows(
+    [],
+    [input("OPEN_PROSPECTIVE", 8.5)],
+    "2026-08-24T18:00:00.000Z",
+  ).rows[0]!;
+  const wrongDate = [...valid];
+  wrongDate[0] = "2026-08-25";
+  const tooLate = [...valid];
+  tooLate[1] = "20260824_LATE_BBB";
+  tooLate[11] = firstPitch;
+
+  const finalized = finalizeOpenPregamePacketRows(
+    [valid, wrongDate, tooLate],
+    "2026-08-24",
+    "2026-08-24T23:11:00.000Z",
+  );
+  assert.equal(finalized.rowsFrozen, 1);
+  assert.equal(finalized.rowsRejected, 1);
+  assert.equal(finalized.rows[0]![5], "FROZEN_PREGAME");
+  assert.equal(finalized.rows[0]![11], valid[11]);
+  assert.equal(finalized.rows[1]![5], "OPEN_PROSPECTIVE");
+  assert.equal(finalized.rows[2]![5], "OPEN_PROSPECTIVE");
+});
+
+test("v41 packet header migration preserves old frozen fields by name", () => {
+  const oldHeader = PREGAME_PACKET_HISTORY_HEADERS.filter((name) => ![
+    "Reference_Market_Line", "Reference_Market_Source", "Reference_Market_TS",
+    "Executable_Market_Line", "Executable_Market_Source", "Executable_Market_TS",
+    "Primary_Grade_Market_Line", "Primary_Grade_Market_Source", "Primary_Grade_Market_Status",
+  ].includes(name));
+  const oldRow = Array(oldHeader.length).fill("");
+  oldRow[oldHeader.indexOf("Game_ID")] = "20260824_AAA_BBB";
+  oldRow[oldHeader.indexOf("Direction")] = "OVER";
+  oldRow[oldHeader.indexOf("Away_Starter")] = "Frozen Away Starter";
+  oldRow[oldHeader.indexOf("Market_Line")] = 8;
+  const migrated = normalizePregamePacketHistoryRows([oldHeader, oldRow]);
+  const index = Object.fromEntries(PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]));
+  assert.equal(migrated.headerMigrated, true);
+  assert.equal(migrated.rows[0]![index.Game_ID], "20260824_AAA_BBB");
+  assert.equal(migrated.rows[0]![index.Direction], "OVER");
+  assert.equal(migrated.rows[0]![index.Away_Starter], "Frozen Away Starter");
+  assert.equal(migrated.rows[0]![index.Market_Line], 8);
+  assert.equal(migrated.rows[0]![index.Executable_Market_Line], "");
+});
+
 test("packet contract preserves market and dependent shadow fields as explicit columns", () => {
   for (const required of [
     "Market_Line",
     "Market_Snapshot_Status",
+    "Reference_Market_Line",
+    "Executable_Market_Line",
+    "Primary_Grade_Market_Line",
     "Away_Expected_IP",
     "Bullpen_Data_Status",
     "Environment_Certainty",

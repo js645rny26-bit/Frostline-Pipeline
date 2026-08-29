@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   FROZEN_VEHICLE_REQUIRED_FROM_DATE,
   COLLISION_CALIBRATION_REPORT_HEADER,
+  OUTCOMES_HEADER,
   classifyFrozenVehicleGap,
   collisionCalibrationValues,
   frozenProjectionReplayValues,
@@ -13,6 +14,8 @@ import {
   parseStarterSurvivalV2ProspectiveSnapshots,
   parseProspectiveDecisionAuditSnapshots,
   parseFrozenPacketStarterSnapshots,
+  parseFrozenPacketMarketSnapshots,
+  resolveSettlementMarketGrade,
   resolveProjectedStarter,
   selectProspectiveProjection,
   settlementRowToValues,
@@ -21,6 +24,7 @@ import {
   starterSurvivalV2CalibrationValues,
   type SettlementRow,
 } from "./module14_shadowSettlement.js";
+import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
 
 const vehicle = { market_line: 8.5, direction: "OVER", projected_total: 9.11 };
 
@@ -348,6 +352,44 @@ test("frozen packet starter provenance repairs an unresolved legacy outcome with
   );
 });
 
+test("frozen packet keeps executable Hard Rock market distinct from reference grading", () => {
+  const index = Object.fromEntries(
+    PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]),
+  ) as Record<(typeof PREGAME_PACKET_HISTORY_HEADERS)[number], number>;
+  const packet = Array(PREGAME_PACKET_HISTORY_HEADERS.length).fill("");
+  packet[index.Date] = "2026-08-28";
+  packet[index.Game_ID] = "20260828_PHI_LAA";
+  packet[index.Scheduled_First_Pitch] = "2026-08-28T23:10:00.000Z";
+  packet[index.Packet_Status] = "FROZEN_PREGAME";
+  packet[index.Packet_Snapshot_TS] = "2026-08-28T22:45:00.000Z";
+  packet[index.Freeze_TS] = "2026-08-28T23:11:00.000Z";
+  packet[index.Market_Line] = 7.5;
+  packet[index.Reference_Market_Line] = 8;
+  packet[index.Reference_Market_Source] = "AUTOMATED_REFERENCE_BOARD";
+  packet[index.Reference_Market_TS] = "2026-08-28T22:30:00.000Z";
+  packet[index.Executable_Market_Line] = 7.5;
+  packet[index.Executable_Market_Source] = "MANUAL_OPERATOR_HARD_ROCK";
+  packet[index.Executable_Market_TS] = "2026-08-28T22:44:00.000Z";
+  packet[index.Primary_Grade_Market_Line] = 7.5;
+  packet[index.Primary_Grade_Market_Source] = "MANUAL_OPERATOR_HARD_ROCK";
+  packet[index.Primary_Grade_Market_Status] = "EXECUTABLE_OPERATOR_CAPTURED";
+
+  const snapshot = parseFrozenPacketMarketSnapshots([packet], "2026-08-28").get("20260828_PHI_LAA");
+  assert.equal(snapshot?.reference_market_line, 8);
+  assert.equal(snapshot?.executable_market_line, 7.5);
+  const grade = resolveSettlementMarketGrade(8.75, 8, snapshot, undefined);
+  assert.equal(grade.reference_directional_result, "PUSH");
+  assert.equal(grade.primary_directional_result, "WIN");
+  assert.equal(grade.primary_market_grade_status, "EXECUTABLE_OPERATOR_CAPTURED");
+
+  const legacyOutcome = Array(44).fill("");
+  legacyOutcome[17] = 8;
+  const fallback = resolveSettlementMarketGrade(8.75, 8, undefined, legacyOutcome);
+  assert.equal(fallback.primary_market_grade_status, "REFERENCE_ONLY_FALLBACK");
+  assert.equal(fallback.primary_directional_result, "PUSH");
+  assert.equal(fallback.executable_market_line, null);
+});
+
 test("vehicle log wins while validated audit evidence can repair an unresolved outcome", () => {
   const frozenVehicle = {
     market_line: 8.5,
@@ -433,9 +475,10 @@ test("legacy frozen audit columns survive the combined outcome migration", () =>
   ];
 
   const migrated = normalizeOutcomeValues(legacy, vehicle);
-  assert.equal(migrated.length, 33);
+  assert.equal(migrated.length, OUTCOMES_HEADER.length);
   assert.deepEqual(migrated.slice(12, 22), legacy.slice(12, 22));
-  assert.deepEqual(migrated.slice(22), Array(11).fill(""));
+  assert.deepEqual(migrated.slice(22, 33), Array(11).fill(""));
+  assert.deepEqual(migrated.slice(33), Array(11).fill(""));
 });
 
 test("v16 pitcher columns move from M:W to W:AG and gain frozen audit values", () => {
@@ -454,7 +497,8 @@ test("v16 pitcher columns move from M:W to W:AG and gain frozen audit values", (
   assert.equal(migrated[13], -2);
   assert.equal(migrated[15], "FROZEN_VEHICLE_LOG");
   assert.equal(migrated[21], "REPAIRED_DIFFERS_FROM_PUBLISHED");
-  assert.deepEqual(migrated.slice(22), pitcher);
+  assert.deepEqual(migrated.slice(22, 33), pitcher);
+  assert.deepEqual(migrated.slice(33), Array(11).fill(""));
 });
 
 test("frozen projection replay serializes the packet projection, not repaired projection", () => {
@@ -496,7 +540,7 @@ test("frozen projection replay serializes the packet projection, not repaired pr
     pitcher_provenance_status: "COMPLETE",
   } satisfies SettlementRow;
 
-  assert.equal(settlementRowToValues(row).length, 33);
+  assert.equal(settlementRowToValues(row).length, OUTCOMES_HEADER.length);
   const replay = frozenProjectionReplayValues(row, "2026-08-09T00:00:00.000Z");
   assert.ok(replay);
   assert.equal(replay[5], 9.2);

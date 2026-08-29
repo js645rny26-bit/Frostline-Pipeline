@@ -72,6 +72,8 @@ export type FullLadderStatus = "OPEN_PROSPECTIVE" | "FROZEN_PREGAME";
 
 export interface OperatorEvidenceSnapshot {
   fields: Map<OperatorOverlayField, string>;
+  /** Timestamp for the surviving value of each explicitly supplied field. */
+  field_supplied_ts: Map<OperatorOverlayField, string>;
   source: "MANUAL_OPERATOR";
   supplied_ts: string;
   provenance: string;
@@ -178,13 +180,18 @@ export function resolveOperatorEvidenceRows(
   for (const [gameId, items] of gathered) {
     const ordered = [...items].sort((left, right) => Date.parse(left.suppliedTs) - Date.parse(right.suppliedTs));
     const fields = new Map<OperatorOverlayField, string>();
-    for (const item of ordered) fields.set(item.field, item.value);
+    const fieldSuppliedTs = new Map<OperatorOverlayField, string>();
+    for (const item of ordered) {
+      fields.set(item.field, item.value);
+      fieldSuppliedTs.set(item.field, item.suppliedTs);
+    }
     const latestTs = ordered.at(-1)?.suppliedTs ?? "";
     const provenance = ordered
       .map((item) => `${item.field}=${item.value}${item.note ? ` (${item.note})` : ""}`)
       .join("; ");
     snapshots.set(gameId, {
       fields,
+      field_supplied_ts: fieldSuppliedTs,
       source: "MANUAL_OPERATOR",
       supplied_ts: latestTs,
       provenance,
