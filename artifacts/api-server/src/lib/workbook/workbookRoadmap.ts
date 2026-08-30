@@ -471,6 +471,30 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Start with Eligible_N; then inspect the correlation against total, starter-window, bullpen-window, and allocation error before proposing any distribution change.",
   },
   {
+    sheet: "FAILURE_CLASSIFICATION_SHADOW_V1",
+    stage: "REPLAY",
+    timing:
+      "Every legitimate pre-first-pitch publish, then packet finalization (Module 26)",
+    purpose:
+      "Price-blind structural labels for opener-chain uncertainty, starter-versus-bullpen scoring dependence, and traffic/damage evidence. The label is tied to the same pregame packet used for settlement.",
+    boardRelationship:
+      "Shadow-only. It cannot alter a projection, market line, vehicle, BET/PASS result, confidence, or authorization.",
+    readNote:
+      "A known opener is not a known relief chain; traffic and damage are not conversion; a bullpen-dependent path is not a prediction of bullpen damage.",
+  },
+  {
+    sheet: "FAILURE_CLASSIFICATION_REPLAY_V1",
+    stage: "REPLAY",
+    timing:
+      "Daily settlement after GAME_TRUTH_REPLAY_V1 refresh (Module 26)",
+    purpose:
+      "Joins frozen structural labels to settled total error, starter/bullpen timing, allocation, and conversion outcomes so proof and anti-proof cases can be measured prospectively.",
+    boardRelationship:
+      "Research-only. No label creates a threshold, a center correction, or an automatic veto.",
+    readNote:
+      "Read label frequencies and outcomes alongside sample size. Do not turn one opener game, one bullpen collapse, or one market improvement into a global rule.",
+  },
+  {
     sheet: "FULL_LADDER_SETTLEMENT",
     stage: "SETTLEMENT",
     timing: "Daily settlement for frozen FULL_LADDER_AUDIT rows (Module 24)",

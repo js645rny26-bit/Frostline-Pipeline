@@ -45,6 +45,12 @@ import { runMonotonicityV2, type MonotonicityV2Result } from "./module23_monoton
 import { runPostgameDiagnostics, type PostgameDiagnosticsResult } from "./module24_postgameDiagnostics.js";
 import { runDistributionWidthReplay, type DistributionWidthReplayResult } from "./module25_distributionWidthReplay.js";
 import {
+  runFailureClassificationReplay,
+  syncFailureClassificationShadow,
+  type FailureClassificationReplayResult,
+  type FailureClassificationShadowResult,
+} from "./module26_failureClassification.js";
+import {
   logDecisionAuditPregame,
   settleDecisionAuditLog,
   type DecisionAuditWriteResult,
@@ -253,6 +259,8 @@ export interface PublishResult {
   module_20_decision_audit: DecisionAuditWriteResult;
   /** Module 20a: immutable, self-contained dependent pregame packet. */
   module_20a_pregame_packet: PregamePacketResult;
+  /** Module 26: price-blind structural-failure labels derived from the packet only. */
+  module_26_failure_classification: FailureClassificationShadowResult;
   /** Module 20b: durable manual/operator evidence and full-total-ladder ledger. */
   module_20b_full_ladder_audit: FullLadderAuditResult;
   /** Schema/reference documentation refreshed from the runtime workbook schema. */
@@ -501,6 +509,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_17: { status: "failure", date, publish_ts: new Date().toISOString(), rows_written: 0, rows_skipped: 0, errors: ["Skipped: Module 08 failed"] },
       module_20_decision_audit: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, duplicates_removed: 0, audit_gaps: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_20a_pregame_packet: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_skipped_after_first_pitch: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
+      module_26_failure_classification: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen_preserved: 0, packets_ineligible: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_20b_full_ladder_audit: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_schema_documentation: {
         workbook_id: workbookId,
@@ -806,6 +815,30 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     });
   }
 
+  // Module 26 is an explicitly price-blind, shadow-only classification of the
+  // pregame packet. It cannot feed projection math, market comparison, board
+  // authorization, or vehicle publication. It runs after packet capture so
+  // every label is traceable to the exact stored pre-first-pitch state.
+  const mod26 = mod20a.status === "success"
+    ? await syncFailureClassificationShadow(date, { workbookId })
+    : {
+      status: "failure" as const,
+      date,
+      rows_written: 0,
+      rows_updated: 0,
+      rows_frozen_preserved: 0,
+      packets_ineligible: 0,
+      warnings: [],
+      errors: ["Failure classification blocked: pregame packet write did not complete"],
+    } satisfies FailureClassificationShadowResult;
+  if (mod26.status !== "success") {
+    allErrors.push({
+      module: "26_failure_classification",
+      error: mod26.errors.join("; ") || "Failure classification shadow write failed",
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // This is a shadow-only, immutable record of the price-blind manual full
   // total ladder. It uses the packet just written above, never current/live
   // game state, and does not participate in projection or authorization.
@@ -923,6 +956,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_17: mod17,
     module_20_decision_audit: mod20,
     module_20a_pregame_packet: mod20a,
+    module_26_failure_classification: mod26,
     module_20b_full_ladder_audit: mod20b,
     module_schema_documentation: schemaDocumentation,
     workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
@@ -946,6 +980,8 @@ export interface DailySettlementResult {
   decision_audit_status: DecisionAuditWriteResult["status"];
   postgame_diagnostics_status: PostgameDiagnosticsResult["status"];
   distribution_width_replay_status: DistributionWidthReplayResult["status"];
+  failure_classification_status: FailureClassificationShadowResult["status"];
+  failure_classification_replay_status: FailureClassificationReplayResult["status"];
   packet_finalization_status: PregamePacketFinalizationResult["status"];
   full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
@@ -960,6 +996,8 @@ export interface DailySettlementResult {
   decision_audit: DecisionAuditWriteResult;
   postgame_diagnostics: PostgameDiagnosticsResult;
   distribution_width_replay: DistributionWidthReplayResult;
+  failure_classification: FailureClassificationShadowResult;
+  failure_classification_replay: FailureClassificationReplayResult;
   packet_finalization: PregamePacketFinalizationResult;
   full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
@@ -1026,6 +1064,19 @@ export async function runDailySettlement(
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`full_ladder_sync: ${msg}`);
       return { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, warnings: [], errors: [msg] };
+    },
+  );
+
+  // Promote only the already-stored pregame packet, then refresh its
+  // price-blind failure labels. This never reads current game state or results.
+  const failure_classification = await syncFailureClassificationShadow(date, { workbookId }).catch(
+    (err: unknown): FailureClassificationShadowResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`failure_classification: ${msg}`);
+      return {
+        status: "failure", date, rows_written: 0, rows_updated: 0,
+        rows_frozen_preserved: 0, packets_ineligible: 0, warnings: [], errors: [msg],
+      };
     },
   );
 
@@ -1119,6 +1170,21 @@ export async function runDailySettlement(
         summary_rows_written: 0,
         warnings: [],
         errors: [msg],
+      };
+    },
+  );
+
+  // Module 26 consumes its own immutable labels and the canonical Module 24
+  // game-truth replay. It is descriptive evidence only and cannot issue a
+  // projection, market, vehicle, or authorization change.
+  const failure_classification_replay = await runFailureClassificationReplay({ workbookId }).catch(
+    (err: unknown): FailureClassificationReplayResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`failure_classification_replay: ${msg}`);
+      return {
+        status: "failure", replay_timestamp_utc: new Date().toISOString(),
+        frozen_classifications_seen: 0, eligible_games: 0, replay_rows_written: 0,
+        snapshot_mismatches: 0, warnings: [], errors: [msg],
       };
     },
   );
@@ -1230,6 +1296,8 @@ export async function runDailySettlement(
     { module: "MODULE_20_DECISION_AUDIT_SETTLEMENT", status: decision_audit.status },
     { module: "MODULE_24_POSTGAME_DIAGNOSTICS", status: postgame_diagnostics.status },
     { module: "MODULE_25_DISTRIBUTION_WIDTH_REPLAY", status: distribution_width_replay.status },
+    { module: "MODULE_26_FAILURE_CLASSIFICATION", status: failure_classification.status },
+    { module: "MODULE_26_FAILURE_CLASSIFICATION_REPLAY", status: failure_classification_replay.status },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
@@ -1243,6 +1311,8 @@ export async function runDailySettlement(
   errors.push(...decision_audit.errors.map((message) => `decision_audit: ${message}`));
   errors.push(...postgame_diagnostics.errors.map((message) => `postgame_diagnostics: ${message}`));
   errors.push(...distribution_width_replay.errors.map((message) => `distribution_width_replay: ${message}`));
+  errors.push(...failure_classification.errors.map((message) => `failure_classification: ${message}`));
+  errors.push(...failure_classification_replay.errors.map((message) => `failure_classification_replay: ${message}`));
 
   const failedCount = module_statuses.filter((module) => module.status === "failure").length;
   const incompleteCount = module_statuses.filter((module) => module.status !== "success").length;
@@ -1265,6 +1335,8 @@ export async function runDailySettlement(
       decision_audit_status: decision_audit.status,
       postgame_diagnostics_status: postgame_diagnostics.status,
       distribution_width_replay_status: distribution_width_replay.status,
+      failure_classification_status: failure_classification.status,
+      failure_classification_replay_status: failure_classification_replay.status,
       packet_finalization_status: packet_finalization.status,
       full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
@@ -1294,6 +1366,8 @@ export async function runDailySettlement(
     decision_audit_status: decision_audit.status,
     postgame_diagnostics_status: postgame_diagnostics.status,
     distribution_width_replay_status: distribution_width_replay.status,
+    failure_classification_status: failure_classification.status,
+    failure_classification_replay_status: failure_classification_replay.status,
     packet_finalization_status: packet_finalization.status,
     full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
@@ -1307,6 +1381,8 @@ export async function runDailySettlement(
     decision_audit,
     postgame_diagnostics,
     distribution_width_replay,
+    failure_classification,
+    failure_classification_replay,
     packet_finalization,
     full_ladder_sync,
     schema_documentation,

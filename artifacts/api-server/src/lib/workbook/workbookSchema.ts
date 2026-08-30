@@ -118,8 +118,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *  v41 (2026-08-29): Frozen pregame packets preserve automated/reference and
  *      operator-supplied executable market evidence separately, including the
  *      timestamp/source and explicit primary directional grading line.
+ *  v42 (2026-08-30): FAILURE_CLASSIFICATION_SHADOW_V1 and REPLAY_V1 preserve
+ *      price-blind opener-chain, starter/bullpen path, and traffic/damage
+ *      structural labels from frozen packets. They are research-only and
+ *      cannot alter projections, markets, vehicles, or authorization.
  */
-export const WORKBOOK_SCHEMA_VERSION = 41;
+export const WORKBOOK_SCHEMA_VERSION = 42;
 
 export interface ColumnDef {
   name: string;
@@ -155,6 +159,7 @@ export interface ColumnDef {
     | "MODULE_23"
     | "MODULE_24"
     | "MODULE_25"
+    | "MODULE_26"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -625,6 +630,56 @@ const DISTRIBUTION_WIDTH_REPLAY_SUMMARY_COLUMN_NAMES = [
   "Outcome_Mean",
   "Research_Status",
   "Replay_TS",
+] as const;
+const FAILURE_CLASSIFICATION_SHADOW_V1_COLUMN_NAMES = [
+  "Date",
+  "Game_ID",
+  "Away_Team",
+  "Home_Team",
+  "Packet_Snapshot_TS",
+  "Packet_Status",
+  "Classification_Status",
+  "Starter_Phase_Runs",
+  "Bullpen_Continuation_Runs",
+  "Combined_Bullpen_Exposure_IP",
+  "Away_Starter_Role",
+  "Home_Starter_Role",
+  "Away_Expected_IP",
+  "Home_Expected_IP",
+  "Opener_Chain_Status",
+  "Scoring_Path_Status",
+  "Traffic_Conversion_Status",
+  "Traffic_Damage_CoSign_Status",
+  "Distribution_Structure_Status",
+  "Distribution_Risk_Tags",
+  "Projection_Impact_Status",
+  "Authorization_Impact_Status",
+  "Source_Provenance",
+  "Classification_TS",
+] as const;
+const FAILURE_CLASSIFICATION_REPLAY_V1_COLUMN_NAMES = [
+  "Date",
+  "Game_ID",
+  "Frozen_Packet_Snapshot_TS",
+  "Frozen_Classification_Status",
+  "Frozen_Opener_Chain_Status",
+  "Frozen_Scoring_Path_Status",
+  "Frozen_Traffic_Conversion_Status",
+  "Frozen_Traffic_Damage_CoSign_Status",
+  "Frozen_Distribution_Structure_Status",
+  "Frozen_Distribution_Risk_Tags",
+  "Actual_Total",
+  "Total_Error",
+  "Total_Abs_Error",
+  "Actual_Starter_Window_Runs",
+  "Actual_Bullpen_Window_Runs",
+  "Primary_Scoring_Mechanism",
+  "Allocation_MAE",
+  "Allocation_Sign_Reversal",
+  "Away_Conversion_Outcome",
+  "Home_Conversion_Outcome",
+  "Replay_Status",
+  "Settlement_TS",
 ] as const;
 
 function diagnosticColumns(
@@ -6942,6 +6997,45 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Outcome_Mean",
       ],
       "MODULE_25",
+    ),
+  },
+
+  {
+    name: "FAILURE_CLASSIFICATION_SHADOW_V1",
+    description:
+      "Price-blind pregame structural labels derived only from a legitimate packet: opener-chain certainty, starter-versus-bullpen path, and traffic/damage evidence. OPEN labels may refresh before first pitch; frozen labels are immutable. They never alter projections, markets, vehicles, or authorization.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      FAILURE_CLASSIFICATION_SHADOW_V1_COLUMN_NAMES,
+      [
+        "Starter_Phase_Runs",
+        "Bullpen_Continuation_Runs",
+        "Combined_Bullpen_Exposure_IP",
+        "Away_Expected_IP",
+        "Home_Expected_IP",
+      ],
+      "MODULE_26",
+    ),
+  },
+
+  {
+    name: "FAILURE_CLASSIFICATION_REPLAY_V1",
+    description:
+      "Settlement replay joining frozen structural-failure labels to official total, starter-window, bullpen-window, allocation, and conversion outcomes. It is research-only and does not create a coefficient, forecast, threshold, vehicle, or authorization state.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      FAILURE_CLASSIFICATION_REPLAY_V1_COLUMN_NAMES,
+      [
+        "Actual_Total",
+        "Total_Error",
+        "Total_Abs_Error",
+        "Actual_Starter_Window_Runs",
+        "Actual_Bullpen_Window_Runs",
+        "Allocation_MAE",
+      ],
+      "MODULE_26",
     ),
   },
 
