@@ -1184,6 +1184,7 @@ export async function runDailySettlement(
       return {
         status: "failure", replay_timestamp_utc: new Date().toISOString(),
         frozen_classifications_seen: 0, eligible_games: 0, replay_rows_written: 0,
+        discrimination_rows_written: 0,
         snapshot_mismatches: 0, warnings: [], errors: [msg],
       };
     },

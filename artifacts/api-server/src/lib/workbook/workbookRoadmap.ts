@@ -480,7 +480,7 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     boardRelationship:
       "Shadow-only. It cannot alter a projection, market line, vehicle, BET/PASS result, confidence, or authorization.",
     readNote:
-      "A known opener is not a known relief chain; traffic and damage are not conversion; a bullpen-dependent path is not a prediction of bullpen damage.",
+      "A known opener is not a known relief chain; traffic and damage are not conversion; traffic-only and damage-only support are asymmetric fragility states, not directional run changes; bullpen-dependent path is not a prediction of bullpen damage.",
   },
   {
     sheet: "FAILURE_CLASSIFICATION_REPLAY_V1",
@@ -492,7 +492,19 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     boardRelationship:
       "Research-only. No label creates a threshold, a center correction, or an automatic veto.",
     readNote:
-      "Read label frequencies and outcomes alongside sample size. Do not turn one opener game, one bullpen collapse, or one market improvement into a global rule.",
+      "Read warning quadrants and false-negative rows with sample size. Do not turn one opener game, one bullpen collapse, or one market improvement into a global rule.",
+  },
+  {
+    sheet: "FAILURE_CLASSIFICATION_DISCRIMINATION_V1",
+    stage: "REPLAY",
+    timing:
+      "Rebuilt with Failure Classification Replay during daily settlement (Module 26)",
+    purpose:
+      "Shows whether each frozen classification family actually discriminates center error, 4+ run research misses, reference-market directional results, and starter/bullpen scoring mechanisms.",
+    boardRelationship:
+      "Research-only. A classification's precision, recall, or miss rate does not create a live penalty, blocker, threshold, or center correction.",
+    readNote:
+      "Use eligible N before interpreting rates. Compare traffic+damage, traffic-only, damage-only, and neither/unavailable; inspect warned/no-warning quadrants so both false positives and false negatives remain visible.",
   },
   {
     sheet: "FULL_LADDER_SETTLEMENT",

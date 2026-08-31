@@ -462,11 +462,11 @@ const ENTRIES: ModelInputCatalogEntry[] = [
   {
     recordType: "PROJECTION", id: "FAILURE_CLASSIFICATION_SHADOW", label: "Structural failure-classification shadow",
     layer: "SETTLEMENT", outputClass: "DIAGNOSTIC", operationalStatus: "SHADOW_ONLY",
-    definition: "Price-blind labels for opener-chain uncertainty, starter-versus-bullpen path dependence, and traffic/damage evidence, derived only from the packet already frozen for settlement.",
+    definition: "Price-blind labels for opener-chain uncertainty, starter-versus-bullpen path dependence, traffic/damage co-signing, and asymmetric traffic-only or damage-only support, derived only from the packet already frozen for settlement.",
     statisticalWindow: "One prospective frozen packet", gameWindow: "STARTER_WINDOW -> BULLPEN_WINDOW -> FULL_GAME distribution",
     primarySource: "PREGAME_PACKET_HISTORY", fallbackSource: "No label when a legitimate packet is missing",
     refreshCadence: "OPEN pregame; immutable at first pitch; replayed after settlement", freshnessEvidence: "FAILURE_CLASSIFICATION_SHADOW_V1 Packet_Snapshot_TS/Packet_Status",
-    workbookLocation: "FAILURE_CLASSIFICATION_SHADOW_V1; FAILURE_CLASSIFICATION_REPLAY_V1", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
+    workbookLocation: "FAILURE_CLASSIFICATION_SHADOW_V1; FAILURE_CLASSIFICATION_REPLAY_V1; FAILURE_CLASSIFICATION_DISCRIMINATION_V1", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
     correlationFamily: "STRUCTURAL_FAILURE_CLASSIFICATION", missingBehavior: "Explicit ineligible/missing-packet state; no reconstructed label.",
     notes: "Neither market line nor price enters the classifier. Labels are research evidence, never coefficients, thresholds, vehicles, or authorization.", freshnessKey: "PREGAME_PACKET",
   },

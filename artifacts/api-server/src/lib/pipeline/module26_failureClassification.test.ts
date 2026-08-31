@@ -3,11 +3,14 @@ import test from "node:test";
 
 import {
   FAILURE_CLASSIFICATION_REPLAY_HEADERS,
+  FAILURE_CLASSIFICATION_DISCRIMINATION_HEADERS,
   FAILURE_CLASSIFICATION_SHADOW_HEADERS,
+  buildFailureClassificationDiscriminationRows,
   buildFailureClassificationReplayRows,
   buildFailureClassificationShadowRow,
   parseFailureClassificationPackets,
   parseFrozenFailureClassifications,
+  parseFrozenReferenceMarkets,
   parseSettledFailureClassificationGameTruth,
   upsertFailureClassificationRows,
 } from "./module26_failureClassification.js";
@@ -15,6 +18,7 @@ import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
 import { GAME_TRUTH_REPLAY_HEADERS } from "./module24_postgameDiagnostics.js";
 import { WORKBOOK_ROADMAP } from "../workbook/workbookRoadmap.js";
 import { WORKBOOK_SCHEMA } from "../workbook/workbookSchema.js";
+import { computeDecision } from "./module11_outputExtraction.js";
 
 const snapshot = "2026-08-30T16:00:00.000Z";
 const firstPitch = "2026-08-30T17:10:00.000Z";
@@ -149,6 +153,33 @@ test("traffic without damage explicitly declines to infer conversion", () => {
   const row = buildFailureClassificationShadowRow(packets.packets[0]!, snapshot);
   assert.equal(outputValue(row, "Traffic_Damage_CoSign_Status"), "TRAFFIC_WITHOUT_DAMAGE_COSIGN");
   assert.equal(outputValue(row, "Traffic_Conversion_Status"), "TRAFFIC_ONLY_NO_CONVERSION_INFERENCE");
+  assert.equal(outputValue(row, "CoSign_Fragility_Status"), "TRAFFIC_WITHOUT_DAMAGE_FRAGILITY");
+  assert.equal(outputValue(row, "Distribution_Structure_Status"), "ASYMMETRIC_SCORING_SUPPORT");
+  assert.match(String(outputValue(row, "Distribution_Risk_Tags")), /TRAFFIC_WITHOUT_DAMAGE_FRAGILITY/);
+});
+
+test("damage without traffic is a distinct asymmetric fragility rather than a co-signed tail", () => {
+  const packets = parseFailureClassificationPackets([
+    Array.from(PREGAME_PACKET_HISTORY_HEADERS),
+    packetRow({ Collision_Traffic_Estimate: 0, Collision_Damage_Estimate: 0.4 }),
+  ]);
+  const row = buildFailureClassificationShadowRow(packets.packets[0]!, snapshot);
+  assert.equal(outputValue(row, "Traffic_Damage_CoSign_Status"), "DAMAGE_WITHOUT_TRAFFIC_COSIGN");
+  assert.equal(outputValue(row, "CoSign_Fragility_Status"), "DAMAGE_WITHOUT_TRAFFIC_FRAGILITY");
+  assert.equal(outputValue(row, "Distribution_Structure_Status"), "ASYMMETRIC_SCORING_SUPPORT");
+  assert.doesNotMatch(String(outputValue(row, "Distribution_Risk_Tags")), /TRAFFIC_DAMAGE_TAIL_CANDIDATE/);
+});
+
+test("traffic and damage stay a tail candidate without an automatic projection or authorization consequence", () => {
+  const packets = parseFailureClassificationPackets([
+    Array.from(PREGAME_PACKET_HISTORY_HEADERS),
+    packetRow(),
+  ]);
+  const row = buildFailureClassificationShadowRow(packets.packets[0]!, snapshot);
+  assert.equal(outputValue(row, "CoSign_Fragility_Status"), "TRAFFIC_DAMAGE_TAIL_CANDIDATE");
+  assert.equal(outputValue(row, "Distribution_Structure_Status"), "TRAFFIC_DAMAGE_TAIL_CANDIDATE");
+  assert.equal(outputValue(row, "Projection_Impact_Status"), "SHADOW_ONLY_NO_PROJECTION_IMPACT");
+  assert.equal(outputValue(row, "Authorization_Impact_Status"), "SHADOW_ONLY_NO_AUTHORIZATION_IMPACT");
 });
 
 test("market fields are absent from the classifier and cannot alter its labels", () => {
@@ -166,6 +197,33 @@ test("market fields are absent from the classifier and cannot alter its labels",
     buildFailureClassificationShadowRow(first, snapshot),
     buildFailureClassificationShadowRow(second, snapshot),
   );
+});
+
+test("toggling any shadow-only co-sign classification leaves operational decision output identical", () => {
+  const trafficOnly = parseFailureClassificationPackets([
+    Array.from(PREGAME_PACKET_HISTORY_HEADERS),
+    packetRow({ Collision_Traffic_Estimate: 0.4, Collision_Damage_Estimate: 0 }),
+  ]).packets[0]!;
+  const damageOnly = parseFailureClassificationPackets([
+    Array.from(PREGAME_PACKET_HISTORY_HEADERS),
+    packetRow({ Collision_Traffic_Estimate: 0, Collision_Damage_Estimate: 0.4 }),
+  ]).packets[0]!;
+  const trafficShadow = buildFailureClassificationShadowRow(trafficOnly, snapshot);
+  const damageShadow = buildFailureClassificationShadowRow(damageOnly, snapshot);
+  assert.notEqual(
+    outputValue(trafficShadow, "CoSign_Fragility_Status"),
+    outputValue(damageShadow, "CoSign_Fragility_Status"),
+  );
+  const operatingInputs = [8.5, 7.5, "FULL_GAME_TOTAL", {
+    awayPitcherRole: "CONVENTIONAL_STARTER",
+    homePitcherRole: "CONVENTIONAL_STARTER",
+    awayExpectedInnings: 6,
+    homeExpectedInnings: 6,
+    bullpenAvailable: true,
+  }] as const;
+  const before = computeDecision(...operatingInputs);
+  const after = computeDecision(...operatingInputs);
+  assert.deepEqual(before, after);
 });
 
 test("frozen shadow labels remain immutable when a later packet synchronization runs", () => {
@@ -202,12 +260,84 @@ test("replay joins only matching frozen classifications to canonical settled gam
     truthRow(),
     truthRow({ Game_ID: "20260830_MISMATCH", Frozen_Packet_Snapshot_TS: "2026-08-30T16:05:00.000Z" }),
   ]);
-  const replay = buildFailureClassificationReplayRows(frozen, truth);
+  const markets = parseFrozenReferenceMarkets([
+    Array.from(PREGAME_PACKET_HISTORY_HEADERS),
+    packetRow({ Packet_Status: "FROZEN_PREGAME", Reference_Market_Line: 8 }),
+  ]);
+  const replay = buildFailureClassificationReplayRows(frozen, truth, markets);
   assert.equal(frozen.size, 1);
   assert.equal(replay.snapshot_mismatches, 0);
   assert.equal(replay.rows.length, 1);
   assert.equal(replay.rows[0]?.[FAILURE_CLASSIFICATION_REPLAY_HEADERS.indexOf("Replay_Status")], "FROZEN_CLASSIFICATION_RESEARCH_ONLY");
   assert.equal(replay.rows[0]?.[FAILURE_CLASSIFICATION_REPLAY_HEADERS.indexOf("Actual_Total")], 12);
+  assert.equal(replay.rows[0]?.[FAILURE_CLASSIFICATION_REPLAY_HEADERS.indexOf("Reference_Directional_Result")], "WIN");
+  assert.equal(replay.rows[0]?.[FAILURE_CLASSIFICATION_REPLAY_HEADERS.indexOf("Warning_Outcome_Quadrant")], "WARNED_NO_MAJOR_MISS");
+});
+
+test("discrimination report retains asymmetric co-sign buckets and all warning outcome quadrants", () => {
+  const makeReplay = (overrides: Record<string, unknown>): unknown[] => {
+    const row = Array(FAILURE_CLASSIFICATION_REPLAY_HEADERS.length).fill("");
+    const fields: Record<string, unknown> = {
+      Frozen_Traffic_Damage_CoSign_Status: "TRAFFIC_WITHOUT_DAMAGE_COSIGN",
+      Frozen_CoSign_Fragility_Status: "TRAFFIC_WITHOUT_DAMAGE_FRAGILITY",
+      Frozen_Distribution_Structure_Status: "ASYMMETRIC_SCORING_SUPPORT",
+      Frozen_Distribution_Risk_Tags: "TRAFFIC_WITHOUT_DAMAGE_FRAGILITY",
+      Total_Abs_Error: 4.14,
+      Total_Error: 4.14,
+      Actual_Starter_Window_Runs: 2,
+      Actual_Bullpen_Window_Runs: 3,
+      Primary_Scoring_Mechanism: "STARTER_WINDOW_PRIMARY",
+      Reference_Directional_Result: "LOSS",
+      Major_Center_Miss_Status: "ABS_ERROR_4_PLUS",
+      Warning_Outcome_Quadrant: "WARNED_MAJOR_MISS",
+      False_Negative_Distribution_Case: "FALSE",
+      CoSign_Comparison_Bucket: "TRAFFIC_WITHOUT_DAMAGE_COSIGN",
+      ...overrides,
+    };
+    for (const [name, fieldValue] of Object.entries(fields)) {
+      setByHeader(row, FAILURE_CLASSIFICATION_REPLAY_HEADERS, name, fieldValue);
+    }
+    return row;
+  };
+  const summary = buildFailureClassificationDiscriminationRows([
+    makeReplay({}),
+    makeReplay({
+      Frozen_Traffic_Damage_CoSign_Status: "DAMAGE_WITHOUT_TRAFFIC_COSIGN",
+      Frozen_CoSign_Fragility_Status: "DAMAGE_WITHOUT_TRAFFIC_FRAGILITY",
+      Frozen_Distribution_Risk_Tags: "DAMAGE_WITHOUT_TRAFFIC_FRAGILITY",
+      CoSign_Comparison_Bucket: "DAMAGE_WITHOUT_TRAFFIC_COSIGN",
+      Total_Abs_Error: 1,
+      Total_Error: -1,
+      Reference_Directional_Result: "WIN",
+      Major_Center_Miss_Status: "ABS_ERROR_UNDER_4",
+      Warning_Outcome_Quadrant: "WARNED_NO_MAJOR_MISS",
+    }),
+    makeReplay({
+      Frozen_Traffic_Damage_CoSign_Status: "NO_PROSPECTIVE_COLLISION_EVIDENCE",
+      Frozen_CoSign_Fragility_Status: "NO_COSIGN_FRAGILITY_CLASSIFICATION",
+      Frozen_Distribution_Structure_Status: "NO_CLASSIFIED_WIDENING_PATH",
+      Frozen_Distribution_Risk_Tags: "NO_CLASSIFIED_RISK_TAG",
+      CoSign_Comparison_Bucket: "NEITHER_OR_UNAVAILABLE",
+      Total_Abs_Error: 5,
+      Total_Error: -5,
+      Reference_Directional_Result: "PUSH",
+      Major_Center_Miss_Status: "ABS_ERROR_4_PLUS",
+      Warning_Outcome_Quadrant: "NO_WARNING_MAJOR_MISS",
+      False_Negative_Distribution_Case: "TRUE",
+    }),
+  ], "2026-08-31T03:00:00.000Z");
+  const coSignRows = summary.filter((row) => row[0] === "CO_SIGN_COMPARISON");
+  assert.deepEqual(coSignRows.map((row) => row[1]).sort(), [
+    "DAMAGE_WITHOUT_TRAFFIC_COSIGN",
+    "NEITHER_OR_UNAVAILABLE",
+    "TRAFFIC_WITHOUT_DAMAGE_COSIGN",
+  ]);
+  const falseNegative = summary.find(
+    (row) => row[0] === "FALSE_NEGATIVE_DISTRIBUTION" && row[1] === "TRUE",
+  );
+  assert.equal(falseNegative?.[2], 1);
+  assert.equal(falseNegative?.[6], 1);
+  assert.equal(FAILURE_CLASSIFICATION_DISCRIMINATION_HEADERS.length, falseNegative?.length);
 });
 
 test("failure-classification surfaces are documented as Module 26 research-only sheets", () => {
@@ -216,6 +346,8 @@ test("failure-classification surfaces are documented as Module 26 research-only 
   );
   assert.deepEqual(columns("FAILURE_CLASSIFICATION_SHADOW_V1"), FAILURE_CLASSIFICATION_SHADOW_HEADERS);
   assert.deepEqual(columns("FAILURE_CLASSIFICATION_REPLAY_V1"), FAILURE_CLASSIFICATION_REPLAY_HEADERS);
+  assert.deepEqual(columns("FAILURE_CLASSIFICATION_DISCRIMINATION_V1"), FAILURE_CLASSIFICATION_DISCRIMINATION_HEADERS);
   assert.ok(WORKBOOK_ROADMAP.some((entry) => entry.sheet === "FAILURE_CLASSIFICATION_SHADOW_V1"));
   assert.ok(WORKBOOK_ROADMAP.some((entry) => entry.sheet === "FAILURE_CLASSIFICATION_REPLAY_V1"));
+  assert.ok(WORKBOOK_ROADMAP.some((entry) => entry.sheet === "FAILURE_CLASSIFICATION_DISCRIMINATION_V1"));
 });

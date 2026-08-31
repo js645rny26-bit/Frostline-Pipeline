@@ -25,6 +25,8 @@ export const FAILURE_CLASSIFICATION_SHADOW_SHEET =
   "FAILURE_CLASSIFICATION_SHADOW_V1";
 export const FAILURE_CLASSIFICATION_REPLAY_SHEET =
   "FAILURE_CLASSIFICATION_REPLAY_V1";
+export const FAILURE_CLASSIFICATION_DISCRIMINATION_SHEET =
+  "FAILURE_CLASSIFICATION_DISCRIMINATION_V1";
 
 export const FAILURE_CLASSIFICATION_SHADOW_HEADERS = [
   "Date",
@@ -45,6 +47,7 @@ export const FAILURE_CLASSIFICATION_SHADOW_HEADERS = [
   "Scoring_Path_Status",
   "Traffic_Conversion_Status",
   "Traffic_Damage_CoSign_Status",
+  "CoSign_Fragility_Status",
   "Distribution_Structure_Status",
   "Distribution_Risk_Tags",
   "Projection_Impact_Status",
@@ -62,8 +65,12 @@ export const FAILURE_CLASSIFICATION_REPLAY_HEADERS = [
   "Frozen_Scoring_Path_Status",
   "Frozen_Traffic_Conversion_Status",
   "Frozen_Traffic_Damage_CoSign_Status",
+  "Frozen_CoSign_Fragility_Status",
   "Frozen_Distribution_Structure_Status",
   "Frozen_Distribution_Risk_Tags",
+  "Frozen_Reference_Market_Line",
+  "Reference_Market_Direction",
+  "Reference_Directional_Result",
   "Actual_Total",
   "Total_Error",
   "Total_Abs_Error",
@@ -74,8 +81,36 @@ export const FAILURE_CLASSIFICATION_REPLAY_HEADERS = [
   "Allocation_Sign_Reversal",
   "Away_Conversion_Outcome",
   "Home_Conversion_Outcome",
+  "CoSign_Comparison_Bucket",
+  "Major_Center_Miss_Status",
+  "Distribution_Warning_Status",
+  "Warning_Outcome_Quadrant",
+  "False_Negative_Distribution_Case",
   "Replay_Status",
   "Settlement_TS",
+] as const;
+
+export const FAILURE_CLASSIFICATION_DISCRIMINATION_HEADERS = [
+  "Classification_Family",
+  "Classification_Value",
+  "Eligible_N",
+  "Mean_Abs_Center_Error",
+  "Median_Abs_Center_Error",
+  "Signed_Center_Bias",
+  "Major_Miss_Count",
+  "Major_Miss_Rate",
+  "Directional_Wins",
+  "Directional_Losses",
+  "Directional_Pushes",
+  "Directional_Eligible_N",
+  "Mean_Actual_Starter_Window_Runs",
+  "Mean_Actual_Bullpen_Window_Runs",
+  "Starter_Primary_Count",
+  "Bullpen_Primary_Count",
+  "Balanced_Primary_Count",
+  "Other_Primary_Count",
+  "Research_Status",
+  "Replay_TS",
 ] as const;
 
 interface FailureClassificationPacket {
@@ -107,6 +142,7 @@ interface FrozenFailureClassification {
   scoring_path_status: string;
   traffic_conversion_status: string;
   traffic_damage_cosign_status: string;
+  cosign_fragility_status: string;
   distribution_structure_status: string;
   distribution_risk_tags: string;
 }
@@ -128,6 +164,12 @@ interface SettledGameTruth {
   settlement_ts: string;
 }
 
+interface FrozenReferenceMarket {
+  snapshot_ts: string;
+  projected_total: number;
+  reference_market_line: number | null;
+}
+
 export interface FailureClassificationShadowResult {
   status: "success" | "failure";
   date: string;
@@ -145,6 +187,7 @@ export interface FailureClassificationReplayResult {
   frozen_classifications_seen: number;
   eligible_games: number;
   replay_rows_written: number;
+  discrimination_rows_written: number;
   snapshot_mismatches: number;
   warnings: string[];
   errors: string[];
@@ -234,6 +277,25 @@ function trafficConversionStatus(coSignStatus: string): string {
   return "NO_PREGAME_CONVERSION_INFERENCE";
 }
 
+/**
+ * Co-sign asymmetry is a structural fragility label, not a directional run
+ * adjustment. A one-sided signal lacks the redundant traffic+damage path
+ * available to a fully co-signed candidate, but it does not tell us whether
+ * the eventual miss will be high-side or low-side.
+ */
+function coSignFragilityStatus(coSignStatus: string): string {
+  if (coSignStatus === "TRAFFIC_WITHOUT_DAMAGE_COSIGN") {
+    return "TRAFFIC_WITHOUT_DAMAGE_FRAGILITY";
+  }
+  if (coSignStatus === "DAMAGE_WITHOUT_TRAFFIC_COSIGN") {
+    return "DAMAGE_WITHOUT_TRAFFIC_FRAGILITY";
+  }
+  if (coSignStatus === "TRAFFIC_AND_DAMAGE_COSIGNED") {
+    return "TRAFFIC_DAMAGE_TAIL_CANDIDATE";
+  }
+  return "NO_COSIGN_FRAGILITY_CLASSIFICATION";
+}
+
 export function buildFailureClassificationShadowRow(
   packet: FailureClassificationPacket,
   classificationTs: string,
@@ -242,12 +304,13 @@ export function buildFailureClassificationShadowRow(
   const scoring = scoringPathStatus(packet);
   const coSign = trafficDamageCoSignStatus(packet);
   const traffic = trafficConversionStatus(coSign);
+  const coSignFragility = coSignFragilityStatus(coSign);
   const tags = [
     opener === "OPENER_CHAIN_UNCERTAINTY" || opener === "OPENER_WORKLOAD_UNRESOLVED"
       ? opener
       : "",
     scoring === "BULLPEN_PHASE_RELIANT" ? "BULLPEN_CONTINUATION_DEPENDENT" : "",
-    coSign === "TRAFFIC_AND_DAMAGE_COSIGNED" ? "TRAFFIC_DAMAGE_TAIL_CANDIDATE" : "",
+    coSignFragility !== "NO_COSIGN_FRAGILITY_CLASSIFICATION" ? coSignFragility : "",
   ].filter(Boolean);
   const distribution = tags.includes("OPENER_CHAIN_UNCERTAINTY")
     || tags.includes("OPENER_WORKLOAD_UNRESOLVED")
@@ -256,7 +319,10 @@ export function buildFailureClassificationShadowRow(
       ? "BULLPEN_CONTINUATION_TAIL_CANDIDATE"
       : tags.includes("TRAFFIC_DAMAGE_TAIL_CANDIDATE")
         ? "TRAFFIC_DAMAGE_TAIL_CANDIDATE"
-        : "NO_CLASSIFIED_WIDENING_PATH";
+        : coSignFragility === "TRAFFIC_WITHOUT_DAMAGE_FRAGILITY"
+          || coSignFragility === "DAMAGE_WITHOUT_TRAFFIC_FRAGILITY"
+          ? "ASYMMETRIC_SCORING_SUPPORT"
+          : "NO_CLASSIFIED_WIDENING_PATH";
   const combinedExposure = packet.away_bullpen_exposure_ip === null
     || packet.home_bullpen_exposure_ip === null
     ? ""
@@ -282,6 +348,7 @@ export function buildFailureClassificationShadowRow(
     scoring,
     traffic,
     coSign,
+    coSignFragility,
     distribution,
     tags.join("; ") || "NO_CLASSIFIED_RISK_TAG",
     "SHADOW_ONLY_NO_PROJECTION_IMPACT",
@@ -506,6 +573,8 @@ export function parseFrozenFailureClassifications(rows: unknown[][]): Map<string
       || text(value(row, index, "Packet_Status")) !== "FROZEN_PREGAME"
       || text(value(row, index, "Classification_Status")) !== "FROZEN_PREGAME_SHADOW"
     ) continue;
+    const coSignStatus = text(value(row, index, "Traffic_Damage_CoSign_Status"));
+    const storedFragility = text(value(row, index, "CoSign_Fragility_Status"));
     classifications.set(key(date, gameId), {
       date,
       game_id: gameId,
@@ -514,7 +583,11 @@ export function parseFrozenFailureClassifications(rows: unknown[][]): Map<string
       opener_chain_status: text(value(row, index, "Opener_Chain_Status")),
       scoring_path_status: text(value(row, index, "Scoring_Path_Status")),
       traffic_conversion_status: text(value(row, index, "Traffic_Conversion_Status")),
-      traffic_damage_cosign_status: text(value(row, index, "Traffic_Damage_CoSign_Status")),
+      traffic_damage_cosign_status: coSignStatus,
+      // v42 frozen rows predate the dedicated field. This is a deterministic
+      // v43 read of their already-frozen co-sign status, never a lookup of
+      // outcome, market, or current-game evidence.
+      cosign_fragility_status: storedFragility || coSignFragilityStatus(coSignStatus),
       distribution_structure_status: text(value(row, index, "Distribution_Structure_Status")),
       distribution_risk_tags: text(value(row, index, "Distribution_Risk_Tags")),
     });
@@ -562,9 +635,78 @@ export function parseSettledFailureClassificationGameTruth(rows: unknown[][]): M
   return games;
 }
 
+/**
+ * Market evidence is parsed only for the settlement report. It is not passed
+ * to the pregame classifier and cannot affect any frozen classification.
+ */
+export function parseFrozenReferenceMarkets(rows: unknown[][]): Map<string, FrozenReferenceMarket> {
+  const [header = [], ...data] = rows;
+  const index = headerIndex(header);
+  const markets = new Map<string, FrozenReferenceMarket>();
+  for (const row of data) {
+    const date = text(value(row, index, "Date"));
+    const gameId = text(value(row, index, "Game_ID"));
+    const snapshotTs = text(value(row, index, "Packet_Snapshot_TS"));
+    const firstPitch = text(value(row, index, "Scheduled_First_Pitch"));
+    const projectedTotal = numeric(value(row, index, "Base_Projection"));
+    if (
+      !date
+      || !gameId
+      || !snapshotTs
+      || !isValidBeforeFirstPitch(snapshotTs, firstPitch)
+      || text(value(row, index, "Packet_Status")) !== "FROZEN_PREGAME"
+      || projectedTotal === null
+    ) continue;
+    markets.set(key(date, gameId), {
+      snapshot_ts: snapshotTs,
+      projected_total: projectedTotal,
+      reference_market_line: numeric(value(row, index, "Reference_Market_Line")),
+    });
+  }
+  return markets;
+}
+
+function referenceMarketDirection(market: FrozenReferenceMarket | undefined): string {
+  if (!market || market.reference_market_line === null) return "NOT_GRADABLE";
+  if (market.projected_total > market.reference_market_line) return "OVER";
+  if (market.projected_total < market.reference_market_line) return "UNDER";
+  return "NONE";
+}
+
+function referenceDirectionalResult(
+  market: FrozenReferenceMarket | undefined,
+  actualTotal: number,
+): string {
+  const direction = referenceMarketDirection(market);
+  if (!market || market.reference_market_line === null || direction === "NONE") {
+    return "NOT_GRADABLE";
+  }
+  if (actualTotal === market.reference_market_line) return "PUSH";
+  return direction === "OVER"
+    ? actualTotal > market.reference_market_line ? "WIN" : "LOSS"
+    : actualTotal < market.reference_market_line ? "WIN" : "LOSS";
+}
+
+function coSignComparisonBucket(coSignStatus: string): string {
+  return coSignStatus === "TRAFFIC_AND_DAMAGE_COSIGNED"
+    || coSignStatus === "TRAFFIC_WITHOUT_DAMAGE_COSIGN"
+    || coSignStatus === "DAMAGE_WITHOUT_TRAFFIC_COSIGN"
+    ? coSignStatus
+    : "NEITHER_OR_UNAVAILABLE";
+}
+
+const MAJOR_CENTER_MISS_RESEARCH_THRESHOLD = 4;
+
+function warningOutcomeQuadrant(warned: boolean, majorMiss: boolean): string {
+  if (warned && majorMiss) return "WARNED_MAJOR_MISS";
+  if (warned) return "WARNED_NO_MAJOR_MISS";
+  return majorMiss ? "NO_WARNING_MAJOR_MISS" : "NO_WARNING_NO_MAJOR_MISS";
+}
+
 export function buildFailureClassificationReplayRows(
   classifications: ReadonlyMap<string, FrozenFailureClassification>,
   settledGames: ReadonlyMap<string, SettledGameTruth>,
+  referenceMarkets: ReadonlyMap<string, FrozenReferenceMarket> = new Map(),
 ): { rows: unknown[][]; snapshot_mismatches: number } {
   const rows: unknown[][] = [];
   let snapshotMismatches = 0;
@@ -575,6 +717,15 @@ export function buildFailureClassificationReplayRows(
       snapshotMismatches++;
       continue;
     }
+    const market = referenceMarkets.get(observationKey);
+    // A reference-market row is usable only when it preserves the exact same
+    // packet snapshot. A market mismatch is simply not gradeable, never a
+    // reason to alter an otherwise valid price-blind classification.
+    const matchedMarket = market?.snapshot_ts === classification.snapshot_ts
+      ? market
+      : undefined;
+    const majorMiss = game.total_abs_error >= MAJOR_CENTER_MISS_RESEARCH_THRESHOLD;
+    const warned = classification.distribution_structure_status !== "NO_CLASSIFIED_WIDENING_PATH";
     rows.push([
       classification.date,
       classification.game_id,
@@ -584,8 +735,12 @@ export function buildFailureClassificationReplayRows(
       classification.scoring_path_status,
       classification.traffic_conversion_status,
       classification.traffic_damage_cosign_status,
+      classification.cosign_fragility_status,
       classification.distribution_structure_status,
       classification.distribution_risk_tags,
+      matchedMarket?.reference_market_line ?? "",
+      referenceMarketDirection(matchedMarket),
+      referenceDirectionalResult(matchedMarket, game.actual_total),
       game.actual_total,
       game.total_error,
       game.total_abs_error,
@@ -596,11 +751,134 @@ export function buildFailureClassificationReplayRows(
       game.allocation_sign_reversal,
       game.away_conversion_outcome,
       game.home_conversion_outcome,
+      coSignComparisonBucket(classification.traffic_damage_cosign_status),
+      majorMiss ? "ABS_ERROR_4_PLUS" : "ABS_ERROR_UNDER_4",
+      warned ? "WARNED" : "NO_WARNING",
+      warningOutcomeQuadrant(warned, majorMiss),
+      !warned && majorMiss ? "TRUE" : "FALSE",
       "FROZEN_CLASSIFICATION_RESEARCH_ONLY",
       game.settlement_ts,
     ]);
   }
   return { rows, snapshot_mismatches: snapshotMismatches };
+}
+
+function mean(values: number[]): number | null {
+  return values.length === 0
+    ? null
+    : round2(values.reduce((sum, current) => sum + current, 0) / values.length);
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const ordered = [...values].sort((left, right) => left - right);
+  const midpoint = Math.floor(ordered.length / 2);
+  return ordered.length % 2 === 1
+    ? ordered[midpoint]!
+    : round2((ordered[midpoint - 1]! + ordered[midpoint]!) / 2);
+}
+
+interface ClassificationFamilyValue {
+  family: string;
+  value: string;
+}
+
+function classificationFamilyValues(
+  row: unknown[],
+  index: ReadonlyMap<string, number>,
+): ClassificationFamilyValue[] {
+  const single = (family: string, header: string): ClassificationFamilyValue[] => {
+    const classification = text(value(row, index, header));
+    return classification ? [{ family, value: classification }] : [];
+  };
+  const tags = text(value(row, index, "Frozen_Distribution_Risk_Tags"));
+  const tagValues = tags && tags !== "NO_CLASSIFIED_RISK_TAG"
+    ? tags.split(";").map((tag) => tag.trim()).filter(Boolean)
+    : ["NO_CLASSIFIED_RISK_TAG"];
+  return [
+    ...single("OPENER_CHAIN", "Frozen_Opener_Chain_Status"),
+    ...single("SCORING_PATH", "Frozen_Scoring_Path_Status"),
+    ...single("TRAFFIC_DAMAGE_COSIGN", "Frozen_Traffic_Damage_CoSign_Status"),
+    ...single("CO_SIGN_COMPARISON", "CoSign_Comparison_Bucket"),
+    ...single("CO_SIGN_FRAGILITY", "Frozen_CoSign_Fragility_Status"),
+    ...single("DISTRIBUTION_STRUCTURE", "Frozen_Distribution_Structure_Status"),
+    ...single("WARNING_OUTCOME_QUADRANT", "Warning_Outcome_Quadrant"),
+    ...single("FALSE_NEGATIVE_DISTRIBUTION", "False_Negative_Distribution_Case"),
+    ...tagValues.map((tag) => ({ family: "DISTRIBUTION_RISK_TAG", value: tag })),
+  ];
+}
+
+/**
+ * Descriptive discrimination report only. The 4-run field is the explicitly
+ * requested postgame research cut; no row maps this statistic to an active
+ * threshold, penalty, confidence change, or authorization behavior.
+ */
+export function buildFailureClassificationDiscriminationRows(
+  replayRows: unknown[][],
+  replayTs: string,
+): unknown[][] {
+  const index = headerIndex(FAILURE_CLASSIFICATION_REPLAY_HEADERS as unknown as unknown[]);
+  const groups = new Map<string, { family: string; value: string; rows: unknown[][] }>();
+  for (const row of replayRows) {
+    for (const classification of classificationFamilyValues(row, index)) {
+      const groupKey = `${classification.family}|${classification.value}`;
+      const group = groups.get(groupKey) ?? {
+        family: classification.family,
+        value: classification.value,
+        rows: [],
+      };
+      group.rows.push(row);
+      groups.set(groupKey, group);
+    }
+  }
+  return [...groups.values()]
+    .sort((left, right) => left.family.localeCompare(right.family) || left.value.localeCompare(right.value))
+    .map((group) => {
+      const absErrors = group.rows
+        .map((row) => numeric(value(row, index, "Total_Abs_Error")))
+        .filter((entry): entry is number => entry !== null);
+      const signedErrors = group.rows
+        .map((row) => numeric(value(row, index, "Total_Error")))
+        .filter((entry): entry is number => entry !== null);
+      const starterRuns = group.rows
+        .map((row) => numeric(value(row, index, "Actual_Starter_Window_Runs")))
+        .filter((entry): entry is number => entry !== null);
+      const bullpenRuns = group.rows
+        .map((row) => numeric(value(row, index, "Actual_Bullpen_Window_Runs")))
+        .filter((entry): entry is number => entry !== null);
+      const directional = group.rows.map((row) => text(value(row, index, "Reference_Directional_Result")));
+      const mechanisms = group.rows.map((row) => text(value(row, index, "Primary_Scoring_Mechanism")));
+      const majorMissCount = group.rows.filter(
+        (row) => text(value(row, index, "Major_Center_Miss_Status")) === "ABS_ERROR_4_PLUS",
+      ).length;
+      const directionalEligible = directional.filter((result) => result !== "NOT_GRADABLE");
+      return [
+        group.family,
+        group.value,
+        group.rows.length,
+        mean(absErrors) ?? "",
+        median(absErrors) ?? "",
+        mean(signedErrors) ?? "",
+        majorMissCount,
+        group.rows.length === 0 ? "" : round2(majorMissCount / group.rows.length),
+        directional.filter((result) => result === "WIN").length,
+        directional.filter((result) => result === "LOSS").length,
+        directional.filter((result) => result === "PUSH").length,
+        directionalEligible.length,
+        mean(starterRuns) ?? "",
+        mean(bullpenRuns) ?? "",
+        mechanisms.filter((mechanism) => mechanism === "STARTER_WINDOW_PRIMARY").length,
+        mechanisms.filter((mechanism) => mechanism === "BULLPEN_TRANSITION_PRIMARY").length,
+        mechanisms.filter((mechanism) => mechanism === "BALANCED_STARTER_AND_BULLPEN").length,
+        mechanisms.filter((mechanism) => ![
+          "STARTER_WINDOW_PRIMARY",
+          "BULLPEN_TRANSITION_PRIMARY",
+          "BALANCED_STARTER_AND_BULLPEN",
+        ].includes(mechanism)).length,
+        "RESEARCH_ONLY_NO_PROMOTION",
+        replayTs,
+      ];
+    });
 }
 
 export async function runFailureClassificationReplay(
@@ -611,13 +889,23 @@ export async function runFailureClassificationReplay(
   const warnings: string[] = [];
   const errors: string[] = [];
   try {
-    const [classificationRows, gameTruthRows] = await Promise.all([
+    const [classificationRows, gameTruthRows, packetRows] = await Promise.all([
       readOptionalSheet(workbookId, `${FAILURE_CLASSIFICATION_SHADOW_SHEET}!A1:AZ10000`, warnings),
       readOptionalSheet(workbookId, "GAME_TRUTH_REPLAY_V1!A1:AZ10000", warnings),
+      readOptionalSheet(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ10000`, warnings),
     ]);
     const classifications = parseFrozenFailureClassifications(classificationRows);
     const settledGames = parseSettledFailureClassificationGameTruth(gameTruthRows);
-    const replay = buildFailureClassificationReplayRows(classifications, settledGames);
+    const referenceMarkets = parseFrozenReferenceMarkets(packetRows);
+    const replay = buildFailureClassificationReplayRows(
+      classifications,
+      settledGames,
+      referenceMarkets,
+    );
+    const discrimination = buildFailureClassificationDiscriminationRows(
+      replay.rows,
+      replayTimestamp,
+    );
     if (replay.snapshot_mismatches > 0) {
       warnings.push(
         `FROZEN_CLASSIFICATION_SNAPSHOT_MISMATCH: ${replay.snapshot_mismatches} join(s) excluded`,
@@ -628,12 +916,27 @@ export async function runFailureClassificationReplay(
       FAILURE_CLASSIFICATION_REPLAY_SHEET,
       FAILURE_CLASSIFICATION_REPLAY_HEADERS.length,
     );
-    await writeRange(workbookId, `${FAILURE_CLASSIFICATION_REPLAY_SHEET}!A1`, [
-      Array.from(FAILURE_CLASSIFICATION_REPLAY_HEADERS),
-      ...replay.rows,
+    await ensureSheet(
+      workbookId,
+      FAILURE_CLASSIFICATION_DISCRIMINATION_SHEET,
+      FAILURE_CLASSIFICATION_DISCRIMINATION_HEADERS.length,
+    );
+    await Promise.all([
+      writeRange(workbookId, `${FAILURE_CLASSIFICATION_REPLAY_SHEET}!A1`, [
+        Array.from(FAILURE_CLASSIFICATION_REPLAY_HEADERS),
+        ...replay.rows,
+      ]),
+      writeRange(workbookId, `${FAILURE_CLASSIFICATION_DISCRIMINATION_SHEET}!A1`, [
+        Array.from(FAILURE_CLASSIFICATION_DISCRIMINATION_HEADERS),
+        ...discrimination,
+      ]),
     ]);
     logger.info(
-      { frozen_classifications_seen: classifications.size, eligible_games: replay.rows.length },
+      {
+        frozen_classifications_seen: classifications.size,
+        eligible_games: replay.rows.length,
+        discrimination_rows: discrimination.length,
+      },
       "MODULE_26: failure classification replay written (research-only)",
     );
     return {
@@ -642,6 +945,7 @@ export async function runFailureClassificationReplay(
       frozen_classifications_seen: classifications.size,
       eligible_games: replay.rows.length,
       replay_rows_written: replay.rows.length,
+      discrimination_rows_written: discrimination.length,
       snapshot_mismatches: replay.snapshot_mismatches,
       warnings,
       errors,
@@ -656,6 +960,7 @@ export async function runFailureClassificationReplay(
       frozen_classifications_seen: 0,
       eligible_games: 0,
       replay_rows_written: 0,
+      discrimination_rows_written: 0,
       snapshot_mismatches: 0,
       warnings,
       errors,

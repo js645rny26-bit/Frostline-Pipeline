@@ -122,8 +122,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      price-blind opener-chain, starter/bullpen path, and traffic/damage
  *      structural labels from frozen packets. They are research-only and
  *      cannot alter projections, markets, vehicles, or authorization.
+ *  v43 (2026-08-30): Failure classification separates asymmetric
+ *      traffic-only and damage-only scoring support from co-signed tail
+ *      candidates and adds a research-only discrimination report. No label
+ *      changes projection, market, decision, or authorization behavior.
  */
-export const WORKBOOK_SCHEMA_VERSION = 42;
+export const WORKBOOK_SCHEMA_VERSION = 43;
 
 export interface ColumnDef {
   name: string;
@@ -650,6 +654,7 @@ const FAILURE_CLASSIFICATION_SHADOW_V1_COLUMN_NAMES = [
   "Scoring_Path_Status",
   "Traffic_Conversion_Status",
   "Traffic_Damage_CoSign_Status",
+  "CoSign_Fragility_Status",
   "Distribution_Structure_Status",
   "Distribution_Risk_Tags",
   "Projection_Impact_Status",
@@ -666,8 +671,12 @@ const FAILURE_CLASSIFICATION_REPLAY_V1_COLUMN_NAMES = [
   "Frozen_Scoring_Path_Status",
   "Frozen_Traffic_Conversion_Status",
   "Frozen_Traffic_Damage_CoSign_Status",
+  "Frozen_CoSign_Fragility_Status",
   "Frozen_Distribution_Structure_Status",
   "Frozen_Distribution_Risk_Tags",
+  "Frozen_Reference_Market_Line",
+  "Reference_Market_Direction",
+  "Reference_Directional_Result",
   "Actual_Total",
   "Total_Error",
   "Total_Abs_Error",
@@ -678,8 +687,35 @@ const FAILURE_CLASSIFICATION_REPLAY_V1_COLUMN_NAMES = [
   "Allocation_Sign_Reversal",
   "Away_Conversion_Outcome",
   "Home_Conversion_Outcome",
+  "CoSign_Comparison_Bucket",
+  "Major_Center_Miss_Status",
+  "Distribution_Warning_Status",
+  "Warning_Outcome_Quadrant",
+  "False_Negative_Distribution_Case",
   "Replay_Status",
   "Settlement_TS",
+] as const;
+const FAILURE_CLASSIFICATION_DISCRIMINATION_V1_COLUMN_NAMES = [
+  "Classification_Family",
+  "Classification_Value",
+  "Eligible_N",
+  "Mean_Abs_Center_Error",
+  "Median_Abs_Center_Error",
+  "Signed_Center_Bias",
+  "Major_Miss_Count",
+  "Major_Miss_Rate",
+  "Directional_Wins",
+  "Directional_Losses",
+  "Directional_Pushes",
+  "Directional_Eligible_N",
+  "Mean_Actual_Starter_Window_Runs",
+  "Mean_Actual_Bullpen_Window_Runs",
+  "Starter_Primary_Count",
+  "Bullpen_Primary_Count",
+  "Balanced_Primary_Count",
+  "Other_Primary_Count",
+  "Research_Status",
+  "Replay_TS",
 ] as const;
 
 function diagnosticColumns(
@@ -7003,7 +7039,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "FAILURE_CLASSIFICATION_SHADOW_V1",
     description:
-      "Price-blind pregame structural labels derived only from a legitimate packet: opener-chain certainty, starter-versus-bullpen path, and traffic/damage evidence. OPEN labels may refresh before first pitch; frozen labels are immutable. They never alter projections, markets, vehicles, or authorization.",
+      "Price-blind pregame structural labels derived only from a legitimate packet: opener-chain certainty, starter-versus-bullpen path, traffic/damage co-signing, and asymmetric scoring support. OPEN labels may refresh before first pitch; frozen labels are immutable. They never alter projections, markets, vehicles, or authorization.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(
@@ -7022,7 +7058,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "FAILURE_CLASSIFICATION_REPLAY_V1",
     description:
-      "Settlement replay joining frozen structural-failure labels to official total, starter-window, bullpen-window, allocation, and conversion outcomes. It is research-only and does not create a coefficient, forecast, threshold, vehicle, or authorization state.",
+      "Settlement replay joining frozen structural-failure labels to official total, starter-window, bullpen-window, allocation, conversion, reference-market grading, and warned/major-miss research quadrants. It is research-only and does not create a coefficient, forecast, threshold, vehicle, or authorization state.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(
@@ -7034,6 +7070,36 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Actual_Starter_Window_Runs",
         "Actual_Bullpen_Window_Runs",
         "Allocation_MAE",
+      ],
+      "MODULE_26",
+    ),
+  },
+
+  {
+    name: "FAILURE_CLASSIFICATION_DISCRIMINATION_V1",
+    description:
+      "Research-only classification-by-outcome report: sample count, center-error distribution, 4+ run research miss rate, reference-market W/L/P, starter/bullpen window means, and realized primary-scoring mechanisms. It measures warning precision and recall without creating a live rule.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      FAILURE_CLASSIFICATION_DISCRIMINATION_V1_COLUMN_NAMES,
+      [
+        "Eligible_N",
+        "Mean_Abs_Center_Error",
+        "Median_Abs_Center_Error",
+        "Signed_Center_Bias",
+        "Major_Miss_Count",
+        "Major_Miss_Rate",
+        "Directional_Wins",
+        "Directional_Losses",
+        "Directional_Pushes",
+        "Directional_Eligible_N",
+        "Mean_Actual_Starter_Window_Runs",
+        "Mean_Actual_Bullpen_Window_Runs",
+        "Starter_Primary_Count",
+        "Bullpen_Primary_Count",
+        "Balanced_Primary_Count",
+        "Other_Primary_Count",
       ],
       "MODULE_26",
     ),
