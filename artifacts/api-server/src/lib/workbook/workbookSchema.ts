@@ -126,8 +126,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      traffic-only and damage-only scoring support from co-signed tail
  *      candidates and adds a research-only discrimination report. No label
  *      changes projection, market, decision, or authorization behavior.
+ *  v44 (2026-08-30): All prospective full-game total market comparisons use
+ *      executable Hard Rock half-number representation. Integer source/input
+ *      totals normalize to the immediately lower half number; frozen history
+ *      remains immutable.
  */
-export const WORKBOOK_SCHEMA_VERSION = 43;
+export const WORKBOOK_SCHEMA_VERSION = 44;
 
 export interface ColumnDef {
   name: string;

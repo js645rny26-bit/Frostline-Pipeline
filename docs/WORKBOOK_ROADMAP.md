@@ -188,6 +188,16 @@ state, environment identity, and every shadow companion then available
 This packet is provenance infrastructure only. It cannot change the active
 projection, authorization, vehicle selection, or market interpretation.
 
+### Executable full-game total convention
+
+Frostline represents prospective full-game totals as executable Hard Rock
+half-number lines. If an automated source or a pregame operator entry reports
+an integer, normalize it down one half-run: `10 -> 9.5`, `7 -> 6.5`.
+Existing half-numbers remain unchanged; unsupported fractional values fail
+closed rather than being rounded into an invented market. This is market
+representation only—never an input to the baseball projection. Frozen packets
+and historical grades are never rewritten.
+
 ## Operator evidence and the full-game ladder
 
 `OPERATOR_EVIDENCE_OVERLAY` is the durable intake surface for a fact supplied

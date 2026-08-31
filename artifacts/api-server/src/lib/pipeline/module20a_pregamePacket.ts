@@ -20,6 +20,7 @@ import {
   WORKBOOK_ID,
 } from "../sheets/client.js";
 import { isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
+import { normalizeFullGameTotalLine } from "./marketLineNormalization.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
 import type { ShadowAuditRow } from "./module09s_statcastShadow.js";
@@ -246,7 +247,10 @@ function operatorNumber(
 ): number | undefined {
   const value = operatorValue(snapshot, field);
   const parsed = value === undefined ? Number.NaN : Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  if (!Number.isFinite(parsed)) return undefined;
+  return field === "CURRENT_HARD_ROCK_LINE"
+    ? normalizeFullGameTotalLine(parsed) ?? undefined
+    : parsed;
 }
 
 function operatorFieldTimestamp(
@@ -305,7 +309,9 @@ export function buildPregamePacketInputs(
       operator,
       "CURRENT_HARD_ROCK_LINE",
     );
-    const referenceMarketLine = boardRow.market_line;
+    // The board should already receive a normalized source line, but retain a
+    // defensive boundary here because this packet is settlement provenance.
+    const referenceMarketLine = normalizeFullGameTotalLine(boardRow.market_line);
     const packetMarketLine = operatorMarketLine ?? referenceMarketLine;
     const referenceMarketTs = referenceMarketLine === null
       ? ""

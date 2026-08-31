@@ -33,12 +33,18 @@ test("operator overlays accept only explicit, timestamped pre-first-pitch fields
     [...OPERATOR_EVIDENCE_OVERLAY_HEADERS],
     [date, gameId, "Home starter", "Operator Starter", "2026-08-24T22:00:00.000Z", "MANUAL_OPERATOR", "confirmed"],
     [date, gameId, "Park multiplier", "1.07", "2026-08-24T22:01:00.000Z", "MANUAL_OPERATOR", "official venue note"],
+    [date, gameId, "Current Hard Rock Line", "10", "2026-08-24T22:02:00.000Z", "MANUAL_OPERATOR", "book board"],
+    [date, gameId, "Hard Rock Total Lines", "7, 7.5, 10", "2026-08-24T22:03:00.000Z", "MANUAL_OPERATOR", "book board"],
+    [date, gameId, "Preferred Total Vehicle", "OVER 10", "2026-08-24T22:04:00.000Z", "MANUAL_OPERATOR", "book board"],
     [date, gameId, "Weather", "late data", "2026-08-24T23:41:00.000Z", "MANUAL_OPERATOR", "too late"],
   ];
   const resolved = resolveOperatorEvidenceRows(rows, date, [{ legacy_game_id: gameId, scheduled_utc_time: firstPitch }]);
   const snapshot = resolved.snapshots.get(gameId);
   assert.equal(snapshot?.fields.get("HOME_STARTER"), "Operator Starter");
   assert.equal(snapshot?.fields.get("PARK_MULTIPLIER"), "1.07");
+  assert.equal(snapshot?.fields.get("CURRENT_HARD_ROCK_LINE"), "9.5");
+  assert.equal(snapshot?.fields.get("HARD_ROCK_TOTAL_LINES"), "6.5, 7.5, 9.5");
+  assert.equal(snapshot?.fields.get("PREFERRED_TOTAL_VEHICLE"), "OVER 9.5");
   assert.equal(snapshot?.field_supplied_ts.get("HOME_STARTER"), "2026-08-24T22:00:00.000Z");
   assert.equal(snapshot?.field_supplied_ts.get("PARK_MULTIPLIER"), "2026-08-24T22:01:00.000Z");
   assert.equal(snapshot?.fields.has("WEATHER"), false);

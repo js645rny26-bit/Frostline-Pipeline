@@ -141,7 +141,7 @@ test("an executable market overlay changes only market provenance, never price-b
     games,
     [], [], [],
     new Map([["20260824_AAA_BBB", {
-      fields: new Map([["CURRENT_HARD_ROCK_LINE", "7.5"]]),
+      fields: new Map([["CURRENT_HARD_ROCK_LINE", "10"]]),
       field_supplied_ts: new Map([["CURRENT_HARD_ROCK_LINE", "2026-08-24T22:45:00.000Z"]]),
       source: "MANUAL_OPERATOR",
       supplied_ts: "2026-08-24T22:45:00.000Z",
@@ -153,9 +153,9 @@ test("an executable market overlay changes only market provenance, never price-b
   assert.equal(reference[0]?.values[index.Base_Away_Projection], executable[0]?.values[index.Base_Away_Projection]);
   assert.equal(reference[0]?.values[index.Base_Home_Projection], executable[0]?.values[index.Base_Home_Projection]);
   assert.equal(reference[0]?.values[index.Base_Projection], executable[0]?.values[index.Base_Projection]);
-  assert.equal(executable[0]?.values[index.Reference_Market_Line], 8);
-  assert.equal(executable[0]?.values[index.Executable_Market_Line], 7.5);
-  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Line], 7.5);
+  assert.equal(reference[0]?.values[index.Reference_Market_Line], 7.5);
+  assert.equal(executable[0]?.values[index.Executable_Market_Line], 9.5);
+  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Line], 9.5);
 });
 
 test("a frozen pregame packet remains byte-for-byte unchanged on later refresh", () => {

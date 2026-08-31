@@ -11,6 +11,7 @@ import { mergeProtectedRows, type PublicationProtection } from "./module00_scope
 import { logger } from "../../lib/logger.js";
 import type { NormalizationResult } from "./module06_normalization.js";
 import type { MarketLine } from "./module05b_marketOdds.js";
+import { normalizeFullGameTotalLine } from "./marketLineNormalization.js";
 
 export interface SeedResult {
   legacy_game_id: string;
@@ -146,6 +147,35 @@ function isBlank(v: unknown): boolean {
   return v === null || v === undefined || v === "";
 }
 
+/**
+ * Market representation sanitation for an OPEN full-game total only. Once a
+ * game is LIVE/FINAL its stored line is historical pregame evidence and must
+ * remain untouched; Module 11 will still fail closed on an invalid value.
+ */
+function normalizeOpenMarketCell(
+  row: Record<number, unknown>,
+  column: number,
+  gameId: string,
+  field: string,
+): void {
+  if (isBlank(row[column])) return;
+  const normalized = normalizeFullGameTotalLine(row[column]);
+  if (normalized === null) {
+    logger.warn(
+      { gameId, field, value: row[column] },
+      "MODULE_10: Unsupported non-half full-game total retained for operator review",
+    );
+    return;
+  }
+  if (Number(row[column]) !== normalized) {
+    logger.info(
+      { gameId, field, sourceLine: row[column], executableLine: normalized },
+      "MODULE_10: Whole-number total normalized to executable half-number line",
+    );
+    row[column] = normalized;
+  }
+}
+
 export async function seedSlateInput(
   normalized: NormalizationResult,
   workbookId = WORKBOOK_ID,
@@ -202,9 +232,24 @@ export async function seedSlateInput(
       if (existingByGameId.has(gameId)) {
         // EXISTING: refresh model fields, preserve operator fields
         const row = existingByGameId.get(gameId)!;
+        const phase = deriveMarketPhase(game.game_status.abstractGameState);
+        const alreadyFrozen = !isBlank(row[COL_LINE_LOCKED_TS]);
 
         // Refresh model fields (indices 5–13)
         modelValues.forEach((v, i) => { row[5 + i] = v; });
+
+        // Frostline represents executable full-game totals exclusively on
+        // Hard Rock half numbers. This prospective-only sanitation keeps a
+        // whole-number source/manual entry from reaching the board unchanged.
+        if (phase === "PREGAME" && !alreadyFrozen) {
+          normalizeOpenMarketCell(row, COL_LINE, gameId, "Line");
+          normalizeOpenMarketCell(
+            row,
+            COL_AUTH_PREGAME_TOTAL,
+            gameId,
+            "Authoritative_Pregame_Total",
+          );
+        }
 
         // Back-fill Line/Odds from odds map only if currently blank
         // (preserves anything the operator typed manually)
@@ -222,10 +267,7 @@ export async function seedSlateInput(
         }
 
         // ── Pregame lock logic (pipeline-maintained, X–AB) ─────────────────
-        const phase = deriveMarketPhase(game.game_status.abstractGameState);
         row[COL_MARKET_PHASE] = phase;
-
-        const alreadyFrozen = !isBlank(row[COL_LINE_LOCKED_TS]);
 
         if (phase === "PREGAME" && !alreadyFrozen) {
           // During PREGAME, keep Auth fields as a rolling snapshot of the latest

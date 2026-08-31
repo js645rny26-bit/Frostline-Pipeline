@@ -21,6 +21,7 @@ import {
   type PublicationValidationResult,
 } from "./module11_publicationValidation.js";
 import { applySchemaNumberFormats } from "../workbook/workbookSetup.js";
+import { normalizeFullGameTotalLine } from "./marketLineNormalization.js";
 
 export interface SlateBoardEntry {
   legacy_game_id: string;
@@ -899,8 +900,16 @@ export async function extractOutputBoards(
       // Prefer Authoritative_Pregame_Total (frozen at game-time) over the live
       // Line (which may have moved after the operator's board-final publish).
       // Falls back to Line when Auth is not yet set (PREGAME phase).
-      const authTotal    = parseNum(row[SLATE_INPUT_COLS.AUTH_PREGAME_TOTAL]);
-      const liveTotal    = parseNum(row[SLATE_INPUT_COLS.LINE]);
+      // Every operational full-game total is represented on the executable
+      // Hard Rock half-number board. This is intentionally downstream of the
+      // price-blind projection and merely prevents a whole-number source or
+      // manual entry from creating a non-executable comparison.
+      const authTotal = normalizeFullGameTotalLine(
+        parseNum(row[SLATE_INPUT_COLS.AUTH_PREGAME_TOTAL]),
+      );
+      const liveTotal = normalizeFullGameTotalLine(
+        parseNum(row[SLATE_INPUT_COLS.LINE]),
+      );
       const authOverOdds = parseNum(row[SLATE_INPUT_COLS.AUTH_OVER_ODDS]);
 
       marketMap.set(gameId, {

@@ -21,6 +21,11 @@ import {
 } from "../sheets/client.js";
 import { isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
 import {
+  normalizeFullGameTotalLine,
+  normalizeFullGameTotalVehicle,
+  normalizeHardRockTotalLineList,
+} from "./marketLineNormalization.js";
+import {
   PREGAME_PACKET_HISTORY_HEADERS,
   PREGAME_PACKET_HISTORY_SHEET,
 } from "./module20a_pregamePacket.js";
@@ -140,6 +145,35 @@ function strictlyBeforeFirstPitch(suppliedTs: string, firstPitch: string): boole
 }
 
 /**
+ * Normalize only the explicit full-game Hard Rock fields. The source row is
+ * still retained verbatim in OPERATOR_EVIDENCE_OVERLAY; this returns the
+ * executable representation that downstream prospective packets may use.
+ */
+function normalizeOperatorMarketValue(
+  field: OperatorOverlayField,
+  raw: string,
+): string | null {
+  if (field === "CURRENT_HARD_ROCK_LINE") {
+    const line = normalizeFullGameTotalLine(raw);
+    return line === null ? null : line.toFixed(1);
+  }
+  if (field === "HARD_ROCK_TOTAL_LINES") {
+    const numericTokens = raw.match(/\d+(?:\.\d+)?/g) ?? [];
+    if (
+      numericTokens.length === 0
+      || numericTokens.some((token) => normalizeFullGameTotalLine(token) === null)
+    ) return null;
+    return normalizeHardRockTotalLineList(raw);
+  }
+  if (field === "PREFERRED_TOTAL_VEHICLE") {
+    const token = raw.match(/\d+(?:\.\d+)?/);
+    if (!token || normalizeFullGameTotalLine(token[0]) === null) return null;
+    return normalizeFullGameTotalVehicle(raw);
+  }
+  return raw;
+}
+
+/**
  * Pure overlay resolver used by the runtime reader and deterministic tests.
  * Later duplicate field rows win only when they are still genuinely pregame.
  */
@@ -158,17 +192,22 @@ export function resolveOperatorEvidenceRows(
     if (text(valueByHeader(row, index, "Date")) !== date) continue;
     const gameId = text(valueByHeader(row, index, "Game_ID"));
     const field = normalizeField(valueByHeader(row, index, "Field_Name"));
-    const value = text(valueByHeader(row, index, "Field_Value"));
+    const rawValue = text(valueByHeader(row, index, "Field_Value"));
     const suppliedTs = text(valueByHeader(row, index, "Supplied_TS"));
     const source = text(valueByHeader(row, index, "Source"));
     const firstPitch = firstPitchByGame.get(gameId);
-    if (!gameId || !field || !value) continue;
+    if (!gameId || !field || !rawValue) continue;
     if (source && source !== "MANUAL_OPERATOR") {
       warnings.push(`OPERATOR_EVIDENCE_IGNORED_SOURCE: ${gameId}/${field} source=${source}`);
       continue;
     }
     if (!firstPitch || !strictlyBeforeFirstPitch(suppliedTs, firstPitch)) {
       warnings.push(`OPERATOR_EVIDENCE_NOT_PROSPECTIVE: ${gameId}/${field}`);
+      continue;
+    }
+    const value = normalizeOperatorMarketValue(field, rawValue);
+    if (value === null) {
+      warnings.push(`OPERATOR_EVIDENCE_INVALID_HARD_ROCK_TOTAL: ${gameId}/${field}=${rawValue}`);
       continue;
     }
     const bucket = gathered.get(gameId) ?? [];

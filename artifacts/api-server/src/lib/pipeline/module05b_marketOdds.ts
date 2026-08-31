@@ -9,6 +9,7 @@
 
 import { logger } from "../../lib/logger.js";
 import { SOURCE_MAPPINGS } from "./config.js";
+import { normalizeFullGameTotalLine } from "./marketLineNormalization.js";
 
 const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
 
@@ -190,7 +191,15 @@ export async function fetchMarketOdds(date: string): Promise<OddsResult> {
       const avg = (arr: number[]) =>
         arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null;
 
-      const total    = consensusTotal(overPoints);
+      const sourceTotal = consensusTotal(overPoints);
+      const total = normalizeFullGameTotalLine(sourceTotal);
+      if (total === null) {
+        logger.warn(
+          { gameId, sourceTotal },
+          "MODULE_05b: Unsupported non-half full-game total rejected",
+        );
+        continue;
+      }
       const avgOver  = Math.round(overOdds.reduce((a, b) => a + b, 0) / overOdds.length);
       const avgUnder = Math.round(underOdds.reduce((a, b) => a + b, 0) / underOdds.length);
 

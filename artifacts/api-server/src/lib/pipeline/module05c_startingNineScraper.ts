@@ -20,6 +20,7 @@
 import { logger } from "../../lib/logger.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 import { fetchMarketOdds, buildOddsMap } from "./module05b_marketOdds.js";
+import { normalizeFullGameTotalLine } from "./marketLineNormalization.js";
 import type { OddsResult, MarketLine } from "./module05b_marketOdds.js";
 
 export { buildOddsMap } from "./module05b_marketOdds.js";
@@ -65,7 +66,15 @@ async function scrapeStartingNine(date: string): Promise<OddsResult> {
     // ── O/U line ──────────────────────────────────────────────────────────
     const ouMatch = chunk.match(/O\/U\s+(\d+\.?\d*)/);
     if (!ouMatch) continue;
-    const total = parseFloat(ouMatch[1]!);
+    const sourceTotal = parseFloat(ouMatch[1]!);
+    const total = normalizeFullGameTotalLine(sourceTotal);
+    if (total === null) {
+      logger.warn(
+        { sourceTotal },
+        "MODULE_05c: Unsupported non-half full-game total rejected",
+      );
+      continue;
+    }
 
     // ── Team IDs from logo URLs ───────────────────────────────────────────
     // Logo pattern: /team-cap-on-light/109.svg  (first = away, second = home)
