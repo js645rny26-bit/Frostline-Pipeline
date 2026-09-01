@@ -200,6 +200,38 @@ normalized, converted, inferred, or synthesized from a reference-market row.
 This distinction is market provenance only—never an input to the baseball
 projection. Frozen packets and historical grades are never rewritten.
 
+### Pre-registered separation gate audit
+
+`SEPARATION_GATE_AUDIT_V1` is a **shadow-only** settlement study. Its primary
+cohort is frozen from the six price-blind `Truth_Checks` only: resolved
+starters, expected innings, usable bullpen, usable offense source, usable
+lineup data, and usable park source. It does not use the market margin,
+Vehicle Score, direction, price, or the operational 1.5-run threshold to
+define that cohort.
+
+For every future frozen packet, Frostline stores continuous absolute
+separation between the center and the queried total plus these fixed bins:
+
+- `<0.75`
+- `0.75–1.24`
+- `1.25–1.49`
+- `1.50–1.99`
+- `≥2.00`
+
+It also freezes the explicit adjacent comparison of `1.25–1.49` against
+`1.50–1.74`. `SEPARATION_GATE_AUDIT_SUMMARY_V1` reports separate
+walk-forward Wilson intervals for literal Hard Rock half-total evidence and
+reference-only research. A reference line may be tagged
+`NEAR_BOUNDARY_REFERENCE`, but it is never silently counted as Hard Rock
+calibration evidence. A literal operator quote that is not a half total is
+preserved exactly but is marked research-only rather than normalized or used
+for Hard Rock calibration.
+
+The existing 1.5-run authorization boundary remains operationally unchanged.
+No future relaxation is implied by a single rate: it requires adequate samples
+in both adjacent cohorts, persistent prospective results, and a later
+probability-layer review of Brier/log-loss and structural moderators.
+
 ## Operator evidence and the full-game ladder
 
 `OPERATOR_EVIDENCE_OVERLAY` is the durable intake surface for a fact supplied

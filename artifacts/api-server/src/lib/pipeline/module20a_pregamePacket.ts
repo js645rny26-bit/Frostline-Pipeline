@@ -29,6 +29,7 @@ import {
   classifyTrafficConversion,
   classifyTrafficDamageCoSign,
 } from "./failureClassificationShared.js";
+import { buildFrozenSeparationState } from "./separationGateShared.js";
 import { WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
@@ -175,6 +176,18 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Distribution_Risk_Tags",
   "Environment_Dependence_State",
   "Lineup_Completeness_State",
+  // Fixed pre-registration for the shadow-only separation study. These are
+  // packet provenance fields, never active board inputs.
+  "Separation_Pre_Registration_Version",
+  "Price_Blind_Structural_Eligibility_Status",
+  "Price_Blind_Structural_Failed_Checks",
+  "Separation_Query_Line",
+  "Separation_Market_Provenance",
+  "Separation_Hard_Rock_Calibration_Status",
+  "Separation_Continuous",
+  "Separation_Cohort",
+  "Separation_Adjacent_Threshold_Cohort",
+  "Separation_Research_Tag",
 ] as const;
 
 export const PREGAME_PACKET_HISTORY_COLS =
@@ -468,6 +481,12 @@ export function buildPregamePacketInputs(
       moderationReliance,
       moderationFragility,
     );
+    const frozenSeparation = buildFrozenSeparationState({
+      truth_checks: boardRow.truth_components,
+      projected_total: summary.projected_total_runs,
+      query_line: packetMarketLine,
+      has_literal_executable_hard_rock_line: operatorMarketLine !== undefined,
+    });
     // Board authorization finalizes before first pitch; forecast provenance
     // does not. Keep the packet refreshable for every legitimate pregame run,
     // then promote the last stored pregame snapshot after first pitch without
@@ -606,6 +625,16 @@ export function buildPregamePacketInputs(
         awayLineupCoverage,
         homeLineupCoverage,
       ),
+      frozenSeparation.pre_registration_version,
+      frozenSeparation.price_blind_structural_eligibility_status,
+      frozenSeparation.price_blind_structural_failed_checks,
+      blank(frozenSeparation.separation_query_line),
+      frozenSeparation.separation_market_provenance,
+      frozenSeparation.separation_hard_rock_calibration_status,
+      blank(frozenSeparation.separation_continuous),
+      frozenSeparation.separation_cohort,
+      frozenSeparation.separation_adjacent_threshold_cohort,
+      frozenSeparation.separation_research_tag,
     ];
     return [
       {

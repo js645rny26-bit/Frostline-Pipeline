@@ -241,7 +241,7 @@ test("future frozen packets preserve component-level moderation state without ch
   assert.equal(packet.values[index.Environment_Dependence_State], "ENVIRONMENT_MATERIAL_COMPONENT");
   assert.equal(packet.values[index.Lineup_Completeness_State], "AWAY_FULL_100|HOME_PARTIAL_66.7");
   assert.equal(packet.values[index.Engine_Version], "engine-test");
-  assert.equal(packet.values[index.Schema_Version], 45);
+  assert.equal(packet.values[index.Schema_Version], 46);
 
   const open = upsertPregamePacketRows([], [packet], "2026-08-24T22:45:00.000Z");
   const frozen = upsertPregamePacketRows(open.rows, [], "2026-08-24T23:11:00.000Z");
@@ -393,6 +393,16 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Lineup_Completeness_State",
     "Engine_Version",
     "Schema_Version",
+    "Separation_Pre_Registration_Version",
+    "Price_Blind_Structural_Eligibility_Status",
+    "Price_Blind_Structural_Failed_Checks",
+    "Separation_Query_Line",
+    "Separation_Market_Provenance",
+    "Separation_Hard_Rock_Calibration_Status",
+    "Separation_Continuous",
+    "Separation_Cohort",
+    "Separation_Adjacent_Threshold_Cohort",
+    "Separation_Research_Tag",
   ])
     assert.ok(PREGAME_PACKET_HISTORY_HEADERS.includes(required as never));
 });
@@ -400,6 +410,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 45);
-  assert.equal(pregamePacketHistoryRange(5000), "A1:DV5000");
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 46);
+  assert.equal(pregamePacketHistoryRange(5000), "A1:EF5000");
 });

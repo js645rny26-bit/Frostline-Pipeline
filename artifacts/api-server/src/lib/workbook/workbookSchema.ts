@@ -134,8 +134,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      Future frozen packets also preserve component-level moderation state
  *      (checks, scores, structural labels, source completeness, and versions)
  *      for prospective research only.
+ *  v46 (2026-09-01): Frozen packets pre-register a price-blind structural
+ *      separation study. It records continuous projection-to-queried-line
+ *      distance and fixed cohorts while keeping reference-only observations
+ *      distinct from literal Hard Rock half-total calibration evidence.
  */
-export const WORKBOOK_SCHEMA_VERSION = 45;
+export const WORKBOOK_SCHEMA_VERSION = 46;
 
 export interface ColumnDef {
   name: string;
@@ -172,6 +176,7 @@ export interface ColumnDef {
     | "MODULE_24"
     | "MODULE_25"
     | "MODULE_26"
+    | "MODULE_27"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -314,6 +319,16 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Distribution_Risk_Tags",
   "Environment_Dependence_State",
   "Lineup_Completeness_State",
+  "Separation_Pre_Registration_Version",
+  "Price_Blind_Structural_Eligibility_Status",
+  "Price_Blind_Structural_Failed_Checks",
+  "Separation_Query_Line",
+  "Separation_Market_Provenance",
+  "Separation_Hard_Rock_Calibration_Status",
+  "Separation_Continuous",
+  "Separation_Cohort",
+  "Separation_Adjacent_Threshold_Cohort",
+  "Separation_Research_Tag",
 ] as const;
 
 const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
@@ -371,6 +386,8 @@ const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
   "Home_Recent_Form_Multiplier",
   "Away_Active_Offense_Center",
   "Home_Active_Offense_Center",
+  "Separation_Query_Line",
+  "Separation_Continuous",
 ]);
 
 const PREGAME_PACKET_HISTORY_COLUMNS: ColumnDef[] =
@@ -751,6 +768,54 @@ const FAILURE_CLASSIFICATION_DISCRIMINATION_V1_COLUMN_NAMES = [
   "Bullpen_Primary_Count",
   "Balanced_Primary_Count",
   "Other_Primary_Count",
+  "Research_Status",
+  "Replay_TS",
+] as const;
+
+const SEPARATION_GATE_AUDIT_V1_COLUMN_NAMES = [
+  "Date",
+  "Game_ID",
+  "Frozen_Packet_Snapshot_TS",
+  "Frozen_Engine_Version",
+  "Frozen_Schema_Version",
+  "Pre_Registration_Version",
+  "Price_Blind_Structural_Eligibility_Status",
+  "Price_Blind_Structural_Failed_Checks",
+  "Frozen_Projected_Total",
+  "Separation_Query_Line",
+  "Separation_Market_Provenance",
+  "Separation_Hard_Rock_Calibration_Status",
+  "Separation_Continuous",
+  "Separation_Cohort",
+  "Separation_Adjacent_Threshold_Cohort",
+  "Separation_Research_Tag",
+  "Direction_From_Queried_Line",
+  "Actual_Total",
+  "Directional_Result",
+  "Total_Error",
+  "Total_Abs_Error",
+  "Settlement_TS",
+  "Replay_Status",
+] as const;
+
+const SEPARATION_GATE_AUDIT_SUMMARY_V1_COLUMN_NAMES = [
+  "Evidence_Population",
+  "Separation_Cohort",
+  "Adjacent_Threshold_Cohort",
+  "Eligible_N",
+  "Directional_Eligible_N",
+  "Directional_Wins",
+  "Directional_Losses",
+  "Directional_Pushes",
+  "Directional_Win_Rate",
+  "Wilson_95_Lower",
+  "Wilson_95_Upper",
+  "Mean_Abs_Center_Error",
+  "Median_Abs_Center_Error",
+  "Signed_Center_Bias",
+  "Major_Miss_4Plus_Count",
+  "Major_Miss_4Plus_Rate",
+  "Probability_Layer_Status",
   "Research_Status",
   "Replay_TS",
 ] as const;
@@ -7139,6 +7204,54 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Other_Primary_Count",
       ],
       "MODULE_26",
+    ),
+  },
+
+  {
+    name: "SEPARATION_GATE_AUDIT_V1",
+    description:
+      "Pre-registered, research-only settlement audit of continuous projection separation inside a frozen price-blind structural cohort. Reference-only rows are explicitly not literal Hard Rock calibration evidence; no row alters the 1.5 authorization rule.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      SEPARATION_GATE_AUDIT_V1_COLUMN_NAMES,
+      [
+        "Frozen_Schema_Version",
+        "Frozen_Projected_Total",
+        "Separation_Query_Line",
+        "Separation_Continuous",
+        "Actual_Total",
+        "Total_Error",
+        "Total_Abs_Error",
+      ],
+      "MODULE_27",
+    ),
+  },
+
+  {
+    name: "SEPARATION_GATE_AUDIT_SUMMARY_V1",
+    description:
+      "Wilson-interval summary for the frozen separation audit. It compares pre-registered separation regions without changing a threshold, confidence, vehicle, BET/PASS state, or any price-blind forecast output.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      SEPARATION_GATE_AUDIT_SUMMARY_V1_COLUMN_NAMES,
+      [
+        "Eligible_N",
+        "Directional_Eligible_N",
+        "Directional_Wins",
+        "Directional_Losses",
+        "Directional_Pushes",
+        "Directional_Win_Rate",
+        "Wilson_95_Lower",
+        "Wilson_95_Upper",
+        "Mean_Abs_Center_Error",
+        "Median_Abs_Center_Error",
+        "Signed_Center_Bias",
+        "Major_Miss_4Plus_Count",
+        "Major_Miss_4Plus_Rate",
+      ],
+      "MODULE_27",
     ),
   },
 

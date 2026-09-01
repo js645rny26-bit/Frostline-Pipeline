@@ -306,7 +306,7 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "AUDIT",
     timing: "Every legitimate pre-first-pitch publish (Module 20a)",
     purpose:
-      "One atomic packet containing the exact projection, allocation, market state, starter/bullpen, lineup, environment, collision, low-center, and survival dependencies available before first pitch.",
+      "One atomic packet containing the exact projection, allocation, market state, starter/bullpen, lineup, environment, collision, low-center, survival dependencies, and pre-registered separation-research provenance available before first pitch.",
     boardRelationship:
       "Preserves provenance for settlement and replay; it cannot change the board, market, vehicle, or authorization.",
     readNote:
@@ -505,6 +505,30 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Research-only. A classification's precision, recall, or miss rate does not create a live penalty, blocker, threshold, or center correction.",
     readNote:
       "Use eligible N before interpreting rates. Compare traffic+damage, traffic-only, damage-only, and neither/unavailable; inspect warned/no-warning quadrants so both false positives and false negatives remain visible.",
+  },
+  {
+    sheet: "SEPARATION_GATE_AUDIT_V1",
+    stage: "REPLAY",
+    timing:
+      "Daily settlement after GAME_TRUTH_REPLAY_V1 refresh (Module 27)",
+    purpose:
+      "Pre-registered frozen-packet study of whether continuous projection separation improves directional reliability inside a fixed price-blind structural cohort.",
+    boardRelationship:
+      "Shadow-only. It observes the existing 1.5 rule but cannot change a projection, market, confidence, vehicle, BET/PASS state, or authorization threshold.",
+    readNote:
+      "Reference-only rows are research evidence, not literal Hard Rock calibration evidence. Read the frozen structural eligibility and exact line provenance before comparing any cohort.",
+  },
+  {
+    sheet: "SEPARATION_GATE_AUDIT_SUMMARY_V1",
+    stage: "REPLAY",
+    timing:
+      "Rebuilt with Separation Gate Audit during daily settlement (Module 27)",
+    purpose:
+      "Fixed-bin and adjacent-boundary Wilson-interval summary for structural-eligible frozen observations, split between literal Hard Rock half totals and reference-only research.",
+    boardRelationship:
+      "Research-only. No sample count or rate relaxes the 1.5 authorization boundary without a separate commissioning decision.",
+    readNote:
+      "Compare 1.25-1.49 with 1.50-1.74 only after meaningful prospective samples exist. Probability calibration fields remain explicitly unavailable until a future probability layer exists.",
   },
   {
     sheet: "FULL_LADDER_SETTLEMENT",
