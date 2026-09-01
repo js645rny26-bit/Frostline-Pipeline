@@ -18,7 +18,19 @@ import {
   writeRange,
   WORKBOOK_ID,
 } from "../sheets/client.js";
-import { PREGAME_PACKET_HISTORY_SHEET } from "./module20a_pregamePacket.js";
+import {
+  pregamePacketHistoryRange,
+  PREGAME_PACKET_HISTORY_SHEET,
+} from "./module20a_pregamePacket.js";
+import {
+  classifyCoSignFragility,
+  classifyDistributionStructure,
+  classifyOpenerChain,
+  classifyScoringPath,
+  classifyTrafficConversion,
+  classifyTrafficDamageCoSign,
+  type FailureClassificationEvidence,
+} from "./failureClassificationShared.js";
 import { logger } from "../../lib/logger.js";
 
 export const FAILURE_CLASSIFICATION_SHADOW_SHEET =
@@ -113,24 +125,15 @@ export const FAILURE_CLASSIFICATION_DISCRIMINATION_HEADERS = [
   "Replay_TS",
 ] as const;
 
-interface FailureClassificationPacket {
+interface FailureClassificationPacket extends FailureClassificationEvidence {
   date: string;
   game_id: string;
   away_team: string;
   home_team: string;
   snapshot_ts: string;
   packet_status: "OPEN_PROSPECTIVE" | "FROZEN_PREGAME";
-  starter_phase_runs: number | null;
-  bullpen_continuation_runs: number | null;
   away_bullpen_exposure_ip: number | null;
   home_bullpen_exposure_ip: number | null;
-  away_starter_role: string;
-  home_starter_role: string;
-  away_expected_ip: number | null;
-  home_expected_ip: number | null;
-  collision_status: string;
-  collision_traffic_estimate: number | null;
-  collision_damage_estimate: number | null;
 }
 
 interface FrozenFailureClassification {
@@ -226,103 +229,19 @@ function isValidBeforeFirstPitch(snapshotTs: string, firstPitch: string): boolea
   return Number.isFinite(snapshotMs) && Number.isFinite(firstPitchMs) && snapshotMs < firstPitchMs;
 }
 
-function openerChainStatus(packet: FailureClassificationPacket): string {
-  const roles = [packet.away_starter_role, packet.home_starter_role]
-    .map((role) => role.toUpperCase())
-    .filter(Boolean);
-  if (roles.length === 0) return "INSUFFICIENT_STARTER_ROLE_INPUT";
-  if (!roles.includes("OPENER")) return "NO_OPENER_IDENTIFIED";
-  const expectedIps = [packet.away_expected_ip, packet.home_expected_ip];
-  return expectedIps.some((innings) => innings === null)
-    ? "OPENER_WORKLOAD_UNRESOLVED"
-    : "OPENER_CHAIN_UNCERTAINTY";
-}
-
-function scoringPathStatus(packet: FailureClassificationPacket): string {
-  if (
-    packet.starter_phase_runs === null
-    || packet.bullpen_continuation_runs === null
-  ) return "INSUFFICIENT_PHASE_INPUT";
-  if (packet.bullpen_continuation_runs > packet.starter_phase_runs) {
-    return "BULLPEN_PHASE_RELIANT";
-  }
-  if (packet.starter_phase_runs > packet.bullpen_continuation_runs) {
-    return "STARTER_PHASE_SUPPORTED";
-  }
-  return "BALANCED_STARTER_AND_BULLPEN_PATHS";
-}
-
-function trafficDamageCoSignStatus(packet: FailureClassificationPacket): string {
-  if (packet.collision_status !== "PROSPECTIVE_SHADOW_CANDIDATE") {
-    return "NO_PROSPECTIVE_COLLISION_EVIDENCE";
-  }
-  const trafficPositive = (packet.collision_traffic_estimate ?? 0) > 0;
-  const damagePositive = (packet.collision_damage_estimate ?? 0) > 0;
-  if (trafficPositive && damagePositive) return "TRAFFIC_AND_DAMAGE_COSIGNED";
-  if (trafficPositive) return "TRAFFIC_WITHOUT_DAMAGE_COSIGN";
-  if (damagePositive) return "DAMAGE_WITHOUT_TRAFFIC_COSIGN";
-  return "NO_POSITIVE_COLLISION_SIGNAL";
-}
-
-function trafficConversionStatus(coSignStatus: string): string {
-  if (coSignStatus === "TRAFFIC_AND_DAMAGE_COSIGNED") {
-    return "TRAFFIC_DAMAGE_COSIGNED_NO_CONVERSION_INFERENCE";
-  }
-  if (coSignStatus === "TRAFFIC_WITHOUT_DAMAGE_COSIGN") {
-    return "TRAFFIC_ONLY_NO_CONVERSION_INFERENCE";
-  }
-  if (coSignStatus === "DAMAGE_WITHOUT_TRAFFIC_COSIGN") {
-    return "DAMAGE_ONLY_NO_CONVERSION_INFERENCE";
-  }
-  return "NO_PREGAME_CONVERSION_INFERENCE";
-}
-
-/**
- * Co-sign asymmetry is a structural fragility label, not a directional run
- * adjustment. A one-sided signal lacks the redundant traffic+damage path
- * available to a fully co-signed candidate, but it does not tell us whether
- * the eventual miss will be high-side or low-side.
- */
-function coSignFragilityStatus(coSignStatus: string): string {
-  if (coSignStatus === "TRAFFIC_WITHOUT_DAMAGE_COSIGN") {
-    return "TRAFFIC_WITHOUT_DAMAGE_FRAGILITY";
-  }
-  if (coSignStatus === "DAMAGE_WITHOUT_TRAFFIC_COSIGN") {
-    return "DAMAGE_WITHOUT_TRAFFIC_FRAGILITY";
-  }
-  if (coSignStatus === "TRAFFIC_AND_DAMAGE_COSIGNED") {
-    return "TRAFFIC_DAMAGE_TAIL_CANDIDATE";
-  }
-  return "NO_COSIGN_FRAGILITY_CLASSIFICATION";
-}
-
 export function buildFailureClassificationShadowRow(
   packet: FailureClassificationPacket,
   classificationTs: string,
 ): unknown[] {
-  const opener = openerChainStatus(packet);
-  const scoring = scoringPathStatus(packet);
-  const coSign = trafficDamageCoSignStatus(packet);
-  const traffic = trafficConversionStatus(coSign);
-  const coSignFragility = coSignFragilityStatus(coSign);
-  const tags = [
-    opener === "OPENER_CHAIN_UNCERTAINTY" || opener === "OPENER_WORKLOAD_UNRESOLVED"
-      ? opener
-      : "",
-    scoring === "BULLPEN_PHASE_RELIANT" ? "BULLPEN_CONTINUATION_DEPENDENT" : "",
-    coSignFragility !== "NO_COSIGN_FRAGILITY_CLASSIFICATION" ? coSignFragility : "",
-  ].filter(Boolean);
-  const distribution = tags.includes("OPENER_CHAIN_UNCERTAINTY")
-    || tags.includes("OPENER_WORKLOAD_UNRESOLVED")
-    ? "OPENER_CHAIN_UNCERTAINTY"
-    : tags.includes("BULLPEN_CONTINUATION_DEPENDENT")
-      ? "BULLPEN_CONTINUATION_TAIL_CANDIDATE"
-      : tags.includes("TRAFFIC_DAMAGE_TAIL_CANDIDATE")
-        ? "TRAFFIC_DAMAGE_TAIL_CANDIDATE"
-        : coSignFragility === "TRAFFIC_WITHOUT_DAMAGE_FRAGILITY"
-          || coSignFragility === "DAMAGE_WITHOUT_TRAFFIC_FRAGILITY"
-          ? "ASYMMETRIC_SCORING_SUPPORT"
-          : "NO_CLASSIFIED_WIDENING_PATH";
+  const opener = classifyOpenerChain(packet);
+  const scoring = classifyScoringPath(packet);
+  const coSign = classifyTrafficDamageCoSign(packet);
+  const traffic = classifyTrafficConversion(coSign);
+  const coSignFragility = classifyCoSignFragility(coSign);
+  const {
+    distributionStructureStatus: distribution,
+    distributionRiskTags,
+  } = classifyDistributionStructure(opener, scoring, coSignFragility);
   const combinedExposure = packet.away_bullpen_exposure_ip === null
     || packet.home_bullpen_exposure_ip === null
     ? ""
@@ -350,7 +269,7 @@ export function buildFailureClassificationShadowRow(
     coSign,
     coSignFragility,
     distribution,
-    tags.join("; ") || "NO_CLASSIFIED_RISK_TAG",
+    distributionRiskTags,
     "SHADOW_ONLY_NO_PROJECTION_IMPACT",
     "SHADOW_ONLY_NO_AUTHORIZATION_IMPACT",
     "FROZEN_PREGAME_PACKET_FIELDS_ONLY",
@@ -503,7 +422,7 @@ export async function syncFailureClassificationShadow(
   const errors: string[] = [];
   try {
     const [packetRows, existingRaw] = await Promise.all([
-      readOptionalSheet(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ10000`, warnings),
+      readOptionalSheet(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}`, warnings),
       readOptionalSheet(workbookId, `${FAILURE_CLASSIFICATION_SHADOW_SHEET}!A1:AZ10000`, warnings),
     ]);
     const parsed = parseFailureClassificationPackets(packetRows, date);
@@ -587,7 +506,7 @@ export function parseFrozenFailureClassifications(rows: unknown[][]): Map<string
       // v42 frozen rows predate the dedicated field. This is a deterministic
       // v43 read of their already-frozen co-sign status, never a lookup of
       // outcome, market, or current-game evidence.
-      cosign_fragility_status: storedFragility || coSignFragilityStatus(coSignStatus),
+      cosign_fragility_status: storedFragility || classifyCoSignFragility(coSignStatus),
       distribution_structure_status: text(value(row, index, "Distribution_Structure_Status")),
       distribution_risk_tags: text(value(row, index, "Distribution_Risk_Tags")),
     });
@@ -892,7 +811,7 @@ export async function runFailureClassificationReplay(
     const [classificationRows, gameTruthRows, packetRows] = await Promise.all([
       readOptionalSheet(workbookId, `${FAILURE_CLASSIFICATION_SHADOW_SHEET}!A1:AZ10000`, warnings),
       readOptionalSheet(workbookId, "GAME_TRUTH_REPLAY_V1!A1:AZ10000", warnings),
-      readOptionalSheet(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ10000`, warnings),
+      readOptionalSheet(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}`, warnings),
     ]);
     const classifications = parseFrozenFailureClassifications(classificationRows);
     const settledGames = parseSettledFailureClassificationGameTruth(gameTruthRows);

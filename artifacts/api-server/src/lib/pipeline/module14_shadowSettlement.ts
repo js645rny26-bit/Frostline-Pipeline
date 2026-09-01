@@ -18,6 +18,7 @@ import {
 } from "./module14_pitcherProvenance.js";
 import {
   normalizePregamePacketHistoryRows,
+  pregamePacketHistoryRange,
   PREGAME_PACKET_HISTORY_HEADERS,
 } from "./module20a_pregamePacket.js";
 import type { PostmortemEventEvidence } from "./module21_postmortemMechanism.js";
@@ -1347,7 +1348,7 @@ export async function runShadowSettlement(
   const frozenPacketStartersByGame = new Map<string, FrozenPacketStarterSnapshot>();
   const frozenPacketMarketsByGame = new Map<string, FrozenPacketMarketSnapshot>();
   try {
-    const response = await readRange(wbId, `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ5000`);
+    const response = await readRange(wbId, `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(5000)}`);
     const normalizedPacketRows = normalizePregamePacketHistoryRows(
       (response.values ?? []) as unknown[][],
     );

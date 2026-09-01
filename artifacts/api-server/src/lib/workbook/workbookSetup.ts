@@ -380,7 +380,8 @@ export async function repairWorkbookSchemaReference(
         "v41 (2026-08-29): PREGAME_PACKET_HISTORY preserves automated/reference and MANUAL_OPERATOR Hard Rock market evidence separately, including capture timestamps and an explicit primary directional grading line. Settlement may finalize only a stored, legitimate pre-first-pitch OPEN packet without reading current or postgame state. " +
         "v42 (2026-08-30): FAILURE_CLASSIFICATION_SHADOW_V1 and FAILURE_CLASSIFICATION_REPLAY_V1 preserve price-blind opener-chain, scoring-path, traffic/damage, and distribution-structure labels from legitimate frozen packets. They are research-only and cannot change projections, markets, vehicles, or authorization. " +
         "v43 (2026-08-30): Failure classification preserves traffic-only and damage-only asymmetric scoring-support fragility separately from traffic-and-damage tail candidates. FAILURE_CLASSIFICATION_DISCRIMINATION_V1 reports postgame precision/recall-style evidence only; no labels change projections, markets, scores, vehicles, or authorization. " +
-        "v44 (2026-08-30): Prospective full-game market totals use executable Hard Rock half-number representation. Whole-number source or operator totals normalize down by 0.5 before market comparison; frozen historical packets are never rewritten.",
+        "v44 (2026-08-30): Reference-market full-game totals use executable Hard Rock half-number representation; frozen historical packets are never rewritten. " +
+        "v45 (2026-09-01): Literal operator-supplied Hard Rock line, price, source, and quote timestamp are frozen exactly as supplied and never synthesized from reference-market data. Future packets also preserve component-level moderation research state (individual checks, aggregate scores, structural classifications, environment, lineup completeness, and engine/schema versions) without changing projection or board logic.",
     ],
     [
       "Workbook_Purpose",

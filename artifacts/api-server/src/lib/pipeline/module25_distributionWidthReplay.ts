@@ -18,7 +18,10 @@ import {
   writeRange,
   WORKBOOK_ID,
 } from "../sheets/client.js";
-import { PREGAME_PACKET_HISTORY_SHEET } from "./module20a_pregamePacket.js";
+import {
+  pregamePacketHistoryRange,
+  PREGAME_PACKET_HISTORY_SHEET,
+} from "./module20a_pregamePacket.js";
 import { logger } from "../../lib/logger.js";
 
 const REPLAY_SHEET = "DISTRIBUTION_WIDTH_REPLAY_V1";
@@ -513,7 +516,7 @@ export async function runDistributionWidthReplay(
     const [packetRows, gameTruthRows] = await Promise.all([
       readOptionalSheet(
         workbookId,
-        `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ10000`,
+        `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}`,
         warnings,
       ),
       readOptionalSheet(

@@ -4,11 +4,13 @@ import {
   buildPregamePacketInputs,
   finalizeOpenPregamePacketRows,
   normalizePregamePacketHistoryRows,
+  pregamePacketHistoryRange,
   PREGAME_PACKET_HISTORY_COLS,
   PREGAME_PACKET_HISTORY_HEADERS,
   upsertPregamePacketRows,
   type PregamePacketInput,
 } from "./module20a_pregamePacket.js";
+import { WORKBOOK_SCHEMA, WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
 
 const firstPitch = "2026-08-24T23:10:00.000Z";
 const input = (
@@ -141,8 +143,14 @@ test("an executable market overlay changes only market provenance, never price-b
     games,
     [], [], [],
     new Map([["20260824_AAA_BBB", {
-      fields: new Map([["CURRENT_HARD_ROCK_LINE", "10"]]),
+      fields: new Map([
+        ["CURRENT_HARD_ROCK_LINE", "10"],
+        ["CURRENT_HARD_ROCK_PRICE", "-118"],
+        ["CURRENT_HARD_ROCK_SOURCE", "HARD_ROCK"],
+        ["CURRENT_HARD_ROCK_QUOTED_TS", "2026-08-24T22:43:00.000Z"],
+      ]),
       field_supplied_ts: new Map([["CURRENT_HARD_ROCK_LINE", "2026-08-24T22:45:00.000Z"]]),
+      field_sources: new Map([["CURRENT_HARD_ROCK_LINE", "MANUAL_OPERATOR"]]),
       source: "MANUAL_OPERATOR",
       supplied_ts: "2026-08-24T22:45:00.000Z",
       provenance: "explicit",
@@ -154,8 +162,96 @@ test("an executable market overlay changes only market provenance, never price-b
   assert.equal(reference[0]?.values[index.Base_Home_Projection], executable[0]?.values[index.Base_Home_Projection]);
   assert.equal(reference[0]?.values[index.Base_Projection], executable[0]?.values[index.Base_Projection]);
   assert.equal(reference[0]?.values[index.Reference_Market_Line], 7.5);
-  assert.equal(executable[0]?.values[index.Executable_Market_Line], 9.5);
-  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Line], 9.5);
+  assert.equal(reference[0]?.values[index.Executable_Market_Line], "");
+  assert.equal(reference[0]?.values[index.Executable_Market_Price], "");
+  assert.equal(reference[0]?.values[index.Executable_Market_Status], "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
+  assert.equal(executable[0]?.values[index.Executable_Market_Line], 10);
+  assert.equal(executable[0]?.values[index.Executable_Market_Price], "-118");
+  assert.equal(executable[0]?.values[index.Executable_Market_Source], "HARD_ROCK");
+  assert.equal(executable[0]?.values[index.Executable_Market_Quoted_TS], "2026-08-24T22:43:00.000Z");
+  assert.equal(executable[0]?.values[index.Executable_Market_Status], "LITERAL_EXECUTABLE_HARD_ROCK_CAPTURED");
+  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Line], 10);
+
+  const partial = buildPregamePacketInputs(
+    summary,
+    board,
+    games,
+    [], [], [],
+    new Map([["20260824_AAA_BBB", {
+      fields: new Map([
+        ["CURRENT_HARD_ROCK_PRICE", "-110"],
+        ["CURRENT_HARD_ROCK_SOURCE", "Hard Rock NJ"],
+        ["CURRENT_HARD_ROCK_QUOTED_TS", "2026-08-24T22:40:00.000Z"],
+      ]),
+      field_supplied_ts: new Map([["CURRENT_HARD_ROCK_PRICE", "2026-08-24T22:45:00.000Z"]]),
+      field_sources: new Map([["CURRENT_HARD_ROCK_PRICE", "MANUAL_OPERATOR"]]),
+      source: "MANUAL_OPERATOR",
+      supplied_ts: "2026-08-24T22:45:00.000Z",
+      provenance: "explicit partial",
+      reauthorization_status: "REAUTHORIZATION_REQUIRED",
+    }]]),
+  );
+  assert.equal(partial[0]?.values[index.Executable_Market_Line], "");
+  assert.equal(partial[0]?.values[index.Executable_Market_Price], "-110");
+  assert.equal(partial[0]?.values[index.Executable_Market_Source], "Hard Rock NJ");
+  assert.equal(partial[0]?.values[index.Executable_Market_TS], "2026-08-24T22:45:00.000Z");
+  assert.equal(partial[0]?.values[index.Executable_Market_Quoted_TS], "2026-08-24T22:40:00.000Z");
+  assert.equal(partial[0]?.values[index.Executable_Market_Status], "PARTIAL_LITERAL_EXECUTABLE_HARD_ROCK_EVIDENCE_NO_LINE");
+  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Line], 7.5);
+});
+
+test("future frozen packets preserve component-level moderation state without changing operational outputs", () => {
+  const summary = [{
+    date: "2026-08-24", game_id: "20260824_AAA_BBB", away_team: "AAA", home_team: "BBB",
+    projected_away_runs: 4, projected_home_runs: 4.5, projected_total_runs: 8.5,
+    starter_attack_runs: 3.1, bullpen_continuation_runs: 4.2,
+    away_pitcher_role: "OPENER", home_pitcher_role: "STARTER",
+    away_expected_innings: 2, home_expected_innings: 6,
+    environment_run_adjustment: -0.35, environment_certainty: "HIGH", weather_vehicle_status: "ACTIVE",
+    away_lineup_status: "FULL", home_lineup_status: "PARTIAL",
+    away_lineup_coverage: 100, home_lineup_coverage: 66.7,
+  }] as never;
+  const board = [{
+    legacy_game_id: "20260824_AAA_BBB", market_line: 8.5, run_id: "run", model_version: "engine-test",
+    direction: "UNDER", vehicle_type: "GAME_TOTAL", final_decision: "PASS", core_blocker: "", confidence: 50, variance: 0,
+    truth_family: "RUNS_UNDER", truth_score: 83.33, vehicle_score: 50, stability_score: 66.67,
+    composite_score: 50, confirmation_gate: false, score_decision: "NO_CORE", score_blockers: ["TEST"],
+    truth_components: "truth-a=PASS; truth-b=FAIL", vehicle_components: "vehicle-a=PASS",
+    stability_components: "stability-a=PASS; stability-b=FAIL",
+  }] as never;
+  const collision = [{
+    game_id: "20260824_AAA_BBB", preview_availability: "AVAILABLE", tail_estimate_status: "AVAILABLE",
+    traffic_conversion_estimate: 0.4, hr_xbh_damage_estimate: 0.3,
+  }] as never;
+  const packet = buildPregamePacketInputs(
+    summary,
+    board,
+    [{ legacy_game_id: "20260824_AAA_BBB", scheduled_utc_time: firstPitch }] as never,
+    collision,
+    [],
+    [],
+  )[0]!;
+  const index = Object.fromEntries(PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]));
+  assert.equal(packet.values.length, PREGAME_PACKET_HISTORY_COLS);
+  assert.equal(packet.values[index.Truth_Checks], "truth-a=PASS; truth-b=FAIL");
+  assert.equal(packet.values[index.Stability_Checks], "stability-a=PASS; stability-b=FAIL");
+  assert.equal(packet.values[index.Starter_Bullpen_Reliance_State], "BULLPEN_PHASE_RELIANT");
+  assert.equal(packet.values[index.Opener_Chain_State], "OPENER_CHAIN_UNCERTAINTY");
+  assert.equal(packet.values[index.Traffic_Damage_CoSign_Status], "TRAFFIC_AND_DAMAGE_COSIGNED");
+  assert.equal(packet.values[index.Environment_Dependence_State], "ENVIRONMENT_MATERIAL_COMPONENT");
+  assert.equal(packet.values[index.Lineup_Completeness_State], "AWAY_FULL_100|HOME_PARTIAL_66.7");
+  assert.equal(packet.values[index.Engine_Version], "engine-test");
+  assert.equal(packet.values[index.Schema_Version], 45);
+
+  const open = upsertPregamePacketRows([], [packet], "2026-08-24T22:45:00.000Z");
+  const frozen = upsertPregamePacketRows(open.rows, [], "2026-08-24T23:11:00.000Z");
+  const immutable = upsertPregamePacketRows(
+    frozen.rows,
+    [{ ...packet, values: packet.values.map(() => "post-start-change") }],
+    "2026-08-24T23:12:00.000Z",
+  );
+  assert.deepEqual(immutable.rows[0], frozen.rows[0]);
+  assert.equal(immutable.rows[0]?.[index.Base_Projection], 8.5);
 });
 
 test("a frozen pregame packet remains byte-for-byte unchanged on later refresh", () => {
@@ -242,7 +338,8 @@ test("settlement finalization is date-scoped and rejects non-prospective snapsho
 test("v41 packet header migration preserves old frozen fields by name", () => {
   const oldHeader = PREGAME_PACKET_HISTORY_HEADERS.filter((name) => ![
     "Reference_Market_Line", "Reference_Market_Source", "Reference_Market_TS",
-    "Executable_Market_Line", "Executable_Market_Source", "Executable_Market_TS",
+    "Executable_Market_Line", "Executable_Market_Price", "Executable_Market_Source",
+    "Executable_Market_TS", "Executable_Market_Quoted_TS", "Executable_Market_Status",
     "Primary_Grade_Market_Line", "Primary_Grade_Market_Source", "Primary_Grade_Market_Status",
   ].includes(name));
   const oldRow = Array(oldHeader.length).fill("");
@@ -258,6 +355,8 @@ test("v41 packet header migration preserves old frozen fields by name", () => {
   assert.equal(migrated.rows[0]![index.Away_Starter], "Frozen Away Starter");
   assert.equal(migrated.rows[0]![index.Market_Line], 8);
   assert.equal(migrated.rows[0]![index.Executable_Market_Line], "");
+  assert.equal(migrated.rows[0]![index.Executable_Market_Price], "");
+  assert.equal(migrated.rows[0]![index.Executable_Market_Status], "");
 });
 
 test("packet contract preserves market and dependent shadow fields as explicit columns", () => {
@@ -267,6 +366,9 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Reference_Market_Line",
     "Executable_Market_Line",
     "Primary_Grade_Market_Line",
+    "Executable_Market_Price",
+    "Executable_Market_Quoted_TS",
+    "Executable_Market_Status",
     "Away_Expected_IP",
     "Bullpen_Data_Status",
     "Environment_Certainty",
@@ -282,6 +384,22 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Home_Recent_Form_Multiplier",
     "Away_Active_Offense_Center",
     "Home_Active_Offense_Center",
+    "Truth_Checks",
+    "Stability_Checks",
+    "Starter_Bullpen_Reliance_State",
+    "Opener_Chain_State",
+    "Traffic_Damage_CoSign_Status",
+    "Environment_Dependence_State",
+    "Lineup_Completeness_State",
+    "Engine_Version",
+    "Schema_Version",
   ])
     assert.ok(PREGAME_PACKET_HISTORY_HEADERS.includes(required as never));
+});
+
+test("packet schema and read range expand together for frozen moderation fields", () => {
+  const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
+  assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 45);
+  assert.equal(pregamePacketHistoryRange(5000), "A1:DV5000");
 });

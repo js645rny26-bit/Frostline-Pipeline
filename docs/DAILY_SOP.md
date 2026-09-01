@@ -25,10 +25,12 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
   bullpen state, or executable Hard Rock market before first pitch, add **one
   field per row** to `OPERATOR_EVIDENCE_OVERLAY` with `Source` set to
   `MANUAL_OPERATOR` and an ISO `Supplied_TS` before the game starts.
-- Full-game Hard Rock totals are always represented as half numbers. An
-  integer input is normalized down one half-run (`10 -> 9.5`, `7 -> 6.5`)
-  before prospective market comparison; do not enter a whole-number full-game
-  total as an executable line.
+- Automated/reference full-game totals use half-number representation; an
+  integer reference value is normalized down one half-run (`10 -> 9.5`,
+  `7 -> 6.5`). A literal Hard Rock quote entered through the operator overlay
+  is different: preserve its exact line and price, plus its explicit source
+  and quote timestamp when provided. Never normalize, infer, or synthesize an
+  executable Hard Rock quote from a reference-market value.
 - That input is authoritative only for the named field. The packet records it
   and marks the game for fresh review; it does not silently change projection
   coefficients, BET/PASS, vehicle choice, or unrelated fields.

@@ -21,12 +21,8 @@ import {
 } from "../sheets/client.js";
 import { isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
 import {
-  normalizeFullGameTotalLine,
-  normalizeFullGameTotalVehicle,
-  normalizeHardRockTotalLineList,
-} from "./marketLineNormalization.js";
-import {
   PREGAME_PACKET_HISTORY_HEADERS,
+  pregamePacketHistoryRange,
   PREGAME_PACKET_HISTORY_SHEET,
 } from "./module20a_pregamePacket.js";
 import type { NormalizedGame } from "./module06_normalization.js";
@@ -67,7 +63,8 @@ export const OPERATOR_OVERLAY_FIELDS = [
   "AWAY_STARTER_ROLE", "HOME_STARTER_ROLE", "STADIUM", "PARK_MULTIPLIER",
   "WEATHER", "ROOF_STATUS", "WIND_DISPOSITION", "ENVIRONMENT_CERTAINTY",
   "UMPIRE", "AWAY_BULLPEN_STATE", "HOME_BULLPEN_STATE", "HARD_ROCK_TOTAL_LINES",
-  "CURRENT_HARD_ROCK_LINE", "CURRENT_PRICE", "DIRECTIONAL_TRUTH", "RUN_BAND_LOW",
+  "CURRENT_HARD_ROCK_LINE", "CURRENT_HARD_ROCK_PRICE", "CURRENT_HARD_ROCK_SOURCE",
+  "CURRENT_HARD_ROCK_QUOTED_TS", "CURRENT_PRICE", "DIRECTIONAL_TRUTH", "RUN_BAND_LOW",
   "RUN_BAND_CENTER", "RUN_BAND_HIGH", "PREFERRED_TOTAL_VEHICLE", "BET_OR_PASS",
   "NAMED_BLOCKER", "REASONING_SOURCE", "DECISION_NOTES",
 ] as const;
@@ -79,7 +76,9 @@ export interface OperatorEvidenceSnapshot {
   fields: Map<OperatorOverlayField, string>;
   /** Timestamp for the surviving value of each explicitly supplied field. */
   field_supplied_ts: Map<OperatorOverlayField, string>;
-  source: "MANUAL_OPERATOR";
+  /** Intake provenance for the surviving value of each explicit field. */
+  field_sources: Map<OperatorOverlayField, string>;
+  source: string;
   supplied_ts: string;
   provenance: string;
   reauthorization_status: "NOT_REQUIRED" | "REAUTHORIZATION_REQUIRED";
@@ -107,7 +106,10 @@ function normalizeField(value: unknown): OperatorOverlayField | null {
     .replace(/[^A-Z0-9]+/g, "_")
     .replace(/^_|_$/g, "")
     .replace(/^AVAILABLE_HARDROCK_TOTAL_LINES$/, "HARD_ROCK_TOTAL_LINES")
-    .replace(/^CURRENT_MARKET_LINE$/, "CURRENT_HARD_ROCK_LINE");
+    .replace(/^CURRENT_MARKET_LINE$/, "CURRENT_HARD_ROCK_LINE")
+    .replace(/^CURRENT_HARD_ROCK_TIMESTAMP$/, "CURRENT_HARD_ROCK_QUOTED_TS")
+    .replace(/^CURRENT_HARD_ROCK_TIME$/, "CURRENT_HARD_ROCK_QUOTED_TS")
+    .replace(/^CURRENT_HARD_ROCK_BOOK$/, "CURRENT_HARD_ROCK_SOURCE");
   return (OPERATOR_OVERLAY_FIELDS as readonly string[]).includes(normalized)
     ? normalized as OperatorOverlayField
     : null;
@@ -145,37 +147,10 @@ function strictlyBeforeFirstPitch(suppliedTs: string, firstPitch: string): boole
 }
 
 /**
- * Normalize only the explicit full-game Hard Rock fields. The source row is
- * still retained verbatim in OPERATOR_EVIDENCE_OVERLAY; this returns the
- * executable representation that downstream prospective packets may use.
- */
-function normalizeOperatorMarketValue(
-  field: OperatorOverlayField,
-  raw: string,
-): string | null {
-  if (field === "CURRENT_HARD_ROCK_LINE") {
-    const line = normalizeFullGameTotalLine(raw);
-    return line === null ? null : line.toFixed(1);
-  }
-  if (field === "HARD_ROCK_TOTAL_LINES") {
-    const numericTokens = raw.match(/\d+(?:\.\d+)?/g) ?? [];
-    if (
-      numericTokens.length === 0
-      || numericTokens.some((token) => normalizeFullGameTotalLine(token) === null)
-    ) return null;
-    return normalizeHardRockTotalLineList(raw);
-  }
-  if (field === "PREFERRED_TOTAL_VEHICLE") {
-    const token = raw.match(/\d+(?:\.\d+)?/);
-    if (!token || normalizeFullGameTotalLine(token[0]) === null) return null;
-    return normalizeFullGameTotalVehicle(raw);
-  }
-  return raw;
-}
-
-/**
  * Pure overlay resolver used by the runtime reader and deterministic tests.
  * Later duplicate field rows win only when they are still genuinely pregame.
+ * Literal executable Hard Rock evidence is intentionally retained verbatim:
+ * reference-market normalization must never rewrite an operator quote.
  */
 export function resolveOperatorEvidenceRows(
   rows: unknown[][],
@@ -186,7 +161,13 @@ export function resolveOperatorEvidenceRows(
   const [header = [], ...data] = rows;
   const index = headerIndex(header);
   const firstPitchByGame = new Map(games.map((game) => [game.legacy_game_id, game.scheduled_utc_time ?? ""]));
-  const gathered = new Map<string, Array<{ field: OperatorOverlayField; value: string; suppliedTs: string; note: string }>>();
+  const gathered = new Map<string, Array<{
+    field: OperatorOverlayField;
+    value: string;
+    suppliedTs: string;
+    source: string;
+    note: string;
+  }>>();
 
   for (const row of data) {
     if (text(valueByHeader(row, index, "Date")) !== date) continue;
@@ -197,7 +178,7 @@ export function resolveOperatorEvidenceRows(
     const source = text(valueByHeader(row, index, "Source"));
     const firstPitch = firstPitchByGame.get(gameId);
     if (!gameId || !field || !rawValue) continue;
-    if (source && source !== "MANUAL_OPERATOR") {
+    if (source && source !== "MANUAL_OPERATOR" && source !== "HARD_ROCK") {
       warnings.push(`OPERATOR_EVIDENCE_IGNORED_SOURCE: ${gameId}/${field} source=${source}`);
       continue;
     }
@@ -205,13 +186,14 @@ export function resolveOperatorEvidenceRows(
       warnings.push(`OPERATOR_EVIDENCE_NOT_PROSPECTIVE: ${gameId}/${field}`);
       continue;
     }
-    const value = normalizeOperatorMarketValue(field, rawValue);
-    if (value === null) {
-      warnings.push(`OPERATOR_EVIDENCE_INVALID_HARD_ROCK_TOTAL: ${gameId}/${field}=${rawValue}`);
-      continue;
-    }
     const bucket = gathered.get(gameId) ?? [];
-    bucket.push({ field, value, suppliedTs, note: text(valueByHeader(row, index, "Evidence_Note")) });
+    bucket.push({
+      field,
+      value: rawValue,
+      suppliedTs,
+      source: source || "MANUAL_OPERATOR",
+      note: text(valueByHeader(row, index, "Evidence_Note")),
+    });
     gathered.set(gameId, bucket);
   }
 
@@ -220,18 +202,21 @@ export function resolveOperatorEvidenceRows(
     const ordered = [...items].sort((left, right) => Date.parse(left.suppliedTs) - Date.parse(right.suppliedTs));
     const fields = new Map<OperatorOverlayField, string>();
     const fieldSuppliedTs = new Map<OperatorOverlayField, string>();
+    const fieldSources = new Map<OperatorOverlayField, string>();
     for (const item of ordered) {
       fields.set(item.field, item.value);
       fieldSuppliedTs.set(item.field, item.suppliedTs);
+      fieldSources.set(item.field, item.source);
     }
     const latestTs = ordered.at(-1)?.suppliedTs ?? "";
     const provenance = ordered
-      .map((item) => `${item.field}=${item.value}${item.note ? ` (${item.note})` : ""}`)
+      .map((item) => `${item.field}=${item.value} [${item.source}]${item.note ? ` (${item.note})` : ""}`)
       .join("; ");
     snapshots.set(gameId, {
       fields,
       field_supplied_ts: fieldSuppliedTs,
-      source: "MANUAL_OPERATOR",
+      field_sources: fieldSources,
+      source: ordered.at(-1)?.source ?? "MANUAL_OPERATOR",
       supplied_ts: latestTs,
       provenance,
       reauthorization_status: fields.size > 0 ? "REAUTHORIZATION_REQUIRED" : "NOT_REQUIRED",
@@ -386,7 +371,7 @@ export async function syncFullLadderAudit(
   const errors: string[] = [];
   try {
     await ensureSheet(workbookId, FULL_LADDER_AUDIT_SHEET, FULL_LADDER_AUDIT_HEADERS.length);
-    const packetResponse = await readRange(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!A1:CA5000`);
+    const packetResponse = await readRange(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(5000)}`);
     const packetRows = ((packetResponse.values ?? []) as unknown[][]).slice(1)
       .filter((row) => text(row[PACKET_INDEX.Date]) === date);
     const existingResponse = await readRange(workbookId, `${FULL_LADDER_AUDIT_SHEET}!A1:X5000`);

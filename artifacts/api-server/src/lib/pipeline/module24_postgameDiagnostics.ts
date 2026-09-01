@@ -22,7 +22,10 @@ import {
   FULL_LADDER_AUDIT_HEADERS,
   FULL_LADDER_AUDIT_SHEET,
 } from "./module20b_operatorEvidence.js";
-import { PREGAME_PACKET_HISTORY_SHEET } from "./module20a_pregamePacket.js";
+import {
+  pregamePacketHistoryRange,
+  PREGAME_PACKET_HISTORY_SHEET,
+} from "./module20a_pregamePacket.js";
 import { logger } from "../../lib/logger.js";
 
 const MLB_API = "https://statsapi.mlb.com/api/v1";
@@ -1728,7 +1731,7 @@ export async function runPostgameDiagnostics(
       packetRaw = ((
         await readRange(
           workbookId,
-          `${PREGAME_PACKET_HISTORY_SHEET}!A1:CA10000`,
+          `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}`,
         )
       ).values ?? []) as unknown[][];
     } catch (error: unknown) {

@@ -21,6 +21,15 @@ import {
 } from "../sheets/client.js";
 import { isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
 import { normalizeFullGameTotalLine } from "./marketLineNormalization.js";
+import {
+  classifyCoSignFragility,
+  classifyDistributionStructure,
+  classifyOpenerChain,
+  classifyScoringPath,
+  classifyTrafficConversion,
+  classifyTrafficDamageCoSign,
+} from "./failureClassificationShared.js";
+import { WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
 import type { ShadowAuditRow } from "./module09s_statcastShadow.js";
@@ -60,8 +69,11 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Reference_Market_Source",
   "Reference_Market_TS",
   "Executable_Market_Line",
+  "Executable_Market_Price",
   "Executable_Market_Source",
   "Executable_Market_TS",
+  "Executable_Market_Quoted_TS",
+  "Executable_Market_Status",
   "Primary_Grade_Market_Line",
   "Primary_Grade_Market_Source",
   "Primary_Grade_Market_Status",
@@ -139,10 +151,50 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Home_Recent_Form_Multiplier",
   "Away_Active_Offense_Center",
   "Home_Active_Offense_Center",
+  // Frozen component-level moderation instrumentation. These are direct
+  // prospective snapshot fields, not new scores or operational inputs.
+  "Engine_Version",
+  "Schema_Version",
+  "Truth_Family",
+  "Truth_Score",
+  "Truth_Checks",
+  "Vehicle_Score",
+  "Vehicle_Checks",
+  "Stability_Score",
+  "Stability_Checks",
+  "Composite_Score",
+  "Confirmation_Gate",
+  "Score_Decision",
+  "Score_Blockers",
+  "Starter_Bullpen_Reliance_State",
+  "Opener_Chain_State",
+  "Traffic_Conversion_Classification",
+  "Traffic_Damage_CoSign_Status",
+  "Traffic_Damage_Fragility_Status",
+  "Distribution_Structure_Status",
+  "Distribution_Risk_Tags",
+  "Environment_Dependence_State",
+  "Lineup_Completeness_State",
 ] as const;
 
 export const PREGAME_PACKET_HISTORY_COLS =
   PREGAME_PACKET_HISTORY_HEADERS.length;
+
+function columnLabel(columnCount: number): string {
+  let value = columnCount;
+  let label = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    value = Math.floor((value - 1) / 26);
+  }
+  return label;
+}
+
+/** Schema-derived sheet range so new packet columns are never truncated. */
+export function pregamePacketHistoryRange(maxRows = 5000): string {
+  return `A1:${columnLabel(PREGAME_PACKET_HISTORY_COLS)}${maxRows}`;
+}
 
 const I = Object.fromEntries(
   PREGAME_PACKET_HISTORY_HEADERS.map((name, index) => [name, index]),
@@ -248,9 +300,9 @@ function operatorNumber(
   const value = operatorValue(snapshot, field);
   const parsed = value === undefined ? Number.NaN : Number.parseFloat(value);
   if (!Number.isFinite(parsed)) return undefined;
-  return field === "CURRENT_HARD_ROCK_LINE"
-    ? normalizeFullGameTotalLine(parsed) ?? undefined
-    : parsed;
+  // Literal operator-supplied Hard Rock values are executable evidence, not
+  // reference-market input. Never normalize or synthesize them here.
+  return parsed;
 }
 
 function operatorFieldTimestamp(
@@ -258,6 +310,38 @@ function operatorFieldTimestamp(
   field: OperatorOverlayField,
 ): string {
   return snapshot?.field_supplied_ts.get(field) ?? "";
+}
+
+function operatorFieldSource(
+  snapshot: OperatorEvidenceSnapshot | undefined,
+  field: OperatorOverlayField,
+): string {
+  return snapshot?.field_sources.get(field) ?? "";
+}
+
+function environmentDependenceState(summary: GameSummaryRow): string {
+  if (summary.weather_vehicle_status !== "ACTIVE") {
+    return "ENVIRONMENT_VEHICLE_NOT_ACTIVE";
+  }
+  if (summary.environment_certainty !== "HIGH") {
+    return "ENVIRONMENT_LOW_CERTAINTY";
+  }
+  if (Math.abs(summary.environment_run_adjustment ?? 0) >= 0.25) {
+    return "ENVIRONMENT_MATERIAL_COMPONENT";
+  }
+  return "ENVIRONMENT_NON_MATERIAL_COMPONENT";
+}
+
+function lineupCompletenessState(
+  awayStatus: string,
+  homeStatus: string,
+  awayCoverage: number | null | undefined,
+  homeCoverage: number | null | undefined,
+): string {
+  const coverage = [awayCoverage, homeCoverage].map((value) =>
+    value === null || value === undefined || !Number.isFinite(value) ? "UNKNOWN" : String(value),
+  );
+  return `AWAY_${awayStatus || "UNKNOWN"}_${coverage[0]}|HOME_${homeStatus || "UNKNOWN"}_${coverage[1]}`;
 }
 
 function operatorPacketProvenance(
@@ -316,15 +400,39 @@ export function buildPregamePacketInputs(
     const referenceMarketTs = referenceMarketLine === null
       ? ""
       : boardRow.final_decision_ts ?? boardRow.projection_generated_ts ?? "";
-    const executableMarketTs = operatorFieldTimestamp(
-      operator,
+    const literalExecutablePrice = operatorValue(operator, "CURRENT_HARD_ROCK_PRICE");
+    // CURRENT_PRICE predates the dedicated executable price field. Retain it
+    // only when a literal Hard Rock line is present; by itself it remains a
+    // manual-ladder price, not evidence that an executable game total existed.
+    const explicitExecutablePrice = literalExecutablePrice
+      ?? (operatorMarketLine === undefined ? undefined : operatorValue(operator, "CURRENT_PRICE"));
+    const explicitExecutableSource = operatorValue(operator, "CURRENT_HARD_ROCK_SOURCE") ?? "";
+    const executableMarketQuotedTs = operatorValue(operator, "CURRENT_HARD_ROCK_QUOTED_TS") ?? "";
+    const executableEvidenceFields: OperatorOverlayField[] = [
       "CURRENT_HARD_ROCK_LINE",
+      "CURRENT_HARD_ROCK_PRICE",
+      "CURRENT_HARD_ROCK_SOURCE",
+      "CURRENT_HARD_ROCK_QUOTED_TS",
+    ];
+    const executableEvidenceField = executableEvidenceFields.find(
+      (field) => operatorValue(operator, field) !== undefined,
     );
+    const executableMarketSource = explicitExecutableSource || (
+      executableEvidenceField === undefined ? "" : operatorFieldSource(operator, executableEvidenceField)
+    );
+    const executableMarketTs = executableEvidenceField === undefined
+      ? ""
+      : operatorFieldTimestamp(operator, executableEvidenceField);
+    const executableMarketStatus = operatorMarketLine !== undefined
+      ? "LITERAL_EXECUTABLE_HARD_ROCK_CAPTURED"
+      : executableEvidenceField === undefined
+        ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
+        : "PARTIAL_LITERAL_EXECUTABLE_HARD_ROCK_EVIDENCE_NO_LINE";
     const primaryMarketSource = operatorMarketLine === undefined
       ? referenceMarketLine === null
         ? ""
         : "AUTOMATED_REFERENCE_BOARD"
-      : "MANUAL_OPERATOR_HARD_ROCK";
+      : "LITERAL_EXECUTABLE_HARD_ROCK";
     const primaryMarketStatus = operatorMarketLine === undefined
       ? referenceMarketLine === null
         ? "MISSING_MARKET"
@@ -332,6 +440,34 @@ export function buildPregamePacketInputs(
       : "EXECUTABLE_OPERATOR_CAPTURED";
     const awayLineupOverride = operatorValue(operator, "AWAY_LINEUP");
     const homeLineupOverride = operatorValue(operator, "HOME_LINEUP");
+    const awayLineupStatus = awayLineupOverride
+      ? "MANUAL_OPERATOR_CONFIRMED"
+      : (summary.away_lineup_status ?? "");
+    const homeLineupStatus = homeLineupOverride
+      ? "MANUAL_OPERATOR_CONFIRMED"
+      : (summary.home_lineup_status ?? "");
+    const awayLineupCoverage = awayLineupOverride ? 100 : summary.away_lineup_coverage;
+    const homeLineupCoverage = homeLineupOverride ? 100 : summary.home_lineup_coverage;
+    const moderationEvidence = {
+      starter_phase_runs: summary.starter_attack_runs ?? null,
+      bullpen_continuation_runs: summary.bullpen_continuation_runs ?? null,
+      away_starter_role: operatorValue(operator, "AWAY_STARTER_ROLE") ?? summary.away_pitcher_role ?? "",
+      home_starter_role: operatorValue(operator, "HOME_STARTER_ROLE") ?? summary.home_pitcher_role ?? "",
+      away_expected_ip: summary.away_expected_innings ?? null,
+      home_expected_ip: summary.home_expected_innings ?? null,
+      collision_status: collisionStatus(collision),
+      collision_traffic_estimate: collision?.traffic_conversion_estimate ?? null,
+      collision_damage_estimate: collision?.hr_xbh_damage_estimate ?? null,
+    };
+    const moderationOpenerChain = classifyOpenerChain(moderationEvidence);
+    const moderationReliance = classifyScoringPath(moderationEvidence);
+    const moderationCoSign = classifyTrafficDamageCoSign(moderationEvidence);
+    const moderationFragility = classifyCoSignFragility(moderationCoSign);
+    const moderationDistribution = classifyDistributionStructure(
+      moderationOpenerChain,
+      moderationReliance,
+      moderationFragility,
+    );
     // Board authorization finalizes before first pitch; forecast provenance
     // does not. Keep the packet refreshable for every legitimate pregame run,
     // then promote the last stored pregame snapshot after first pitch without
@@ -360,8 +496,11 @@ export function buildPregamePacketInputs(
       referenceMarketLine === null ? "" : "AUTOMATED_REFERENCE_BOARD",
       referenceMarketTs,
       blank(operatorMarketLine),
-      operatorMarketLine === undefined ? "" : "MANUAL_OPERATOR_HARD_ROCK",
+      explicitExecutablePrice ?? "",
+      executableMarketSource,
       executableMarketTs,
+      executableMarketQuotedTs,
+      executableMarketStatus,
       blank(packetMarketLine),
       primaryMarketSource,
       primaryMarketStatus,
@@ -385,20 +524,16 @@ export function buildPregamePacketInputs(
       summary.bullpen_continuation_runs,
       summary.baseball_only_projection,
       summary.environment_run_adjustment,
-      awayLineupOverride
-        ? "MANUAL_OPERATOR_CONFIRMED"
-        : summary.away_lineup_status,
-      homeLineupOverride
-        ? "MANUAL_OPERATOR_CONFIRMED"
-        : summary.home_lineup_status,
+      awayLineupStatus,
+      homeLineupStatus,
       awayLineupOverride
         ? "MANUAL_OPERATOR"
         : (summary.away_lineup_source ?? ""),
       homeLineupOverride
         ? "MANUAL_OPERATOR"
         : (summary.home_lineup_source ?? ""),
-      awayLineupOverride ? 100 : summary.away_lineup_coverage,
-      homeLineupOverride ? 100 : summary.home_lineup_coverage,
+      awayLineupCoverage,
+      homeLineupCoverage,
       operatorValue(operator, "STADIUM") ?? summary.stadium,
       operatorNumber(operator, "PARK_MULTIPLIER") ?? summary.park_multiplier,
       summary.weather_multiplier,
@@ -444,6 +579,33 @@ export function buildPregamePacketInputs(
       summary.home_recent_form_multiplier,
       summary.away_active_offense_center,
       summary.home_active_offense_center,
+      boardRow.model_version,
+      WORKBOOK_SCHEMA_VERSION,
+      boardRow.truth_family,
+      boardRow.truth_score,
+      boardRow.truth_components,
+      boardRow.vehicle_score,
+      boardRow.vehicle_components,
+      boardRow.stability_score,
+      boardRow.stability_components,
+      boardRow.composite_score,
+      boardRow.confirmation_gate ? "TRUE" : "FALSE",
+      boardRow.score_decision,
+      boardRow.score_blockers?.join("; ") ?? "",
+      moderationReliance,
+      moderationOpenerChain,
+      classifyTrafficConversion(moderationCoSign),
+      moderationCoSign,
+      moderationFragility,
+      moderationDistribution.distributionStructureStatus,
+      moderationDistribution.distributionRiskTags,
+      environmentDependenceState(summary),
+      lineupCompletenessState(
+        awayLineupStatus,
+        homeLineupStatus,
+        awayLineupCoverage,
+        homeLineupCoverage,
+      ),
     ];
     return [
       {
@@ -600,7 +762,7 @@ export async function writePregamePacketHistory(
     await ensurePacketSheet(workbookId);
     const response = await readRange(
       workbookId,
-      `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ5000`,
+      `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(5000)}`,
     );
     const raw = (response.values ?? []) as unknown[][];
     const existingPacketRows = normalizePregamePacketHistoryRows(raw);
@@ -672,7 +834,7 @@ export async function finalizePregamePacketHistory(
     await ensurePacketSheet(workbookId);
     const response = await readRange(
       workbookId,
-      `${PREGAME_PACKET_HISTORY_SHEET}!A1:CZ5000`,
+      `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(5000)}`,
     );
     const raw = (response.values ?? []) as unknown[][];
     const existingPacketRows = normalizePregamePacketHistoryRows(raw);

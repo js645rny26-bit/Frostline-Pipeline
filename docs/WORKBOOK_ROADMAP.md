@@ -190,13 +190,15 @@ projection, authorization, vehicle selection, or market interpretation.
 
 ### Executable full-game total convention
 
-Frostline represents prospective full-game totals as executable Hard Rock
-half-number lines. If an automated source or a pregame operator entry reports
-an integer, normalize it down one half-run: `10 -> 9.5`, `7 -> 6.5`.
-Existing half-numbers remain unchanged; unsupported fractional values fail
-closed rather than being rounded into an invented market. This is market
-representation only—never an input to the baseball projection. Frozen packets
-and historical grades are never rewritten.
+Reference-market totals use Frostline's half-number representation: an integer
+reference source is normalized down one half-run (`10 -> 9.5`, `7 -> 6.5`),
+while unsupported fractions fail closed rather than being rounded into an
+invented market. A literal pregame Hard Rock quote supplied through
+`OPERATOR_EVIDENCE_OVERLAY`, however, is stored exactly as supplied, along with
+its explicit price, source, and quote timestamp when provided. It is never
+normalized, converted, inferred, or synthesized from a reference-market row.
+This distinction is market provenance only—never an input to the baseball
+projection. Frozen packets and historical grades are never rewritten.
 
 ## Operator evidence and the full-game ladder
 

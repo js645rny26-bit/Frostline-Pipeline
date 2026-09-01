@@ -28,12 +28,15 @@ function packet(status: "OPEN_PROSPECTIVE" | "FROZEN_PREGAME", snapshotTs: strin
   return row;
 }
 
-test("operator overlays accept only explicit, timestamped pre-first-pitch fields", () => {
+test("operator overlays preserve literal Hard Rock evidence and reject late fields", () => {
   const rows: unknown[][] = [
     [...OPERATOR_EVIDENCE_OVERLAY_HEADERS],
     [date, gameId, "Home starter", "Operator Starter", "2026-08-24T22:00:00.000Z", "MANUAL_OPERATOR", "confirmed"],
     [date, gameId, "Park multiplier", "1.07", "2026-08-24T22:01:00.000Z", "MANUAL_OPERATOR", "official venue note"],
     [date, gameId, "Current Hard Rock Line", "10", "2026-08-24T22:02:00.000Z", "MANUAL_OPERATOR", "book board"],
+    [date, gameId, "Current Hard Rock Price", "-121", "2026-08-24T22:02:30.000Z", "HARD_ROCK", "book board"],
+    [date, gameId, "Current Hard Rock Source", "Hard Rock NJ", "2026-08-24T22:02:35.000Z", "MANUAL_OPERATOR", "book board"],
+    [date, gameId, "Current Hard Rock Quoted TS", "2026-08-24T22:01:55.000Z", "2026-08-24T22:02:40.000Z", "MANUAL_OPERATOR", "book board"],
     [date, gameId, "Hard Rock Total Lines", "7, 7.5, 10", "2026-08-24T22:03:00.000Z", "MANUAL_OPERATOR", "book board"],
     [date, gameId, "Preferred Total Vehicle", "OVER 10", "2026-08-24T22:04:00.000Z", "MANUAL_OPERATOR", "book board"],
     [date, gameId, "Weather", "late data", "2026-08-24T23:41:00.000Z", "MANUAL_OPERATOR", "too late"],
@@ -42,9 +45,13 @@ test("operator overlays accept only explicit, timestamped pre-first-pitch fields
   const snapshot = resolved.snapshots.get(gameId);
   assert.equal(snapshot?.fields.get("HOME_STARTER"), "Operator Starter");
   assert.equal(snapshot?.fields.get("PARK_MULTIPLIER"), "1.07");
-  assert.equal(snapshot?.fields.get("CURRENT_HARD_ROCK_LINE"), "9.5");
-  assert.equal(snapshot?.fields.get("HARD_ROCK_TOTAL_LINES"), "6.5, 7.5, 9.5");
-  assert.equal(snapshot?.fields.get("PREFERRED_TOTAL_VEHICLE"), "OVER 9.5");
+  assert.equal(snapshot?.fields.get("CURRENT_HARD_ROCK_LINE"), "10");
+  assert.equal(snapshot?.fields.get("CURRENT_HARD_ROCK_PRICE"), "-121");
+  assert.equal(snapshot?.fields.get("CURRENT_HARD_ROCK_SOURCE"), "Hard Rock NJ");
+  assert.equal(snapshot?.fields.get("CURRENT_HARD_ROCK_QUOTED_TS"), "2026-08-24T22:01:55.000Z");
+  assert.equal(snapshot?.fields.get("HARD_ROCK_TOTAL_LINES"), "7, 7.5, 10");
+  assert.equal(snapshot?.fields.get("PREFERRED_TOTAL_VEHICLE"), "OVER 10");
+  assert.equal(snapshot?.field_sources.get("CURRENT_HARD_ROCK_PRICE"), "HARD_ROCK");
   assert.equal(snapshot?.field_supplied_ts.get("HOME_STARTER"), "2026-08-24T22:00:00.000Z");
   assert.equal(snapshot?.field_supplied_ts.get("PARK_MULTIPLIER"), "2026-08-24T22:01:00.000Z");
   assert.equal(snapshot?.fields.has("WEATHER"), false);

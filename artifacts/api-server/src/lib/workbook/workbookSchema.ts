@@ -126,12 +126,16 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      traffic-only and damage-only scoring support from co-signed tail
  *      candidates and adds a research-only discrimination report. No label
  *      changes projection, market, decision, or authorization behavior.
- *  v44 (2026-08-30): All prospective full-game total market comparisons use
- *      executable Hard Rock half-number representation. Integer source/input
- *      totals normalize to the immediately lower half number; frozen history
+ *  v44 (2026-08-30): Reference-market full-game total comparisons use
+ *      executable Hard Rock half-number representation. Frozen history
  *      remains immutable.
+ *  v45 (2026-09-01): Literal operator-supplied Hard Rock market evidence is
+ *      preserved exactly, separately from reference-market normalization.
+ *      Future frozen packets also preserve component-level moderation state
+ *      (checks, scores, structural labels, source completeness, and versions)
+ *      for prospective research only.
  */
-export const WORKBOOK_SCHEMA_VERSION = 44;
+export const WORKBOOK_SCHEMA_VERSION = 45;
 
 export interface ColumnDef {
   name: string;
@@ -206,8 +210,11 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Reference_Market_Source",
   "Reference_Market_TS",
   "Executable_Market_Line",
+  "Executable_Market_Price",
   "Executable_Market_Source",
   "Executable_Market_TS",
+  "Executable_Market_Quoted_TS",
+  "Executable_Market_Status",
   "Primary_Grade_Market_Line",
   "Primary_Grade_Market_Source",
   "Primary_Grade_Market_Status",
@@ -285,6 +292,28 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Home_Recent_Form_Multiplier",
   "Away_Active_Offense_Center",
   "Home_Active_Offense_Center",
+  "Engine_Version",
+  "Schema_Version",
+  "Truth_Family",
+  "Truth_Score",
+  "Truth_Checks",
+  "Vehicle_Score",
+  "Vehicle_Checks",
+  "Stability_Score",
+  "Stability_Checks",
+  "Composite_Score",
+  "Confirmation_Gate",
+  "Score_Decision",
+  "Score_Blockers",
+  "Starter_Bullpen_Reliance_State",
+  "Opener_Chain_State",
+  "Traffic_Conversion_Classification",
+  "Traffic_Damage_CoSign_Status",
+  "Traffic_Damage_Fragility_Status",
+  "Distribution_Structure_Status",
+  "Distribution_Risk_Tags",
+  "Environment_Dependence_State",
+  "Lineup_Completeness_State",
 ] as const;
 
 const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
@@ -294,6 +323,10 @@ const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
   "Market_Line",
   "Reference_Market_Line",
   "Executable_Market_Line",
+  "Truth_Score",
+  "Vehicle_Score",
+  "Stability_Score",
+  "Composite_Score",
   "Primary_Grade_Market_Line",
   "Confidence",
   "Variance",
