@@ -30,6 +30,10 @@ import {
   classifyTrafficDamageCoSign,
 } from "./failureClassificationShared.js";
 import { buildFrozenSeparationState } from "./separationGateShared.js";
+import {
+  classifyStrictStructuralEligibility,
+  STRICT_STRUCTURAL_COHORT_START_DATE,
+} from "./strictStructuralEligibilityShared.js";
 import { WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
@@ -188,6 +192,27 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Separation_Cohort",
   "Separation_Adjacent_Threshold_Cohort",
   "Separation_Research_Tag",
+  // Day-2 strict research cohort. These fields are append-only and stay blank
+  // for pre-2026-09-02 packets so Day 1 is never backfilled or redefined.
+  "Strict_Structural_Cohort_Version",
+  "Strict_Structural_Snapshot_TS",
+  "Strict_Structural_Verdict",
+  "Strict_Structural_Exclusion_Reasons",
+  "Strict_Check_Core_Packet_Complete",
+  "Strict_Check_Starters_Resolved",
+  "Strict_Check_Expected_Innings_Present",
+  "Strict_Check_Opener_Chain_Clean",
+  "Strict_Check_Bullpen_Usable",
+  "Strict_Check_Offense_Source_Usable",
+  "Strict_Check_Lineup_Data_Usable",
+  "Strict_Check_Park_Source_Usable",
+  "Strict_Check_Lineups_Official",
+  "Strict_Check_Lineups_Full",
+  "Strict_Check_Offense_Sources_Blended",
+  "Strict_Check_Weather_Resolved_Or_Neutral",
+  "Strict_Check_Environment_Certainty_High",
+  "Strict_Check_Weather_Vehicle_Active",
+  "Strict_Structural_Check_Vector",
 ] as const;
 
 export const PREGAME_PACKET_HISTORY_COLS =
@@ -487,6 +512,21 @@ export function buildPregamePacketInputs(
       query_line: packetMarketLine,
       has_literal_executable_hard_rock_line: operatorMarketLine !== undefined,
     });
+    const strictStructural = summary.date >= STRICT_STRUCTURAL_COHORT_START_DATE
+      ? classifyStrictStructuralEligibility({
+        core_packet_status: packetCoreStatus(packetMarketLine),
+        truth_checks: boardRow.truth_components,
+        stability_checks: boardRow.stability_components,
+        opener_chain_state: moderationOpenerChain,
+        away_lineup_status: awayLineupStatus,
+        home_lineup_status: homeLineupStatus,
+        away_lineup_coverage: awayLineupCoverage,
+        home_lineup_coverage: homeLineupCoverage,
+        environment_certainty: operatorValue(operator, "ENVIRONMENT_CERTAINTY") ?? summary.environment_certainty,
+        weather_vehicle_status: summary.weather_vehicle_status,
+        stability_score: boardRow.stability_score,
+      })
+      : null;
     // Board authorization finalizes before first pitch; forecast provenance
     // does not. Keep the packet refreshable for every legitimate pregame run,
     // then promote the last stored pregame snapshot after first pitch without
@@ -635,6 +675,25 @@ export function buildPregamePacketInputs(
       frozenSeparation.separation_cohort,
       frozenSeparation.separation_adjacent_threshold_cohort,
       frozenSeparation.separation_research_tag,
+      strictStructural?.cohort_version ?? "",
+      "",
+      strictStructural?.verdict ?? "",
+      strictStructural?.exclusion_reasons ?? "",
+      strictStructural?.checks.CORE_PACKET_COMPLETE ?? "",
+      strictStructural?.checks.STARTERS_RESOLVED ?? "",
+      strictStructural?.checks.EXPECTED_INNINGS_PRESENT ?? "",
+      strictStructural?.checks.OPENER_CHAIN_CLEAN ?? "",
+      strictStructural?.checks.BULLPEN_USABLE ?? "",
+      strictStructural?.checks.OFFENSE_SOURCE_USABLE ?? "",
+      strictStructural?.checks.LINEUP_DATA_USABLE ?? "",
+      strictStructural?.checks.PARK_SOURCE_USABLE ?? "",
+      strictStructural?.checks.LINEUPS_OFFICIAL ?? "",
+      strictStructural?.checks.LINEUPS_FULL ?? "",
+      strictStructural?.checks.OFFENSE_SOURCES_BLENDED ?? "",
+      strictStructural?.checks.WEATHER_RESOLVED_OR_NEUTRAL ?? "",
+      strictStructural?.checks.ENVIRONMENT_CERTAINTY_HIGH ?? "",
+      strictStructural?.checks.WEATHER_VEHICLE_ACTIVE ?? "",
+      strictStructural?.check_vector ?? "",
     ];
     return [
       {
@@ -689,6 +748,9 @@ export function upsertPregamePacketRows(
     if (existing?.[I.Packet_Status] === "FROZEN_PREGAME") continue;
     const next = pad(input.values);
     next[I.Packet_Snapshot_TS] = snapshotTs;
+    if (next[I.Strict_Structural_Cohort_Version]) {
+      next[I.Strict_Structural_Snapshot_TS] = snapshotTs;
+    }
     if (input.packet_status === "FROZEN_PREGAME")
       next[I.Freeze_TS] = snapshotTs;
     if (existingIndex === undefined) {

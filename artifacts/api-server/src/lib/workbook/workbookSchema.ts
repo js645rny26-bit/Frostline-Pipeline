@@ -138,8 +138,11 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      separation study. It records continuous projection-to-queried-line
  *      distance and fixed cohorts while keeping reference-only observations
  *      distinct from literal Hard Rock half-total calibration evidence.
+ *  v47 (2026-09-02): Frozen packets add STRICT_STRUCTURAL_ELIGIBLE_V1
+ *      criterion vectors for a separate, Day-2-only strict research cohort.
+ *      Day 1 remains untouched and strict evidence is not a board input.
  */
-export const WORKBOOK_SCHEMA_VERSION = 46;
+export const WORKBOOK_SCHEMA_VERSION = 47;
 
 export interface ColumnDef {
   name: string;
@@ -329,6 +332,25 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Separation_Cohort",
   "Separation_Adjacent_Threshold_Cohort",
   "Separation_Research_Tag",
+  "Strict_Structural_Cohort_Version",
+  "Strict_Structural_Snapshot_TS",
+  "Strict_Structural_Verdict",
+  "Strict_Structural_Exclusion_Reasons",
+  "Strict_Check_Core_Packet_Complete",
+  "Strict_Check_Starters_Resolved",
+  "Strict_Check_Expected_Innings_Present",
+  "Strict_Check_Opener_Chain_Clean",
+  "Strict_Check_Bullpen_Usable",
+  "Strict_Check_Offense_Source_Usable",
+  "Strict_Check_Lineup_Data_Usable",
+  "Strict_Check_Park_Source_Usable",
+  "Strict_Check_Lineups_Official",
+  "Strict_Check_Lineups_Full",
+  "Strict_Check_Offense_Sources_Blended",
+  "Strict_Check_Weather_Resolved_Or_Neutral",
+  "Strict_Check_Environment_Certainty_High",
+  "Strict_Check_Weather_Vehicle_Active",
+  "Strict_Structural_Check_Vector",
 ] as const;
 
 const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
@@ -8036,7 +8058,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "PREGAME_PACKET_HISTORY",
     description:
-      "One self-contained, date-anchored record of every valid pre-first-pitch model, market, allocation, starter, bullpen, lineup, environment, collision, low-center, and starter-survival dependency. OPEN packets may update before first pitch; the first FROZEN_PREGAME packet is immutable.",
+      "One self-contained, date-anchored record of every valid pre-first-pitch model, market, allocation, starter, bullpen, lineup, environment, collision, low-center, starter-survival, and Day-2 strict-structural research dependency. OPEN packets may update before first pitch; the first FROZEN_PREGAME packet is immutable.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: PREGAME_PACKET_HISTORY_COLUMNS,

@@ -241,7 +241,12 @@ test("future frozen packets preserve component-level moderation state without ch
   assert.equal(packet.values[index.Environment_Dependence_State], "ENVIRONMENT_MATERIAL_COMPONENT");
   assert.equal(packet.values[index.Lineup_Completeness_State], "AWAY_FULL_100|HOME_PARTIAL_66.7");
   assert.equal(packet.values[index.Engine_Version], "engine-test");
-  assert.equal(packet.values[index.Schema_Version], 46);
+  assert.equal(packet.values[index.Schema_Version], 47);
+  // Day 1 stays exactly in its broad v46 population. Current code must not
+  // retrospectively classify it under the separately versioned Day-2 cohort.
+  assert.equal(packet.values[index.Strict_Structural_Cohort_Version], "");
+  assert.equal(packet.values[index.Strict_Structural_Verdict], "");
+  assert.equal(packet.values[index.Strict_Structural_Check_Vector], "");
 
   const open = upsertPregamePacketRows([], [packet], "2026-08-24T22:45:00.000Z");
   const frozen = upsertPregamePacketRows(open.rows, [], "2026-08-24T23:11:00.000Z");
@@ -252,6 +257,43 @@ test("future frozen packets preserve component-level moderation state without ch
   );
   assert.deepEqual(immutable.rows[0], frozen.rows[0]);
   assert.equal(immutable.rows[0]?.[index.Base_Projection], 8.5);
+});
+
+test("Day 2 strict cohort freezes the complete vector and cannot change after first pitch", () => {
+  const strictDate = "2026-09-02";
+  const strictFirstPitch = "2026-09-02T23:10:00.000Z";
+  const index = Object.fromEntries(PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]));
+  const strictPacket = input("OPEN_PROSPECTIVE", 8.5);
+  strictPacket.date = strictDate;
+  strictPacket.game_id = "20260902_AAA_BBB";
+  strictPacket.scheduled_first_pitch = strictFirstPitch;
+  strictPacket.values = Array(PREGAME_PACKET_HISTORY_COLS).fill("");
+  strictPacket.values[index.Date] = strictDate;
+  strictPacket.values[index.Game_ID] = strictPacket.game_id;
+  strictPacket.values[index.Scheduled_First_Pitch] = strictFirstPitch;
+  strictPacket.values[index.Packet_Status] = "OPEN_PROSPECTIVE";
+  strictPacket.values[index.Base_Projection] = 8.5;
+  strictPacket.values[index.Strict_Structural_Cohort_Version] = "STRICT_STRUCTURAL_ELIGIBLE_V1_2026-09-02";
+  strictPacket.values[index.Strict_Structural_Verdict] = "STRICT_STRUCTURAL_EXCLUDED";
+  strictPacket.values[index.Strict_Structural_Exclusion_Reasons] = "LINEUPS_FULL=FAIL";
+  strictPacket.values[index.Strict_Check_Core_Packet_Complete] = "PASS";
+  strictPacket.values[index.Strict_Check_Lineups_Full] = "FAIL";
+  strictPacket.values[index.Strict_Structural_Check_Vector] = "LINEUPS_FULL=FAIL(AWAY_FULL_1/HOME_PARTIAL_0.8888888889)";
+
+  const open = upsertPregamePacketRows([], [strictPacket], "2026-09-02T23:05:00.000Z");
+  assert.equal(open.rows[0]?.[index.Strict_Structural_Snapshot_TS], "2026-09-02T23:05:00.000Z");
+  const frozen = upsertPregamePacketRows(open.rows, [], "2026-09-02T23:11:00.000Z");
+  const stalePostStart = {
+    ...strictPacket,
+    values: strictPacket.values.map(() => "post-start-mutation"),
+  };
+  const rerun = upsertPregamePacketRows(frozen.rows, [stalePostStart], "2026-09-02T23:12:00.000Z");
+
+  assert.equal(frozen.rows[0]?.[index.Packet_Status], "FROZEN_PREGAME");
+  assert.equal(rerun.rows[0]?.[index.Strict_Structural_Verdict], "STRICT_STRUCTURAL_EXCLUDED");
+  assert.equal(rerun.rows[0]?.[index.Strict_Structural_Snapshot_TS], "2026-09-02T23:05:00.000Z");
+  assert.equal(rerun.rows[0]?.[index.Strict_Check_Lineups_Full], "FAIL");
+  assert.equal(rerun.rows[0]?.[index.Strict_Structural_Check_Vector], "LINEUPS_FULL=FAIL(AWAY_FULL_1/HOME_PARTIAL_0.8888888889)");
 });
 
 test("a frozen pregame packet remains byte-for-byte unchanged on later refresh", () => {
@@ -357,6 +399,9 @@ test("v41 packet header migration preserves old frozen fields by name", () => {
   assert.equal(migrated.rows[0]![index.Executable_Market_Line], "");
   assert.equal(migrated.rows[0]![index.Executable_Market_Price], "");
   assert.equal(migrated.rows[0]![index.Executable_Market_Status], "");
+  assert.equal(migrated.rows[0]![index.Strict_Structural_Cohort_Version], "");
+  assert.equal(migrated.rows[0]![index.Strict_Structural_Verdict], "");
+  assert.equal(migrated.rows[0]![index.Strict_Structural_Check_Vector], "");
 });
 
 test("packet contract preserves market and dependent shadow fields as explicit columns", () => {
@@ -403,6 +448,25 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Separation_Cohort",
     "Separation_Adjacent_Threshold_Cohort",
     "Separation_Research_Tag",
+    "Strict_Structural_Cohort_Version",
+    "Strict_Structural_Snapshot_TS",
+    "Strict_Structural_Verdict",
+    "Strict_Structural_Exclusion_Reasons",
+    "Strict_Check_Core_Packet_Complete",
+    "Strict_Check_Starters_Resolved",
+    "Strict_Check_Expected_Innings_Present",
+    "Strict_Check_Opener_Chain_Clean",
+    "Strict_Check_Bullpen_Usable",
+    "Strict_Check_Offense_Source_Usable",
+    "Strict_Check_Lineup_Data_Usable",
+    "Strict_Check_Park_Source_Usable",
+    "Strict_Check_Lineups_Official",
+    "Strict_Check_Lineups_Full",
+    "Strict_Check_Offense_Sources_Blended",
+    "Strict_Check_Weather_Resolved_Or_Neutral",
+    "Strict_Check_Environment_Certainty_High",
+    "Strict_Check_Weather_Vehicle_Active",
+    "Strict_Structural_Check_Vector",
   ])
     assert.ok(PREGAME_PACKET_HISTORY_HEADERS.includes(required as never));
 });
@@ -410,6 +474,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 46);
-  assert.equal(pregamePacketHistoryRange(5000), "A1:EF5000");
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 47);
+  assert.equal(pregamePacketHistoryRange(5000), "A1:EY5000");
 });
