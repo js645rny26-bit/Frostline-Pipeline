@@ -35,7 +35,7 @@ import {
 } from "./module21_postmortemMechanism.js";
 
 export const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
-export const DECISION_AUDIT_COLS = 62;
+export const DECISION_AUDIT_COLS = 64;
 /** August 10 is the first live slate whose pregame publish includes Module 20. */
 export const DECISION_AUDIT_REQUIRED_FROM_DATE = "2026-08-10";
 
@@ -65,6 +65,7 @@ export const DECISION_AUDIT_HEADER = [
   "Model_Margin_Error", "Manual_Margin_Error",
   "Actual_Winner", "Model_Winner_Result", "Manual_Winner_Result",
   "Freeze_TS",
+  "Settlement_Status", "Settlement_Gap_Reason",
 ] as const;
 
 export type DecisionAuditStatus = "OPEN" | "FROZEN" | "SETTLED" | "AUDIT_GAP";
@@ -166,6 +167,8 @@ export const DECISION_AUDIT_INDEX = {
   MODEL_WINNER_RESULT: 59,
   MANUAL_WINNER_RESULT: 60,
   FREEZE_TS: 61,
+  SETTLEMENT_STATUS: 62,
+  SETTLEMENT_GAP_REASON: 63,
 } as const;
 
 export interface DecisionAuditPregameInput {
@@ -201,6 +204,7 @@ export interface DecisionAuditWriteResult {
   rows_settled: number;
   duplicates_removed: number;
   audit_gaps: number;
+  outcome_gaps: number;
   warnings: string[];
   errors: string[];
 }
@@ -538,6 +542,7 @@ export function upsertDecisionAuditPregameRows(
       ...manual, ...final, ...settlement,
     ].slice(0, DECISION_AUDIT_COLS);
     row[DECISION_AUDIT_INDEX.FREEZE_TS] = status === "FROZEN" ? ts : "";
+    if (!existing) row[DECISION_AUDIT_INDEX.SETTLEMENT_STATUS] = "PENDING_SETTLEMENT";
 
     if (position === undefined) {
       index.set(key, rows.length);
@@ -641,6 +646,12 @@ export function settleDecisionAuditRows(
     current[DECISION_AUDIT_INDEX.MECHANISM] = diagnosis.mechanism;
     current[DECISION_AUDIT_INDEX.LESSON] = diagnosis.lesson;
     current[DECISION_AUDIT_INDEX.GRADED_TS] = ts;
+    current[DECISION_AUDIT_INDEX.SETTLEMENT_STATUS] = isAuditGap
+      ? "NOT_GRADABLE_PREGAME_AUDIT_GAP"
+      : "SETTLED";
+    current[DECISION_AUDIT_INDEX.SETTLEMENT_GAP_REASON] = isAuditGap
+      ? "PREGAME_FREEZE_MISSING"
+      : "";
     const modelAway = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_AWAY]);
     const modelHome = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_HOME]);
     const modelTotal = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_TOTAL]);
@@ -744,6 +755,42 @@ function buildPregameInputs(
   return [...boardInputs, ...protectedMissingInputs];
 }
 
+/**
+ * Settlement is complete only when every decision record for its requested
+ * date either joined an official outcome or carries an explicit terminal
+ * reason. This mutates settlement metadata only; it never reconstructs a
+ * pregame projection, direction, or packet.
+ */
+export function markDecisionAuditOutcomeGaps(
+  existingRows: unknown[][],
+  date: string,
+  outcomeKeys: ReadonlySet<string>,
+): { rows: unknown[][]; outcomeGaps: number; reasons: string[] } {
+  const rows = existingRows.map(padRow);
+  const reasons: string[] = [];
+  let outcomeGaps = 0;
+  for (const row of rows) {
+    if (String(row[DECISION_AUDIT_INDEX.DATE] ?? "") !== date) continue;
+    if (String(row[DECISION_AUDIT_INDEX.GRADED_TS] ?? "").trim()) continue;
+    const key = rowKey(row[DECISION_AUDIT_INDEX.DATE], row[DECISION_AUDIT_INDEX.GAME_ID]);
+    if (outcomeKeys.has(key)) continue;
+    const isAuditGap = row[DECISION_AUDIT_INDEX.AUDIT_STATUS] === "AUDIT_GAP";
+    const status = isAuditGap
+      ? "NOT_GRADABLE_PREGAME_AUDIT_GAP"
+      : date < DECISION_AUDIT_REQUIRED_FROM_DATE
+        ? "HISTORICAL_OUTCOME_GAP"
+        : "MISSING_OFFICIAL_OUTCOME";
+    const reason = isAuditGap
+      ? "PREGAME_FREEZE_MISSING"
+      : "SETTLEMENT_OUTCOME_NOT_FOUND";
+    row[DECISION_AUDIT_INDEX.SETTLEMENT_STATUS] = status;
+    row[DECISION_AUDIT_INDEX.SETTLEMENT_GAP_REASON] = reason;
+    outcomeGaps++;
+    reasons.push(`${String(row[DECISION_AUDIT_INDEX.GAME_ID] ?? "")}:${status}:${reason}`);
+  }
+  return { rows, outcomeGaps, reasons };
+}
+
 async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
   let properties = await getSpreadsheetSheetProperties(workbookId);
   let property = properties.find((sheet) => sheet.title === DECISION_AUDIT_SHEET);
@@ -814,7 +861,7 @@ async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
 }
 
 async function readAuditRows(workbookId: string): Promise<unknown[][]> {
-  const response = await readRange(workbookId, `${DECISION_AUDIT_SHEET}!A1:BJ5000`);
+  const response = await readRange(workbookId, `${DECISION_AUDIT_SHEET}!A1:BL5000`);
   return ((response.values ?? []) as unknown[][]).slice(1);
 }
 
@@ -865,7 +912,7 @@ export async function logDecisionAuditPregame(
       status: errors.length === 0 ? "success" : "partial", phase: "pregame", date,
       rows_written: mutation.rowsWritten, rows_updated: mutation.rowsUpdated,
       rows_frozen: mutation.rowsFrozen, rows_settled: 0,
-      duplicates_removed: mutation.duplicatesRemoved, audit_gaps: mutation.auditGaps, warnings, errors,
+      duplicates_removed: mutation.duplicatesRemoved, audit_gaps: mutation.auditGaps, outcome_gaps: 0, warnings, errors,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -874,7 +921,7 @@ export async function logDecisionAuditPregame(
     return {
       status: "failure", phase: "pregame", date,
       rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
-      duplicates_removed: 0, audit_gaps: 0, warnings, errors,
+      duplicates_removed: 0, audit_gaps: 0, outcome_gaps: 0, warnings, errors,
     };
   }
 }
@@ -903,6 +950,12 @@ export async function settleDecisionAuditLog(
     const missingClassification = classifyMissingDecisionAuditRows(date, unmatched);
     warnings.push(...missingClassification.warnings);
     errors.push(...missingClassification.errors);
+    const gapMarked = markDecisionAuditOutcomeGaps(mutation.rows, date, expectedKeys);
+    if (gapMarked.outcomeGaps > 0) {
+      const message = `DECISION_AUDIT_OUTCOME_GAPS: ${gapMarked.reasons.join(", ")}`;
+      if (date < DECISION_AUDIT_REQUIRED_FROM_DATE) warnings.push(`LEGACY_${message}`);
+      else errors.push(message);
+    }
     if (mutation.auditGaps > 0) {
       // The row is intentionally present and explicitly ungradable.  This is
       // a partial-pregame-scope fact, not a failed settlement write.  A truly
@@ -911,12 +964,12 @@ export async function settleDecisionAuditLog(
         `PREGAME_FREEZE_MISSING: ${mutation.auditGaps} settled game(s) have AUDIT_GAP provenance and remain NOT_GRADABLE`,
       );
     }
-    await writeAuditRows(workbookId, mutation.rows, existing.length);
+    await writeAuditRows(workbookId, gapMarked.rows, existing.length);
     return {
       status: errors.length === 0 ? "success" : "partial", phase: "settlement", date,
       rows_written: 0, rows_updated: mutation.rowsUpdated,
       rows_frozen: 0, rows_settled: mutation.rowsSettled,
-      duplicates_removed: mutation.duplicatesRemoved, audit_gaps: mutation.auditGaps, warnings, errors,
+      duplicates_removed: mutation.duplicatesRemoved, audit_gaps: mutation.auditGaps, outcome_gaps: gapMarked.outcomeGaps, warnings, errors,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -925,7 +978,7 @@ export async function settleDecisionAuditLog(
     return {
       status: "failure", phase: "settlement", date,
       rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
-      duplicates_removed: 0, audit_gaps: 0, warnings, errors,
+      duplicates_removed: 0, audit_gaps: 0, outcome_gaps: 0, warnings, errors,
     };
   }
 }

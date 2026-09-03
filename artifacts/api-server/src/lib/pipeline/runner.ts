@@ -508,8 +508,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_11: { status: "failure", extraction_timestamp_utc: new Date().toISOString(), slate_board: [], active_board_snapshot: [], core_count: 0, no_core_count: 0, core_auth_status: "DISABLED_MONOTONICITY_NOT_COMPUTED", monotonicity_verdict: null, monotonicity_override_active: false, publication_validation: { status: "FAIL", expected_games: 0, board_games: 0, slate_input_games: 0, active_games: 0, errors: ["Skipped: Module 08 failed"] }, error: "Skipped: Module 08 failed" },
       module_12: { status: "failure", archival_timestamp_utc: new Date().toISOString(), bundle_name: `${date}_v01`, bundle_folder_id: "", files_archived: {}, errors: [{ module: "12", error: "Skipped: Module 08 failed", timestamp: new Date().toISOString() }] },
       module_17: { status: "failure", date, publish_ts: new Date().toISOString(), rows_written: 0, rows_skipped: 0, errors: ["Skipped: Module 08 failed"] },
-      module_20_decision_audit: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, duplicates_removed: 0, audit_gaps: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
-      module_20a_pregame_packet: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_skipped_after_first_pitch: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
+      module_20_decision_audit: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, duplicates_removed: 0, audit_gaps: 0, outcome_gaps: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
+      module_20a_pregame_packet: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_skipped_after_first_pitch: 0, packet_snapshot_ts_by_game: {}, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_26_failure_classification: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen_preserved: 0, packets_ineligible: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_20b_full_ladder_audit: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_schema_documentation: {
@@ -717,7 +717,10 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     const publishableBoard = mod11.slate_board.filter(
       (entry) => !currentProtection.protected_game_ids.has(entry.legacy_game_id),
     );
-    return logVehicles(date, publishableBoard, { workbookId }).catch(
+    return logVehicles(date, publishableBoard, {
+      workbookId,
+      packetSnapshotTsByGame: mod20a.packet_snapshot_ts_by_game,
+    }).catch(
       (err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         logger.warn({ err: msg }, "Full pipeline: Module 17 vehicle log threw — continuing");
@@ -765,7 +768,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     return {
       status: "failure", phase: "pregame", date,
       rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
-      duplicates_removed: 0, audit_gaps: 0, warnings: [], errors: [msg],
+      duplicates_removed: 0, audit_gaps: 0, outcome_gaps: 0, warnings: [], errors: [msg],
     };
   });
   if (mod20.status !== "success") {
@@ -915,7 +918,44 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
         ? "partial_success"
         : mod08.status === "partial_failure"
           ? "partial_success"
-          : "success";
+        : "success";
+
+  // Module results frequently carry detailed errors even when the pipeline can
+  // continue in partial scope. Preserve every one in the immutable RUN_LOG
+  // record once, rather than relying on each caller to remember to push it.
+  const recordedIssueKeys = new Set(allErrors.map((issue) => `${issue.module}|${issue.error}`));
+  const retainModuleIssues = (module: string, result: unknown) => {
+    // Modules predate the common result shape: some expose strings, some
+    // structured { error } records, and a few expose no errors member at all.
+    // Normalize only the observability record here; do not change any module's
+    // execution semantics merely to satisfy RUN_LOG.
+    const candidate = result as {
+      errors?: readonly (string | { error?: unknown; message?: unknown })[];
+    };
+    for (const issue of candidate.errors ?? []) {
+      const error = typeof issue === "string"
+        ? issue
+        : String(issue.error ?? issue.message ?? JSON.stringify(issue));
+      const issueKey = `${module}|${error}`;
+      if (recordedIssueKeys.has(issueKey)) continue;
+      allErrors.push({ module, error, timestamp: new Date().toISOString() });
+      recordedIssueKeys.add(issueKey);
+    }
+  };
+  retainModuleIssues("08_feed_writer", mod08);
+  retainModuleIssues("08b_statcast_preview", mod08b);
+  retainModuleIssues("09_recalculation", mod09);
+  retainModuleIssues("09s_statcast_shadow", mod09s);
+  retainModuleIssues("09t_starter_survival", mod09t);
+  retainModuleIssues("09u_starter_survival_v2", mod09u);
+  retainModuleIssues("09v_starter_survival_differentiation", mod09v);
+  retainModuleIssues("10_slate_input", mod10);
+  retainModuleIssues("11_output_extraction", mod11);
+  retainModuleIssues("17_vehicle_log", mod17);
+  retainModuleIssues("20_decision_audit", mod20);
+  retainModuleIssues("20a_pregame_packet", mod20a);
+  retainModuleIssues("20b_full_ladder", mod20b);
+  retainModuleIssues("26_failure_classification", mod26);
 
   // Module 12: Append run log row to RUN_LOG sheet (non-blocking — failure is advisory)
   const mod12 = await archiveRunBundle(
@@ -928,6 +968,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       projection_writable_games: recalculationGames.length,
       audit_gap_games: mod20.audit_gaps,
     },
+    allErrors,
   );
   if (mod12.status !== "success") {
     // Run log is best-effort; don't downgrade overall status for it
@@ -1136,7 +1177,7 @@ export async function runDailySettlement(
       return {
         status: "failure", phase: "settlement", date,
         rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
-        duplicates_removed: 0, audit_gaps: 0, warnings: [], errors: [msg],
+        duplicates_removed: 0, audit_gaps: 0, outcome_gaps: 0, warnings: [], errors: [msg],
       };
     },
   );

@@ -141,8 +141,11 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *  v47 (2026-09-02): Frozen packets add STRICT_STRUCTURAL_ELIGIBLE_V1
  *      criterion vectors for a separate, Day-2-only strict research cohort.
  *      Day 1 remains untouched and strict evidence is not a board input.
+ *  v48 (2026-09-03): P0 structural-leak integrity repairs preserve run issue
+ *      details, explicit decision-outcome gaps, canonical vehicle snapshot
+ *      keys, and reference-price provenance metadata. No model math changes.
  */
-export const WORKBOOK_SCHEMA_VERSION = 47;
+export const WORKBOOK_SCHEMA_VERSION = 48;
 
 export interface ColumnDef {
   name: string;
@@ -2056,6 +2059,32 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         width: 110,
         filledBy: "MODULE_05d",
         exampleValue: "FanDuel",
+      },
+      {
+        name: "Price_Provenance_Status",
+        index: 7,
+        type: "string",
+        width: 230,
+        filledBy: "MODULE_05d",
+        description: "REFERENCE_TOTAL_SYNTHETIC_PRICE | OBSERVED_REFERENCE_PRICE_UNVERIFIED | OBSERVED_REFERENCE_PRICE_INVALID_FORMAT | UNKNOWN_PROVENANCE. Never implies executable-book verification.",
+        exampleValue: "REFERENCE_TOTAL_SYNTHETIC_PRICE",
+      },
+      {
+        name: "Price_Usage_Status",
+        index: 8,
+        type: "string",
+        width: 225,
+        filledBy: "MODULE_05d",
+        description: "Reference/synthetic history is NOT_ELIGIBLE_FOR_EV_VIG_OR_CLV. Literal executable evidence is preserved only in frozen packet operator fields.",
+        exampleValue: "NOT_ELIGIBLE_FOR_EV_VIG_OR_CLV",
+      },
+      {
+        name: "Provenance_Notes",
+        index: 9,
+        type: "string",
+        width: 360,
+        filledBy: "MODULE_05d",
+        exampleValue: "Automated Starting Nine reference total; -110 side prices are synthetic placeholders, not observed executable quotes.",
       },
     ],
   },
@@ -5585,6 +5614,42 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
           "FULL_PREGAME_SCOPE | PARTIAL_PREGAME_SCOPE | NO_PREGAME_SCOPE",
         exampleValue: "PARTIAL_PREGAME_SCOPE",
       },
+      {
+        name: "Critical_Failure_Details",
+        index: 44,
+        type: "string",
+        width: 420,
+        filledBy: "MODULE_12",
+        description: "JSON issue records matching Critical_Failures exactly; each preserves module, code, message, timestamp, fallback state, and usability state.",
+        exampleValue: "[]",
+      },
+      {
+        name: "Warning_Details",
+        index: 45,
+        type: "string",
+        width: 420,
+        filledBy: "MODULE_12",
+        description: "JSON issue records matching Warnings exactly.",
+        exampleValue: "[]",
+      },
+      {
+        name: "Module_Error_Details",
+        index: 46,
+        type: "string",
+        width: 420,
+        filledBy: "MODULE_12",
+        description: "Runner-observed module errors. NOT_DECLARED is recorded when upstream fallback/usability evidence was not supplied.",
+        exampleValue: "[]",
+      },
+      {
+        name: "Run_Log_Integrity_Status",
+        index: 47,
+        type: "string",
+        width: 210,
+        filledBy: "MODULE_12",
+        description: "PASS only when counted validation warning/critical-failure records have matching details; otherwise RUN_LOG_INTEGRITY_FAILURE.",
+        exampleValue: "PASS",
+      },
     ],
   },
 
@@ -7725,7 +7790,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "VEHICLE_LOG",
     description:
-      "Append-only per-game vehicle decision log. Written by module17 (phase 1) after every publish. Idempotent by (date, game_id).",
+      "Append-only per-game vehicle decision log. New rows use Date + Game_ID + Packet_Snapshot_TS as the canonical immutable snapshot key; legacy ambiguous collisions remain preserved but excluded from deterministic joins.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: [
@@ -7861,6 +7926,36 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         filledBy: "MODULE_17",
         readOnly: true,
         exampleValue: "2026-07-24T13:42:11.000Z",
+      },
+      {
+        name: "Packet_Snapshot_TS",
+        index: 14,
+        type: "string",
+        width: 200,
+        filledBy: "MODULE_17",
+        readOnly: true,
+        description: "Exact PREGAME_PACKET_HISTORY snapshot consumed by this vehicle record. Blank only for preserved legacy rows.",
+        exampleValue: "2026-09-03T16:30:00.000Z",
+      },
+      {
+        name: "Vehicle_Snapshot_Key",
+        index: 15,
+        type: "string",
+        width: 330,
+        filledBy: "MODULE_17",
+        readOnly: true,
+        description: "Canonical Date|Game_ID|Packet_Snapshot_TS key. Consumers reject ambiguous legacy duplicates rather than selecting by row order.",
+        exampleValue: "2026-09-03|20260903_AAA_BBB|2026-09-03T16:30:00.000Z",
+      },
+      {
+        name: "Record_Integrity_Status",
+        index: 16,
+        type: "string",
+        width: 220,
+        filledBy: "MODULE_17",
+        readOnly: true,
+        description: "CANONICAL_PACKET_SNAPSHOT for new valid rows; legacy rows stay blank and are never silently selected when conflicting.",
+        exampleValue: "CANONICAL_PACKET_SNAPSHOT",
       },
     ],
   },
@@ -8684,6 +8779,26 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         description:
           "Real timestamp when the coherent pregame snapshot became immutable; distinct from projection generation, decision, publication, and settlement.",
         exampleValue: "2026-08-11T20:51:25.000Z",
+      },
+      {
+        name: "Settlement_Status",
+        index: 62,
+        type: "string",
+        width: 225,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "PENDING_SETTLEMENT | SETTLED | NOT_GRADABLE_PREGAME_AUDIT_GAP | MISSING_OFFICIAL_OUTCOME | HISTORICAL_OUTCOME_GAP. A decision record may not disappear from grading silently.",
+        exampleValue: "SETTLED",
+      },
+      {
+        name: "Settlement_Gap_Reason",
+        index: 63,
+        type: "string",
+        width: 235,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "Named reason when no official outcome could grade the stored decision evidence; never reconstructs pregame state.",
+        exampleValue: "SETTLEMENT_OUTCOME_NOT_FOUND",
       },
     ],
   },

@@ -41,6 +41,7 @@
 
 import { readRange, writeRange, clearRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
+import { selectCanonicalVehicleRows } from "./module17_vehiclePostmortem.js";
 
 // ─── Sheet / column constants ─────────────────────────────────────────────────
 
@@ -467,8 +468,12 @@ function computeMonotonicity(joined: JoinedGame[]): MonotonicityResult {
 async function readVehicleLog(wbId: string): Promise<Map<string, { direction: "OVER" | "UNDER"; market_line: number; projected_total: number; variance: number }>> {
   const map = new Map<string, { direction: "OVER" | "UNDER"; market_line: number; projected_total: number; variance: number }>();
   try {
-    const resp = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A2:N20000`);
-    for (const row of (resp.values ?? []) as string[][]) {
+    const resp = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A2:Q20000`);
+    const integrity = selectCanonicalVehicleRows((resp.values ?? []) as unknown[][]);
+    if (integrity.warnings.length > 0) {
+      logger.warn({ warnings: integrity.warnings, rejected: integrity.rejected }, "MODULE_15: ambiguous VEHICLE_LOG rows excluded from regression join");
+    }
+    for (const row of integrity.rows as string[][]) {
       const gameId    = row[VL_GAME_ID];
       const dir       = row[VL_DIRECTION];
       const line      = parseFloat(row[VL_MARKET_LINE] ?? "");

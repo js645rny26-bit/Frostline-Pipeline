@@ -80,6 +80,7 @@
 
 import { readRange, writeRange, clearRange, expandSheetColumns, addSheet, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
+import { selectCanonicalVehicleRows } from "./module17_vehiclePostmortem.js";
 import { gradeDirectionalOutcome } from "./module14_settlementGrading.js";
 
 // ─── Constants (must stay in sync with module11 / module09) ──────────────────
@@ -432,7 +433,7 @@ export async function runSurvivalGateReplay(
 
   // ── Read all three source sheets concurrently ──────────────────────────────
   const [vlResp, shResp, soResp] = await Promise.all([
-    readRange(wbId, "VEHICLE_LOG!A1:N5000").catch((e: unknown) => { errors.push(`VEHICLE_LOG: ${e instanceof Error ? e.message : String(e)}`); return null; }),
+    readRange(wbId, "VEHICLE_LOG!A1:Q5000").catch((e: unknown) => { errors.push(`VEHICLE_LOG: ${e instanceof Error ? e.message : String(e)}`); return null; }),
     readRange(wbId, "SHADOW_HISTORY!A1:W5000").catch((e: unknown) => { errors.push(`SHADOW_HISTORY: ${e instanceof Error ? e.message : String(e)}`); return null; }),
     readRange(wbId, "SHADOW_OUTCOMES!A1:AG5000").catch((e: unknown) => { errors.push(`SHADOW_OUTCOMES: ${e instanceof Error ? e.message : String(e)}`); return null; }),
   ]);
@@ -461,7 +462,9 @@ export async function runSurvivalGateReplay(
   }
 
   // ── Parse VEHICLE_LOG — filter to date range, all directions ──────────────
-  const vlRows = (vlResp.values ?? []).slice(1) as unknown[][];
+  const vehicleIntegrity = selectCanonicalVehicleRows(((vlResp.values ?? []) as unknown[][]).slice(1));
+  errors.push(...vehicleIntegrity.warnings);
+  const vlRows = vehicleIntegrity.rows;
   const vlMap  = new Map<string, {
     date: string; game_id: string; away: string; home: string; vehicle: string;
     line: number | null; direction: string; proj: number;
@@ -474,7 +477,9 @@ export async function runSurvivalGateReplay(
     const gameId = parseStr(row[VL_GAME_ID]);
     if (!gameId || !date) continue;
 
-    // Deduplicate: keep latest entry per date+game (last row wins)
+    // `selectCanonicalVehicleRows` already rejected ambiguous collisions and
+    // chose either the latest canonical packet snapshot or, for older rows
+    // with distinct Publish_TS values, the documented legacy latest snapshot.
     const key = `${date}|${gameId}`;
     vlMap.set(key, {
       date,

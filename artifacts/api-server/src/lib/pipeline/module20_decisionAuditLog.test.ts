@@ -6,6 +6,7 @@ import {
   DECISION_AUDIT_INDEX as C,
   DECISION_AUDIT_REQUIRED_FROM_DATE,
   classifyMissingDecisionAuditRows,
+  markDecisionAuditOutcomeGaps,
   gradeAuditTruth,
   settleDecisionAuditRows,
   upsertDecisionAuditPregameRows,
@@ -82,14 +83,16 @@ function outcome(overrides: Partial<SettlementRow> = {}): SettlementRow {
   };
 }
 
-test("decision audit schema has the exact 62-column contract", () => {
+test("decision audit schema has the exact 64-column settlement-completeness contract", () => {
   assert.equal(DECISION_AUDIT_HEADER.length, DECISION_AUDIT_COLS);
-  assert.equal(DECISION_AUDIT_COLS, 62);
+  assert.equal(DECISION_AUDIT_COLS, 64);
   assert.equal(DECISION_AUDIT_HEADER[0], "Date");
   assert.equal(DECISION_AUDIT_HEADER[49], "Graded_TS");
   assert.equal(DECISION_AUDIT_HEADER[50], "Model_Total_Error");
   assert.equal(DECISION_AUDIT_HEADER[60], "Manual_Winner_Result");
   assert.equal(DECISION_AUDIT_HEADER[61], "Freeze_TS");
+  assert.equal(DECISION_AUDIT_HEADER[62], "Settlement_Status");
+  assert.equal(DECISION_AUDIT_HEADER[63], "Settlement_Gap_Reason");
 });
 
 test("pregame replay is idempotent by Date + Game_ID with zero duplicates", () => {
@@ -275,6 +278,20 @@ test("settlement appends grading without changing any pregame field", () => {
   assert.equal(settled.rows[0]![C.ACTUAL_WINNER], "AWAY");
   assert.equal(settled.rows[0]![C.MODEL_WINNER_RESULT], "CORRECT");
   assert.equal(settled.rows[0]![C.MANUAL_WINNER_RESULT], "NOT_GRADABLE");
+  assert.equal(settled.rows[0]![C.SETTLEMENT_STATUS], "SETTLED");
+});
+
+test("an existing decision without an official outcome receives an explicit non-grading reason", () => {
+  const pre = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-08-26",
+    game_id: "20260826_TBR_DET",
+    lock_status: "LOCKED_IN",
+  })], TS1);
+  const marked = markDecisionAuditOutcomeGaps(pre.rows, "2026-08-26", new Set());
+  assert.equal(marked.outcomeGaps, 1);
+  assert.equal(marked.rows[0]![C.SETTLEMENT_STATUS], "MISSING_OFFICIAL_OUTCOME");
+  assert.equal(marked.rows[0]![C.SETTLEMENT_GAP_REASON], "SETTLEMENT_OUTCOME_NOT_FOUND");
+  assert.equal(marked.rows[0]![C.FROZEN_TOTAL], 9, "gap status must not rewrite frozen pregame evidence");
 });
 
 test("settlement rerun is idempotent and cannot rewrite frozen reasoning", () => {

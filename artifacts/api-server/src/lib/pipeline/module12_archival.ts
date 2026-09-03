@@ -66,6 +66,12 @@ export const RUN_LOG_HEADERS = [
   "Projection_Writable_Games",
   "Audit_Gap_Games",
   "Publication_Scope",
+  // P0 observability fields. Counts without the corresponding immutable
+  // detail records are an integrity failure, not a successful run log.
+  "Critical_Failure_Details",
+  "Warning_Details",
+  "Module_Error_Details",
+  "Run_Log_Integrity_Status",
 ] as const;
 
 /**
@@ -79,6 +85,87 @@ export interface PublicationScopeAudit {
   feed_writable_games: number;
   projection_writable_games: number;
   audit_gap_games: number;
+}
+
+/**
+ * Normalized issue record deliberately carries the absence of fallback/use
+ * information as data.  Earlier runs recorded neither the issue nor whether
+ * the pipeline could continue; P0 must never manufacture those facts.
+ */
+export interface RunLogIssueDetail {
+  module: string;
+  code: string;
+  message: string;
+  timestamp: string;
+  fallback_state: "NOT_DECLARED" | "NO_FALLBACK" | "FALLBACK_AVAILABLE";
+  usability_state: "BLOCKING" | "WARNING" | "DEGRADED";
+}
+
+export interface RunLogModuleIssue {
+  module: string;
+  error: string;
+  timestamp: string;
+}
+
+/**
+ * Keeps the P0 observability invariant independently testable. A future
+ * caller that reports a count without serializing the corresponding detail
+ * must make the record visibly invalid rather than returning a reassuring
+ * successful run-log row.
+ */
+export function assessRunLogIntegrity(
+  criticalFailureCount: number,
+  warningCount: number,
+  criticalDetails: readonly RunLogIssueDetail[],
+  warningDetails: readonly RunLogIssueDetail[],
+): "PASS" | "RUN_LOG_INTEGRITY_FAILURE" {
+  return criticalDetails.length === criticalFailureCount && warningDetails.length === warningCount
+    ? "PASS"
+    : "RUN_LOG_INTEGRITY_FAILURE";
+}
+
+export function buildRunLogIssueDetails(
+  criticalFailures: readonly string[],
+  warnings: readonly string[],
+  moduleIssues: readonly RunLogModuleIssue[],
+  timestamp: string,
+): {
+  critical: RunLogIssueDetail[];
+  warnings: RunLogIssueDetail[];
+  moduleErrors: RunLogIssueDetail[];
+  integrityStatus: "PASS" | "RUN_LOG_INTEGRITY_FAILURE";
+} {
+  const critical = criticalFailures.map((message) => ({
+    module: "07_validation",
+    code: "VALIDATION_CRITICAL_FAILURE",
+    message,
+    timestamp,
+    fallback_state: "NO_FALLBACK" as const,
+    usability_state: "BLOCKING" as const,
+  }));
+  const warningDetails = warnings.map((message) => ({
+    module: "07_validation",
+    code: "VALIDATION_WARNING",
+    message,
+    timestamp,
+    fallback_state: "NOT_DECLARED" as const,
+    usability_state: "WARNING" as const,
+  }));
+  const moduleErrors = moduleIssues.map((issue) => ({
+    module: issue.module,
+    code: "MODULE_ERROR",
+    message: issue.error,
+    timestamp: issue.timestamp || timestamp,
+    fallback_state: "NOT_DECLARED" as const,
+    usability_state: "DEGRADED" as const,
+  }));
+  const integrityStatus = assessRunLogIntegrity(
+    criticalFailures.length,
+    warnings.length,
+    critical,
+    warningDetails,
+  );
+  return { critical, warnings: warningDetails, moduleErrors, integrityStatus };
 }
 
 export interface ArchivedFile {
@@ -149,6 +236,7 @@ export async function archiveRunBundle(
   workbookId = WORKBOOK_ID,
   statcastPreview: StatcastPreviewResult | null = null,
   scope: PublicationScopeAudit | null = null,
+  moduleIssues: readonly RunLogModuleIssue[] = [],
 ): Promise<Module12Result> {
   const dateStr = slate.date;
   const bundleName = `${dateStr}_v${String(versionNumber).padStart(2, "0")}`;
@@ -180,9 +268,16 @@ export async function archiveRunBundle(
   const weatherFallback = slate.games.length - weatherLive;
 
   const sw = mod08.sheets_written;
-  const errorsJson = JSON.stringify(
-    output.errors.length > 0 ? output.errors : [],
+  const issueDetails = buildRunLogIssueDetails(
+    slate.validation.critical_failures,
+    slate.validation.warnings,
+    moduleIssues,
+    archivalTimestamp,
   );
+  // Retain Errors for backwards compatibility, but it now carries the
+  // upstream module errors that the runner had actually observed rather than
+  // the impossible-to-know result of this row's own future append failure.
+  const errorsJson = JSON.stringify(issueDetails.moduleErrors);
 
   const row = [
     archivalTimestamp,                                   // Run_Timestamp
@@ -233,6 +328,10 @@ export async function archiveRunBundle(
       : scope.projection_writable_games > 0
         ? "PARTIAL_PREGAME_SCOPE"
         : "NO_PREGAME_SCOPE",                            // Publication_Scope
+    JSON.stringify(issueDetails.critical),                // Critical_Failure_Details
+    JSON.stringify(issueDetails.warnings),                // Warning_Details
+    JSON.stringify(issueDetails.moduleErrors),            // Module_Error_Details
+    issueDetails.integrityStatus,                          // Run_Log_Integrity_Status
   ];
 
   try {

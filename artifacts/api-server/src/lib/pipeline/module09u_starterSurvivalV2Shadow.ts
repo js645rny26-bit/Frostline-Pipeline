@@ -141,9 +141,17 @@ export function calibrateStarterFromHistory(
     { rows: roleRows, cohort: "ROLE" },
     { rows: valid, cohort: "GLOBAL" },
   ];
-  // Failure severity is undefined without at least one observed failure. Move
-  // to a broader *empirical* cohort; never inject an arbitrary shortfall.
-  const selectedCandidate = candidates.find((candidate) => candidate.rows.some((row) => row.actual_innings < row.expected_innings));
+  // Both branches are required for a survival/failure calibration. A cohort
+  // containing only failures used to produce a superficially valid 0.0000
+  // survival probability and 0.00 run cost (the NYM–TBR silent-zero path).
+  // Broaden only to another strictly earlier empirical cohort; if no cohort
+  // contains both states, report insufficient history rather than inventing a
+  // baseball zero.
+  const selectedCandidate = candidates.find((candidate) => {
+    const failures = candidate.rows.some((row) => row.actual_innings < row.expected_innings);
+    const survivals = candidate.rows.some((row) => row.actual_innings >= row.expected_innings);
+    return failures && survivals;
+  });
   if (!selectedCandidate) return null;
   const selected = selectedCandidate.rows;
   const cohort = selectedCandidate.cohort;

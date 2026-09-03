@@ -1,8 +1,8 @@
 /**
  * Schema-validation tests: module12 RUN_LOG_HEADERS vs workbookSchema RUN_LOG columns.
  *
- * These tests prove that the 44 header strings module12 writes to the live
- * RUN_LOG sheet exactly match the 44 column definitions registered in
+ * These tests prove that the 48 header strings module12 writes to the live
+ * RUN_LOG sheet exactly match the 48 column definitions registered in
  * workbookSchema.ts — in the same order, with sequential indices.
  *
  * Any rename, reorder, addition, or deletion that keeps one file in sync but
@@ -23,19 +23,19 @@ describe("RUN_LOG schema alignment", () => {
     assert.ok(RUN_LOG_SHEET, "RUN_LOG sheet must be registered in WORKBOOK_SCHEMA");
   });
 
-  it("WORKBOOK_SCHEMA RUN_LOG has exactly 44 columns", () => {
+  it("WORKBOOK_SCHEMA RUN_LOG has exactly 48 columns", () => {
     assert.strictEqual(
       RUN_LOG_SHEET!.columns.length,
-      44,
-      `Expected 44 schema columns, got ${RUN_LOG_SHEET!.columns.length}`,
+      48,
+      `Expected 48 schema columns, got ${RUN_LOG_SHEET!.columns.length}`,
     );
   });
 
-  it("module12 RUN_LOG_HEADERS has exactly 44 entries", () => {
+  it("module12 RUN_LOG_HEADERS has exactly 48 entries", () => {
     assert.strictEqual(
       RUN_LOG_HEADERS.length,
-      44,
-      `Expected 44 RUN_LOG_HEADERS, got ${RUN_LOG_HEADERS.length}`,
+      48,
+      `Expected 48 RUN_LOG_HEADERS, got ${RUN_LOG_HEADERS.length}`,
     );
   });
 
@@ -102,6 +102,22 @@ describe("RUN_LOG schema alignment", () => {
         "Projection_Writable_Games",
         "Audit_Gap_Games",
         "Publication_Scope",
+        "Critical_Failure_Details",
+        "Warning_Details",
+        "Module_Error_Details",
+        "Run_Log_Integrity_Status",
+      ],
+    );
+  });
+
+  it("records counted validation issues as inspectable detail with an integrity verdict", () => {
+    assert.deepEqual(
+      [...RUN_LOG_HEADERS].slice(44),
+      [
+        "Critical_Failure_Details",
+        "Warning_Details",
+        "Module_Error_Details",
+        "Run_Log_Integrity_Status",
       ],
     );
   });

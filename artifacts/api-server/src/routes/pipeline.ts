@@ -457,7 +457,9 @@ router.get("/pipeline/repair-data", async (req, res): Promise<void> => {
   // Game_ID format: "YYYYMMDD_AWAY_HOME". Cross-date = first 8 chars of
   // Game_ID don't match the Date column (normalized via shared toYMD).
   try {
-    const vlResp = await readRange(wbId, "VEHICLE_LOG!A1:N5000");
+    // P0 added canonical packet-snapshot identity fields through Q.  This
+    // repair endpoint must preserve them when it rewrites cross-date rows.
+    const vlResp = await readRange(wbId, "VEHICLE_LOG!A1:Q5000");
     const vlAll  = (vlResp.values ?? []) as unknown[][];
     if (vlAll.length > 1) {
       const dataRows = vlAll.slice(1);
@@ -476,7 +478,7 @@ router.get("/pipeline/repair-data", async (req, res): Promise<void> => {
         clean.push(row);
       }
       if (removed > 0) {
-        await clearRange(wbId, "VEHICLE_LOG!A2:N5000");
+        await clearRange(wbId, "VEHICLE_LOG!A2:Q5000");
         if (clean.length > 0) await writeRange(wbId, "VEHICLE_LOG!A2", clean);
       }
       report["vehicle_log"] = { rows_inspected: dataRows.length, removed };

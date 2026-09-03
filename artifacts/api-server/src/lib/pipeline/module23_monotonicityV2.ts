@@ -9,6 +9,7 @@
 
 import { addSheet, expandSheetColumns, readRange, writeRange, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
+import { selectCanonicalVehicleRows } from "./module17_vehiclePostmortem.js";
 
 const VEHICLE_LOG_SHEET = "VEHICLE_LOG";
 const OUTCOMES_SHEET = "SHADOW_OUTCOMES";
@@ -307,10 +308,11 @@ export async function runMonotonicityV2(options: { workbookId?: string } = {}): 
   const reportTs = new Date().toISOString();
   try {
     const [vehicles, outcomes] = await Promise.all([
-      readRange(workbookId, `${VEHICLE_LOG_SHEET}!A2:N20000`),
+      readRange(workbookId, `${VEHICLE_LOG_SHEET}!A2:Q20000`),
       readRange(workbookId, `${OUTCOMES_SHEET}!A2:H20000`),
     ]);
-    const observations = parseFrozenMonotonicityV2Observations(vehicles.values ?? [], outcomes.values ?? []);
+    const vehicleIntegrity = selectCanonicalVehicleRows((vehicles.values ?? []) as unknown[][]);
+    const observations = parseFrozenMonotonicityV2Observations(vehicleIntegrity.rows, outcomes.values ?? []);
     const summaries = (["OVER", "UNDER"] as Direction[]).map((direction) => buildDirectionalV2Summary(direction, observations.filter((row) => row.direction === direction)));
     const replay = buildMonotonicityV2Replay(observations, summaries, reportTs);
     const calibrationRows: unknown[][] = [];
@@ -323,7 +325,10 @@ export async function runMonotonicityV2(options: { workbookId?: string } = {}): 
     await ensureSheet(workbookId, REPLAY_SHEET, MONOTONICITY_V2_REPLAY_HEADER.length);
     await writeRange(workbookId, `${CALIBRATION_SHEET}!A1`, [Array.from(MONOTONICITY_V2_HEADER), ...calibrationRows]);
     await writeRange(workbookId, `${REPLAY_SHEET}!A1`, [Array.from(MONOTONICITY_V2_REPLAY_HEADER), ...replay]);
-    logger.info({ eligible_games: observations.length, replay_rows: replay.length }, "MODULE_23: Monotonicity V2 written (shadow-only)");
+    if (vehicleIntegrity.warnings.length > 0) {
+      logger.warn({ warnings: vehicleIntegrity.warnings }, "MODULE_23: ambiguous legacy VEHICLE_LOG rows excluded from replay");
+    }
+    logger.info({ eligible_games: observations.length, replay_rows: replay.length, vehicle_integrity_rejections: vehicleIntegrity.rejected.length }, "MODULE_23: Monotonicity V2 written (shadow-only)");
     return { status: "success", report_timestamp_utc: reportTs, eligible_games: observations.length, summaries, replay_rows: replay, errors: [] };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

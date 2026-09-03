@@ -8,6 +8,7 @@
 
 import { addSheet, readRange, writeRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
+import { selectCanonicalVehicleRows } from "./module17_vehiclePostmortem.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 import {
   comparePitcherNames,
@@ -1368,8 +1369,10 @@ export async function runShadowSettlement(
 
   const vehiclesByGame = new Map<string, FrozenProjection>();
   try {
-    const response = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:N5000`);
-    for (const row of ((response.values ?? []) as unknown[][]).slice(1)) {
+    const response = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:Q5000`);
+    const vehicleIntegrity = selectCanonicalVehicleRows(((response.values ?? []) as unknown[][]).slice(1));
+    warnings.push(...vehicleIntegrity.warnings);
+    for (const row of vehicleIntegrity.rows) {
       const gameId = String(row[1] ?? "");
       const projected = numberOrNull(row[7]);
       if (!gameId || projected === null) continue;

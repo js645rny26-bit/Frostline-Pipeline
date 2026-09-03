@@ -234,9 +234,10 @@ export function pregamePacketHistoryRange(maxRows = 5000): string {
   return `A1:${columnLabel(PREGAME_PACKET_HISTORY_COLS)}${maxRows}`;
 }
 
-const I = Object.fromEntries(
+export const PREGAME_PACKET_HISTORY_INDEX = Object.fromEntries(
   PREGAME_PACKET_HISTORY_HEADERS.map((name, index) => [name, index]),
 ) as Record<(typeof PREGAME_PACKET_HISTORY_HEADERS)[number], number>;
+const I = PREGAME_PACKET_HISTORY_INDEX;
 
 export type PregamePacketStatus = "OPEN_PROSPECTIVE" | "FROZEN_PREGAME";
 
@@ -257,6 +258,8 @@ export interface PregamePacketResult {
   rows_updated: number;
   rows_frozen: number;
   rows_skipped_after_first_pitch: number;
+  /** Exact stored packet snapshot for each game visible to a same-run consumer. */
+  packet_snapshot_ts_by_game: Record<string, string>;
   warnings: string[];
   errors: string[];
 }
@@ -890,6 +893,12 @@ export async function writePregamePacketHistory(
       rows_updated: mutation.rowsUpdated,
       rows_frozen: mutation.rowsFrozen,
       rows_skipped_after_first_pitch: mutation.rowsSkippedAfterFirstPitch,
+      packet_snapshot_ts_by_game: Object.fromEntries(
+        mutation.rows
+          .filter((row) => String(row[I.Date] ?? "") === date)
+          .map((row) => [String(row[I.Game_ID] ?? ""), String(row[I.Packet_Snapshot_TS] ?? "")])
+          .filter(([gameId, packetSnapshotTs]) => Boolean(gameId) && Boolean(packetSnapshotTs)),
+      ),
       warnings,
       errors,
     };
@@ -902,6 +911,7 @@ export async function writePregamePacketHistory(
       rows_updated: 0,
       rows_frozen: 0,
       rows_skipped_after_first_pitch: 0,
+      packet_snapshot_ts_by_game: {},
       warnings,
       errors,
     };

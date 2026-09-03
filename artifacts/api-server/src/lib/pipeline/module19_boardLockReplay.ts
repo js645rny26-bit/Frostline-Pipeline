@@ -51,6 +51,7 @@ import { readRange, writeRange, clearRange, expandSheetColumns, addSheet, WORKBO
 import { fetchMlbSchedule } from "./module01_mlbStatsApi.js";
 import { BOARD_LOCK_HOURS_BEFORE_FIRST_PITCH } from "./config.js";
 import { logger } from "../../lib/logger.js";
+import { selectCanonicalVehicleRows } from "./module17_vehiclePostmortem.js";
 
 // ─── VEHICLE_LOG column indices (0-based) ─────────────────────────────────────
 const VL_DATE      = 0;
@@ -211,7 +212,7 @@ export async function runBoardLockReplay(
 
   // ── Read VEHICLE_LOG and BOARD_LOCK_STATE concurrently ───────────────────
   const [vlResp, blsResp] = await Promise.all([
-    readRange(wbId, "VEHICLE_LOG!A1:N10000").catch((e: unknown) => {
+    readRange(wbId, "VEHICLE_LOG!A1:Q10000").catch((e: unknown) => {
       errors.push(`VEHICLE_LOG: ${e instanceof Error ? e.message : String(e)}`);
       return null;
     }),
@@ -255,8 +256,12 @@ export async function runBoardLockReplay(
     logger.info({ date }, "MODULE_19: BOARD_LOCK_STATE unavailable — using VEHICLE_LOG approximation for all games");
   }
 
-  // Deduplicate: keep latest row per game_id on the requested date (last row wins).
-  const vlRows = (vlResp.values ?? []).slice(1) as unknown[][];
+  // Resolve a canonical packet snapshot when available. Legacy same-game rows
+  // use only the documented distinct-Publish_TS rule; ambiguous collisions are
+  // never silently treated as a last-row-wins decision record.
+  const vehicleIntegrity = selectCanonicalVehicleRows(((vlResp.values ?? []) as unknown[][]).slice(1));
+  errors.push(...vehicleIntegrity.warnings);
+  const vlRows = vehicleIntegrity.rows;
   const vlMap = new Map<string, {
     game_id: string; away: string; home: string;
     decision: string; blocker: string; variance: number | null;

@@ -6,6 +6,8 @@ import {
   isFinalizedVehiclePublication,
   postmortemRowToValues,
   selectNewImmutableVehicleRows,
+  selectCanonicalVehicleRows,
+  vehicleSnapshotKey,
   type PostmortemRow,
 } from "./module17_vehiclePostmortem.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
@@ -62,6 +64,50 @@ test("published vehicle rows remain byte-for-byte immutable on later refresh", (
   assert.deepEqual(published, snapshot);
   assert.equal(result.protectedRows, 1);
   assert.deepEqual(result.newRows, []);
+});
+
+test("a same-timestamp divergent legacy vehicle collision is rejected rather than silently selected", () => {
+  const first = [
+    "2026-07-29", "20260729_ATL_NYM", "ATL", "NYM", "GAME_TOTAL", 8.5,
+    "OVER", 9.26, 0.76, "NO_CORE", "", "LEAN", 0.5, "2026-07-29T15:59:42.730Z",
+  ];
+  const second = [...first];
+  second[7] = 7.39;
+  const parsed = selectCanonicalVehicleRows([first, second]);
+  assert.deepEqual(parsed.rows, []);
+  assert.deepEqual(parsed.rejected, [{
+    date: "2026-07-29", game_id: "20260729_ATL_NYM", reason: "VEHICLE_LOG_SNAPSHOT_COLLISION",
+  }]);
+  assert.match(parsed.warnings[0] ?? "", /VEHICLE_LOG_SNAPSHOT_COLLISION/);
+});
+
+test("legacy refreshes with distinct publish timestamps use the documented latest-snapshot rule", () => {
+  const early = [
+    "2026-07-28", "20260728_CLE_CIN", "CLE", "CIN", "GAME_TOTAL", 8.5,
+    "OVER", 8.2, -0.3, "NO_CORE", "", "LEAN", 0.5, "2026-07-28T15:00:00.000Z",
+  ];
+  const late = [...early];
+  late[7] = 8.8;
+  late[13] = "2026-07-28T16:00:00.000Z";
+  const parsed = selectCanonicalVehicleRows([early, late]);
+  assert.deepEqual(parsed.rows, [late]);
+  assert.equal(parsed.rejected.length, 0);
+  assert.match(parsed.warnings[0] ?? "", /VEHICLE_LOG_LEGACY_PUBLISH_TS_SELECTION/);
+});
+
+test("multiple explicitly keyed snapshots select the latest packet deterministically", () => {
+  const early = [
+    "2026-09-03", "20260903_AAA_BBB", "AAA", "BBB", "GAME_TOTAL", 8.5,
+    "OVER", 9.1, 0.6, "NO_CORE", "", "LEAN", 0.5, "2026-09-03T17:00:00.000Z",
+    "2026-09-03T16:00:00.000Z", vehicleSnapshotKey("2026-09-03", "20260903_AAA_BBB", "2026-09-03T16:00:00.000Z"), "CANONICAL_PACKET_SNAPSHOT",
+  ];
+  const late = [...early];
+  late[7] = 8.8;
+  late[14] = "2026-09-03T16:30:00.000Z";
+  late[15] = vehicleSnapshotKey("2026-09-03", "20260903_AAA_BBB", "2026-09-03T16:30:00.000Z");
+  const parsed = selectCanonicalVehicleRows([early, late]);
+  assert.equal(parsed.rejected.length, 0);
+  assert.deepEqual(parsed.rows, [late]);
 });
 
 test("only finalized board-lock states can become immutable vehicle publications", () => {

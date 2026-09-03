@@ -11,12 +11,16 @@
  * A negative move (8.5 → 7.5 = -1.0) signals money on the under.
  */
 
-import { readRange, appendRange, addSheet } from "../sheets/client.js";
+import { readRange, appendRange, addSheet, expandSheetColumns, writeRange } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
 import type { OddsResult } from "./module05b_marketOdds.js";
 
 const SHEET = "ODDS_HISTORY";
-const HEADER = ["Snapshot_TS_UTC", "Date", "Game_ID", "Total", "Over_Odds", "Under_Odds", "Bookmaker"];
+export const ODDS_HISTORY_HEADERS = [
+  "Snapshot_TS_UTC", "Date", "Game_ID", "Total", "Over_Odds", "Under_Odds", "Bookmaker",
+  "Price_Provenance_Status", "Price_Usage_Status", "Provenance_Notes",
+] as const;
+const HEADER = ODDS_HISTORY_HEADERS;
 // Bounded read window: appends are chronological, so today's snapshots always
 // live in the last N rows. 2000 rows covers days of snapshots even at
 // 15 games × dozens of runs/day — safe no matter how large the sheet grows.
@@ -44,13 +48,98 @@ export interface LineMovementResult {
   error?: string;
 }
 
+export type OddsPriceProvenanceStatus =
+  | "REFERENCE_TOTAL_SYNTHETIC_PRICE"
+  | "OBSERVED_REFERENCE_PRICE_UNVERIFIED"
+  | "OBSERVED_REFERENCE_PRICE_INVALID_FORMAT"
+  | "UNKNOWN_PROVENANCE";
+
+export interface OddsPriceProvenance {
+  status: OddsPriceProvenanceStatus;
+  usage_status: "NOT_ELIGIBLE_FOR_EV_VIG_OR_CLV";
+  notes: string;
+}
+
+function validAmericanOdds(value: unknown): boolean {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && Math.abs(parsed) >= 100;
+}
+
+/**
+ * Historic source labels alone cannot prove a literal executable price. The
+ * only historical auto-classification we can make is Starting Nine's known
+ * synthetic -110 convention; everything else stays explicitly unknown.
+ */
+export function classifyOddsPriceProvenance(
+  bookmaker: unknown,
+  overOdds: unknown,
+  underOdds: unknown,
+  historical: boolean,
+): OddsPriceProvenance {
+  const source = String(bookmaker ?? "").trim().toLowerCase();
+  if (source === "mlbstartingnine") {
+    return {
+      status: "REFERENCE_TOTAL_SYNTHETIC_PRICE",
+      usage_status: "NOT_ELIGIBLE_FOR_EV_VIG_OR_CLV",
+      notes: "Automated Starting Nine reference total; -110 side prices are synthetic placeholders, not observed executable quotes.",
+    };
+  }
+  if (historical) {
+    return {
+      status: "UNKNOWN_PROVENANCE",
+      usage_status: "NOT_ELIGIBLE_FOR_EV_VIG_OR_CLV",
+      notes: "Legacy source label does not establish captured book, quote integrity, or executable price provenance.",
+    };
+  }
+  if (!validAmericanOdds(overOdds) || !validAmericanOdds(underOdds)) {
+    return {
+      status: "OBSERVED_REFERENCE_PRICE_INVALID_FORMAT",
+      usage_status: "NOT_ELIGIBLE_FOR_EV_VIG_OR_CLV",
+      notes: "Reference-price capture failed American-odds plausibility validation; retained for provenance only.",
+    };
+  }
+  return {
+    status: "OBSERVED_REFERENCE_PRICE_UNVERIFIED",
+    usage_status: "NOT_ELIGIBLE_FOR_EV_VIG_OR_CLV",
+    notes: "Observed automated reference quote; not verified as a literal executable Hard Rock price.",
+  };
+}
+
+export function classifyHistoricalOddsHistoryRows(rows: unknown[][]): unknown[][] {
+  return rows.map((row) => {
+    const next = [...row];
+    const existing = String(next[7] ?? "").trim();
+    if (existing) return next;
+    const provenance = classifyOddsPriceProvenance(next[6], next[4], next[5], true);
+    next[7] = provenance.status;
+    next[8] = provenance.usage_status;
+    next[9] = provenance.notes;
+    return next;
+  });
+}
+
 async function ensureSheet(workbookId: string): Promise<void> {
+  let created = false;
   try {
     await addSheet(workbookId, SHEET);
-    await appendRange(workbookId, `${SHEET}!A1:G1`, [HEADER]);
+    created = true;
+    await writeRange(workbookId, `${SHEET}!A1:J1`, [Array.from(HEADER)]);
     logger.info("MODULE_05d: Created ODDS_HISTORY sheet");
   } catch {
     // already exists — expected on every run after the first
+  }
+  await expandSheetColumns(workbookId, SHEET, HEADER.length);
+  if (created) return;
+
+  // Metadata-only migration: append provenance classifications beside frozen
+  // historic values; never modify the original line, price, or bookmaker.
+  const existing = await readRange(workbookId, `${SHEET}!A1:J20000`);
+  const raw = (existing.values ?? []) as unknown[][];
+  const data = raw.slice(1);
+  await writeRange(workbookId, `${SHEET}!A1:J1`, [Array.from(HEADER)]);
+  const labelled = classifyHistoricalOddsHistoryRows(data);
+  if (labelled.length > 0) {
+    await writeRange(workbookId, `${SHEET}!H2:J${labelled.length + 1}`, labelled.map((row) => [row[7] ?? "", row[8] ?? "", row[9] ?? ""]));
   }
 }
 
@@ -74,10 +163,14 @@ export async function trackLineMovement(
 
     // 1. Append this run's snapshot
     const ts = new Date().toISOString();
-    const rows = odds.lines.map((l) => [
-      ts, odds.date, l.game_id, l.total, l.over_odds, l.under_odds, l.bookmaker,
-    ]);
-    const appended = await appendRange(workbookId, `${SHEET}!A:G`, rows);
+    const rows = odds.lines.map((l) => {
+      const provenance = classifyOddsPriceProvenance(l.bookmaker, l.over_odds, l.under_odds, false);
+      return [
+        ts, odds.date, l.game_id, l.total, l.over_odds, l.under_odds, l.bookmaker,
+        provenance.status, provenance.usage_status, provenance.notes,
+      ];
+    });
+    const appended = await appendRange(workbookId, `${SHEET}!A:J`, rows);
     result.snapshots_appended = appended.updatedRows;
 
     // 2. Read back today's snapshots → earliest total per game = opener.

@@ -57,6 +57,27 @@ test("v2 refuses to manufacture a probability without settled failure history or
   assert.equal(late.calibration_status, "POST_FIRST_PITCH_REJECTED");
 });
 
+test("v2 does not convert a one-branch cohort into a legitimate numerical zero", () => {
+  const allFailures = [
+    { date: "2026-08-21", expected_innings: 5.7, actual_innings: 4.33, actual_total: 8, dual_survival_total: 8 },
+  ];
+  assert.equal(
+    calibrateStarterFromHistory(allFailures, 5.7, "CONVENTIONAL_STARTER"),
+    null,
+    "a failure-only cohort has no observed survival branch and must be insufficient, not 0.0000",
+  );
+
+  const broaderHistory = [
+    ...allFailures,
+    { date: "2026-08-20", expected_innings: 6, actual_innings: 6, actual_total: 6, dual_survival_total: 6 },
+    { date: "2026-08-20", expected_innings: 6, actual_innings: 4, actual_total: 9, dual_survival_total: 6 },
+  ];
+  const calibration = calibrateStarterFromHistory(broaderHistory, 5.7, "CONVENTIONAL_STARTER");
+  assert.equal(calibration?.cohort, "GLOBAL");
+  assert.ok((calibration?.survival_probability ?? 0) > 0);
+  assert.ok((calibration?.expected_failure_run_cost ?? 0) > 0);
+});
+
 test("v1 report bootstrap uses only earlier settled rows and never same-date records", () => {
   const history = Array(22).fill("");
   history[0] = "2026-08-21";

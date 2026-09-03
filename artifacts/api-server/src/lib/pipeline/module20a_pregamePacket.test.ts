@@ -241,7 +241,7 @@ test("future frozen packets preserve component-level moderation state without ch
   assert.equal(packet.values[index.Environment_Dependence_State], "ENVIRONMENT_MATERIAL_COMPONENT");
   assert.equal(packet.values[index.Lineup_Completeness_State], "AWAY_FULL_100|HOME_PARTIAL_66.7");
   assert.equal(packet.values[index.Engine_Version], "engine-test");
-  assert.equal(packet.values[index.Schema_Version], 47);
+  assert.equal(packet.values[index.Schema_Version], 48);
   // Day 1 stays exactly in its broad v46 population. Current code must not
   // retrospectively classify it under the separately versioned Day-2 cohort.
   assert.equal(packet.values[index.Strict_Structural_Cohort_Version], "");
@@ -474,6 +474,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 47);
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 48);
   assert.equal(pregamePacketHistoryRange(5000), "A1:EY5000");
 });

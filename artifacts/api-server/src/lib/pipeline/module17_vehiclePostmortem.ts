@@ -32,7 +32,8 @@ import type { SlateBoardEntry } from "./module11_outputExtraction.js";
 const VEHICLE_LOG_SHEET  = "VEHICLE_LOG";
 const POSTMORTEM_SHEET   = "VEHICLE_POSTMORTEM";
 const OUTCOMES_SHEET     = "SHADOW_OUTCOMES";
-const LOG_COLS           = 14;
+export const VEHICLE_LOG_COLS = 17;
+const LOG_COLS           = VEHICLE_LOG_COLS;
 const POSTMORTEM_COLS    = 19;
 
 export interface ContiguousVehicleLogUpdate {
@@ -42,11 +43,12 @@ export interface ContiguousVehicleLogUpdate {
 
 // ─── Sheet headers ─────────────────────────────────────────────────────────────
 
-const LOG_HEADER: string[] = [
+export const VEHICLE_LOG_HEADER: string[] = [
   "Date", "Game_ID", "Away_Team", "Home_Team",
   "Vehicle_Type", "Market_Line", "Direction",
   "Projected_Total", "Variance", "Final_Decision", "Core_Blocker",
   "Edge_Strength", "Confidence", "Publish_TS",
+  "Packet_Snapshot_TS", "Vehicle_Snapshot_Key", "Record_Integrity_Status",
 ];
 
 export const POSTMORTEM_HEADER: string[] = [
@@ -71,6 +73,10 @@ const L_FINAL_DECISION = 9;
 const L_CORE_BLOCKER   = 10;
 const L_EDGE_STRENGTH  = 11;
 const L_CONFIDENCE     = 12;
+const L_PUBLISH_TS     = 13;
+export const L_PACKET_SNAPSHOT_TS = 14;
+export const L_VEHICLE_SNAPSHOT_KEY = 15;
+export const L_RECORD_INTEGRITY_STATUS = 16;
 
 // ─── SHADOW_OUTCOMES column indices (0-based) ─────────────────────────────────
 const O_GAME_ID  = 1;
@@ -88,6 +94,12 @@ export interface VehicleLogResult {
   rows_written: number;
   rows_skipped: number;
   errors: string[];
+}
+
+export interface VehicleLogIntegrityResult {
+  rows: unknown[][];
+  rejected: Array<{ date: string; game_id: string; reason: string }>;
+  warnings: string[];
 }
 
 export interface PostmortemRow {
@@ -182,6 +194,77 @@ function gameIdDateMatchesDate(gameId: string, date: string): boolean {
   return gameId.slice(0, 8) === expectedPrefix;
 }
 
+export function vehicleSnapshotKey(date: string, gameId: string, packetSnapshotTs: string): string {
+  return `${date}|${gameId}|${packetSnapshotTs}`;
+}
+
+function rowString(row: unknown[], index: number): string {
+  return String(row[index] ?? "").trim();
+}
+
+function hasCanonicalVehicleSnapshotKey(row: unknown[]): boolean {
+  const date = rowString(row, L_DATE);
+  const gameId = rowString(row, L_GAME_ID);
+  const snapshotTs = rowString(row, L_PACKET_SNAPSHOT_TS);
+  return Boolean(date && gameId && snapshotTs)
+    && rowString(row, L_VEHICLE_SNAPSHOT_KEY) === vehicleSnapshotKey(date, gameId, snapshotTs)
+    && rowString(row, L_RECORD_INTEGRITY_STATUS) === "CANONICAL_PACKET_SNAPSHOT";
+}
+
+/**
+ * VEHICLE_LOG is append-only, so Date + Game_ID is deliberately not a primary
+ * key: a game may have multiple legitimate frozen packet snapshots. New rows
+ * carry a canonical packet key. For frozen legacy rows only, distinct Publish
+ * timestamps are a documented deterministic selection rule. A duplicate
+ * legacy Publish_TS (the 20260729_ATL_NYM defect) cannot be disambiguated and
+ * is rejected from joins instead of last-row-wins.
+ */
+export function selectCanonicalVehicleRows(rows: unknown[][]): VehicleLogIntegrityResult {
+  const byGame = new Map<string, unknown[][]>();
+  for (const row of rows) {
+    const date = rowString(row, L_DATE);
+    const gameId = rowString(row, L_GAME_ID);
+    if (!date || !gameId || !gameIdDateMatchesDate(gameId, date)) continue;
+    const key = `${date}|${gameId}`;
+    const group = byGame.get(key) ?? [];
+    group.push(row);
+    byGame.set(key, group);
+  }
+
+  const accepted: unknown[][] = [];
+  const rejected: VehicleLogIntegrityResult["rejected"] = [];
+  const warnings: string[] = [];
+  for (const [gameKey, group] of byGame) {
+    if (group.length === 1) {
+      accepted.push(group[0]!);
+      continue;
+    }
+    const keyed = group.filter(hasCanonicalVehicleSnapshotKey);
+    const uniqueKeys = new Set(keyed.map((row) => rowString(row, L_VEHICLE_SNAPSHOT_KEY)));
+    if (keyed.length === group.length && uniqueKeys.size === group.length) {
+      // Multiple explicitly keyed snapshots are valid refresh history. The
+      // newest frozen packet is the deterministic consumer selection rule.
+      accepted.push([...keyed].sort((left, right) => rowString(left, L_PACKET_SNAPSHOT_TS).localeCompare(rowString(right, L_PACKET_SNAPSHOT_TS))).at(-1)!);
+      continue;
+    }
+    const publishTimestamps = group.map((row) => rowString(row, L_PUBLISH_TS));
+    const uniquePublishTimestamps = new Set(publishTimestamps);
+    if (
+      keyed.length === 0
+      && publishTimestamps.every(Boolean)
+      && uniquePublishTimestamps.size === group.length
+    ) {
+      accepted.push([...group].sort((left, right) => rowString(left, L_PUBLISH_TS).localeCompare(rowString(right, L_PUBLISH_TS))).at(-1)!);
+      warnings.push(`VEHICLE_LOG_LEGACY_PUBLISH_TS_SELECTION: ${gameKey} selected latest of ${group.length} unkeyed legacy snapshots`);
+      continue;
+    }
+    const [date, gameId] = gameKey.split("|");
+    rejected.push({ date: date!, game_id: gameId!, reason: "VEHICLE_LOG_SNAPSHOT_COLLISION" });
+    warnings.push(`VEHICLE_LOG_SNAPSHOT_COLLISION: ${gameKey} has ${group.length} rows without an unambiguous canonical packet snapshot`);
+  }
+  return { rows: accepted, rejected, warnings };
+}
+
 /** Collapse adjacent in-place updates into the fewest Sheets write requests. */
 export function groupContiguousVehicleLogUpdates(
   rowUpdates: ReadonlyMap<number, unknown[]>,
@@ -208,14 +291,17 @@ export function selectNewImmutableVehicleRows(
   const existingKeys = new Set(existingRows.flatMap((row) => {
     const rowDate = String(row[L_DATE] ?? "");
     const gameId = String(row[L_GAME_ID] ?? "");
+    const snapshotKey = String(row[L_VEHICLE_SNAPSHOT_KEY] ?? "");
     return rowDate && gameId && gameIdDateMatchesDate(gameId, rowDate)
-      ? [`${rowDate}_${gameId}`]
+      ? [snapshotKey || `LEGACY|${rowDate}|${gameId}`]
       : [];
   }));
   const newRows: unknown[][] = [];
   let protectedRows = 0;
   for (const row of candidateRows) {
-    const key = `${String(row[L_DATE] ?? "")}_${String(row[L_GAME_ID] ?? "")}`;
+    const date = String(row[L_DATE] ?? "");
+    const gameId = String(row[L_GAME_ID] ?? "");
+    const key = String(row[L_VEHICLE_SNAPSHOT_KEY] ?? "") || `LEGACY|${date}|${gameId}`;
     if (existingKeys.has(key)) {
       protectedRows++;
       continue;
@@ -235,7 +321,7 @@ export function isFinalizedVehiclePublication(entry: SlateBoardEntry): boolean {
 export async function logVehicles(
   date: string,
   slateBoard: SlateBoardEntry[],
-  options: { workbookId?: string } = {},
+  options: { workbookId?: string; packetSnapshotTsByGame?: Readonly<Record<string, string>> } = {},
 ): Promise<VehicleLogResult> {
   const ts   = new Date().toISOString();
   const wbId = options.workbookId ?? WORKBOOK_ID;
@@ -268,7 +354,7 @@ export async function logVehicles(
   let existingAllRows: unknown[][] = [];
   let existingRowCount = 0;
   try {
-    const resp = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:N5000`);
+    const resp = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:Q5000`);
     existingAllRows = (resp.values ?? []) as unknown[][];
     existingRowCount = existingAllRows.length;
   } catch {
@@ -281,6 +367,11 @@ export async function logVehicles(
   const candidateRows: unknown[][] = [];
 
   for (const e of finalizedEntries) {
+    const packetSnapshotTs = String(options.packetSnapshotTsByGame?.[e.legacy_game_id] ?? "").trim();
+    if (!packetSnapshotTs) {
+      errors.push(`VEHICLE_LOG_PACKET_SNAPSHOT_UNRESOLVED: ${e.legacy_game_id}`);
+      continue;
+    }
     const row: unknown[] = [
       date,
       e.legacy_game_id,
@@ -296,6 +387,9 @@ export async function logVehicles(
       e.edge_strength,
       e.confidence,
       ts,
+      packetSnapshotTs,
+      vehicleSnapshotKey(date, e.legacy_game_id, packetSnapshotTs),
+      "CANONICAL_PACKET_SNAPSHOT",
     ];
 
     candidateRows.push(row);
@@ -309,8 +403,10 @@ export async function logVehicles(
     await expandSheetColumns(wbId, VEHICLE_LOG_SHEET, LOG_COLS);
     const needsHeader = existingRowCount === 0;
     if (needsHeader) {
-      await writeRange(wbId, `${VEHICLE_LOG_SHEET}!A1:N1`, [LOG_HEADER]);
+      await writeRange(wbId, `${VEHICLE_LOG_SHEET}!A1:Q1`, [VEHICLE_LOG_HEADER]);
       existingRowCount = 1;
+    } else {
+      await writeRange(wbId, `${VEHICLE_LOG_SHEET}!A1:Q1`, [VEHICLE_LOG_HEADER]);
     }
 
     // Append only. Existing prospective rows are immutable evidence and may
@@ -319,7 +415,7 @@ export async function logVehicles(
       const startRow = existingRowCount + 1;
       await writeRange(
         wbId,
-        `${VEHICLE_LOG_SHEET}!A${startRow}:N${startRow + newRows.length - 1}`,
+        `${VEHICLE_LOG_SHEET}!A${startRow}:Q${startRow + newRows.length - 1}`,
         newRows,
       );
       rowsWritten += newRows.length;
@@ -368,9 +464,12 @@ export async function runPostmortem(
   // ── Read VEHICLE_LOG for this date ──
   let vehicleRows: string[][] = [];
   try {
-    const resp = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:N5000`);
+    const resp = await readRange(wbId, `${VEHICLE_LOG_SHEET}!A1:Q5000`);
     const all  = (resp.values ?? []) as string[][];
-    vehicleRows = all.slice(1).filter((r) => {
+    const dateRows = all.slice(1).filter((r) => String(r[L_DATE] ?? "") === date);
+    const integrity = selectCanonicalVehicleRows(dateRows);
+    errors.push(...integrity.warnings);
+    vehicleRows = (integrity.rows as string[][]).filter((r) => {
       const rowDate   = r[L_DATE]    ?? "";
       const rowGameId = r[L_GAME_ID] ?? "";
       // Only include rows where (a) date matches requested date and
