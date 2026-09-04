@@ -471,6 +471,42 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Start with Eligible_N; then inspect the correlation against total, starter-window, bullpen-window, and allocation error before proposing any distribution change.",
   },
   {
+    sheet: "DISTRIBUTION_BENCHMARK_V1",
+    stage: "REPLAY",
+    timing:
+      "Daily settlement after GAME_TRUTH_REPLAY_V1 refresh (Module 28)",
+    purpose:
+      "Per-game expanding-window benchmark of price-blind total-run distributions: Negative Binomial with MLE dispersion, Poisson, and an empirical residual comparator.",
+    boardRelationship:
+      "Research-only. It cannot change the published center, create a band, alter a market view, select a vehicle, or affect BET/PASS or authorization.",
+    readNote:
+      "Verify Training_Through_Date and Prior_Settled_Games first. Every evaluation uses only earlier settled frozen games; insufficient-history rows are visible rather than estimated.",
+  },
+  {
+    sheet: "DISTRIBUTION_BENCHMARK_SUMMARY",
+    stage: "REPLAY",
+    timing:
+      "Rebuilt with the distribution benchmark during daily settlement (Module 28)",
+    purpose:
+      "Walk-forward CRPS, log loss, deterministic discrete mid-PIT, 50/80/90 interval coverage, and Brier score at each frozen queried threshold for every comparator.",
+    boardRelationship:
+      "Research-only. No score, coverage rate, or PIT value is an automatic calibration or promotion decision.",
+    readNote:
+      "Read the self-reported eligible N and frozen threshold provenance before comparing a metric. The market query evaluates probability only; it never enters the fit or location.",
+  },
+  {
+    sheet: "DISTRIBUTION_BENCHMARK_PAIRS",
+    stage: "REPLAY",
+    timing:
+      "Rebuilt with the distribution benchmark during daily settlement (Module 28)",
+    purpose:
+      "Within-game paired CRPS, log-loss, and queried-threshold Brier comparisons among NB, Poisson, and empirical residual distributions.",
+    boardRelationship:
+      "Research-only. Paired sign-test evidence cannot tune dispersion, alter a run band, or create any operational authority.",
+    readNote:
+      "Use paired N, ties, score direction, and the two-sided sign-test result together; neither an isolated p-value nor a point estimate promotes a model.",
+  },
+  {
     sheet: "FAILURE_CLASSIFICATION_SHADOW_V1",
     stage: "REPLAY",
     timing:

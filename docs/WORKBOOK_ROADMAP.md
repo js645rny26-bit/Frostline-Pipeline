@@ -151,6 +151,28 @@ roleless records remain usable only for workload/global cohorts. V2's recorded
 `Failure_Run_Cost` is explicitly `DORMANT_UNCONSUMED`: connecting it to a
 scenario total would be a future model change, not an instrumentation repair.
 
+## Shadow distribution benchmark
+
+Schema v50 adds `DISTRIBUTION_BENCHMARK_V1`,
+`DISTRIBUTION_BENCHMARK_SUMMARY`, and `DISTRIBUTION_BENCHMARK_PAIRS`. They are
+the first persisted benchmark for total-run distribution quality; earlier
+conversational NB figures are not workbook evidence.
+
+For each settled game, the benchmark uses only the immutable price-blind
+`Base_Projection` as its location. It compares a Negative Binomial with
+maximum-likelihood dispersion, a Poisson floor, and a discrete empirical
+residual distribution. Every slate is fitted using only strictly earlier
+settled frozen games, never games from that slate, and remains explicitly
+`INSUFFICIENT_PRIOR_SETTLED_GAMES` until 100 earlier observations exist.
+
+The benchmark records CRPS, log loss, deterministic discrete mid-PIT, 50/80/90
+equal-tailed interval bounds and coverage, plus Brier score at each frozen
+queried market threshold. A queried line is an evaluation threshold only: it
+does not enter the fit, mean, alpha, intervals, or any price-blind baseball
+calculation. Pairwise score comparisons use a descriptive two-sided sign test.
+None of these tabs produces a live forecast, a custom run band, an adjustment,
+a market view, a vehicle, or authorization.
+
 ### SSAT family interpretation
 
 `STARTER_SURVIVAL_DIFFERENTIATION_AUDIT` tests whether v2 has earned separate

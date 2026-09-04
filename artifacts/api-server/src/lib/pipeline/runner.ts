@@ -45,6 +45,7 @@ import { runMonotonicityV2, type MonotonicityV2Result } from "./module23_monoton
 import { runPostgameDiagnostics, type PostgameDiagnosticsResult } from "./module24_postgameDiagnostics.js";
 import { runDistributionWidthReplay, type DistributionWidthReplayResult } from "./module25_distributionWidthReplay.js";
 import { runSeparationGateAudit, type SeparationGateAuditResult } from "./module27_separationGateAudit.js";
+import { runDistributionBenchmark, type DistributionBenchmarkResult } from "./module28_distributionBenchmark.js";
 import {
   runFailureClassificationReplay,
   syncFailureClassificationShadow,
@@ -1025,6 +1026,7 @@ export interface DailySettlementResult {
   failure_classification_status: FailureClassificationShadowResult["status"];
   failure_classification_replay_status: FailureClassificationReplayResult["status"];
   separation_gate_audit_status: SeparationGateAuditResult["status"];
+  distribution_benchmark_status: DistributionBenchmarkResult["status"];
   packet_finalization_status: PregamePacketFinalizationResult["status"];
   full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
@@ -1042,6 +1044,7 @@ export interface DailySettlementResult {
   failure_classification: FailureClassificationShadowResult;
   failure_classification_replay: FailureClassificationReplayResult;
   separation_gate_audit: SeparationGateAuditResult;
+  distribution_benchmark: DistributionBenchmarkResult;
   packet_finalization: PregamePacketFinalizationResult;
   full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
@@ -1250,6 +1253,22 @@ export async function runDailySettlement(
     },
   );
 
+  // Module 28 is the first persisted probability-layer benchmark. It consumes
+  // only frozen centers and strictly earlier settled truth; it cannot write a
+  // live forecast, a run band, a market result, or a decision output.
+  const distribution_benchmark = await runDistributionBenchmark({ workbookId }).catch(
+    (err: unknown): DistributionBenchmarkResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`distribution_benchmark: ${msg}`);
+      return {
+        status: "failure", replay_timestamp_utc: new Date().toISOString(),
+        frozen_packets_seen: 0, settled_observations_seen: 0, eligible_games: 0,
+        benchmark_rows_written: 0, summary_rows_written: 0, pair_rows_written: 0,
+        snapshot_mismatches: 0, warnings: [], errors: [msg],
+      };
+    },
+  );
+
   // Steps 2-4 consume the outcome snapshot and write their audit sheets.
   const regression = await runRegressionReport({ workbookId, writeSheets: true }).catch(
     (err: unknown): RegressionReportResult => {
@@ -1360,6 +1379,7 @@ export async function runDailySettlement(
     { module: "MODULE_26_FAILURE_CLASSIFICATION", status: failure_classification.status },
     { module: "MODULE_26_FAILURE_CLASSIFICATION_REPLAY", status: failure_classification_replay.status },
     { module: "MODULE_27_SEPARATION_GATE_AUDIT", status: separation_gate_audit.status },
+    { module: "MODULE_28_DISTRIBUTION_BENCHMARK", status: distribution_benchmark.status },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
@@ -1376,6 +1396,7 @@ export async function runDailySettlement(
   errors.push(...failure_classification.errors.map((message) => `failure_classification: ${message}`));
   errors.push(...failure_classification_replay.errors.map((message) => `failure_classification_replay: ${message}`));
   errors.push(...separation_gate_audit.errors.map((message) => `separation_gate_audit: ${message}`));
+  errors.push(...distribution_benchmark.errors.map((message) => `distribution_benchmark: ${message}`));
 
   const failedCount = module_statuses.filter((module) => module.status === "failure").length;
   const incompleteCount = module_statuses.filter((module) => module.status !== "success").length;
@@ -1401,6 +1422,7 @@ export async function runDailySettlement(
       failure_classification_status: failure_classification.status,
       failure_classification_replay_status: failure_classification_replay.status,
       separation_gate_audit_status: separation_gate_audit.status,
+      distribution_benchmark_status: distribution_benchmark.status,
       packet_finalization_status: packet_finalization.status,
       full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
@@ -1433,6 +1455,7 @@ export async function runDailySettlement(
     failure_classification_status: failure_classification.status,
     failure_classification_replay_status: failure_classification_replay.status,
     separation_gate_audit_status: separation_gate_audit.status,
+    distribution_benchmark_status: distribution_benchmark.status,
     packet_finalization_status: packet_finalization.status,
     full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
@@ -1449,6 +1472,7 @@ export async function runDailySettlement(
     failure_classification,
     failure_classification_replay,
     separation_gate_audit,
+    distribution_benchmark,
     packet_finalization,
     full_ladder_sync,
     schema_documentation,

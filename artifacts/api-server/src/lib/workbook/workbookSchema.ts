@@ -149,8 +149,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      Historical roleless observations remain roleless. Failure-run cost is
  *      explicitly cataloged as DORMANT_UNCONSUMED; no scenario or active
  *      projection math changes.
+ *  v50 (2026-09-04): DISTRIBUTION_BENCHMARK_* is a settlement-only,
+ *      expanding-window NB / Poisson / empirical-residual research benchmark.
+ *      It uses the frozen price-blind center as location, requires 100 earlier
+ *      settled games, and cannot create a forecast, band, or decision output.
  */
-export const WORKBOOK_SCHEMA_VERSION = 49;
+export const WORKBOOK_SCHEMA_VERSION = 50;
 
 export interface ColumnDef {
   name: string;
@@ -188,6 +192,7 @@ export interface ColumnDef {
     | "MODULE_25"
     | "MODULE_26"
     | "MODULE_27"
+    | "MODULE_28"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -716,6 +721,98 @@ const DISTRIBUTION_WIDTH_REPLAY_SUMMARY_COLUMN_NAMES = [
   "Feature_Min",
   "Feature_Max",
   "Outcome_Mean",
+  "Research_Status",
+  "Replay_TS",
+] as const;
+const DISTRIBUTION_BENCHMARK_V1_COLUMN_NAMES = [
+  "Date",
+  "Game_ID",
+  "Frozen_Packet_Snapshot_TS",
+  "Distribution_Benchmark_Version",
+  "Refit_Slate_Date",
+  "Training_Through_Date",
+  "Prior_Settled_Games",
+  "Distribution_Status",
+  "Frozen_Price_Blind_Mean",
+  "Actual_Total",
+  "NB_Alpha",
+  "NB_Alpha_Fit_Status",
+  "Frozen_Queried_Threshold",
+  "Frozen_Threshold_Source",
+  "Threshold_Status",
+  "NB_CRPS",
+  "NB_Log_Loss",
+  "NB_Mid_PIT",
+  "NB_Over_Probability",
+  "NB_Brier_At_Queried_Threshold",
+  "NB_50_Low",
+  "NB_50_High",
+  "NB_50_Covered",
+  "NB_80_Low",
+  "NB_80_High",
+  "NB_80_Covered",
+  "NB_90_Low",
+  "NB_90_High",
+  "NB_90_Covered",
+  "Poisson_CRPS",
+  "Poisson_Log_Loss",
+  "Poisson_Mid_PIT",
+  "Poisson_Over_Probability",
+  "Poisson_Brier_At_Queried_Threshold",
+  "Poisson_50_Low",
+  "Poisson_50_High",
+  "Poisson_50_Covered",
+  "Poisson_80_Low",
+  "Poisson_80_High",
+  "Poisson_80_Covered",
+  "Poisson_90_Low",
+  "Poisson_90_High",
+  "Poisson_90_Covered",
+  "Empirical_Residual_CRPS",
+  "Empirical_Residual_Log_Loss",
+  "Empirical_Residual_Mid_PIT",
+  "Empirical_Residual_Over_Probability",
+  "Empirical_Residual_Brier_At_Queried_Threshold",
+  "Empirical_Residual_50_Low",
+  "Empirical_Residual_50_High",
+  "Empirical_Residual_50_Covered",
+  "Empirical_Residual_80_Low",
+  "Empirical_Residual_80_High",
+  "Empirical_Residual_80_Covered",
+  "Empirical_Residual_90_Low",
+  "Empirical_Residual_90_High",
+  "Empirical_Residual_90_Covered",
+  "Replay_Status",
+  "Settlement_TS",
+] as const;
+const DISTRIBUTION_BENCHMARK_SUMMARY_COLUMN_NAMES = [
+  "Evaluation_Population",
+  "Comparator",
+  "Metric",
+  "Queried_Threshold",
+  "Eligible_N",
+  "Mean_Value",
+  "Median_Value",
+  "Observed_Coverage",
+  "Target_Coverage",
+  "Mean_Mid_PIT",
+  "Research_Status",
+  "Replay_TS",
+] as const;
+const DISTRIBUTION_BENCHMARK_PAIR_COLUMN_NAMES = [
+  "Evaluation_Population",
+  "Metric",
+  "Queried_Threshold",
+  "Model_A",
+  "Model_B",
+  "Paired_N",
+  "Non_Tied_N",
+  "A_Better_Count",
+  "B_Better_Count",
+  "Tie_Count",
+  "Mean_Delta_A_Minus_B",
+  "Median_Delta_A_Minus_B",
+  "Paired_Sign_Test_Two_Sided_P",
   "Research_Status",
   "Replay_TS",
 ] as const;
@@ -7227,6 +7324,102 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Outcome_Mean",
       ],
       "MODULE_25",
+    ),
+  },
+
+  {
+    name: "DISTRIBUTION_BENCHMARK_V1",
+    description:
+      "Settlement-only, expanding-window evaluation of Negative Binomial, Poisson, and empirical-residual total-run distributions. Every eligible row uses the frozen price-blind published center as its location and only earlier settled frozen rows to fit dispersion. It cannot produce an active projection, run band, market view, vehicle, or authorization state.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      DISTRIBUTION_BENCHMARK_V1_COLUMN_NAMES,
+      [
+        "Prior_Settled_Games",
+        "Frozen_Price_Blind_Mean",
+        "Actual_Total",
+        "NB_Alpha",
+        "Frozen_Queried_Threshold",
+        "NB_CRPS",
+        "NB_Log_Loss",
+        "NB_Mid_PIT",
+        "NB_Over_Probability",
+        "NB_Brier_At_Queried_Threshold",
+        "NB_50_Low",
+        "NB_50_High",
+        "NB_80_Low",
+        "NB_80_High",
+        "NB_90_Low",
+        "NB_90_High",
+        "Poisson_CRPS",
+        "Poisson_Log_Loss",
+        "Poisson_Mid_PIT",
+        "Poisson_Over_Probability",
+        "Poisson_Brier_At_Queried_Threshold",
+        "Poisson_50_Low",
+        "Poisson_50_High",
+        "Poisson_80_Low",
+        "Poisson_80_High",
+        "Poisson_90_Low",
+        "Poisson_90_High",
+        "Empirical_Residual_CRPS",
+        "Empirical_Residual_Log_Loss",
+        "Empirical_Residual_Mid_PIT",
+        "Empirical_Residual_Over_Probability",
+        "Empirical_Residual_Brier_At_Queried_Threshold",
+        "Empirical_Residual_50_Low",
+        "Empirical_Residual_50_High",
+        "Empirical_Residual_80_Low",
+        "Empirical_Residual_80_High",
+        "Empirical_Residual_90_Low",
+        "Empirical_Residual_90_High",
+      ],
+      "MODULE_28",
+    ),
+  },
+
+  {
+    name: "DISTRIBUTION_BENCHMARK_SUMMARY",
+    description:
+      "Research-only walk-forward scoring summary for the three price-blind distribution comparators. CRPS, log loss, deterministic discrete mid-PIT, 50/80/90 interval coverage, and Brier score at each frozen queried threshold remain descriptive and have no promotion or board consumer.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      DISTRIBUTION_BENCHMARK_SUMMARY_COLUMN_NAMES,
+      [
+        "Queried_Threshold",
+        "Eligible_N",
+        "Mean_Value",
+        "Median_Value",
+        "Observed_Coverage",
+        "Target_Coverage",
+        "Mean_Mid_PIT",
+      ],
+      "MODULE_28",
+    ),
+  },
+
+  {
+    name: "DISTRIBUTION_BENCHMARK_PAIRS",
+    description:
+      "Paired score comparisons for the distribution benchmark. It reports within-game CRPS, log-loss, and frozen-threshold Brier deltas with two-sided paired sign-test evidence; no result changes a forecast, band, threshold, or authorization.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      DISTRIBUTION_BENCHMARK_PAIR_COLUMN_NAMES,
+      [
+        "Queried_Threshold",
+        "Paired_N",
+        "Non_Tied_N",
+        "A_Better_Count",
+        "B_Better_Count",
+        "Tie_Count",
+        "Mean_Delta_A_Minus_B",
+        "Median_Delta_A_Minus_B",
+        "Paired_Sign_Test_Two_Sided_P",
+      ],
+      "MODULE_28",
     ),
   },
 

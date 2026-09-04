@@ -472,6 +472,17 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     notes: "Neither market line nor price enters the classifier. Labels are research evidence, never coefficients, thresholds, vehicles, or authorization.", freshnessKey: "PREGAME_PACKET",
   },
   {
+    recordType: "PROJECTION", id: "SHADOW_DISTRIBUTION_BENCHMARK_V1", label: "Walk-forward total-runs distribution benchmark",
+    layer: "SETTLEMENT", outputClass: "DIAGNOSTIC", operationalStatus: "SHADOW_ONLY",
+    definition: "Settlement-only Negative Binomial, Poisson, and empirical-residual comparison using the frozen price-blind published total as each model's location. NB dispersion is maximum-likelihood fit only from strictly earlier settled frozen games.",
+    statisticalWindow: "Expanding time-ordered settled history; minimum 100 prior games; refit per slate", gameWindow: "FULL_GAME distribution",
+    primarySource: "PREGAME_PACKET_HISTORY + GAME_TRUTH_REPLAY_V1", fallbackSource: "Explicit INSUFFICIENT_PRIOR_SETTLED_GAMES; never a current-state reconstruction",
+    refreshCadence: "EVERY_SETTLEMENT", freshnessEvidence: "DISTRIBUTION_BENCHMARK_V1 Training_Through_Date/Prior_Settled_Games/Distribution_Status",
+    workbookLocation: "DISTRIBUTION_BENCHMARK_V1; DISTRIBUTION_BENCHMARK_SUMMARY; DISTRIBUTION_BENCHMARK_PAIRS", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
+    correlationFamily: "DISTRIBUTION_RESEARCH", missingBehavior: "No baseline prediction before 100 earlier eligible settled games; frozen queried threshold may be absent without affecting the price-blind fit.",
+    notes: "Reports CRPS, log loss, discrete mid-PIT, 50/80/90 interval coverage, and Brier score at each frozen query separately. It does not create a run band, coefficient, market view, vehicle, or authorization state.", freshnessKey: "PREGAME_PACKET",
+  },
+  {
     recordType: "PROJECTION", id: "STATCAST_XWOBA_SHADOW", label: "Statcast xwOBA shadow total",
     layer: "BASEBALL_MODEL", outputClass: "SHADOW_CHALLENGER", operationalStatus: "SHADOW_ONLY",
     definition: "Preview-driven xwOBA-only shadow candidate.",
