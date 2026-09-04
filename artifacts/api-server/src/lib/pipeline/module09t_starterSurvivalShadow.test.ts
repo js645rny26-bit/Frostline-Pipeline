@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { computeStarterSurvivalRow, STARTER_FAILURE_INNINGS_DELTA, starterSurvivalBranchWorkloads, starterSurvivalProbability } from "./module09t_starterSurvivalShadow.js";
+import { computeStarterSurvivalRow, STARTER_FAILURE_INNINGS_DELTA, STARTER_SURVIVAL_HISTORY_HEADERS, starterSurvivalBranchWorkloads, starterSurvivalProbability } from "./module09t_starterSurvivalShadow.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
+import { WORKBOOK_SCHEMA } from "../workbook/workbookSchema.js";
 
 const firstPitch = "2026-08-21T23:10:00.000Z";
 const pregame = "2026-08-21T16:00:00.000Z";
@@ -19,6 +20,8 @@ test("four-state probabilities sum to one and use the documented temporary defau
   const row = computeStarterSurvivalRow(summary(), firstPitch, pregame);
   assert.equal(row.away_starter_survival_prob, starterSurvivalProbability(6));
   assert.equal(row.home_starter_survival_prob, starterSurvivalProbability(5.5));
+  assert.equal(row.away_starter_role, "CONVENTIONAL_STARTER");
+  assert.equal(row.home_starter_role, "CONVENTIONAL_STARTER");
   assert.ok(Math.abs((row.p_ss! + row.p_fs! + row.p_sf! + row.p_ff!) - 1) < 1e-9);
 });
 
@@ -56,4 +59,10 @@ test("FDS values clamp at zero and post-first-pitch records are rejected", () =>
   const rejected = computeStarterSurvivalRow(summary(), firstPitch, firstPitch);
   assert.equal(rejected.calibration_status, "POST_FIRST_PITCH_REJECTED");
   assert.equal(rejected.starter_survival_adjusted_total, null);
+});
+
+test("V1 history schema freezes the starter-role fields consumed by prospective V2 training", () => {
+  const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "STARTER_SURVIVAL_CALIBRATION_HISTORY");
+  assert.deepEqual(schema?.columns.map((column) => column.name), STARTER_SURVIVAL_HISTORY_HEADERS);
+  assert.deepEqual(STARTER_SURVIVAL_HISTORY_HEADERS.slice(-2), ["Away_Starter_Role", "Home_Starter_Role"]);
 });

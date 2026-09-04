@@ -79,13 +79,15 @@ test("v2 does not convert a one-branch cohort into a legitimate numerical zero",
 });
 
 test("v1 report bootstrap uses only earlier settled rows and never same-date records", () => {
-  const history = Array(22).fill("");
+  const history = Array(24).fill("");
   history[0] = "2026-08-21";
   history[1] = "20260821_AAA_BBB";
   history[5] = 6;
   history[6] = 5;
   history[13] = 7;
   history[21] = "PROSPECTIVE_SHADOW_CANDIDATE";
+  history[22] = "CONVENTIONAL_STARTER";
+  history[23] = "BULK";
   const report = Array(24).fill("");
   report[0] = "2026-08-21";
   report[1] = "20260821_AAA_BBB";
@@ -100,6 +102,7 @@ test("v1 report bootstrap uses only earlier settled rows and never same-date rec
   const observations = parseV1TrainingObservations([history], [report, sameDate], "2026-08-22", "2026-08-22T16:00:00.000Z");
   assert.equal(observations.length, 2);
   assert.ok(observations.every((row) => row.date < "2026-08-22"));
+  assert.deepEqual(observations.map((row) => row.role), ["CONVENTIONAL_STARTER", "BULK"]);
 
   const futureSettlement = [...report];
   futureSettlement[22] = "2026-08-22T18:00:00.000Z";
@@ -108,4 +111,38 @@ test("v1 report bootstrap uses only earlier settled rows and never same-date rec
     0,
     "a settlement completed after the candidate snapshot is not available pregame evidence",
   );
+});
+
+test("unresolved frozen roles remain roleless training evidence", () => {
+  const history = Array(24).fill("");
+  history[0] = "2026-08-21";
+  history[1] = "20260821_AAA_BBB";
+  history[5] = 6;
+  history[6] = 6;
+  history[13] = 7;
+  history[21] = "PROSPECTIVE_SHADOW_CANDIDATE";
+  history[22] = "UNRESOLVED";
+  history[23] = "UNRESOLVED";
+  const report = Array(24).fill("");
+  report[0] = "2026-08-21";
+  report[1] = "20260821_AAA_BBB";
+  report[7] = 10;
+  report[14] = 3;
+  report[15] = 6;
+  report[22] = "2026-08-22T02:00:00.000Z";
+  report[23] = "SETTLED";
+  const observations = parseV1TrainingObservations([history], [report], "2026-08-22", "2026-08-22T16:00:00.000Z");
+  assert.deepEqual(observations.map((row) => row.role), [undefined, undefined]);
+});
+
+test("v2 can select a genuine frozen role-and-workload cohort", () => {
+  const roleTraining = [
+    { date: "2026-08-21", expected_innings: 6, actual_innings: 6, actual_total: 5, dual_survival_total: 6, role: "CONVENTIONAL_STARTER" },
+    { date: "2026-08-20", expected_innings: 6, actual_innings: 4, actual_total: 10, dual_survival_total: 6, role: "CONVENTIONAL_STARTER" },
+    { date: "2026-08-19", expected_innings: 6, actual_innings: 1, actual_total: 12, dual_survival_total: 6, role: "BULK" },
+  ];
+  const calibration = calibrateStarterFromHistory(roleTraining, 6, "CONVENTIONAL_STARTER");
+  assert.equal(calibration?.cohort, "ROLE_AND_WORKLOAD");
+  assert.equal(calibration?.observations, 2);
+  assert.equal(calibration?.failures, 1);
 });

@@ -144,8 +144,13 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *  v48 (2026-09-03): P0 structural-leak integrity repairs preserve run issue
  *      details, explicit decision-outcome gaps, canonical vehicle snapshot
  *      keys, and reference-price provenance metadata. No model math changes.
+ *  v49 (2026-09-04): STARTER_SURVIVAL_CALIBRATION_HISTORY freezes the
+ *      pregame starter roles required for prospective SSAT V2 role cohorts.
+ *      Historical roleless observations remain roleless. Failure-run cost is
+ *      explicitly cataloged as DORMANT_UNCONSUMED; no scenario or active
+ *      projection math changes.
  */
-export const WORKBOOK_SCHEMA_VERSION = 48;
+export const WORKBOOK_SCHEMA_VERSION = 49;
 
 export interface ColumnDef {
   name: string;
@@ -10969,6 +10974,26 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         filledBy: "MODULE_09t",
         readOnly: true,
         exampleValue: "PROSPECTIVE_SHADOW_CANDIDATE",
+      },
+      {
+        name: "Away_Starter_Role",
+        index: 22,
+        type: "string",
+        width: 180,
+        filledBy: "MODULE_09t",
+        readOnly: true,
+        description: "Frozen pregame away starter role for prospective SSAT V2 role-cohort training. Legacy rows may be blank.",
+        exampleValue: "CONVENTIONAL_STARTER",
+      },
+      {
+        name: "Home_Starter_Role",
+        index: 23,
+        type: "string",
+        width: 180,
+        filledBy: "MODULE_09t",
+        readOnly: true,
+        description: "Frozen pregame home starter role for prospective SSAT V2 role-cohort training. Legacy rows may be blank.",
+        exampleValue: "CONVENTIONAL_STARTER",
       },
     ],
   },

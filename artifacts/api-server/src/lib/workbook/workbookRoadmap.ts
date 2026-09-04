@@ -197,7 +197,7 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "AUDIT",
     timing: "Every pre-first-pitch Module 09t run",
     purpose:
-      "Timestamped four-state starter survival/failure branch totals, probabilities, and continuous FDS diagnostics.",
+      "Timestamped four-state starter survival/failure branch totals, probabilities, continuous FDS diagnostics, and frozen pregame starter roles for prospective V2 role-cohort training.",
     boardRelationship:
       "No board input. It is visible evidence for manual review only and cannot change projection, vehicle, market, or authorization.",
     readNote:
@@ -219,7 +219,7 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "AUDIT",
     timing: "Every pre-first-pitch Module 09u run",
     purpose:
-      "Empirical starter survival probability and conditional failure-severity candidate beside frozen base and SSAT v1 values.",
+      "Empirical starter survival probability and conditional workload-failure severity candidate beside frozen base and SSAT v1 values. Failure_Run_Cost is DORMANT_UNCONSUMED metadata, not a scenario input.",
     boardRelationship:
       "No board input. It cannot change projection, vehicle, market, or authorization.",
     readNote:

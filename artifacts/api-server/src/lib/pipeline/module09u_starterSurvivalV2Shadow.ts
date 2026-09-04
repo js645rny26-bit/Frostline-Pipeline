@@ -284,7 +284,23 @@ export function computeStarterSurvivalV2Row(
 
 function key(date: string, gameId: string): string { return `${date}|${gameId}`; }
 
-/** Builds two starter observations per prior settled v1 game. */
+function frozenRoleOrUndefined(value: unknown): string | undefined {
+  const role = String(value ?? "").trim();
+  // UNRESOLVED is an explicit pregame evidence gap, not a pitcher archetype.
+  // It may use workload/global history, but must never manufacture a role
+  // cohort simply because multiple historical values share the same gap label.
+  return role && role !== "UNRESOLVED" ? role : undefined;
+}
+
+/**
+ * Builds two starter observations per prior settled v1 game.
+ *
+ * Roles were added at the end of the v1 history record in schema v49. Older
+ * frozen records intentionally remain roleless; they can still support the
+ * workload/global cohorts but can never be retrospectively recast as a role
+ * cohort. New observations retain the role that was genuinely present in the
+ * pregame V1 packet.
+ */
 export function parseV1TrainingObservations(historyRows: unknown[][], reportRows: unknown[][], beforeDate: string, beforeTs: string): StarterSurvivalTrainingObservation[] {
   const histories = new Map<string, unknown[]>();
   for (const row of historyRows) {
@@ -306,9 +322,11 @@ export function parseV1TrainingObservations(historyRows: unknown[][], reportRows
     const homeExpected = numberOrNull(history[6]);
     const awayActual = numberOrNull(report[14]);
     const homeActual = numberOrNull(report[15]);
+    const awayRole = frozenRoleOrUndefined(history[22]);
+    const homeRole = frozenRoleOrUndefined(history[23]);
     if (actualTotal === null || dualSurvivalTotal === null) continue;
-    if (awayExpected !== null && awayActual !== null) observations.push({ date, expected_innings: awayExpected, actual_innings: awayActual, actual_total: actualTotal, dual_survival_total: dualSurvivalTotal });
-    if (homeExpected !== null && homeActual !== null) observations.push({ date, expected_innings: homeExpected, actual_innings: homeActual, actual_total: actualTotal, dual_survival_total: dualSurvivalTotal });
+    if (awayExpected !== null && awayActual !== null) observations.push({ date, expected_innings: awayExpected, actual_innings: awayActual, actual_total: actualTotal, dual_survival_total: dualSurvivalTotal, role: awayRole });
+    if (homeExpected !== null && homeActual !== null) observations.push({ date, expected_innings: homeExpected, actual_innings: homeActual, actual_total: actualTotal, dual_survival_total: dualSurvivalTotal, role: homeRole });
   }
   return observations;
 }
@@ -333,7 +351,7 @@ export async function computeAndWriteStarterSurvivalV2Shadow(
   const snapshotTs = new Date().toISOString();
   try {
     const [v1History, v1Report] = await Promise.all([
-      readRange(workbookId, `${V1_HISTORY_SHEET}!A1:V10000`),
+      readRange(workbookId, `${V1_HISTORY_SHEET}!A1:X10000`),
       readRange(workbookId, `${V1_REPORT_SHEET}!A1:X10000`),
     ]);
     const date = summaries[0]?.date ?? "";

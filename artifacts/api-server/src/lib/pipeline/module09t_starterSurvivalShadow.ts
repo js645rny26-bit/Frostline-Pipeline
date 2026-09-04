@@ -21,6 +21,7 @@ export const STARTER_SURVIVAL_HISTORY_HEADERS = [
   "Away_Starter_Survival_Workload", "Home_Starter_Survival_Workload", "Away_Starter_Survival_Prob", "Home_Starter_Survival_Prob",
   "P_SS", "P_FS", "P_SF", "P_FF", "T_SS", "T_FS", "T_SF", "T_FF",
   "Away_Starter_FDS", "Home_Starter_FDS", "Game_FDS", "Snapshot_TS", "Calibration_Status",
+  "Away_Starter_Role", "Home_Starter_Role",
 ];
 
 export type StarterSurvivalStatus = "PROSPECTIVE_SHADOW_CANDIDATE" | "POST_FIRST_PITCH_REJECTED" | "INSUFFICIENT_INPUT";
@@ -34,6 +35,8 @@ export interface StarterSurvivalRow {
   t_ss: number | null; t_fs: number | null; t_sf: number | null; t_ff: number | null;
   away_starter_fds: number | null; home_starter_fds: number | null; game_fds: number | null;
   snapshot_ts: string; calibration_status: StarterSurvivalStatus;
+  /** Frozen pregame role evidence for prospective empirical V2 training. */
+  away_starter_role: string; home_starter_role: string;
 }
 
 export interface StarterSurvivalResult { status: "success" | "partial"; rows_computed: number; rows_written: number; errors: string[]; rows: StarterSurvivalRow[]; }
@@ -103,6 +106,8 @@ export function computeStarterSurvivalRow(
     p_ss: null, p_fs: null, p_sf: null, p_ff: null, t_ss: null, t_fs: null, t_sf: null, t_ff: null,
     away_starter_fds: null, home_starter_fds: null, game_fds: null, snapshot_ts: snapshotTs,
     calibration_status: "INSUFFICIENT_INPUT",
+    away_starter_role: summary.away_pitcher_role || "UNRESOLVED",
+    home_starter_role: summary.home_pitcher_role || "UNRESOLVED",
   };
   if (!inputsAvailable(summary) || !scheduledFirstPitch || !Number.isFinite(Date.parse(scheduledFirstPitch))) return base;
   if (Date.parse(snapshotTs) >= Date.parse(scheduledFirstPitch)) return { ...base, calibration_status: "POST_FIRST_PITCH_REJECTED" };
@@ -141,7 +146,8 @@ function rowValues(row: StarterSurvivalRow): unknown[] {
   return [row.date, row.game_id, row.scheduled_first_pitch, row.base_projected_total, row.starter_survival_adjusted_total ?? "",
     row.away_starter_survival_workload ?? "", row.home_starter_survival_workload ?? "", row.away_starter_survival_prob ?? "", row.home_starter_survival_prob ?? "",
     row.p_ss ?? "", row.p_fs ?? "", row.p_sf ?? "", row.p_ff ?? "", row.t_ss ?? "", row.t_fs ?? "", row.t_sf ?? "", row.t_ff ?? "",
-    row.away_starter_fds ?? "", row.home_starter_fds ?? "", row.game_fds ?? "", row.snapshot_ts, row.calibration_status];
+    row.away_starter_fds ?? "", row.home_starter_fds ?? "", row.game_fds ?? "", row.snapshot_ts, row.calibration_status,
+    row.away_starter_role, row.home_starter_role];
 }
 
 export async function computeAndWriteStarterSurvivalShadow(
@@ -160,7 +166,7 @@ export async function computeAndWriteStarterSurvivalShadow(
   try {
     let existing: unknown[][] = [];
     try {
-      existing = (await readRange(workbookId, `${STARTER_SURVIVAL_HISTORY_SHEET}!A1:V10000`)).values ?? [];
+      existing = (await readRange(workbookId, `${STARTER_SURVIVAL_HISTORY_SHEET}!A1:X10000`)).values ?? [];
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       if (!message.includes("Unable to parse range") && !message.includes("400")) throw error;

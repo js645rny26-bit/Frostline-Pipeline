@@ -144,6 +144,13 @@ cost. It does not silently reapply the v1 `IP / 9` proxy when history is thin;
 instead it records an explicit insufficiency. Its outputs are never board,
 vehicle, market, projection, or authorization inputs.
 
+Schema v49 freezes the genuine pregame away/home starter role in future V1
+history records, allowing V2's strictly-earlier training parser to form role
+and role-plus-workload cohorts without reconstructing older evidence. Legacy
+roleless records remain usable only for workload/global cohorts. V2's recorded
+`Failure_Run_Cost` is explicitly `DORMANT_UNCONSUMED`: connecting it to a
+scenario total would be a future model change, not an instrumentation repair.
+
 ### SSAT family interpretation
 
 `STARTER_SURVIVAL_DIFFERENTIATION_AUDIT` tests whether v2 has earned separate

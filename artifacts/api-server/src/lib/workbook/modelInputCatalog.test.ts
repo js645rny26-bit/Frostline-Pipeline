@@ -81,6 +81,16 @@ test("catalog renders source materialization separately from the static registry
   assert.equal(rows[sourceIndex]?.[15], "CURRENT_MATERIALIZED (30)");
 });
 
+test("SSAT V2 failure run cost is explicitly dormant and cannot be mistaken for a scenario input", () => {
+  const entry = getModelInputCatalogEntries().find(
+    (candidate) => candidate.id === "SSAT_V2_FAILURE_RUN_COST",
+  );
+  assert.equal(entry?.operationalStatus, "DORMANT_UNCONSUMED");
+  assert.equal(entry?.feedsActiveProjection, "NO");
+  assert.equal(entry?.feedsDecisionBoard, "NO");
+  assert.match(entry?.notes ?? "", /not authorized/i);
+});
+
 test("catalog sheet existence is determined from workbook metadata", async () => {
   let addCalls = 0;
   await ensureModelInputCatalogSheet("workbook", {

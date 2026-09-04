@@ -70,7 +70,8 @@ interface ModelInputCatalogEntry {
     | "DECOMMISSIONED_PLACEHOLDER"
     | "MISSING"
     | "FALLBACK_ONLY"
-    | "LEGACY_ALIAS";
+    | "LEGACY_ALIAS"
+    | "DORMANT_UNCONSUMED";
   definition: string;
   statisticalWindow: string;
   gameWindow: string;
@@ -524,6 +525,17 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     workbookLocation: "SSAT V1/V2 history and report tabs", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
     correlationFamily: "SSAT", missingBehavior: "Candidate gap, not a baseball conclusion.",
     notes: "Do not count V1 and V2 as two independent confirmations.",
+  },
+  {
+    recordType: "INPUT", id: "SSAT_V2_FAILURE_RUN_COST", label: "SSAT V2 conditional failure run cost",
+    layer: "BASEBALL_MODEL", outputClass: "DIAGNOSTIC", operationalStatus: "DORMANT_UNCONSUMED",
+    definition: "Empirical conditional total-run cost recorded when a starter misses expected workload. It is computed from strictly earlier settled observations but is not a scenario-total input.",
+    statisticalWindow: "Strictly earlier settled workload-failure observations", gameWindow: "STARTER_WINDOW -> BULLPEN_WINDOW -> FULL_GAME",
+    primarySource: "STARTER_SURVIVAL_V2_CALIBRATION_HISTORY / REPORT", fallbackSource: "NONE",
+    refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "Away/Home_Starter_Failure_Run_Cost with V2 cohort provenance",
+    workbookLocation: "STARTER_SURVIVAL_V2_CALIBRATION_HISTORY and REPORT", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
+    correlationFamily: "SSAT", missingBehavior: "Null/insufficient empirical history remains an explicit candidate gap.",
+    notes: "DORMANT_UNCONSUMED: connecting this quantity to T_SS/T_FS/T_SF/T_FF would be a separate model change and is not authorized by this instrumentation repair.",
   },
   {
     recordType: "PROJECTION", id: "MARKET_COMPARATOR", label: "Market line, edge, direction, decision",
