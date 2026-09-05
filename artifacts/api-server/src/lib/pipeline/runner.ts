@@ -1066,7 +1066,16 @@ export interface DailySettlementResult {
   gate_denominator: number | null;
   /** OVER rows with a known actual total — sample-size gauge for calibration. */
   total_eligible_settled: number;
+  /** Non-fatal module visibility events, retained separately from execution errors. */
+  warnings: string[];
   errors: string[];
+}
+
+/** The settlement endpoint is successful only when every module completed. */
+export function dailySettlementHttpStatus(
+  status: DailySettlementResult["status"],
+): 200 | 500 {
+  return status === "success" ? 200 : 500;
 }
 
 /**
@@ -1095,6 +1104,7 @@ export async function runDailySettlement(
 ): Promise<DailySettlementResult> {
   logger.info({ date, workbookId }, "Daily settlement: starting complete feedback loop");
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   // Settlement may only complete the lifecycle of a packet that was already
   // written before first pitch. It never refreshes or reconstructs pregame
@@ -1339,6 +1349,7 @@ export async function runDailySettlement(
       collateral_blocks: 0,
       gate_denominator: null,
       rows: [],
+      warnings: [],
       errors: [msg],
     } satisfies SurvivalReplayResult;
   });
@@ -1391,6 +1402,7 @@ export async function runDailySettlement(
   errors.push(...regression.errors.map((message) => `regression: ${message}`));
   errors.push(...starter_audit.errors.map((message) => `starter_audit: ${message}`));
   errors.push(...vehicle_postmortem.errors.map((message) => `vehicle_postmortem: ${message}`));
+  warnings.push(...survival_replay.warnings.map((message) => `survival_replay: ${message}`));
   errors.push(...survival_replay.errors.map((message) => `survival_replay: ${message}`));
   errors.push(...collision_replay.errors.map((message) => `collision_replay: ${message}`));
   errors.push(...monotonicity_v2.errors.map((message) => `monotonicity_v2: ${message}`));
@@ -1437,6 +1449,7 @@ export async function runDailySettlement(
       correct_blocks: survival_replay.correct_blocks,
       collateral_blocks: survival_replay.collateral_blocks,
       total_eligible_settled,
+      warning_count: warnings.length,
       replayed_core: survival_replay.replayed_core,
       replayed_blocked: survival_replay.replayed_blocked,
     },
@@ -1486,6 +1499,7 @@ export async function runDailySettlement(
     passed_winners,
     gate_denominator,
     total_eligible_settled,
+    warnings,
     errors,
   };
 }

@@ -5,7 +5,7 @@ import {
   GetPipelineSummaryQueryParams,
   GetPipelineScheduleQueryParams,
 } from "@workspace/api-zod";
-import { runPipeline, getPipelineSummary, runFullPipeline, runDailySettlement } from "../lib/pipeline/runner.js";
+import { dailySettlementHttpStatus, runPipeline, getPipelineSummary, runFullPipeline, runDailySettlement } from "../lib/pipeline/runner.js";
 import { fetchMlbSchedule } from "../lib/pipeline/module01_mlbStatsApi.js";
 import { getTodayDateStr } from "../lib/pipeline/config.js";
 import { runHistoricalReplay } from "../lib/pipeline/module13_historicalReplay.js";
@@ -146,8 +146,7 @@ router.get("/pipeline/settle", async (req, res): Promise<void> => {
 
   try {
     const result = await runDailySettlement(settleDate, workbookId);
-    const hasFailure = result.status !== "success";
-    res.status(hasFailure ? 500 : 200).json(result);
+    res.status(dailySettlementHttpStatus(result.status)).json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: msg });

@@ -310,7 +310,29 @@ export interface SurvivalReplayResult {
    */
   total_eligible_settled: number;
   rows: SurvivalReplayRow[];
+  /**
+   * Non-fatal integrity visibility. A legacy VEHICLE_LOG selection warning or
+   * rejected ambiguous legacy row remains observable without being misreported
+   * as a failed settlement execution.
+   */
+  warnings: string[];
   errors: string[];
+}
+
+/**
+ * The daily settlement is fail-closed for actual replay errors. Deterministic
+ * legacy selection and explicit rejection of ambiguous legacy rows are
+ * warnings: they affect visibility and confidence, not execution success.
+ */
+export function classifySurvivalReplayDiagnostics(
+  errors: readonly string[],
+  warnings: readonly string[],
+): Pick<SurvivalReplayResult, "status" | "errors" | "warnings"> {
+  return {
+    status: errors.length === 0 ? "success" : "partial",
+    errors: [...errors],
+    warnings: [...warnings],
+  };
 }
 
 // ─── Helper parsers ───────────────────────────────────────────────────────────
@@ -428,6 +450,7 @@ export async function runSurvivalGateReplay(
   const appendMode = options.appendMode ?? false;
   const replayTs  = new Date().toISOString();
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   logger.info({ startDate, endDate }, "MODULE_18: Survival gate replay starting");
 
@@ -457,13 +480,20 @@ export async function runSurvivalGateReplay(
       collateral_blocks: 0,
       gate_denominator: null,
       rows: [],
+      warnings,
       errors,
     };
   }
 
   // ── Parse VEHICLE_LOG — filter to date range, all directions ──────────────
   const vehicleIntegrity = selectCanonicalVehicleRows(((vlResp.values ?? []) as unknown[][]).slice(1));
-  errors.push(...vehicleIntegrity.warnings);
+  warnings.push(...vehicleIntegrity.warnings);
+  if (vehicleIntegrity.warnings.length > 0) {
+    logger.warn(
+      { warnings: vehicleIntegrity.warnings, rejected: vehicleIntegrity.rejected },
+      "MODULE_18: legacy VEHICLE_LOG integrity warnings preserved during replay",
+    );
+  }
   const vlRows = vehicleIntegrity.rows;
   const vlMap  = new Map<string, {
     date: string; game_id: string; away: string; home: string; vehicle: string;
@@ -883,7 +913,7 @@ export async function runSurvivalGateReplay(
   }
 
   return {
-    status: errors.length === 0 ? "success" : "partial",
+    ...classifySurvivalReplayDiagnostics(errors, warnings),
     date_range: { start: startDate, end: endDate },
     replay_ts: replayTs,
     total_overs,
@@ -900,6 +930,5 @@ export async function runSurvivalGateReplay(
     collateral_blocks,
     gate_denominator,
     rows: replayRows,
-    errors,
   };
 }
