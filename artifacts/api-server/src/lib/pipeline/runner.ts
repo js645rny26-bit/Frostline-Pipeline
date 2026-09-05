@@ -46,6 +46,7 @@ import { runPostgameDiagnostics, type PostgameDiagnosticsResult } from "./module
 import { runDistributionWidthReplay, type DistributionWidthReplayResult } from "./module25_distributionWidthReplay.js";
 import { runSeparationGateAudit, type SeparationGateAuditResult } from "./module27_separationGateAudit.js";
 import { runDistributionBenchmark, type DistributionBenchmarkResult } from "./module28_distributionBenchmark.js";
+import { runGameTruthDistributionResearch, type GameTruthDistributionResearchResult } from "./module29_gameTruthDistributionResearch.js";
 import {
   runFailureClassificationReplay,
   syncFailureClassificationShadow,
@@ -1031,6 +1032,7 @@ export interface DailySettlementResult {
   failure_classification_replay_status: FailureClassificationReplayResult["status"];
   separation_gate_audit_status: SeparationGateAuditResult["status"];
   distribution_benchmark_status: DistributionBenchmarkResult["status"];
+  game_truth_distribution_research_status: GameTruthDistributionResearchResult["status"];
   packet_finalization_status: PregamePacketFinalizationResult["status"];
   full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
@@ -1049,6 +1051,7 @@ export interface DailySettlementResult {
   failure_classification_replay: FailureClassificationReplayResult;
   separation_gate_audit: SeparationGateAuditResult;
   distribution_benchmark: DistributionBenchmarkResult;
+  game_truth_distribution_research: GameTruthDistributionResearchResult;
   packet_finalization: PregamePacketFinalizationResult;
   full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
@@ -1283,6 +1286,22 @@ export async function runDailySettlement(
     },
   );
 
+  // Module 29 is a separate, direct-total research comparison.  It consumes
+  // the same frozen packet and canonical settled truth as Module 28, but no
+  // active component reads it.  Its only job is to make distribution-form and
+  // aggregate-versus-individual-game evidence reproducible after settlement.
+  const game_truth_distribution_research = await runGameTruthDistributionResearch({ workbookId }).catch(
+    (err: unknown): GameTruthDistributionResearchResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        status: "failure", replay_timestamp_utc: new Date().toISOString(),
+        frozen_packets_seen: 0, settled_observations_seen: 0, eligible_games: 0,
+        distribution_rows_written: 0, line_rows_written: 0, summary_rows_written: 0, pair_rows_written: 0, slate_rows_written: 0,
+        snapshot_mismatches: 0, warnings: [], errors: [msg],
+      };
+    },
+  );
+
   // Steps 2-4 consume the outcome snapshot and write their audit sheets.
   const regression = await runRegressionReport({ workbookId, writeSheets: true }).catch(
     (err: unknown): RegressionReportResult => {
@@ -1395,6 +1414,10 @@ export async function runDailySettlement(
     { module: "MODULE_26_FAILURE_CLASSIFICATION_REPLAY", status: failure_classification_replay.status },
     { module: "MODULE_27_SEPARATION_GATE_AUDIT", status: separation_gate_audit.status },
     { module: "MODULE_28_DISTRIBUTION_BENCHMARK", status: distribution_benchmark.status },
+    // This is a research-only writer. Its own status remains explicit in the
+    // report, but a tab-write failure cannot invalidate immutable settlement
+    // rows or turn an otherwise valid settlement request into HTTP 500.
+    { module: "MODULE_29_GAME_TRUTH_DISTRIBUTION_RESEARCH", status: game_truth_distribution_research.status === "failure" ? "warning" : "success" },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
@@ -1413,6 +1436,7 @@ export async function runDailySettlement(
   errors.push(...failure_classification_replay.errors.map((message) => `failure_classification_replay: ${message}`));
   errors.push(...separation_gate_audit.errors.map((message) => `separation_gate_audit: ${message}`));
   errors.push(...distribution_benchmark.errors.map((message) => `distribution_benchmark: ${message}`));
+  warnings.push(...game_truth_distribution_research.errors.map((message) => `game_truth_distribution_research: ${message}`));
 
   const failedCount = module_statuses.filter((module) => module.status === "failure").length;
   const incompleteCount = module_statuses.filter((module) => module.status !== "success").length;
@@ -1439,6 +1463,7 @@ export async function runDailySettlement(
       failure_classification_replay_status: failure_classification_replay.status,
       separation_gate_audit_status: separation_gate_audit.status,
       distribution_benchmark_status: distribution_benchmark.status,
+      game_truth_distribution_research_status: game_truth_distribution_research.status,
       packet_finalization_status: packet_finalization.status,
       full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
@@ -1473,6 +1498,7 @@ export async function runDailySettlement(
     failure_classification_replay_status: failure_classification_replay.status,
     separation_gate_audit_status: separation_gate_audit.status,
     distribution_benchmark_status: distribution_benchmark.status,
+    game_truth_distribution_research_status: game_truth_distribution_research.status,
     packet_finalization_status: packet_finalization.status,
     full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
@@ -1490,6 +1516,7 @@ export async function runDailySettlement(
     failure_classification_replay,
     separation_gate_audit,
     distribution_benchmark,
+    game_truth_distribution_research,
     packet_finalization,
     full_ladder_sync,
     schema_documentation,

@@ -507,6 +507,61 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Use paired N, ties, score direction, and the two-sided sign-test result together; neither an isolated p-value nor a point estimate promotes a model.",
   },
   {
+    sheet: "GAME_TRUTH_DISTRIBUTION_V2",
+    stage: "REPLAY",
+    timing: "Daily settlement after GAME_TRUTH_REPLAY_V1 refresh (Module 29)",
+    purpose:
+      "Direct-total distribution research comparing Poisson, NB, zero-hurdle NB, mean-parameterized COM-Poisson, and empirical residual forms against the same frozen price-blind center.",
+    boardRelationship:
+      "Research-only. It cannot change a center, create a live band, alter a market view, select a vehicle, or affect BET/PASS or authorization.",
+    readNote:
+      "Start with Training_Through_Date, Prior_Settled_Games, and Shape_Parameter_Status. A zero-hurdle model with zero training support is an explicit comparator limitation, not low-run evidence.",
+  },
+  {
+    sheet: "GAME_TRUTH_DIST_LINES_V2",
+    stage: "REPLAY",
+    timing: "Rebuilt with direct-total distribution research during daily settlement (Module 29)",
+    purpose:
+      "Standard total-line probabilities and settlement-only Brier evidence derived monotonically from each one frozen research PMF.",
+    boardRelationship:
+      "No operational relationship. Standard lines are grading queries, not separate betting classifiers or price inputs.",
+    readNote:
+      "For one Game_ID and Model, probabilities must decline as the standard total line increases. Compare Brier only after checking its eligible N.",
+  },
+  {
+    sheet: "GAME_TRUTH_DIST_SUMMARY_V2",
+    stage: "REPLAY",
+    timing: "Rebuilt with direct-total distribution research during daily settlement (Module 29)",
+    purpose:
+      "PIT-bin, CRPS, log-score, directional interval-escape, and standard-line Brier summaries, plus the recorded no-promotion protocol.",
+    boardRelationship:
+      "Research-only. This is calibration evidence, not a coefficient or distribution-model selection rule.",
+    readNote:
+      "Read high-side and low-side escapes separately. Overall coverage alone cannot reveal asymmetric tail failure.",
+  },
+  {
+    sheet: "GAME_TRUTH_DIST_PAIRS_V2",
+    stage: "REPLAY",
+    timing: "Rebuilt with direct-total distribution research during daily settlement (Module 29)",
+    purpose:
+      "Within-game paired CRPS and log-score evidence among all direct-total research comparators.",
+    boardRelationship:
+      "Research-only. The paired sign test is neither a promotion rule nor a model-selection or authorization input.",
+    readNote:
+      "Compare paired N, ties, score direction, and the two-sided sign-test result. Small-N differences remain ambiguous rather than selecting a model.",
+  },
+  {
+    sheet: "GAME_TRUTH_SLATE_DIAG_V2",
+    stage: "REPLAY",
+    timing: "Rebuilt with direct-total distribution research during daily settlement (Module 29)",
+    purpose:
+      "Per-slate test of aggregate frozen run volume versus individual-game allocation of low, central, and high outcomes.",
+    boardRelationship:
+      "Research-only. It cannot recenter a slate or change an individual game projection.",
+    readNote:
+      "Compare aggregate error with per-game MAE/RMSE and rank association. A close slate total does not establish useful game-level tail placement.",
+  },
+  {
     sheet: "FAILURE_CLASSIFICATION_SHADOW_V1",
     stage: "REPLAY",
     timing:

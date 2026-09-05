@@ -155,7 +155,12 @@ export interface DistributionBenchmarkObservation {
   settlement_ts: string;
 }
 
-interface Distribution {
+/**
+ * A proper integer-total probability mass function.  This is deliberately
+ * exported for later research comparators so they share the V1 benchmark's
+ * numerical conventions instead of copying a second scoring implementation.
+ */
+export interface Distribution {
   pmf: number[];
   cdf: number[];
 }
@@ -347,7 +352,7 @@ export function joinDistributionBenchmarkObservations(
 
 // Lanczos approximation. It keeps the NB likelihood self-contained and avoids
 // a numerical package that could make the benchmark environment-dependent.
-function logGamma(value: number): number {
+export function logGamma(value: number): number {
   const coefficients = [
     676.5203681218851,
     -1259.1392167224028,
@@ -521,16 +526,16 @@ export function buildEmpiricalResidualDistribution(
   return { pmf, cdf };
 }
 
-function pmfAt(distribution: Distribution, total: number): number {
+export function pmfAt(distribution: Distribution, total: number): number {
   return total < 0 ? 0 : distribution.pmf[total] ?? 0;
 }
 
-function cdfAt(distribution: Distribution, total: number): number {
+export function cdfAt(distribution: Distribution, total: number): number {
   if (total < 0) return 0;
   return distribution.cdf[total] ?? 1;
 }
 
-function quantile(distribution: Distribution, probability: number): number {
+export function quantile(distribution: Distribution, probability: number): number {
   const index = distribution.cdf.findIndex((value) => value >= probability);
   return index === -1 ? distribution.cdf.length - 1 : index;
 }
@@ -542,7 +547,7 @@ function interval(distribution: Distribution, coverage: number, actual: number):
   return { low, high, covered: actual >= low && actual <= high };
 }
 
-function crps(distribution: Distribution, actual: number): number {
+export function crps(distribution: Distribution, actual: number): number {
   let score = 0;
   const maximum = Math.max(actual, distribution.cdf.length - 1);
   for (let total = 0; total <= maximum; total++) {

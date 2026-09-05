@@ -158,8 +158,13 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      method, quote count, representation status, and packet/capture
  *      alignment beside the standardized reference line and separate literal
  *      executable evidence.
+ *  v52 (2026-09-05): GAME_TRUTH_DISTRIBUTION_V2 and compact companion tabs
+ *      extend the settlement-only direct-total distribution study with
+ *      Poisson, NB, zero-hurdle NB, mean-parameterized COM-Poisson, and an
+ *      empirical-residual comparator.  It is walk-forward research only;
+ *      no result can create a forecast, band, market view, or decision.
  */
-export const WORKBOOK_SCHEMA_VERSION = 51;
+export const WORKBOOK_SCHEMA_VERSION = 52;
 
 export interface ColumnDef {
   name: string;
@@ -198,6 +203,7 @@ export interface ColumnDef {
     | "MODULE_26"
     | "MODULE_27"
     | "MODULE_28"
+    | "MODULE_29"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -829,6 +835,38 @@ const DISTRIBUTION_BENCHMARK_PAIR_COLUMN_NAMES = [
   "Paired_Sign_Test_Two_Sided_P",
   "Research_Status",
   "Replay_TS",
+] as const;
+const GAME_TRUTH_DISTRIBUTION_V2_COLUMN_NAMES = [
+  "Date", "Game_ID", "Frozen_Packet_Snapshot_TS", "Distribution_Research_Version", "Model",
+  "Training_Through_Date", "Prior_Settled_Games", "Research_Status", "Frozen_Price_Blind_Mean",
+  "Actual_Total", "Shape_Parameter", "Shape_Parameter_Status", "Training_Zero_Total_Rate",
+  "Distribution_Median", "Distribution_Variance", "Distribution_SD", "P_Total_LE_4", "P_Total_LE_6",
+  "P_Total_7_TO_9", "P_Total_GE_10", "P_Total_GE_12", "P_Total_GE_15", "CRPS", "Log_Loss",
+  "Discrete_Mid_PIT", "Deterministic_Randomized_PIT", "Interval_50_Low", "Interval_50_High",
+  "Interval_50_Coverage", "Interval_50_Escape_Side", "Interval_80_Low", "Interval_80_High",
+  "Interval_80_Coverage", "Interval_80_Escape_Side", "Interval_90_Low", "Interval_90_High",
+  "Interval_90_Coverage", "Interval_90_Escape_Side", "Replay_Status", "Settlement_TS",
+] as const;
+const GAME_TRUTH_DIST_LINES_V2_COLUMN_NAMES = [
+  "Date", "Game_ID", "Frozen_Packet_Snapshot_TS", "Distribution_Research_Version", "Model",
+  "Standard_Total_Line", "Frozen_Price_Blind_Mean", "Over_Probability", "Under_Or_Push_Probability",
+  "Actual_Total", "Actual_Over_Result", "Brier_Score", "Research_Status", "Settlement_TS",
+] as const;
+const GAME_TRUTH_DIST_SUMMARY_V2_COLUMN_NAMES = [
+  "Evaluation_Population", "Model", "Metric", "Metric_Bucket", "Eligible_N", "Mean_Value", "Median_Value",
+  "Observed_Value", "Target_Value", "Low_Side_Escapes", "High_Side_Escapes", "Research_Status", "Replay_TS",
+] as const;
+const GAME_TRUTH_DIST_PAIRS_V2_COLUMN_NAMES = [
+  "Evaluation_Population", "Metric", "Standard_Total_Line", "Model_A", "Model_B", "Paired_N", "Non_Tied_N",
+  "A_Better_Count", "B_Better_Count", "Tie_Count", "Mean_Delta_A_Minus_B", "Median_Delta_A_Minus_B",
+  "Paired_Sign_Test_Two_Sided_P", "Research_Status", "Replay_TS",
+] as const;
+const GAME_TRUTH_SLATE_DIAG_V2_COLUMN_NAMES = [
+  "Date", "Frozen_Games", "Frozen_Projected_Run_Sum", "Actual_Run_Sum", "Aggregate_Error_Model_Minus_Actual",
+  "Aggregate_Abs_Error", "Per_Game_MAE", "Per_Game_RMSE", "Median_Absolute_Error", "Misses_GE_3",
+  "Misses_GE_4", "Misses_GE_5", "Projected_Actual_Spearman_Rho", "Actual_Loudest_Game_Identified",
+  "Actual_Quietest_Game_Identified", "Total_Good_Allocation_Bad_Games", "Allocation_Eligible_Games",
+  "Higher_Scoring_Side_Correct", "Allocation_Sign_Reversals", "Research_Status", "Replay_TS",
 ] as const;
 const FAILURE_CLASSIFICATION_SHADOW_V1_COLUMN_NAMES = [
   "Date",
@@ -7484,6 +7522,81 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Paired_Sign_Test_Two_Sided_P",
       ],
       "MODULE_28",
+    ),
+  },
+
+  {
+    name: "GAME_TRUTH_DISTRIBUTION_V2",
+    description:
+      "Settlement-only, direct-total distribution research. Poisson, NB, zero-hurdle NB, mean-parameterized COM-Poisson, and empirical residual comparators retain the frozen price-blind center as location and use only strictly earlier settled frozen games for shape. This tab has no active forecast, band, market, vehicle, or authorization consumer.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      GAME_TRUTH_DISTRIBUTION_V2_COLUMN_NAMES,
+      [
+        "Prior_Settled_Games", "Frozen_Price_Blind_Mean", "Actual_Total", "Shape_Parameter",
+        "Training_Zero_Total_Rate", "Distribution_Median", "Distribution_Variance", "Distribution_SD",
+        "P_Total_LE_4", "P_Total_LE_6", "P_Total_7_TO_9", "P_Total_GE_10", "P_Total_GE_12", "P_Total_GE_15",
+        "CRPS", "Log_Loss", "Discrete_Mid_PIT", "Deterministic_Randomized_PIT",
+        "Interval_50_Low", "Interval_50_High", "Interval_80_Low", "Interval_80_High", "Interval_90_Low", "Interval_90_High",
+      ],
+      "MODULE_29",
+    ),
+  },
+
+  {
+    name: "GAME_TRUTH_DIST_LINES_V2",
+    description:
+      "One price-blind frozen direct-total distribution evaluated at every standard total line. Each probability comes from the same model PMF; the Brier field is settlement-only grading, not a live market recommendation.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      GAME_TRUTH_DIST_LINES_V2_COLUMN_NAMES,
+      ["Standard_Total_Line", "Frozen_Price_Blind_Mean", "Over_Probability", "Under_Or_Push_Probability", "Actual_Total", "Actual_Over_Result", "Brier_Score"],
+      "MODULE_29",
+    ),
+  },
+
+  {
+    name: "GAME_TRUTH_DIST_SUMMARY_V2",
+    description:
+      "Walk-forward distribution diagnostics: proper scores, deterministic randomized-PIT bins, directional interval escapes, standard-line Brier evidence, and the predeclared no-promotion decision protocol.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      GAME_TRUTH_DIST_SUMMARY_V2_COLUMN_NAMES,
+      ["Eligible_N", "Mean_Value", "Median_Value", "Observed_Value", "Target_Value", "Low_Side_Escapes", "High_Side_Escapes"],
+      "MODULE_29",
+    ),
+  },
+
+  {
+    name: "GAME_TRUTH_DIST_PAIRS_V2",
+    description:
+      "Within-game paired CRPS and log-score comparisons among the direct-total research comparators. Two-sided sign tests are descriptive evidence only and cannot select a model, tune dispersion, or change a forecast or decision.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      GAME_TRUTH_DIST_PAIRS_V2_COLUMN_NAMES,
+      ["Standard_Total_Line", "Paired_N", "Non_Tied_N", "A_Better_Count", "B_Better_Count", "Tie_Count", "Mean_Delta_A_Minus_B", "Median_Delta_A_Minus_B", "Paired_Sign_Test_Two_Sided_P"],
+      "MODULE_29",
+    ),
+  },
+
+  {
+    name: "GAME_TRUTH_SLATE_DIAG_V2",
+    description:
+      "Per-slate frozen-center diagnostic separating aggregate run-volume error from game-level MAE/RMSE, miss rates, within-slate projected-versus-actual rank association, extreme-game identification, and exact frozen-key allocation diagnostics.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      GAME_TRUTH_SLATE_DIAG_V2_COLUMN_NAMES,
+      [
+        "Frozen_Games", "Frozen_Projected_Run_Sum", "Actual_Run_Sum", "Aggregate_Error_Model_Minus_Actual",
+        "Aggregate_Abs_Error", "Per_Game_MAE", "Per_Game_RMSE", "Median_Absolute_Error", "Misses_GE_3", "Misses_GE_4", "Misses_GE_5",
+        "Projected_Actual_Spearman_Rho", "Total_Good_Allocation_Bad_Games", "Allocation_Eligible_Games", "Higher_Scoring_Side_Correct", "Allocation_Sign_Reversals",
+      ],
+      "MODULE_29",
     ),
   },
 

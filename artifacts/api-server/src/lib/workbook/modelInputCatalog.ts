@@ -483,6 +483,17 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     notes: "Reports CRPS, log loss, discrete mid-PIT, 50/80/90 interval coverage, and Brier score at each frozen query separately. It does not create a run band, coefficient, market view, vehicle, or authorization state.", freshnessKey: "PREGAME_PACKET",
   },
   {
+    recordType: "PROJECTION", id: "GAME_TRUTH_DISTRIBUTION_RESEARCH_V2", label: "Direct-total distribution-form research",
+    layer: "SETTLEMENT", outputClass: "DIAGNOSTIC", operationalStatus: "SHADOW_ONLY",
+    definition: "Settlement-only direct-total comparison of Poisson, NB, zero-hurdle NB, mean-parameterized COM-Poisson, and empirical residual distributions. Every form retains the frozen price-blind active center as location and fits shape only from strictly earlier settled frozen games.",
+    statisticalWindow: "Expanding time-ordered settled history; minimum 100 prior games; refit per slate", gameWindow: "FULL_GAME distribution",
+    primarySource: "PREGAME_PACKET_HISTORY + GAME_TRUTH_REPLAY_V1", fallbackSource: "Explicit INSUFFICIENT_PRIOR_SETTLED_GAMES; no current-state reconstruction",
+    refreshCadence: "EVERY_SETTLEMENT", freshnessEvidence: "GAME_TRUTH_DISTRIBUTION_V2 Training_Through_Date/Prior_Settled_Games/Research_Status",
+    workbookLocation: "GAME_TRUTH_DISTRIBUTION_V2; GAME_TRUTH_DIST_LINES_V2; GAME_TRUTH_DIST_SUMMARY_V2; GAME_TRUTH_DIST_PAIRS_V2; GAME_TRUTH_SLATE_DIAG_V2", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
+    correlationFamily: "DISTRIBUTION_RESEARCH", missingBehavior: "No prediction before 100 earlier eligible settled games; zero-hurdle support is surfaced explicitly when no prior zero totals exist.",
+    notes: "Writes coherent model-specific total-line probabilities from a single PMF, plus PIT, proper scores, directional interval escapes, and slate-level aggregate-versus-game diagnostics. It has no forecast, band, market, vehicle, or authorization consumer.", freshnessKey: "PREGAME_PACKET",
+  },
+  {
     recordType: "PROJECTION", id: "STATCAST_XWOBA_SHADOW", label: "Statcast xwOBA shadow total",
     layer: "BASEBALL_MODEL", outputClass: "SHADOW_CHALLENGER", operationalStatus: "SHADOW_ONLY",
     definition: "Preview-driven xwOBA-only shadow candidate.",

@@ -173,6 +173,31 @@ calculation. Pairwise score comparisons use a descriptive two-sided sign test.
 None of these tabs produces a live forecast, a custom run band, an adjustment,
 a market view, a vehicle, or authorization.
 
+### Direct-total distribution research V2
+
+Schema v52 adds `GAME_TRUTH_DISTRIBUTION_V2`,
+`GAME_TRUTH_DIST_LINES_V2`, `GAME_TRUTH_DIST_SUMMARY_V2`, and
+`GAME_TRUTH_DIST_PAIRS_V2`, and `GAME_TRUTH_SLATE_DIAG_V2`. They retain the same frozen price-blind total as
+the location for every comparator and use only strictly earlier settled frozen
+games for distribution shape. They compare Poisson, NB, zero-hurdle NB,
+mean-parameterized COM-Poisson, and the empirical residual benchmark.
+
+The line surface is long-form by game, comparator, and standard total line.
+Each probability therefore comes from one coherent PMF, so over probabilities
+are monotone in the queried line rather than independent threshold classifiers.
+The summary separately records randomized-PIT bins and high-side versus
+low-side interval escapes. The zero-hurdle comparator exposes its historical
+zero-total support; it cannot silently turn a no-zero corpus into a low-run
+claim.
+
+`GAME_TRUTH_DIST_PAIRS_V2` preserves within-game CRPS and log-score deltas
+with a two-sided sign test. That is descriptive paired evidence, not a model
+selection rule.
+
+This is settlement research only. It has no active consumer and cannot change
+the published center, create a live run band, alter a market view, select a
+vehicle, or affect BET/PASS or authorization.
+
 ### SSAT family interpretation
 
 `STARTER_SURVIVAL_DIFFERENTIATION_AUDIT` tests whether v2 has earned separate
