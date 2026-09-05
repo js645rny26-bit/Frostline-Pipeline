@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  describeFullGameTotalNormalization,
   isHalfNumberFullGameTotal,
   normalizeFullGameTotalLine,
   normalizeFullGameTotalVehicle,
@@ -13,6 +14,21 @@ test("whole-number full-game totals normalize to the immediately lower Hard Rock
   assert.equal(normalizeFullGameTotalLine("7"), 6.5);
   assert.equal(normalizeFullGameTotalLine(8.5), 8.5);
   assert.equal(normalizeFullGameTotalLine("9.5"), 9.5);
+});
+
+test("normalization metadata preserves the source representation decision", () => {
+  assert.deepEqual(describeFullGameTotalNormalization(10), {
+    normalized_total: 9.5,
+    status: "INTEGER_TO_LOWER_HALF",
+  });
+  assert.deepEqual(describeFullGameTotalNormalization(8.5), {
+    normalized_total: 8.5,
+    status: "ALREADY_HALF_NUMBER",
+  });
+  assert.deepEqual(describeFullGameTotalNormalization(8.25), {
+    normalized_total: null,
+    status: "UNSUPPORTED_OR_MISSING",
+  });
 });
 
 test("unsupported fractional totals fail closed instead of inventing a Hard Rock line", () => {

@@ -9,7 +9,7 @@
 
 import { logger } from "../../lib/logger.js";
 import { SOURCE_MAPPINGS } from "./config.js";
-import { normalizeFullGameTotalLine } from "./marketLineNormalization.js";
+import { describeFullGameTotalNormalization } from "./marketLineNormalization.js";
 
 const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
 
@@ -28,6 +28,18 @@ export interface MarketLine {
   under_odds: number;
   bookmaker: string;         // source bookmaker used for the line
   market_available: boolean;
+  /** Literal total supplied by the automated reference provider before Frostline representation. */
+  source_total?: number;
+  /** Provider identity, not an assertion of executable-book identity. */
+  source_provider?: string;
+  /** UTC time at which Frostline observed the automated reference provider. */
+  source_observed_ts?: string;
+  /** How source_total was selected when the provider supplied multiple totals. */
+  source_selection_method?: string;
+  /** Number of provider total quotes participating in source_total selection. */
+  source_quote_count?: number;
+  /** Whether Frostline preserved a half total or represented an integer as a lower half total. */
+  source_normalization_status?: string;
   // ── Run-line (spread) data — null when no spreads market available ──
   away_spread: number | null;       // point for away team (+1.5 = underdog, -1.5 = favourite)
   away_spread_odds: number | null;  // American odds for away team to cover the spread
@@ -126,6 +138,7 @@ export async function fetchMarketOdds(date: string): Promise<OddsResult> {
     }>;
 
     const lines: MarketLine[] = [];
+    const observedTs = new Date().toISOString();
 
     for (const game of games) {
       const awayAbbr = resolveAbbr(game.away_team);
@@ -192,8 +205,8 @@ export async function fetchMarketOdds(date: string): Promise<OddsResult> {
         arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null;
 
       const sourceTotal = consensusTotal(overPoints);
-      const total = normalizeFullGameTotalLine(sourceTotal);
-      if (total === null) {
+      const normalization = describeFullGameTotalNormalization(sourceTotal);
+      if (normalization.normalized_total === null) {
         logger.warn(
           { gameId, sourceTotal },
           "MODULE_05b: Unsupported non-half full-game total rejected",
@@ -207,11 +220,17 @@ export async function fetchMarketOdds(date: string): Promise<OddsResult> {
         game_id:          gameId,
         away_abbr:        awayAbbr,
         home_abbr:        homeAbbr,
-        total,
+        total:            normalization.normalized_total,
         over_odds:        avgOver,
         under_odds:       avgUnder,
         bookmaker:        topBookmaker,
         market_available: true,
+        source_total: sourceTotal,
+        source_provider: "THE_ODDS_API_US_CONSENSUS",
+        source_observed_ts: observedTs,
+        source_selection_method: "MODE_THEN_LOWER_MEDIAN",
+        source_quote_count: overPoints.length,
+        source_normalization_status: normalization.status,
         away_spread:      awaySpreadPts.length > 0 ? consensusTotal(awaySpreadPts) : null,
         away_spread_odds: avg(awaySpreadPrices),
         home_spread_odds: avg(homeSpreadPrices),

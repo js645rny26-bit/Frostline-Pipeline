@@ -19,6 +19,10 @@ const SHEET = "ODDS_HISTORY";
 export const ODDS_HISTORY_HEADERS = [
   "Snapshot_TS_UTC", "Date", "Game_ID", "Total", "Over_Odds", "Under_Odds", "Bookmaker",
   "Price_Provenance_Status", "Price_Usage_Status", "Provenance_Notes",
+  // Raw automated-reference capture stays beside Frostline's standardized
+  // half-number Total. This is provenance only, never executable evidence.
+  "Observed_Source_Total", "Total_Source_Provider", "Total_Observed_TS",
+  "Total_Selection_Method", "Total_Quote_Count", "Total_Normalization_Status",
 ] as const;
 const HEADER = ODDS_HISTORY_HEADERS;
 // Bounded read window: appends are chronological, so today's snapshots always
@@ -123,7 +127,7 @@ async function ensureSheet(workbookId: string): Promise<void> {
   try {
     await addSheet(workbookId, SHEET);
     created = true;
-    await writeRange(workbookId, `${SHEET}!A1:J1`, [Array.from(HEADER)]);
+    await writeRange(workbookId, `${SHEET}!A1:P1`, [Array.from(HEADER)]);
     logger.info("MODULE_05d: Created ODDS_HISTORY sheet");
   } catch {
     // already exists — expected on every run after the first
@@ -133,10 +137,10 @@ async function ensureSheet(workbookId: string): Promise<void> {
 
   // Metadata-only migration: append provenance classifications beside frozen
   // historic values; never modify the original line, price, or bookmaker.
-  const existing = await readRange(workbookId, `${SHEET}!A1:J20000`);
+  const existing = await readRange(workbookId, `${SHEET}!A1:P20000`);
   const raw = (existing.values ?? []) as unknown[][];
   const data = raw.slice(1);
-  await writeRange(workbookId, `${SHEET}!A1:J1`, [Array.from(HEADER)]);
+  await writeRange(workbookId, `${SHEET}!A1:P1`, [Array.from(HEADER)]);
   const labelled = classifyHistoricalOddsHistoryRows(data);
   if (labelled.length > 0) {
     await writeRange(workbookId, `${SHEET}!H2:J${labelled.length + 1}`, labelled.map((row) => [row[7] ?? "", row[8] ?? "", row[9] ?? ""]));
@@ -168,9 +172,11 @@ export async function trackLineMovement(
       return [
         ts, odds.date, l.game_id, l.total, l.over_odds, l.under_odds, l.bookmaker,
         provenance.status, provenance.usage_status, provenance.notes,
+        l.source_total ?? "", l.source_provider ?? "", l.source_observed_ts ?? "",
+        l.source_selection_method ?? "", l.source_quote_count ?? "", l.source_normalization_status ?? "",
       ];
     });
-    const appended = await appendRange(workbookId, `${SHEET}!A:J`, rows);
+    const appended = await appendRange(workbookId, `${SHEET}!A:P`, rows);
     result.snapshots_appended = appended.updatedRows;
 
     // 2. Read back today's snapshots → earliest total per game = opener.

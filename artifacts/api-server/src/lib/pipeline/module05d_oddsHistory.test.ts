@@ -1,6 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classifyHistoricalOddsHistoryRows, classifyOddsPriceProvenance } from "./module05d_oddsHistory.js";
+import {
+  classifyHistoricalOddsHistoryRows,
+  classifyOddsPriceProvenance,
+  ODDS_HISTORY_HEADERS,
+} from "./module05d_oddsHistory.js";
+import { WORKBOOK_SCHEMA } from "../workbook/workbookSchema.js";
+
+test("ODDS_HISTORY schema preserves raw automated-reference capture fields", () => {
+  const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "ODDS_HISTORY");
+  assert.deepEqual(schema?.columns.map((column) => column.name), ODDS_HISTORY_HEADERS);
+  for (const field of [
+    "Observed_Source_Total",
+    "Total_Source_Provider",
+    "Total_Observed_TS",
+    "Total_Selection_Method",
+    "Total_Quote_Count",
+    "Total_Normalization_Status",
+  ]) {
+    assert.ok(ODDS_HISTORY_HEADERS.includes(field as never));
+  }
+});
 
 test("Starting Nine -110 prices are labelled synthetic reference data, never executable", () => {
   assert.deepEqual(

@@ -41,6 +41,7 @@ import type { ShadowAuditRow } from "./module09s_statcastShadow.js";
 import type { StarterSurvivalRow } from "./module09t_starterSurvivalShadow.js";
 import type { StarterSurvivalV2Row } from "./module09u_starterSurvivalV2Shadow.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
+import type { MarketLine } from "./module05b_marketOdds.js";
 import type {
   OperatorEvidenceSnapshot,
   OperatorOverlayField,
@@ -73,6 +74,16 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Reference_Market_Line",
   "Reference_Market_Source",
   "Reference_Market_TS",
+  // Literal automated-reference evidence before Frostline's half-number
+  // representation. It lets later review distinguish a bad source quote from
+  // a representation decision without treating either as executable evidence.
+  "Reference_Market_Observed_Line",
+  "Reference_Market_Provider",
+  "Reference_Market_Observed_TS",
+  "Reference_Market_Selection_Method",
+  "Reference_Market_Quote_Count",
+  "Reference_Market_Normalization_Status",
+  "Reference_Market_Capture_Alignment_Status",
   "Executable_Market_Line",
   "Executable_Market_Price",
   "Executable_Market_Source",
@@ -413,6 +424,7 @@ export function buildPregamePacketInputs(
     string,
     OperatorEvidenceSnapshot
   > = new Map(),
+  referenceMarketEvidenceByGame: ReadonlyMap<string, MarketLine> = new Map(),
 ): PregamePacketInput[] {
   const boardByGame = new Map(board.map((row) => [row.legacy_game_id, row]));
   const gameById = new Map(games.map((row) => [row.legacy_game_id, row]));
@@ -430,6 +442,7 @@ export function buildPregamePacketInputs(
     const v1 = v1ByGame.get(summary.game_id);
     const v2 = v2ByGame.get(summary.game_id);
     const operator = operatorEvidenceByGame.get(summary.game_id);
+    const referenceEvidence = referenceMarketEvidenceByGame.get(summary.game_id);
     const operatorMarketLine = operatorNumber(
       operator,
       "CURRENT_HARD_ROCK_LINE",
@@ -438,9 +451,24 @@ export function buildPregamePacketInputs(
     // defensive boundary here because this packet is settlement provenance.
     const referenceMarketLine = normalizeFullGameTotalLine(boardRow.market_line);
     const packetMarketLine = operatorMarketLine ?? referenceMarketLine;
-    const referenceMarketTs = referenceMarketLine === null
-      ? ""
-      : boardRow.final_decision_ts ?? boardRow.projection_generated_ts ?? "";
+    const capturedReferenceLine = referenceEvidence?.total ?? null;
+    const referenceCaptureAlignmentStatus = referenceMarketLine === null
+      ? capturedReferenceLine === null
+        ? "NO_REFERENCE_MARKET"
+        : "CAPTURED_REFERENCE_NOT_ON_BOARD"
+      : capturedReferenceLine === null
+        ? "UNTRACED_REFERENCE_LINE"
+        : referenceMarketLine === capturedReferenceLine
+          ? "MATCHED_CAPTURE"
+          : "MISMATCHED_CAPTURE";
+    const referenceMarketTs = referenceCaptureAlignmentStatus === "MATCHED_CAPTURE"
+      ? referenceEvidence?.source_observed_ts ?? ""
+      : referenceMarketLine === null
+        ? ""
+        : boardRow.final_decision_ts ?? boardRow.projection_generated_ts ?? "";
+    const referenceMarketSource = referenceCaptureAlignmentStatus === "MATCHED_CAPTURE"
+      ? referenceEvidence?.source_provider ?? ""
+      : referenceMarketLine === null ? "" : "REFERENCE_LINE_UNTRACED";
     const literalExecutablePrice = operatorValue(operator, "CURRENT_HARD_ROCK_PRICE");
     // CURRENT_PRICE predates the dedicated executable price field. Retain it
     // only when a literal Hard Rock line is present; by itself it remains a
@@ -555,8 +583,15 @@ export function buildPregamePacketInputs(
       blank(packetMarketLine),
       primaryMarketStatus,
       blank(referenceMarketLine),
-      referenceMarketLine === null ? "" : "AUTOMATED_REFERENCE_BOARD",
+      referenceMarketSource,
       referenceMarketTs,
+      blank(referenceEvidence?.source_total),
+      referenceEvidence?.source_provider ?? "",
+      referenceEvidence?.source_observed_ts ?? "",
+      referenceEvidence?.source_selection_method ?? "",
+      blank(referenceEvidence?.source_quote_count),
+      referenceEvidence?.source_normalization_status ?? "",
+      referenceCaptureAlignmentStatus,
       blank(operatorMarketLine),
       explicitExecutablePrice ?? "",
       executableMarketSource,
@@ -846,6 +881,7 @@ export async function writePregamePacketHistory(
     workbookId?: string;
     snapshotTs?: string;
     operatorEvidenceByGame?: ReadonlyMap<string, OperatorEvidenceSnapshot>;
+    referenceMarketEvidenceByGame?: ReadonlyMap<string, MarketLine>;
   } = {},
 ): Promise<PregamePacketResult> {
   const workbookId = options.workbookId ?? WORKBOOK_ID;
@@ -874,6 +910,7 @@ export async function writePregamePacketHistory(
         ssatV1Rows,
         ssatV2Rows,
         options.operatorEvidenceByGame,
+        options.referenceMarketEvidenceByGame,
       ),
       snapshotTs,
     );

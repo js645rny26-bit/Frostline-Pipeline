@@ -20,7 +20,7 @@
 import { logger } from "../../lib/logger.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 import { fetchMarketOdds, buildOddsMap } from "./module05b_marketOdds.js";
-import { normalizeFullGameTotalLine } from "./marketLineNormalization.js";
+import { describeFullGameTotalNormalization } from "./marketLineNormalization.js";
 import type { OddsResult, MarketLine } from "./module05b_marketOdds.js";
 
 export { buildOddsMap } from "./module05b_marketOdds.js";
@@ -57,6 +57,7 @@ async function scrapeStartingNine(date: string): Promise<OddsResult> {
   }
 
   const lines: MarketLine[] = [];
+  const observedTs = new Date().toISOString();
 
   // Split on card boundaries. Each game card starts with the element that
   // has id="game-XXXXXX". We discard everything before the first card.
@@ -67,8 +68,8 @@ async function scrapeStartingNine(date: string): Promise<OddsResult> {
     const ouMatch = chunk.match(/O\/U\s+(\d+\.?\d*)/);
     if (!ouMatch) continue;
     const sourceTotal = parseFloat(ouMatch[1]!);
-    const total = normalizeFullGameTotalLine(sourceTotal);
-    if (total === null) {
+    const normalization = describeFullGameTotalNormalization(sourceTotal);
+    if (normalization.normalized_total === null) {
       logger.warn(
         { sourceTotal },
         "MODULE_05c: Unsupported non-half full-game total rejected",
@@ -101,11 +102,17 @@ async function scrapeStartingNine(date: string): Promise<OddsResult> {
       game_id:          gameId,
       away_abbr:        awayAbbr,
       home_abbr:        homeAbbr,
-      total,
+      total:            normalization.normalized_total,
       over_odds:        -110,
       under_odds:       -110,
       bookmaker:        "mlbstartingnine",
       market_available: true,
+      source_total: sourceTotal,
+      source_provider: "MLB_STARTING_NINE_CARD",
+      source_observed_ts: observedTs,
+      source_selection_method: "LITERAL_CARD_TOTAL",
+      source_quote_count: 1,
+      source_normalization_status: normalization.status,
       // mlbstartingnine is a totals-only source; spread/ML not available here
       away_spread:      null,
       away_spread_odds: null,

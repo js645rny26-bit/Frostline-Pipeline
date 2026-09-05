@@ -13,6 +13,16 @@
 
 const HALF_NUMBER_EPSILON = 1e-8;
 
+export type FullGameTotalNormalizationStatus =
+  | "ALREADY_HALF_NUMBER"
+  | "INTEGER_TO_LOWER_HALF"
+  | "UNSUPPORTED_OR_MISSING";
+
+export interface FullGameTotalNormalization {
+  normalized_total: number | null;
+  status: FullGameTotalNormalizationStatus;
+}
+
 function numeric(value: unknown): number | null {
   if (value === null || value === undefined || String(value).trim() === "") return null;
   const parsed = typeof value === "number" ? value : Number(String(value).trim());
@@ -24,15 +34,26 @@ function numeric(value: unknown): number | null {
  * one half-run; existing half-number inputs are preserved; all other inputs
  * fail closed.
  */
-export function normalizeFullGameTotalLine(value: unknown): number | null {
+export function describeFullGameTotalNormalization(value: unknown): FullGameTotalNormalization {
   const parsed = numeric(value);
-  if (parsed === null || parsed <= 0) return null;
+  if (parsed === null || parsed <= 0) {
+    return { normalized_total: null, status: "UNSUPPORTED_OR_MISSING" };
+  }
   const halfSteps = Math.round(parsed * 2);
-  if (Math.abs(parsed * 2 - halfSteps) > HALF_NUMBER_EPSILON) return null;
+  if (Math.abs(parsed * 2 - halfSteps) > HALF_NUMBER_EPSILON) {
+    return { normalized_total: null, status: "UNSUPPORTED_OR_MISSING" };
+  }
   const normalized = halfSteps % 2 === 0
     ? (halfSteps - 1) / 2
     : halfSteps / 2;
-  return Number(normalized.toFixed(1));
+  return {
+    normalized_total: Number(normalized.toFixed(1)),
+    status: halfSteps % 2 === 0 ? "INTEGER_TO_LOWER_HALF" : "ALREADY_HALF_NUMBER",
+  };
+}
+
+export function normalizeFullGameTotalLine(value: unknown): number | null {
+  return describeFullGameTotalNormalization(value).normalized_total;
 }
 
 /** True only for an already-valid positive half-number total. */

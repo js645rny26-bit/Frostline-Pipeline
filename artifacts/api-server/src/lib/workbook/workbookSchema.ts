@@ -153,8 +153,13 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      expanding-window NB / Poisson / empirical-residual research benchmark.
  *      It uses the frozen price-blind center as location, requires 100 earlier
  *      settled games, and cannot create a forecast, band, or decision output.
+ *  v51 (2026-09-04): Automated reference-market packets and ODDS_HISTORY
+ *      preserve raw source totals, provider, observation timestamp, selection
+ *      method, quote count, representation status, and packet/capture
+ *      alignment beside the standardized reference line and separate literal
+ *      executable evidence.
  */
-export const WORKBOOK_SCHEMA_VERSION = 50;
+export const WORKBOOK_SCHEMA_VERSION = 51;
 
 export interface ColumnDef {
   name: string;
@@ -230,6 +235,13 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Reference_Market_Line",
   "Reference_Market_Source",
   "Reference_Market_TS",
+  "Reference_Market_Observed_Line",
+  "Reference_Market_Provider",
+  "Reference_Market_Observed_TS",
+  "Reference_Market_Selection_Method",
+  "Reference_Market_Quote_Count",
+  "Reference_Market_Normalization_Status",
+  "Reference_Market_Capture_Alignment_Status",
   "Executable_Market_Line",
   "Executable_Market_Price",
   "Executable_Market_Source",
@@ -372,6 +384,8 @@ const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
   "Base_Projection",
   "Market_Line",
   "Reference_Market_Line",
+  "Reference_Market_Observed_Line",
+  "Reference_Market_Quote_Count",
   "Executable_Market_Line",
   "Truth_Score",
   "Vehicle_Score",
@@ -2187,6 +2201,56 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         width: 360,
         filledBy: "MODULE_05d",
         exampleValue: "Automated Starting Nine reference total; -110 side prices are synthetic placeholders, not observed executable quotes.",
+      },
+      {
+        name: "Observed_Source_Total",
+        index: 10,
+        type: "number",
+        width: 165,
+        format: "0.0",
+        filledBy: "MODULE_05d",
+        description: "Literal total observed from the automated reference provider before Frostline's half-number representation. Blank for legacy snapshots whose raw provider value was not preserved.",
+      },
+      {
+        name: "Total_Source_Provider",
+        index: 11,
+        type: "string",
+        width: 215,
+        filledBy: "MODULE_05d",
+        description: "Automated reference provider identity, never an assertion of executable-book identity.",
+      },
+      {
+        name: "Total_Observed_TS",
+        index: 12,
+        type: "string",
+        width: 195,
+        filledBy: "MODULE_05d",
+        description: "UTC timestamp when Frostline observed the automated reference provider.",
+      },
+      {
+        name: "Total_Selection_Method",
+        index: 13,
+        type: "string",
+        width: 215,
+        filledBy: "MODULE_05d",
+        description: "LITERAL_CARD_TOTAL or MODE_THEN_LOWER_MEDIAN; explains how the raw automated-reference total was selected.",
+      },
+      {
+        name: "Total_Quote_Count",
+        index: 14,
+        type: "number",
+        width: 135,
+        format: "0",
+        filledBy: "MODULE_05d",
+        description: "Number of automated-reference totals contributing to the selection. One for a literal Starting Nine card total.",
+      },
+      {
+        name: "Total_Normalization_Status",
+        index: 15,
+        type: "string",
+        width: 220,
+        filledBy: "MODULE_05d",
+        description: "ALREADY_HALF_NUMBER or INTEGER_TO_LOWER_HALF. Representation metadata only; does not establish a literal Hard Rock quote.",
       },
     ],
   },

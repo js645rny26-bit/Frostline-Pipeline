@@ -810,7 +810,11 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     mod09s.shadow_rows,
     mod09t.rows,
     mod09u.rows,
-    { workbookId, operatorEvidenceByGame: operatorEvidence.snapshots },
+    {
+      workbookId,
+      operatorEvidenceByGame: operatorEvidence.snapshots,
+      referenceMarketEvidenceByGame: oddsMap,
+    },
   );
   if (mod20a.status !== "success") {
     allErrors.push({

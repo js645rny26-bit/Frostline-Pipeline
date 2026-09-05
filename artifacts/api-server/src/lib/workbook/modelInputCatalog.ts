@@ -258,8 +258,8 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     "Market total snapshots",
     "MLB Starting Nine totals; The Odds API fallback",
     "EVERY_PREGAME_RUN",
-    "ODDS_HISTORY.Snapshot_TS_UTC + SLATE_INPUT authoritative market fields",
-    "Market is downstream execution context only. Prospective full-game totals normalize to Hard Rock half numbers (integer -> immediately lower half); first Frostline observation is not necessarily the market opener.",
+    "ODDS_HISTORY observed-source fields + PREGAME_PACKET_HISTORY reference/executable fields",
+    "Market is downstream execution context only. Every prospective automated reference observation retains its raw provider total, provider, timestamp, selection method, quote count, and representation status beside the standardized half-number total. Literal executable Hard Rock evidence remains separate; first Frostline observation is not necessarily the market opener.",
     "MARKET",
   ),
   SOURCE(
