@@ -560,6 +560,52 @@ test("legacy frozen audit columns survive the combined outcome migration", () =>
   assert.deepEqual(migrated.slice(33), Array(11).fill(""));
 });
 
+test("correcting an official final recomputes frozen errors without changing frozen evidence", () => {
+  const staleOutcome = Array(OUTCOMES_HEADER.length).fill("");
+  staleOutcome[0] = "2026-09-04";
+  staleOutcome[1] = "20260904_DET_CLE__G1";
+  staleOutcome[4] = 8.13;
+  staleOutcome[5] = 13;
+  staleOutcome[12] = 8.13;
+  staleOutcome[13] = 1.13; // Originally and incorrectly graded against G2's 7.
+  staleOutcome[14] = 1.13;
+  staleOutcome[15] = "FROZEN_VEHICLE_LOG";
+  staleOutcome[16] = 0;
+  staleOutcome[17] = 8.5;
+  staleOutcome[18] = 8.5;
+  staleOutcome[19] = "PUSH";
+  staleOutcome[20] = "PUSH";
+  staleOutcome[21] = "MATCHES_PUBLISHED";
+
+  const untouchedMigration = normalizeOutcomeValues(staleOutcome, {
+    market_line: 8.5,
+    direction: "UNDER",
+    projected_total: 8.13,
+    source: "FROZEN_VEHICLE_LOG",
+  });
+  assert.deepEqual(untouchedMigration.slice(13, 15), [1.13, 1.13]);
+
+  const normalized = normalizeOutcomeValues(
+    staleOutcome,
+    {
+      market_line: 8.5,
+      direction: "UNDER",
+      projected_total: 8.13,
+      source: "FROZEN_VEHICLE_LOG",
+    },
+    true,
+  );
+
+  // Frozen pregame values survive byte-for-byte; only settlement-derived
+  // grading is repaired from the corrected final of 13.
+  assert.deepEqual(normalized.slice(12, 13), [8.13]);
+  assert.equal(normalized[15], "FROZEN_VEHICLE_LOG");
+  assert.equal(normalized[17], 8.5);
+  assert.deepEqual(normalized.slice(13, 15), [-4.87, 4.87]);
+  assert.equal(normalized[19], "LOSS");
+  assert.equal(normalized[20], "LOSS");
+});
+
 test("v16 pitcher columns move from M:W to W:AG and gain frozen audit values", () => {
   const pitcher = [
     "Zac Thornton", "Carmen Mlodzinski", "Zac Thornton", "Carmen Mlodzinski",
@@ -622,7 +668,9 @@ test("frozen projection replay serializes the packet projection, not repaired pr
   assert.equal(settlementRowToValues(row).length, OUTCOMES_HEADER.length);
   const replay = frozenProjectionReplayValues(row, "2026-08-09T00:00:00.000Z");
   assert.ok(replay);
+  assert.equal(replay[4], 14);
   assert.equal(replay[5], 9.2);
+  assert.deepEqual(replay.slice(10, 15), Array(5).fill(-4.8));
   assert.equal(replay[1], "20260807_OAK_BOS");
   assert.equal(replay[26], 9.2);
   assert.equal(replay[27], -4.8);

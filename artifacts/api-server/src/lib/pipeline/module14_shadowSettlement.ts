@@ -122,7 +122,10 @@ const P_AWAY_STARTER = PACKET_INDEX.Away_Starter;
 const P_HOME_STARTER = PACKET_INDEX.Home_Starter;
 
 const O_SETTLEMENT_TS = 11;
+const O_FROZEN_PUBLISHED_TOTAL = 12;
 const O_FROZEN_SOURCE = 15;
+const O_FROZEN_MARKET_LINE = 17;
+const O_FROZEN_TICKET_RESULT = 19;
 const O_REFERENCE_MARKET_LINE = 33;
 const O_REFERENCE_MARKET_SOURCE = 34;
 const O_REFERENCE_MARKET_TS = 35;
@@ -1007,24 +1010,43 @@ function frozenAuditValues(
   actualTotal: number,
   projection: FrozenProjection | undefined,
   existing?: unknown[],
+  recomputeSettlementDerived = false,
 ): unknown[] {
-  // Schema-v16 manual repairs stored the frozen audit directly in M:V. Preserve
-  // those values verbatim while migrating the pitcher fields to W:AG.
-  if (isPreservedProspectiveSource(existing?.[O_FROZEN_SOURCE])) {
-    return existing!.slice(12, 22);
+  const hasPreservedSource = isPreservedProspectiveSource(existing?.[O_FROZEN_SOURCE]);
+  // Reading or migrating unrelated historical outcome rows must not rewrite
+  // their grading. A date-scoped settlement repair explicitly opts in below,
+  // after it has obtained that game's canonical official final.
+  if (hasPreservedSource && !recomputeSettlementDerived) return existing!.slice(12, 22);
+  const preservedFrozenTotal = numberOrNull(existing?.[O_FROZEN_PUBLISHED_TOTAL]);
+  if (hasPreservedSource && preservedFrozenTotal === null) {
+    // A preserved source without its frozen value is an integrity gap. Do not
+    // substitute a current vehicle or audit value under its historical label.
+    return ["", "", "", "INVALID_PRESERVED_FROZEN_VALUE", "", "", "", "", "", "FROZEN_SOURCE_UNRESOLVED"];
   }
-  if (!projection) {
+  if (!hasPreservedSource && !projection) {
     return ["", "", "", "MISSING_FROZEN_VEHICLE_LOG", "", "", "", "", "", "FROZEN_SOURCE_UNRESOLVED"];
   }
-  const frozenError = round2(projection.projected_total - actualTotal);
-  const delta = round2(repairedProjection - projection.projected_total);
-  const line = projection.market_line;
-  const result = gradeDirection(projection.direction, line, actualTotal);
+  // The projection, its source, and its frozen market are prospective facts.
+  // Error, absolute error, and ticket grading are settlement-derived values.
+  // Recompute only the latter on every rerun, so a repaired official final
+  // cannot leave a stale outcome attached to immutable pregame evidence.
+  const frozenTotal = hasPreservedSource ? preservedFrozenTotal! : projection!.projected_total;
+  const source = hasPreservedSource
+    ? String(existing?.[O_FROZEN_SOURCE] ?? "")
+    : projection!.source ?? "FROZEN_VEHICLE_LOG";
+  const preservedLine = numberOrNull(existing?.[O_FROZEN_MARKET_LINE]);
+  const line = hasPreservedSource ? preservedLine : projection!.market_line;
+  const direction = projection?.direction ?? "";
+  const frozenError = round2(frozenTotal - actualTotal);
+  const delta = round2(repairedProjection - frozenTotal);
+  const result = direction === "OVER" || direction === "UNDER"
+    ? gradeDirection(direction, line, actualTotal)
+    : String(existing?.[O_FROZEN_TICKET_RESULT] ?? "");
   return [
-    projection.projected_total,
+    frozenTotal,
     frozenError,
     round2(Math.abs(frozenError)),
-    projection.source ?? "FROZEN_VEHICLE_LOG",
+    source,
     delta,
     line ?? "",
     line ?? "",
@@ -1056,6 +1078,7 @@ export function classifyFrozenVehicleGap(
 export function normalizeOutcomeValues(
   raw: unknown[],
   vehicle?: FrozenProjection,
+  recomputeSettlementDerived = false,
 ): unknown[] {
   const base = raw.slice(0, 12);
   while (base.length < 12) base.push("");
@@ -1069,7 +1092,7 @@ export function normalizeOutcomeValues(
       ? Array(11).fill("")
       : raw.slice(12, 23);
   while (pitcher.length < 11) pitcher.push("");
-  const frozen = frozenAuditValues(repaired, actual, vehicle, raw);
+  const frozen = frozenAuditValues(repaired, actual, vehicle, raw, recomputeSettlementDerived);
   // Market-provenance columns were added after the original 33-column
   // outcome layout. Preserve them verbatim on normalization so a settlement
   // rerun cannot erase a legitimately frozen executable line.
@@ -1569,7 +1592,13 @@ export async function runShadowSettlement(
       vehiclesByGame.get(gameId),
       auditSnapshotsByGame.get(gameId),
     );
-    const frozen = frozenAuditValues(projection, final.actual_total, prospectiveProjection, existing?.values);
+    const frozen = frozenAuditValues(
+      projection,
+      final.actual_total,
+      prospectiveProjection,
+      existing?.values,
+      true,
+    );
     const frozenGap = classifyFrozenVehicleGap(
       date,
       gameId,
