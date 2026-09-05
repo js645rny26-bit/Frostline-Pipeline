@@ -74,6 +74,36 @@ test("settlement binds doubleheader finals to canonical G1/G2 packet identities"
   );
 });
 
+test("settlement rejects an official-final identity collision instead of selecting a team-matched result", () => {
+  const provenance = parseGamePitcherProvenance(null);
+  const warnings: string[] = [];
+  const finals = indexFinalGamesByCanonicalGameId([
+    {
+      legacy_game_id: "20260904_DET_CLE",
+      game_pk: 778003,
+      gameNumber: null,
+      actual_away_runs: 6,
+      actual_home_runs: 7,
+      actual_total: 13,
+      provenance,
+    },
+    {
+      legacy_game_id: "20260904_DET_CLE",
+      game_pk: 778003,
+      gameNumber: null,
+      actual_away_runs: 3,
+      actual_home_runs: 4,
+      actual_total: 7,
+      provenance,
+    },
+  ], warnings);
+
+  assert.equal(finals.size, 0);
+  assert.deepEqual(warnings, [
+    "FINAL_GAME_ID_COLLISION: 20260904_DET_CLE__GPK778003 has multiple official finals; settlement rejected the identity rather than selecting one",
+  ]);
+});
+
 test("collision settlement accepts only a preserved pre-first-pitch available candidate", () => {
   const valid = Array(19).fill("");
   valid[0] = "2026-08-23";
