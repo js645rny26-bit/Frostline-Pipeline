@@ -22,6 +22,7 @@ import {
   pregamePacketHistoryRange,
   PREGAME_PACKET_HISTORY_HEADERS,
 } from "./module20a_pregamePacket.js";
+import { assignUniqueGameIds } from "./module01_mlbStatsApi.js";
 import type { PostmortemEventEvidence } from "./module21_postmortemMechanism.js";
 
 const MLB_API = "https://statsapi.mlb.com/api/v1";
@@ -494,6 +495,8 @@ export interface SettlementResult {
 
 interface MlbGame {
   gamePk?: number;
+  officialDate?: string;
+  gameNumber?: number;
   status?: { abstractGameState?: string };
   teams?: {
     away?: { score?: number; team?: { name?: string } };
@@ -507,6 +510,12 @@ interface FinalGame {
   actual_home_runs: number;
   actual_total: number;
   provenance: GamePitcherProvenance;
+}
+
+/** An official final paired with the same canonical identity fields as a packet. */
+export interface FinalGameIdentityCandidate extends FinalGame {
+  legacy_game_id: string;
+  gameNumber: number | null;
 }
 
 const FULL_NAME_TO_ABBR: Record<string, string> = {};
@@ -542,18 +551,51 @@ async function fetchJson(url: string): Promise<unknown> {
   }
 }
 
+/**
+ * Index official finals by the canonical Game_ID used by pregame packets.
+ *
+ * Never reduce a final to away/home alone: that silently overwrites Game 1
+ * with Game 2 in a same-day doubleheader. An unresolved identity is omitted
+ * rather than guessed, so settlement remains ungradable instead of misbound.
+ */
+export function indexFinalGamesByCanonicalGameId(
+  finals: readonly FinalGameIdentityCandidate[],
+  warnings: string[],
+): Map<string, FinalGame> {
+  const indexed = new Map<string, FinalGame>();
+  const rejectedIds = new Set<string>();
+
+  const canonicalFinals = assignUniqueGameIds(finals.map((game) => ({
+    ...game,
+    gamePk: game.game_pk,
+  })));
+  for (const game of canonicalFinals) {
+    const gameId = game.legacy_game_id;
+    if (rejectedIds.has(gameId)) continue;
+    if (indexed.has(gameId)) {
+      indexed.delete(gameId);
+      rejectedIds.add(gameId);
+      warnings.push(`FINAL_GAME_ID_COLLISION: ${gameId} has multiple official finals; settlement rejected the identity rather than selecting one`);
+      continue;
+    }
+    indexed.set(gameId, {
+      game_pk: game.game_pk,
+      actual_away_runs: game.actual_away_runs,
+      actual_home_runs: game.actual_home_runs,
+      actual_total: game.actual_total,
+      provenance: game.provenance,
+    });
+  }
+
+  return indexed;
+}
+
 async function fetchFinalGames(date: string, warnings: string[]): Promise<Map<string, FinalGame>> {
   const schedule = await fetchJson(
     `${MLB_API}/schedule?sportId=1&date=${date}&gameType=R&hydrate=linescore`,
   ) as { dates?: Array<{ games?: MlbGame[] }> };
 
-  const finals: Array<{
-    key: string;
-    game_pk: number;
-    actual_away_runs: number;
-    actual_home_runs: number;
-    actual_total: number;
-  }> = [];
+  const finals: Array<Omit<FinalGameIdentityCandidate, "provenance">> = [];
   for (const day of schedule.dates ?? []) {
     for (const game of day.games ?? []) {
       if (game.status?.abstractGameState !== "Final") continue;
@@ -562,9 +604,11 @@ async function fetchFinalGames(date: string, warnings: string[]): Promise<Map<st
       const away = teamNameToAbbr(game.teams?.away?.team?.name ?? "");
       const home = teamNameToAbbr(game.teams?.home?.team?.name ?? "");
       if (awayScore === undefined || homeScore === undefined || !away || !home || !game.gamePk) continue;
+      const officialDate = game.officialDate ?? date;
       finals.push({
-        key: `${away}_${home}`,
+        legacy_game_id: `${officialDate.replace(/-/g, "")}_${away}_${home}`,
         game_pk: game.gamePk,
+        gameNumber: Number.isInteger(game.gameNumber) ? game.gameNumber! : null,
         actual_away_runs: awayScore,
         actual_home_runs: homeScore,
         actual_total: awayScore + homeScore,
@@ -583,18 +627,7 @@ async function fetchFinalGames(date: string, warnings: string[]): Promise<Map<st
     }
   }));
 
-  return new Map(resolved.map((game) => [game.key, {
-    game_pk: game.game_pk,
-    actual_away_runs: game.actual_away_runs,
-    actual_home_runs: game.actual_home_runs,
-    actual_total: game.actual_total,
-    provenance: game.provenance,
-  }]));
-}
-
-function gameIdToTeamKey(gameId: string): string | null {
-  const parts = gameId.split("_");
-  return parts.length >= 3 ? `${parts[1]}_${parts[2]}` : null;
+  return indexFinalGamesByCanonicalGameId(resolved, warnings);
 }
 
 export function settlementRowToValues(row: SettlementRow): unknown[] {
@@ -1498,8 +1531,7 @@ export async function runShadowSettlement(
 
   for (const history of historyRows) {
     const gameId = history[H_GAME_ID] ?? "";
-    const key = gameIdToTeamKey(gameId);
-    const final = key ? finalGames.get(key) : undefined;
+    const final = finalGames.get(gameId);
     if (!final) {
       noActual++;
       continue;

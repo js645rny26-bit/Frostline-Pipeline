@@ -7,6 +7,7 @@ import {
   classifyFrozenVehicleGap,
   collisionCalibrationValues,
   frozenProjectionReplayValues,
+  indexFinalGamesByCanonicalGameId,
   normalizeOutcomeValues,
   parseLowCenterProspectiveSnapshots,
   parseCollisionProspectiveSnapshots,
@@ -24,9 +25,54 @@ import {
   starterSurvivalV2CalibrationValues,
   type SettlementRow,
 } from "./module14_shadowSettlement.js";
+import { parseGamePitcherProvenance } from "./module14_pitcherProvenance.js";
 import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
 
 const vehicle = { market_line: 8.5, direction: "OVER", projected_total: 9.11 };
+
+test("settlement binds doubleheader finals to canonical G1/G2 packet identities", () => {
+  const provenance = parseGamePitcherProvenance(null);
+  const finals = indexFinalGamesByCanonicalGameId([
+    {
+      legacy_game_id: "20260904_DET_CLE",
+      game_pk: 778001,
+      gameNumber: 1,
+      actual_away_runs: 6,
+      actual_home_runs: 7,
+      actual_total: 13,
+      provenance: {
+        ...provenance,
+        away: { ...provenance.away, actual_starter: "Keider Montero" },
+        home: { ...provenance.home, actual_starter: "Logan Allen" },
+      },
+    },
+    {
+      legacy_game_id: "20260904_DET_CLE",
+      game_pk: 778002,
+      gameNumber: 2,
+      actual_away_runs: 3,
+      actual_home_runs: 4,
+      actual_total: 7,
+      provenance: {
+        ...provenance,
+        away: { ...provenance.away, actual_starter: "Andrew Sears" },
+        home: { ...provenance.home, actual_starter: "Foster Griffin" },
+      },
+    },
+  ], []);
+
+  const gameOne = finals.get("20260904_DET_CLE__G1");
+  const gameTwo = finals.get("20260904_DET_CLE__G2");
+  assert.equal(finals.has("20260904_DET_CLE"), false, "a team-only doubleheader identity must not be matchable");
+  assert.deepEqual(
+    [gameOne?.game_pk, gameOne?.actual_total, gameOne?.provenance.away.actual_starter, gameOne?.provenance.home.actual_starter],
+    [778001, 13, "Keider Montero", "Logan Allen"],
+  );
+  assert.deepEqual(
+    [gameTwo?.game_pk, gameTwo?.actual_total, gameTwo?.provenance.away.actual_starter, gameTwo?.provenance.home.actual_starter],
+    [778002, 7, "Andrew Sears", "Foster Griffin"],
+  );
+});
 
 test("collision settlement accepts only a preserved pre-first-pitch available candidate", () => {
   const valid = Array(19).fill("");

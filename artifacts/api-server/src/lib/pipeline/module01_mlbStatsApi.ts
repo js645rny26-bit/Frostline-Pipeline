@@ -139,16 +139,22 @@ function normalizeGame(raw: any): ScheduleGameData {
   };
 }
 
+export interface CanonicalGameIdentityInput {
+  gamePk: number;
+  legacy_game_id: string;
+  gameNumber: number | null;
+}
+
 /**
- * Give each official game a worksheet-safe identity.
- *
- * The former date_away_home form is retained for normal slates. It is not
- * unique on doubleheader days, however, so the two official games receive
- * stable __G1 / __G2 suffixes based on MLB's gameNumber. If MLB omits that
- * field, the official gamePk is used rather than guessing from source order.
+ * Apply Frostline's canonical doubleheader suffix to any official MLB game
+ * records. Consumers of the schedule and final-results feeds must share this
+ * helper: a date/team key alone is not an identity when a doubleheader exists.
+ * Normal games retain date_away_home; a doubleheader receives stable __G1 /
+ * __G2 suffixes from MLB gameNumber, or __GPK{gamePk} when that number is
+ * absent rather than guessing from source order.
  */
-export function assignUniqueScheduleGameIds(games: readonly ScheduleGameData[]): ScheduleGameData[] {
-  const groups = new Map<string, ScheduleGameData[]>();
+export function assignUniqueGameIds<T extends CanonicalGameIdentityInput>(games: readonly T[]): T[] {
+  const groups = new Map<string, T[]>();
   for (const game of games) {
     const base = baseGameId(game.legacy_game_id);
     const group = groups.get(base) ?? [];
@@ -168,6 +174,10 @@ export function assignUniqueScheduleGameIds(games: readonly ScheduleGameData[]):
     const suffix = numberIsUnique ? `G${gameNumber}` : `GPK${game.gamePk}`;
     return { ...game, legacy_game_id: `${base}__${suffix}` };
   });
+}
+
+export function assignUniqueScheduleGameIds(games: readonly ScheduleGameData[]): ScheduleGameData[] {
+  return assignUniqueGameIds(games);
 }
 
 export async function fetchMlbSchedule(dateStr: string): Promise<GameScheduleResult> {
