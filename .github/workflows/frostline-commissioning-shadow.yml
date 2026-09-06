@@ -8,6 +8,11 @@ on:
         required: false
         default: ""
         type: string
+      isolated_smoke:
+        description: Create a new disposable workbook and run pregame only; never writes the commissioning workbook or runs settlement
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -59,6 +64,11 @@ jobs:
             slate_date="$requested_date"
           fi
 
+          if [ "${{ inputs.isolated_smoke }}" = "true" ] && [[ "$slate_date" <= "$(TZ=America/New_York date +%F)" ]]; then
+            echo "::error title=Unsafe isolated smoke date::An isolated smoke run must target a future slate."
+            exit 1
+          fi
+
           echo "SLATE_DATE=$slate_date" >> "$GITHUB_ENV"
           echo "date=$slate_date" >> "$GITHUB_OUTPUT"
           echo "Publishing Frostline commissioning slate for $slate_date (America/New_York)."
@@ -67,6 +77,7 @@ jobs:
         run: |
           : > frostline-api-server.log
           echo '{"status":"NOT_RUN"}' > frostline-commissioning-report.json
+          echo '{"status":"NOT_RUN"}' > frostline-isolated-workbook.json
 
       - name: Authenticate Google ADC through GitHub OIDC
         id: google-auth
@@ -99,7 +110,7 @@ jobs:
       - name: Build API server
         run: pnpm --filter @workspace/api-server run build
 
-      - name: Run isolated commissioning shadow
+      - name: Run commissioning pregame or isolated smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -130,13 +141,33 @@ jobs:
             exit 1
           fi
 
+          workbook_id="${FROSTLINE_WORKBOOK_ID}"
+          if [ "${{ inputs.isolated_smoke }}" = "true" ]; then
+            if ! curl --silent --show-error --fail-with-body --request POST \
+              "http://127.0.0.1:3000/api/workbook/create?date=${SLATE_DATE}-SMOKE" \
+              --output frostline-isolated-workbook.json; then
+              echo "Unable to create isolated smoke workbook."
+              cat frostline-isolated-workbook.json || true
+              cat frostline-api-server.log
+              exit 1
+            fi
+            workbook_id="$(node -e 'const fs = require("fs"); const result = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); if (!result.workbook_id) process.exit(2); process.stdout.write(result.workbook_id);' frostline-isolated-workbook.json)"
+            case "$workbook_id" in
+              1KPYzbSawLIrOcckn5EXxO4vH5eABOhMIibhCgpF-oNs|1MWsGQYR13tFjwd-L4lMweGShKJkrOsSNJaHzdjiMNHs)
+                echo "::error title=Unsafe isolated workbook::A smoke run must never resolve to a known production workbook."
+                exit 1
+                ;;
+            esac
+            echo "Isolated pregame smoke workbook: $workbook_id"
+          fi
+
           set +e
           curl \
             --silent \
             --show-error \
             --fail-with-body \
             --request POST \
-            "http://127.0.0.1:3000/api/pipeline/publish?date=${SLATE_DATE}&workbook_id=${FROSTLINE_WORKBOOK_ID}" \
+            "http://127.0.0.1:3000/api/pipeline/publish?date=${SLATE_DATE}&workbook_id=${workbook_id}" \
             --output frostline-commissioning-report.json
           publish_status=$?
           set -e
@@ -191,5 +222,6 @@ jobs:
           name: frostline-commissioning-report-${{ steps.slate-date.outputs.date }}
           path: |
             frostline-commissioning-report.json
+            frostline-isolated-workbook.json
             frostline-api-server.log
           if-no-files-found: error
