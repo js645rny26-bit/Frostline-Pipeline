@@ -22,6 +22,7 @@ import {
 import { isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
 import {
   describeLiteralFullGameTotal,
+  isHalfNumberFullGameTotal,
   normalizeFullGameTotalLine,
 } from "./marketLineNormalization.js";
 import {
@@ -453,10 +454,20 @@ export function buildPregamePacketInputs(
     const v2 = v2ByGame.get(summary.game_id);
     const operator = operatorEvidenceByGame.get(summary.game_id);
     const referenceEvidence = referenceMarketEvidenceByGame.get(summary.game_id);
-    const operatorMarketLine = operatorNumber(
+    const suppliedOperatorMarketLine = operatorNumber(
       operator,
       "CURRENT_HARD_ROCK_LINE",
     );
+    // Florida Hard Rock full-game totals are half-number markets. A supplied
+    // whole number is preserved in the operator-evidence ledger for audit but
+    // cannot become an executable market, be normalized, or introduce push
+    // semantics into the executable path.
+    const operatorMarketLine = suppliedOperatorMarketLine !== undefined
+      && isHalfNumberFullGameTotal(suppliedOperatorMarketLine)
+      ? suppliedOperatorMarketLine
+      : undefined;
+    const invalidExecutableHardRockTotal = suppliedOperatorMarketLine !== undefined
+      && !isHalfNumberFullGameTotal(suppliedOperatorMarketLine);
     // Preserve the source market exactly for settlement provenance. The board
     // may still expose an older lower-half representation for operational
     // compatibility, but that representation is synthetic and cannot become a
@@ -521,6 +532,8 @@ export function buildPregamePacketInputs(
       : operatorFieldTimestamp(operator, executableEvidenceField);
     const executableMarketStatus = operatorMarketLine !== undefined
       ? "LITERAL_EXECUTABLE_HARD_ROCK_CAPTURED"
+      : invalidExecutableHardRockTotal
+        ? "INVALID_LITERAL_EXECUTABLE_HARD_ROCK_FULL_GAME_TOTAL"
       : executableEvidenceField === undefined
         ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
         : "PARTIAL_LITERAL_EXECUTABLE_HARD_ROCK_EVIDENCE_NO_LINE";
