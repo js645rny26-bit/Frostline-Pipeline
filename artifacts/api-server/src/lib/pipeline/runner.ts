@@ -1296,7 +1296,8 @@ export async function runDailySettlement(
       return {
         status: "failure", replay_timestamp_utc: new Date().toISOString(),
         frozen_packets_seen: 0, settled_observations_seen: 0, eligible_games: 0,
-        distribution_rows_written: 0, line_rows_written: 0, summary_rows_written: 0, pair_rows_written: 0, slate_rows_written: 0,
+        distribution_rows_written: 0, line_rows_written: 0, summary_rows_written: 0, pair_rows_written: 0,
+        corp_rows_written: 0, feature_governance_rows_written: 0, slate_rows_written: 0,
         snapshot_mismatches: 0, warnings: [], errors: [msg],
       };
     },

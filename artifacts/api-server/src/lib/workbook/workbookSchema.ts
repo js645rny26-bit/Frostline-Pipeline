@@ -163,8 +163,13 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      Poisson, NB, zero-hurdle NB, mean-parameterized COM-Poisson, and an
  *      empirical-residual comparator.  It is walk-forward research only;
  *      no result can create a forecast, band, market view, or decision.
+ *  v53 (2026-09-05): Module 29 validation refinement adds non-randomized
+ *      count PIT, threshold-weighted CRPS, PMF/line-coherence checks,
+ *      slate-block paired-score uncertainty, CORP/PAV reliability diagnostics,
+ *      and a research-only feature-governance ledger. No distribution result
+ *      can affect a forecast, band, market, vehicle, or authorization output.
  */
-export const WORKBOOK_SCHEMA_VERSION = 52;
+export const WORKBOOK_SCHEMA_VERSION = 53;
 
 export interface ColumnDef {
   name: string;
@@ -842,15 +847,17 @@ const GAME_TRUTH_DISTRIBUTION_V2_COLUMN_NAMES = [
   "Actual_Total", "Shape_Parameter", "Shape_Parameter_Status", "Training_Zero_Total_Rate",
   "Distribution_Median", "Distribution_Variance", "Distribution_SD", "P_Total_LE_4", "P_Total_LE_6",
   "P_Total_7_TO_9", "P_Total_GE_10", "P_Total_GE_12", "P_Total_GE_15", "CRPS", "Log_Loss",
-  "Discrete_Mid_PIT", "Deterministic_Randomized_PIT", "Interval_50_Low", "Interval_50_High",
+  "Discrete_Mid_PIT", "Nonrandomized_Count_PIT", "Nonrandomized_PIT_Interval_Low", "Nonrandomized_PIT_Interval_High",
+  "Deterministic_Randomized_PIT", "Threshold_Weighted_CRPS_6_5_TO_11_5", "PMF_Integrity_Status", "Line_Portability_Status",
+  "Interval_50_Low", "Interval_50_High",
   "Interval_50_Coverage", "Interval_50_Escape_Side", "Interval_80_Low", "Interval_80_High",
   "Interval_80_Coverage", "Interval_80_Escape_Side", "Interval_90_Low", "Interval_90_High",
   "Interval_90_Coverage", "Interval_90_Escape_Side", "Replay_Status", "Settlement_TS",
 ] as const;
 const GAME_TRUTH_DIST_LINES_V2_COLUMN_NAMES = [
   "Date", "Game_ID", "Frozen_Packet_Snapshot_TS", "Distribution_Research_Version", "Model",
-  "Standard_Total_Line", "Frozen_Price_Blind_Mean", "Over_Probability", "Under_Or_Push_Probability",
-  "Actual_Total", "Actual_Over_Result", "Brier_Score", "Research_Status", "Settlement_TS",
+  "Standard_Total_Line", "Frozen_Price_Blind_Mean", "Line_Cutoff_Integer", "Over_Probability", "Under_Or_Push_Probability",
+  "CDF_At_Line_Cutoff", "Line_Probability_Reconciliation_Status", "Actual_Total", "Actual_Over_Result", "Brier_Score", "Research_Status", "Settlement_TS",
 ] as const;
 const GAME_TRUTH_DIST_SUMMARY_V2_COLUMN_NAMES = [
   "Evaluation_Population", "Model", "Metric", "Metric_Bucket", "Eligible_N", "Mean_Value", "Median_Value",
@@ -859,7 +866,17 @@ const GAME_TRUTH_DIST_SUMMARY_V2_COLUMN_NAMES = [
 const GAME_TRUTH_DIST_PAIRS_V2_COLUMN_NAMES = [
   "Evaluation_Population", "Metric", "Standard_Total_Line", "Model_A", "Model_B", "Paired_N", "Non_Tied_N",
   "A_Better_Count", "B_Better_Count", "Tie_Count", "Mean_Delta_A_Minus_B", "Median_Delta_A_Minus_B",
-  "Paired_Sign_Test_Two_Sided_P", "Research_Status", "Replay_TS",
+  "Paired_Sign_Test_Two_Sided_P", "Block_Count", "Block_Bootstrap_95_Low", "Block_Bootstrap_95_High", "Model_Relationship",
+  "HLN_DM_Statistic", "HLN_DM_Two_Sided_P", "HLN_Status", "Variant_Count", "Block_Definition", "Sample_Size_Status", "Research_Status", "Replay_TS",
+] as const;
+const GAME_TRUTH_DIST_CORP_V2_COLUMN_NAMES = [
+  "Evaluation_Population", "Model", "Standard_Total_Line", "PAV_Group", "Prediction_Low", "Prediction_High",
+  "Mean_Predicted_Probability", "Observed_Frequency", "Group_N", "CORP_MCB_Brier", "Block_Bootstrap_95_Low",
+  "Block_Bootstrap_95_High", "Block_Count", "Sample_Size_Status", "Research_Status", "Replay_TS",
+] as const;
+const GAME_TRUTH_DIST_FEATURE_GOV_V2_COLUMN_NAMES = [
+  "Feature", "Evidence_Status", "Mean_Location_Governance", "Variance_Tail_Governance", "Frozen_Frostline_Data_Availability",
+  "Price_Blind_Prospective_Test_Design", "Current_Recommendation", "Data_Gap_Or_Guardrail", "Research_Status", "Protocol_Version",
 ] as const;
 const GAME_TRUTH_SLATE_DIAG_V2_COLUMN_NAMES = [
   "Date", "Frozen_Games", "Frozen_Projected_Run_Sum", "Actual_Run_Sum", "Aggregate_Error_Model_Minus_Actual",
@@ -7537,7 +7554,8 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Prior_Settled_Games", "Frozen_Price_Blind_Mean", "Actual_Total", "Shape_Parameter",
         "Training_Zero_Total_Rate", "Distribution_Median", "Distribution_Variance", "Distribution_SD",
         "P_Total_LE_4", "P_Total_LE_6", "P_Total_7_TO_9", "P_Total_GE_10", "P_Total_GE_12", "P_Total_GE_15",
-        "CRPS", "Log_Loss", "Discrete_Mid_PIT", "Deterministic_Randomized_PIT",
+        "CRPS", "Log_Loss", "Discrete_Mid_PIT", "Nonrandomized_Count_PIT", "Nonrandomized_PIT_Interval_Low", "Nonrandomized_PIT_Interval_High",
+        "Deterministic_Randomized_PIT", "Threshold_Weighted_CRPS_6_5_TO_11_5",
         "Interval_50_Low", "Interval_50_High", "Interval_80_Low", "Interval_80_High", "Interval_90_Low", "Interval_90_High",
       ],
       "MODULE_29",
@@ -7552,7 +7570,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
     frozenRows: 1,
     columns: diagnosticColumns(
       GAME_TRUTH_DIST_LINES_V2_COLUMN_NAMES,
-      ["Standard_Total_Line", "Frozen_Price_Blind_Mean", "Over_Probability", "Under_Or_Push_Probability", "Actual_Total", "Actual_Over_Result", "Brier_Score"],
+      ["Standard_Total_Line", "Frozen_Price_Blind_Mean", "Line_Cutoff_Integer", "Over_Probability", "Under_Or_Push_Probability", "CDF_At_Line_Cutoff", "Actual_Total", "Actual_Over_Result", "Brier_Score"],
       "MODULE_29",
     ),
   },
@@ -7573,12 +7591,41 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "GAME_TRUTH_DIST_PAIRS_V2",
     description:
-      "Within-game paired CRPS and log-score comparisons among the direct-total research comparators. Two-sided sign tests are descriptive evidence only and cannot select a model, tune dispersion, or change a forecast or decision.",
+      "Within-game paired CRPS, log-score, and posted-region twCRPS comparisons among direct-total research comparators. Slate-date block-bootstrap intervals are primary uncertainty; HLN-DM is an explicitly secondary cross-check and is disabled for nested pairs. No row can select a model, tune dispersion, or change a forecast or decision.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(
       GAME_TRUTH_DIST_PAIRS_V2_COLUMN_NAMES,
-      ["Standard_Total_Line", "Paired_N", "Non_Tied_N", "A_Better_Count", "B_Better_Count", "Tie_Count", "Mean_Delta_A_Minus_B", "Median_Delta_A_Minus_B", "Paired_Sign_Test_Two_Sided_P"],
+      ["Standard_Total_Line", "Paired_N", "Non_Tied_N", "A_Better_Count", "B_Better_Count", "Tie_Count", "Mean_Delta_A_Minus_B", "Median_Delta_A_Minus_B", "Paired_Sign_Test_Two_Sided_P", "Block_Count", "Block_Bootstrap_95_Low", "Block_Bootstrap_95_High", "HLN_DM_Statistic", "HLN_DM_Two_Sided_P", "Variant_Count"],
+      "MODULE_29",
+    ),
+  },
+
+  {
+    name: "GAME_TRUTH_DIST_CORP_V2",
+    description:
+      "Research-only CORP-style per-line reliability diagnostic. PAV/isotonic groups replace arbitrary fixed bins; MCB and whole-slate bootstrap consistency intervals remain descriptive at the current small walk-forward sample. This is not recalibration and has no forecast, market, vehicle, or authorization consumer.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      GAME_TRUTH_DIST_CORP_V2_COLUMN_NAMES,
+      [
+        "Standard_Total_Line", "PAV_Group", "Prediction_Low", "Prediction_High", "Mean_Predicted_Probability",
+        "Observed_Frequency", "Group_N", "CORP_MCB_Brier", "Block_Bootstrap_95_Low", "Block_Bootstrap_95_High", "Block_Count",
+      ],
+      "MODULE_29",
+    ),
+  },
+
+  {
+    name: "GAME_TRUTH_DIST_FEATURE_GOV_V2",
+    description:
+      "Versioned research governance ledger for prospective price-blind mean versus variance/tail candidates. It records evidence level, data availability, test design, exclusion rules, and recommendation before any covariate is fitted. It is not a live feature registry.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      GAME_TRUTH_DIST_FEATURE_GOV_V2_COLUMN_NAMES,
+      [],
       "MODULE_29",
     ),
   },

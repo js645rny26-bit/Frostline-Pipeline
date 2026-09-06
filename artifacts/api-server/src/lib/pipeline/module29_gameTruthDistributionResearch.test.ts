@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  andersonDarlingUniformDiagnostic,
+  buildGameTruthDistributionCorpRows,
   buildGameTruthDistributionLineRows,
   buildGameTruthDistributionPairs,
   buildGameTruthDistributionRows,
@@ -11,13 +13,22 @@ import {
   buildMeanParameterizedCOMPoissonDistribution,
   evaluateGameTruthDistributionWalkForward,
   GAME_TRUTH_DISTRIBUTION_HEADERS,
+  GAME_TRUTH_DISTRIBUTION_CORP_HEADERS,
+  GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_HEADERS,
   GAME_TRUTH_DISTRIBUTION_LINES_HEADERS,
   GAME_TRUTH_DISTRIBUTION_PAIRS_HEADERS,
+  gameTruthDistributionFeatureGovernanceRows,
   MIN_PRIOR_SETTLED_GAMES_V2,
+  nonrandomizedCountPit,
+  pairedSlateBlockBootstrapCi,
   parseFrozenAllocationOutcomes,
+  poolAdjacentViolators,
   STANDARD_TOTAL_LINES,
+  thresholdWeightedCrpsPostedRegion,
+  validatePmfAndLinePortability,
 } from "./module29_gameTruthDistributionResearch.js";
 import type { DistributionBenchmarkObservation } from "./module28_distributionBenchmark.js";
+import { buildPoissonDistribution } from "./module28_distributionBenchmark.js";
 import { WORKBOOK_ROADMAP } from "../workbook/workbookRoadmap.js";
 import { WORKBOOK_SCHEMA } from "../workbook/workbookSchema.js";
 import { ALLOCATION_SETTLEMENT_HEADERS } from "./module24_postgameDiagnostics.js";
@@ -97,23 +108,77 @@ test("all standard-line probabilities come from one PMF and are monotone in the 
   assert.equal(nbRows.length, STANDARD_TOTAL_LINES.length);
   const probabilities = nbRows.map((row) => Number(row[GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Over_Probability")]));
   for (let index = 1; index < probabilities.length; index++) assert.ok(probabilities[index - 1]! >= probabilities[index]!);
+  assert.ok(nbRows.every((row) => row[GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Line_Probability_Reconciliation_Status")] === "VALID_CDF_RECONCILIATION"));
+  const line75 = nbRows.find((row) => Number(row[GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Standard_Total_Line")]) === 7.5);
+  assert.equal(line75?.[GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Line_Cutoff_Integer")], 7);
 });
 
-test("distribution rows expose PIT and directional interval escapes; summary records PIT bins and high/low escapes", () => {
+test("Czado-Gneiting-Held non-randomized count PIT retains its CDF-jump interval", () => {
+  const distribution = { pmf: [0.2, 0.3, 0.5], cdf: [0.2, 0.5, 1] };
+  const pit = nonrandomizedCountPit(distribution, 1);
+  assert.deepEqual(pit, { pit: 0.35, interval_low: 0.2, interval_high: 0.5 });
+  assert.equal(andersonDarlingUniformDiagnostic([0.2]), null);
+  assert.ok(Number.isFinite(andersonDarlingUniformDiagnostic([0.2, 0.5, 0.8])!));
+});
+
+test("distribution rows expose count-correct PIT, posted-region twCRPS, and directional interval escapes", () => {
   const evaluations = evaluateGameTruthDistributionWalkForward(observationsWithTraining());
   const rows = buildGameTruthDistributionRows(evaluations);
   const lineRows = buildGameTruthDistributionLineRows(evaluations);
   const firstEligible = rows.find((row) => row[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Research_Status")] === "WALK_FORWARD_ELIGIBLE");
   assert.ok(firstEligible);
+  assert.notEqual(firstEligible?.[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Nonrandomized_Count_PIT")], "");
+  assert.notEqual(firstEligible?.[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Nonrandomized_PIT_Interval_Low")], "");
+  assert.notEqual(firstEligible?.[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Threshold_Weighted_CRPS_6_5_TO_11_5")], "");
+  assert.equal(firstEligible?.[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("PMF_Integrity_Status")], "VALID_PMF");
   assert.notEqual(firstEligible?.[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Deterministic_Randomized_PIT")], "");
   assert.match(String(firstEligible?.[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Interval_90_Escape_Side")]), /^(LOW|HIGH|INSIDE)$/);
   const summary = buildGameTruthDistributionSummary(rows, lineRows, "2026-08-03T03:00:00.000Z");
   const pairs = buildGameTruthDistributionPairs(rows, "2026-08-03T03:00:00.000Z");
-  assert.ok(summary.some((row) => row[2] === "RANDOMIZED_PIT_BIN"));
+  assert.ok(summary.some((row) => row[2] === "NONRANDOMIZED_COUNT_PIT_BIN"));
+  assert.ok(summary.some((row) => row[2] === "RANDOMIZED_PIT_BIN_SECONDARY"));
+  assert.ok(summary.some((row) => row[2] === "ANDERSON_DARLING_UNIFORM_DIAGNOSTIC"));
   assert.ok(summary.some((row) => row[2] === "INTERVAL_COVERAGE_90"));
   assert.ok(summary.some((row) => row[2] === "PREDECLARED_DECISION"));
   assert.ok(pairs.some((row) => row[1] === "CRPS"));
   assert.equal(pairs[0]?.length, GAME_TRUTH_DISTRIBUTION_PAIRS_HEADERS.length);
+});
+
+test("threshold-weighted CRPS uses coherent half-run CDF cutoffs and PMF integrity is deterministic", () => {
+  const distribution = buildPoissonDistribution(8, 30);
+  assert.ok(thresholdWeightedCrpsPostedRegion(distribution, 9) >= 0);
+  assert.deepEqual(validatePmfAndLinePortability(distribution), {
+    pmf_integrity_status: "VALID_PMF",
+    line_portability_status: "VALID_COHERENT_LINES",
+  });
+  assert.equal(validatePmfAndLinePortability({ pmf: [0.5, 0.4], cdf: [0.5, 0.9] }).pmf_integrity_status, "INVALID_PMF");
+});
+
+test("paired block bootstrap is deterministic and resamples complete slate dates", () => {
+  const records = [
+    { date: "2026-08-01", delta: -0.4 },
+    { date: "2026-08-01", delta: 0.1 },
+    { date: "2026-08-02", delta: -0.2 },
+  ];
+  const first = pairedSlateBlockBootstrapCi(records, "fixture");
+  const second = pairedSlateBlockBootstrapCi(records, "fixture");
+  assert.deepEqual(first, second);
+  assert.equal(first.block_count, 2);
+  assert.ok(first.low !== null && first.high !== null && first.low <= first.high);
+});
+
+test("CORP uses PAV rather than arbitrary fixed bins and governance stays non-operational", () => {
+  const pav = poolAdjacentViolators([
+    { date: "2026-08-01", probability: 0.2, outcome: 1 },
+    { date: "2026-08-02", probability: 0.8, outcome: 0 },
+  ]);
+  assert.equal(pav.length, 1);
+  const evaluations = evaluateGameTruthDistributionWalkForward(observationsWithTraining());
+  const corp = buildGameTruthDistributionCorpRows(buildGameTruthDistributionLineRows(evaluations), "2026-08-03T03:00:00.000Z");
+  assert.ok(corp.some((row) => row.length === GAME_TRUTH_DISTRIBUTION_CORP_HEADERS.length));
+  const governance = gameTruthDistributionFeatureGovernanceRows();
+  assert.ok(governance.every((row) => row.length === GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_HEADERS.length));
+  assert.ok(governance.some((row) => row[0] === "TRAFFIC_WITHOUT_DAMAGE_HISTORICAL_GAP" && row[6] === "REJECT"));
 });
 
 test("slate diagnostics separate aggregate error from within-slate game ranking", () => {
@@ -146,7 +211,7 @@ test("Module 29 workbook surfaces are schema-documented research-only tabs", () 
   assert.deepEqual(columns("GAME_TRUTH_DISTRIBUTION_V2"), GAME_TRUTH_DISTRIBUTION_HEADERS);
   assert.deepEqual(columns("GAME_TRUTH_DIST_LINES_V2"), GAME_TRUTH_DISTRIBUTION_LINES_HEADERS);
   assert.deepEqual(columns("GAME_TRUTH_DIST_PAIRS_V2"), GAME_TRUTH_DISTRIBUTION_PAIRS_HEADERS);
-  for (const sheet of ["GAME_TRUTH_DISTRIBUTION_V2", "GAME_TRUTH_DIST_LINES_V2", "GAME_TRUTH_DIST_SUMMARY_V2", "GAME_TRUTH_DIST_PAIRS_V2", "GAME_TRUTH_SLATE_DIAG_V2"]) {
+  for (const sheet of ["GAME_TRUTH_DISTRIBUTION_V2", "GAME_TRUTH_DIST_LINES_V2", "GAME_TRUTH_DIST_SUMMARY_V2", "GAME_TRUTH_DIST_PAIRS_V2", "GAME_TRUTH_DIST_CORP_V2", "GAME_TRUTH_DIST_FEATURE_GOV_V2", "GAME_TRUTH_SLATE_DIAG_V2"]) {
     assert.ok(WORKBOOK_ROADMAP.some((entry) => entry.sheet === sheet));
   }
 });

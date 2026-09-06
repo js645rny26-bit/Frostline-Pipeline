@@ -533,22 +533,44 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "REPLAY",
     timing: "Rebuilt with direct-total distribution research during daily settlement (Module 29)",
     purpose:
-      "PIT-bin, CRPS, log-score, directional interval-escape, and standard-line Brier summaries, plus the recorded no-promotion protocol.",
+      "Non-randomized count-PIT, secondary deterministic randomized-PIT, proper-score, directional interval-escape, threshold-weighted CRPS, and standard-line Brier summaries, plus sample-size constraints and the recorded no-promotion protocol.",
     boardRelationship:
       "Research-only. This is calibration evidence, not a coefficient or distribution-model selection rule.",
     readNote:
-      "Read high-side and low-side escapes separately. Overall coverage alone cannot reveal asymmetric tail failure.",
+      "Read non-randomized count PIT as the primary view: a U shape means too narrow, a dome too wide, and a slope center bias. At the current sample it is a diagnostic, not a calibration certificate.",
   },
   {
     sheet: "GAME_TRUTH_DIST_PAIRS_V2",
     stage: "REPLAY",
     timing: "Rebuilt with direct-total distribution research during daily settlement (Module 29)",
     purpose:
-      "Within-game paired CRPS and log-score evidence among all direct-total research comparators.",
+      "Within-game paired CRPS, log-score, and posted-region twCRPS evidence among all direct-total research comparators, with slate-date block-bootstrap intervals and a secondary HLN-DM cross-check where applicable.",
     boardRelationship:
       "Research-only. The paired sign test is neither a promotion rule nor a model-selection or authorization input.",
     readNote:
-      "Compare paired N, ties, score direction, and the two-sided sign-test result. Small-N differences remain ambiguous rather than selecting a model.",
+      "Block-bootstrap intervals are primary because games on a slate can co-move. Nested pair HLN-DM values are intentionally unavailable; small-N differences remain ambiguous rather than selecting a model.",
+  },
+  {
+    sheet: "GAME_TRUTH_DIST_CORP_V2",
+    stage: "REPLAY",
+    timing: "Rebuilt with direct-total distribution research during daily settlement (Module 29)",
+    purpose:
+      "CORP-style, PAV/isotonic per-line reliability curves, numerical Brier miscalibration evidence, and whole-slate bootstrap consistency intervals.",
+    boardRelationship:
+      "Research-only. It does not recalibrate probabilities or influence any center, distribution, market, vehicle, BET/PASS, or authorization state.",
+    readNote:
+      "PAV groups are data-adaptive rather than arbitrary bins. Read their bootstrap bands and sample size before interpreting any apparent calibration curve.",
+  },
+  {
+    sheet: "GAME_TRUTH_DIST_FEATURE_GOV_V2",
+    stage: "REPLAY",
+    timing: "Rebuilt with direct-total distribution research during daily settlement (Module 29)",
+    purpose:
+      "Predeclared, price-blind mean versus variance/tail governance for candidate structural features, including evidence level, available frozen data, test design, and exclusion guardrails.",
+    boardRelationship:
+      "No operational relationship. This is not a live feature registry and cannot add a covariate to any production calculation.",
+    readNote:
+      "Use it to keep evidence-backed candidates, prospective hypotheses, and rejected sequencing/noise features separate before any distributional regression is attempted.",
   },
   {
     sheet: "GAME_TRUTH_SLATE_DIAG_V2",
