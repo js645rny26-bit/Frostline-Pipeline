@@ -1,0 +1,166 @@
+name: Frostline isolated pregame smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: Future MLB slate date to exercise in an isolated workbook (YYYY-MM-DD)
+        required: true
+        default: "2026-09-07"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  isolated-pregame-smoke:
+    if: github.ref == 'refs/heads/commissioning/bridge-repair-2026-08-01'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      PORT: 3000
+      FROSTLINE_SHEETS_BACKEND: google
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.FROSTLINE_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.FROSTLINE_GCP_SERVICE_ACCOUNT }}
+
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Resolve smoke date
+        id: slate-date
+        shell: bash
+        run: |
+          set -euo pipefail
+          slate_date="${{ inputs.date }}"
+          if [[ ! "$slate_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "::error title=Invalid slate date::Expected YYYY-MM-DD."
+            exit 1
+          fi
+          if [[ "$slate_date" <= "$(TZ=America/New_York date +%F)" ]]; then
+            echo "::error title=Unsafe smoke date::Use a future slate date; this workflow never writes a current or completed slate."
+            exit 1
+          fi
+          echo "SLATE_DATE=$slate_date" >> "$GITHUB_ENV"
+          echo "date=$slate_date" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate Google ADC through GitHub OIDC
+        id: google-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+          token_format: access_token
+          access_token_scopes: |
+            https://www.googleapis.com/auth/spreadsheets
+            https://www.googleapis.com/auth/drive.file
+
+      - name: Export short-lived Google access token
+        run: echo "FROSTLINE_GOOGLE_ACCESS_TOKEN=${{ steps.google-auth.outputs.access_token }}" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Run typecheck
+        run: pnpm run typecheck
+
+      - name: Run complete API-server test suite
+        working-directory: artifacts/api-server
+        run: node ./run-tests.mjs
+
+      - name: Build API server
+        run: pnpm --filter @workspace/api-server run build
+
+      - name: Create isolated workbook and publish pregame only
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > frostline-api-server.log
+          echo '{"status":"NOT_RUN"}' > frostline-pregame-smoke-report.json
+          echo '{"status":"NOT_RUN"}' > frostline-pregame-smoke-workbook.json
+
+          pnpm --filter @workspace/api-server start > frostline-api-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for attempt in {1..30}; do
+            if curl --silent --fail http://127.0.0.1:3000/api/healthz >/dev/null; then
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat frostline-api-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if ! curl --silent --show-error --fail-with-body --request POST \
+            "http://127.0.0.1:3000/api/workbook/create?date=${SLATE_DATE}-SMOKE" \
+            --output frostline-pregame-smoke-workbook.json; then
+            cat frostline-pregame-smoke-workbook.json || true
+            cat frostline-api-server.log
+            exit 1
+          fi
+
+          sandbox_workbook_id="$(node -e 'const fs = require("fs"); const x = JSON.parse(fs.readFileSync("frostline-pregame-smoke-workbook.json", "utf8")); if (!x.workbook_id) process.exit(2); process.stdout.write(x.workbook_id);')"
+          case "$sandbox_workbook_id" in
+            1KPYzbSawLIrOcckn5EXxO4vH5eABOhMIibhCgpF-oNs|1MWsGQYR13tFjwd-L4lMweGShKJkrOsSNJaHzdjiMNHs)
+              echo "::error title=Unsafe sandbox identity::New smoke workbook resolved to a protected workbook ID."
+              exit 1
+              ;;
+          esac
+          echo "SANDBOX_WORKBOOK_ID=$sandbox_workbook_id" >> "$GITHUB_ENV"
+
+          set +e
+          curl --silent --show-error --fail-with-body --request POST \
+            "http://127.0.0.1:3000/api/pipeline/publish?date=${SLATE_DATE}&workbook_id=${sandbox_workbook_id}" \
+            --output frostline-pregame-smoke-report.json
+          publish_status=$?
+          set -e
+
+          node <<'NODE'
+          const fs = require("fs");
+          const report = JSON.parse(fs.readFileSync("frostline-pregame-smoke-report.json", "utf8"));
+          const workbook = JSON.parse(fs.readFileSync("frostline-pregame-smoke-workbook.json", "utf8"));
+          console.log(JSON.stringify({
+            smoke_date: process.env.SLATE_DATE,
+            sandbox_workbook_id: workbook.workbook_id,
+            sandbox_workbook_url: workbook.workbook_url,
+            pipeline_status: report.pipeline_status ?? null,
+            validation_status: report.validation_status ?? null,
+            errors: report.errors ?? [report.error ?? "no response error"],
+          }, null, 2));
+          if (report.pipeline_status !== "success" || report.validation_status !== "PASS" || (report.errors?.length ?? 0) > 0) process.exit(1);
+          NODE
+
+          if [ "$publish_status" -ne 0 ]; then
+            echo "Pregame smoke publish failed; API server log follows."
+            cat frostline-api-server.log
+            exit "$publish_status"
+          fi
+
+      - name: Upload isolated pregame evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frostline-pregame-smoke-${{ steps.slate-date.outputs.date }}
+          path: |
+            frostline-pregame-smoke-report.json
+            frostline-pregame-smoke-workbook.json
+            frostline-api-server.log
+          if-no-files-found: error
