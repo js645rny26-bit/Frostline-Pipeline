@@ -161,7 +161,9 @@ test("an executable market overlay changes only market provenance, never price-b
   assert.equal(reference[0]?.values[index.Base_Away_Projection], executable[0]?.values[index.Base_Away_Projection]);
   assert.equal(reference[0]?.values[index.Base_Home_Projection], executable[0]?.values[index.Base_Home_Projection]);
   assert.equal(reference[0]?.values[index.Base_Projection], executable[0]?.values[index.Base_Projection]);
-  assert.equal(reference[0]?.values[index.Reference_Market_Line], 7.5);
+  assert.equal(reference[0]?.values[index.Reference_Market_Line], "");
+  assert.equal(reference[0]?.values[index.Synthetic_Normalized_Reference_Line], 7.5);
+  assert.equal(reference[0]?.values[index.Reference_Market_Representation_Status], "SYNTHETIC_NORMALIZED_REFERENCE");
   assert.equal(reference[0]?.values[index.Executable_Market_Line], "");
   assert.equal(reference[0]?.values[index.Executable_Market_Price], "");
   assert.equal(reference[0]?.values[index.Executable_Market_Status], "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
@@ -171,6 +173,7 @@ test("an executable market overlay changes only market provenance, never price-b
   assert.equal(executable[0]?.values[index.Executable_Market_Quoted_TS], "2026-08-24T22:43:00.000Z");
   assert.equal(executable[0]?.values[index.Executable_Market_Status], "LITERAL_EXECUTABLE_HARD_ROCK_CAPTURED");
   assert.equal(executable[0]?.values[index.Primary_Grade_Market_Line], 10);
+  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Status], "LITERAL_EXECUTABLE");
 
   const partial = buildPregamePacketInputs(
     summary,
@@ -197,7 +200,8 @@ test("an executable market overlay changes only market provenance, never price-b
   assert.equal(partial[0]?.values[index.Executable_Market_TS], "2026-08-24T22:45:00.000Z");
   assert.equal(partial[0]?.values[index.Executable_Market_Quoted_TS], "2026-08-24T22:40:00.000Z");
   assert.equal(partial[0]?.values[index.Executable_Market_Status], "PARTIAL_LITERAL_EXECUTABLE_HARD_ROCK_EVIDENCE_NO_LINE");
-  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Line], 7.5);
+  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Line], "");
+  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Status], "SYNTHETIC_NORMALIZED_REFERENCE");
 });
 
 test("a packet freezes automated-reference capture metadata beside literal executable evidence", () => {
@@ -249,7 +253,7 @@ test("a packet freezes automated-reference capture metadata beside literal execu
     summary, board, game, [], [], [], operator as never, referenceEvidence as never,
   )[0]!;
   const index = Object.fromEntries(PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]));
-  assert.equal(packet.values[index.Reference_Market_Line], 9.5);
+  assert.equal(packet.values[index.Reference_Market_Line], 10);
   assert.equal(packet.values[index.Reference_Market_Observed_Line], 10);
   assert.equal(packet.values[index.Reference_Market_Provider], "MLB_STARTING_NINE_CARD");
   assert.equal(packet.values[index.Reference_Market_Observed_TS], "2026-08-24T22:44:00.000Z");
@@ -257,6 +261,11 @@ test("a packet freezes automated-reference capture metadata beside literal execu
   assert.equal(packet.values[index.Reference_Market_Quote_Count], 1);
   assert.equal(packet.values[index.Reference_Market_Normalization_Status], "INTEGER_TO_LOWER_HALF");
   assert.equal(packet.values[index.Reference_Market_Capture_Alignment_Status], "MATCHED_CAPTURE");
+  assert.equal(packet.values[index.Reference_Market_Over_Price], -110);
+  assert.equal(packet.values[index.Reference_Market_Under_Price], -110);
+  assert.equal(packet.values[index.Reference_Market_Convention], "WHOLE_NUMBER");
+  assert.equal(packet.values[index.Reference_Market_Representation_Status], "LITERAL_REFERENCE");
+  assert.equal(packet.values[index.Synthetic_Normalized_Reference_Line], 9.5);
   assert.equal(packet.values[index.Executable_Market_Line], 9.5);
   assert.equal(packet.values[index.Executable_Market_Source], "Hard Rock NJ");
   assert.equal(packet.values[index.Base_Projection], 8.5);
@@ -269,8 +278,9 @@ test("a packet freezes automated-reference capture metadata beside literal execu
   const mismatchedPacket = buildPregamePacketInputs(
     summary, mismatchedBoard, game, [], [], [], new Map(), referenceEvidence as never,
   )[0]!;
-  assert.equal(mismatchedPacket.values[index.Reference_Market_Line], 8.5);
-  assert.equal(mismatchedPacket.values[index.Reference_Market_Source], "REFERENCE_LINE_UNTRACED");
+  assert.equal(mismatchedPacket.values[index.Reference_Market_Line], 10);
+  assert.equal(mismatchedPacket.values[index.Reference_Market_Source], "MLB_STARTING_NINE_CARD");
+  assert.equal(mismatchedPacket.values[index.Synthetic_Normalized_Reference_Line], 9.5);
   assert.equal(mismatchedPacket.values[index.Reference_Market_Capture_Alignment_Status], "MISMATCHED_CAPTURE");
 });
 
@@ -454,6 +464,9 @@ test("settlement finalization is date-scoped and rejects non-prospective snapsho
 test("v41 packet header migration preserves old frozen fields by name", () => {
   const oldHeader = PREGAME_PACKET_HISTORY_HEADERS.filter((name) => ![
     "Reference_Market_Line", "Reference_Market_Source", "Reference_Market_TS",
+    "Reference_Market_Over_Price", "Reference_Market_Under_Price",
+    "Reference_Market_Convention", "Reference_Market_Representation_Status",
+    "Synthetic_Normalized_Reference_Line",
     "Executable_Market_Line", "Executable_Market_Price", "Executable_Market_Source",
     "Executable_Market_TS", "Executable_Market_Quoted_TS", "Executable_Market_Status",
     "Primary_Grade_Market_Line", "Primary_Grade_Market_Source", "Primary_Grade_Market_Status",
@@ -483,6 +496,11 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Market_Line",
     "Market_Snapshot_Status",
     "Reference_Market_Line",
+    "Reference_Market_Over_Price",
+    "Reference_Market_Under_Price",
+    "Reference_Market_Convention",
+    "Reference_Market_Representation_Status",
+    "Synthetic_Normalized_Reference_Line",
     "Executable_Market_Line",
     "Primary_Grade_Market_Line",
     "Executable_Market_Price",
@@ -548,6 +566,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 53);
-  assert.equal(pregamePacketHistoryRange(5000), "A1:FF5000");
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 54);
+  assert.equal(pregamePacketHistoryRange(5000), "A1:FK5000");
 });

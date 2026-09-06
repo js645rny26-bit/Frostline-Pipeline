@@ -168,8 +168,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      slate-block paired-score uncertainty, CORP/PAV reliability diagnostics,
  *      and a research-only feature-governance ledger. No distribution result
  *      can affect a forecast, band, market, vehicle, or authorization output.
+ *  v54 (2026-09-06): Literal reference totals remain intact for fallback
+ *      settlement, including whole-number push semantics. Any lower-half
+ *      normalization is separately labeled synthetic and cannot become an
+ *      executable or economically equivalent grading market.
  */
-export const WORKBOOK_SCHEMA_VERSION = 53;
+export const WORKBOOK_SCHEMA_VERSION = 54;
 
 export interface ColumnDef {
   name: string;
@@ -253,6 +257,11 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Reference_Market_Quote_Count",
   "Reference_Market_Normalization_Status",
   "Reference_Market_Capture_Alignment_Status",
+  "Reference_Market_Over_Price",
+  "Reference_Market_Under_Price",
+  "Reference_Market_Convention",
+  "Reference_Market_Representation_Status",
+  "Synthetic_Normalized_Reference_Line",
   "Executable_Market_Line",
   "Executable_Market_Price",
   "Executable_Market_Source",

@@ -20,7 +20,10 @@ import {
   WORKBOOK_ID,
 } from "../sheets/client.js";
 import { isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
-import { normalizeFullGameTotalLine } from "./marketLineNormalization.js";
+import {
+  describeLiteralFullGameTotal,
+  normalizeFullGameTotalLine,
+} from "./marketLineNormalization.js";
 import {
   classifyCoSignFragility,
   classifyDistributionStructure,
@@ -66,9 +69,9 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Base_Away_Projection",
   "Base_Home_Projection",
   "Base_Projection",
-  // `Market_Line` remains the backwards-compatible primary grading line. The
-  // following fields preserve the distinct reference and executable evidence
-  // that produced it; none are inputs to the price-blind projection.
+  // `Market_Line` remains a backwards-compatible mechanical/query line. The
+  // explicit Primary_Grade fields below own settlement grading and preserve
+  // literal reference/executable evidence; none are price-blind inputs.
   "Market_Line",
   "Market_Snapshot_Status",
   "Reference_Market_Line",
@@ -84,6 +87,13 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Reference_Market_Quote_Count",
   "Reference_Market_Normalization_Status",
   "Reference_Market_Capture_Alignment_Status",
+  // The literal reference market is authoritative for fallback settlement.
+  // Any lower-half representation remains separately visible and synthetic.
+  "Reference_Market_Over_Price",
+  "Reference_Market_Under_Price",
+  "Reference_Market_Convention",
+  "Reference_Market_Representation_Status",
+  "Synthetic_Normalized_Reference_Line",
   "Executable_Market_Line",
   "Executable_Market_Price",
   "Executable_Market_Source",
@@ -447,28 +457,45 @@ export function buildPregamePacketInputs(
       operator,
       "CURRENT_HARD_ROCK_LINE",
     );
-    // The board should already receive a normalized source line, but retain a
-    // defensive boundary here because this packet is settlement provenance.
-    const referenceMarketLine = normalizeFullGameTotalLine(boardRow.market_line);
-    const packetMarketLine = operatorMarketLine ?? referenceMarketLine;
-    const capturedReferenceLine = referenceEvidence?.total ?? null;
+    // Preserve the source market exactly for settlement provenance. The board
+    // may still expose an older lower-half representation for operational
+    // compatibility, but that representation is synthetic and cannot become a
+    // literal reference fallback or an executable market claim.
+    const boardSyntheticReferenceLine = normalizeFullGameTotalLine(boardRow.market_line);
+    const capturedLiteralReference = describeLiteralFullGameTotal(
+      referenceEvidence?.source_total,
+    );
+    const referenceMarketLine = capturedLiteralReference.literal_total;
+    const syntheticNormalizedReferenceLine = referenceEvidence?.total
+      ?? boardSyntheticReferenceLine;
+    const packetMarketLine = operatorMarketLine
+      ?? referenceMarketLine
+      ?? syntheticNormalizedReferenceLine;
+    const referenceRepresentationStatus = referenceMarketLine === null
+      ? syntheticNormalizedReferenceLine === null
+        ? "REFERENCE_MARKET_UNAVAILABLE"
+        : "SYNTHETIC_NORMALIZED_REFERENCE"
+      : "LITERAL_REFERENCE";
     const referenceCaptureAlignmentStatus = referenceMarketLine === null
-      ? capturedReferenceLine === null
+      ? syntheticNormalizedReferenceLine === null
         ? "NO_REFERENCE_MARKET"
-        : "CAPTURED_REFERENCE_NOT_ON_BOARD"
-      : capturedReferenceLine === null
-        ? "UNTRACED_REFERENCE_LINE"
-        : referenceMarketLine === capturedReferenceLine
+        : "SYNTHETIC_REFERENCE_UNTRACED"
+      : syntheticNormalizedReferenceLine === null
+        ? "LITERAL_REFERENCE_NOT_ON_BOARD"
+        : boardSyntheticReferenceLine === syntheticNormalizedReferenceLine
           ? "MATCHED_CAPTURE"
           : "MISMATCHED_CAPTURE";
-    const referenceMarketTs = referenceCaptureAlignmentStatus === "MATCHED_CAPTURE"
-      ? referenceEvidence?.source_observed_ts ?? ""
-      : referenceMarketLine === null
-        ? ""
-        : boardRow.final_decision_ts ?? boardRow.projection_generated_ts ?? "";
-    const referenceMarketSource = referenceCaptureAlignmentStatus === "MATCHED_CAPTURE"
-      ? referenceEvidence?.source_provider ?? ""
-      : referenceMarketLine === null ? "" : "REFERENCE_LINE_UNTRACED";
+    const referenceMarketTs = referenceMarketLine === null
+      ? ""
+      : referenceEvidence?.source_observed_ts
+        ?? boardRow.final_decision_ts
+        ?? boardRow.projection_generated_ts
+        ?? "";
+    const referenceMarketSource = referenceMarketLine === null
+      ? ""
+      : referenceEvidence?.source_provider
+        ?? referenceEvidence?.bookmaker
+        ?? "REFERENCE_LINE_UNTRACED";
     const literalExecutablePrice = operatorValue(operator, "CURRENT_HARD_ROCK_PRICE");
     // CURRENT_PRICE predates the dedicated executable price field. Retain it
     // only when a literal Hard Rock line is present; by itself it remains a
@@ -498,15 +525,15 @@ export function buildPregamePacketInputs(
         ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
         : "PARTIAL_LITERAL_EXECUTABLE_HARD_ROCK_EVIDENCE_NO_LINE";
     const primaryMarketSource = operatorMarketLine === undefined
-      ? referenceMarketLine === null
-        ? ""
-        : "AUTOMATED_REFERENCE_BOARD"
+      ? referenceMarketLine === null ? "" : referenceMarketSource
       : "LITERAL_EXECUTABLE_HARD_ROCK";
     const primaryMarketStatus = operatorMarketLine === undefined
       ? referenceMarketLine === null
-        ? "MISSING_MARKET"
-        : "REFERENCE_ONLY_FALLBACK"
-      : "EXECUTABLE_OPERATOR_CAPTURED";
+        ? referenceRepresentationStatus === "SYNTHETIC_NORMALIZED_REFERENCE"
+          ? "SYNTHETIC_NORMALIZED_REFERENCE"
+          : "MISSING_MARKET"
+        : "LITERAL_REFERENCE"
+      : "LITERAL_EXECUTABLE";
     const awayLineupOverride = operatorValue(operator, "AWAY_LINEUP");
     const homeLineupOverride = operatorValue(operator, "HOME_LINEUP");
     const awayLineupStatus = awayLineupOverride
@@ -592,13 +619,18 @@ export function buildPregamePacketInputs(
       blank(referenceEvidence?.source_quote_count),
       referenceEvidence?.source_normalization_status ?? "",
       referenceCaptureAlignmentStatus,
+      referenceEvidence?.over_odds ?? "",
+      referenceEvidence?.under_odds ?? "",
+      capturedLiteralReference.convention,
+      referenceRepresentationStatus,
+      blank(syntheticNormalizedReferenceLine),
       blank(operatorMarketLine),
       explicitExecutablePrice ?? "",
       executableMarketSource,
       executableMarketTs,
       executableMarketQuotedTs,
       executableMarketStatus,
-      blank(packetMarketLine),
+      blank(operatorMarketLine ?? referenceMarketLine),
       primaryMarketSource,
       primaryMarketStatus,
       boardRow.direction,

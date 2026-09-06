@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  describeLiteralFullGameTotal,
   describeFullGameTotalNormalization,
   isHalfNumberFullGameTotal,
   normalizeFullGameTotalLine,
@@ -9,11 +10,26 @@ import {
   normalizeHardRockTotalLineList,
 } from "./marketLineNormalization.js";
 
-test("whole-number full-game totals normalize to the immediately lower Hard Rock half number", () => {
+test("synthetic display normalization maps whole-number totals to a lower half number", () => {
   assert.equal(normalizeFullGameTotalLine(10), 9.5);
   assert.equal(normalizeFullGameTotalLine("7"), 6.5);
   assert.equal(normalizeFullGameTotalLine(8.5), 8.5);
   assert.equal(normalizeFullGameTotalLine("9.5"), 9.5);
+});
+
+test("literal market provenance preserves the posted whole-or-half convention", () => {
+  assert.deepEqual(describeLiteralFullGameTotal(8), {
+    literal_total: 8,
+    convention: "WHOLE_NUMBER",
+  });
+  assert.deepEqual(describeLiteralFullGameTotal(8.5), {
+    literal_total: 8.5,
+    convention: "HALF_NUMBER",
+  });
+  assert.deepEqual(describeLiteralFullGameTotal(8.25), {
+    literal_total: null,
+    convention: "UNSUPPORTED_OR_MISSING",
+  });
 });
 
 test("normalization metadata preserves the source representation decision", () => {

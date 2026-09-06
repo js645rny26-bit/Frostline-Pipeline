@@ -23,6 +23,7 @@ import {
   starterSurvivalCalibrationValues,
   STARTER_SURVIVAL_V2_CALIBRATION_REPORT_HEADER,
   starterSurvivalV2CalibrationValues,
+  type FrozenPacketMarketSnapshot,
   type SettlementRow,
 } from "./module14_shadowSettlement.js";
 import { parseGamePitcherProvenance } from "./module14_pitcherProvenance.js";
@@ -461,12 +462,93 @@ test("frozen packet keeps executable Hard Rock market distinct from reference gr
   assert.equal(grade.primary_directional_result, "WIN");
   assert.equal(grade.primary_market_grade_status, "EXECUTABLE_OPERATOR_CAPTURED");
 
-  const legacyOutcome = Array(44).fill("");
+  const legacyOutcome = Array(OUTCOMES_HEADER.length).fill("");
   legacyOutcome[17] = 8;
   const fallback = resolveSettlementMarketGrade(8.75, 8, undefined, legacyOutcome);
   assert.equal(fallback.primary_market_grade_status, "REFERENCE_ONLY_FALLBACK");
   assert.equal(fallback.primary_directional_result, "PUSH");
   assert.equal(fallback.executable_market_line, null);
+});
+
+test("v54 literal whole-number reference fallback preserves below, above, and push outcomes", () => {
+  const index = Object.fromEntries(
+    PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]),
+  ) as Record<(typeof PREGAME_PACKET_HISTORY_HEADERS)[number], number>;
+  const packet = Array(PREGAME_PACKET_HISTORY_HEADERS.length).fill("");
+  packet[index.Date] = "2026-09-06";
+  packet[index.Game_ID] = "20260906_AAA_BBB";
+  packet[index.Scheduled_First_Pitch] = "2026-09-06T23:10:00.000Z";
+  packet[index.Packet_Status] = "FROZEN_PREGAME";
+  packet[index.Packet_Snapshot_TS] = "2026-09-06T22:45:00.000Z";
+  packet[index.Freeze_TS] = "2026-09-06T23:11:00.000Z";
+  packet[index.Market_Line] = 7.5;
+  packet[index.Reference_Market_Line] = 8;
+  packet[index.Reference_Market_Convention] = "WHOLE_NUMBER";
+  packet[index.Reference_Market_Representation_Status] = "LITERAL_REFERENCE";
+  packet[index.Synthetic_Normalized_Reference_Line] = 7.5;
+  packet[index.Primary_Grade_Market_Line] = 8;
+  packet[index.Primary_Grade_Market_Source] = "MLB_STARTING_NINE_CARD";
+  packet[index.Primary_Grade_Market_Status] = "LITERAL_REFERENCE";
+
+  const snapshot = parseFrozenPacketMarketSnapshots([packet], "2026-09-06").get("20260906_AAA_BBB");
+  assert.equal(snapshot?.reference_market_line, 8);
+  assert.equal(snapshot?.synthetic_normalized_reference_line, 7.5);
+  assert.equal(snapshot?.primary_grade_market_line, 8);
+
+  assert.equal(resolveSettlementMarketGrade(8.75, 7, snapshot, undefined).primary_directional_result, "LOSS");
+  assert.equal(resolveSettlementMarketGrade(8.75, 9, snapshot, undefined).primary_directional_result, "WIN");
+  const push = resolveSettlementMarketGrade(8.75, 8, snapshot, undefined);
+  assert.equal(push.primary_directional_result, "PUSH");
+  assert.equal(push.primary_market_provenance, "LITERAL_REFERENCE");
+  assert.equal(push.market_grade_notes, "WHOLE_NUMBER_REFERENCE_PUSH_PRESERVED");
+});
+
+test("v54 synthetic normalized reference is never executable or a fallback grading line", () => {
+  const index = Object.fromEntries(
+    PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]),
+  ) as Record<(typeof PREGAME_PACKET_HISTORY_HEADERS)[number], number>;
+  const packet = Array(PREGAME_PACKET_HISTORY_HEADERS.length).fill("");
+  packet[index.Date] = "2026-09-06";
+  packet[index.Game_ID] = "20260906_CCC_DDD";
+  packet[index.Scheduled_First_Pitch] = "2026-09-06T23:10:00.000Z";
+  packet[index.Packet_Status] = "FROZEN_PREGAME";
+  packet[index.Packet_Snapshot_TS] = "2026-09-06T22:45:00.000Z";
+  packet[index.Freeze_TS] = "2026-09-06T23:11:00.000Z";
+  packet[index.Market_Line] = 7.5;
+  packet[index.Reference_Market_Representation_Status] = "SYNTHETIC_NORMALIZED_REFERENCE";
+  packet[index.Synthetic_Normalized_Reference_Line] = 7.5;
+  packet[index.Primary_Grade_Market_Status] = "SYNTHETIC_NORMALIZED_REFERENCE";
+
+  const snapshot = parseFrozenPacketMarketSnapshots([packet], "2026-09-06").get("20260906_CCC_DDD");
+  assert.equal(snapshot?.primary_grade_market_line, null);
+  const priorOutcome = Array(OUTCOMES_HEADER.length).fill("");
+  priorOutcome[OUTCOMES_HEADER.indexOf("Primary_Grade_Market_Source")] = "STALE_SYNTHETIC_SOURCE";
+  const grade = resolveSettlementMarketGrade(8.75, 8, snapshot, priorOutcome);
+  assert.equal(grade.primary_market_provenance, "SYNTHETIC_NORMALIZED_REFERENCE");
+  assert.equal(grade.primary_directional_result, "NO_BET");
+  assert.equal(grade.executable_market_line, null);
+  assert.equal(grade.primary_grade_market_source, "");
+});
+
+test("a literal half-number market cannot produce a push", () => {
+  const packet: FrozenPacketMarketSnapshot = {
+    reference_market_line: 7.5,
+    reference_market_source: "REFERENCE",
+    reference_market_ts: "2026-09-06T22:45:00.000Z",
+    reference_market_convention: "HALF_NUMBER",
+    reference_market_representation_status: "LITERAL_REFERENCE",
+    synthetic_normalized_reference_line: 7.5,
+    executable_market_line: null,
+    executable_market_source: "",
+    executable_market_ts: "",
+    primary_grade_market_line: 7.5,
+    primary_grade_market_source: "REFERENCE",
+    primary_grade_market_status: "LITERAL_REFERENCE",
+    packet_snapshot_ts: "2026-09-06T22:45:00.000Z",
+    freeze_ts: "2026-09-06T23:11:00.000Z",
+  };
+  assert.equal(resolveSettlementMarketGrade(8.75, 7, packet, undefined).primary_directional_result, "LOSS");
+  assert.equal(resolveSettlementMarketGrade(8.75, 8, packet, undefined).primary_directional_result, "WIN");
 });
 
 test("vehicle log wins while validated audit evidence can repair an unresolved outcome", () => {
@@ -557,7 +639,7 @@ test("legacy frozen audit columns survive the combined outcome migration", () =>
   assert.equal(migrated.length, OUTCOMES_HEADER.length);
   assert.deepEqual(migrated.slice(12, 22), legacy.slice(12, 22));
   assert.deepEqual(migrated.slice(22, 33), Array(11).fill(""));
-  assert.deepEqual(migrated.slice(33), Array(11).fill(""));
+  assert.deepEqual(migrated.slice(33), Array(OUTCOMES_HEADER.length - 33).fill(""));
 });
 
 test("correcting an official final recomputes frozen errors without changing frozen evidence", () => {
@@ -623,7 +705,7 @@ test("v16 pitcher columns move from M:W to W:AG and gain frozen audit values", (
   assert.equal(migrated[15], "FROZEN_VEHICLE_LOG");
   assert.equal(migrated[21], "REPAIRED_DIFFERS_FROM_PUBLISHED");
   assert.deepEqual(migrated.slice(22, 33), pitcher);
-  assert.deepEqual(migrated.slice(33), Array(11).fill(""));
+  assert.deepEqual(migrated.slice(33), Array(OUTCOMES_HEADER.length - 33).fill(""));
 });
 
 test("frozen projection replay serializes the packet projection, not repaired projection", () => {

@@ -40,7 +40,7 @@ const STARTER_SURVIVAL_HISTORY_SHEET = "STARTER_SURVIVAL_CALIBRATION_HISTORY";
 const STARTER_SURVIVAL_REPORT_SHEET = "STARTER_SURVIVAL_CALIBRATION_REPORT";
 const STARTER_SURVIVAL_V2_HISTORY_SHEET = "STARTER_SURVIVAL_V2_CALIBRATION_HISTORY";
 const STARTER_SURVIVAL_V2_REPORT_SHEET = "STARTER_SURVIVAL_V2_CALIBRATION_REPORT";
-const OUTCOMES_COLS = 44; // A-AR
+const OUTCOMES_COLS = 49; // A-AW
 
 export const LOW_CENTER_CALIBRATION_REPORT_HEADER = [
   "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
@@ -137,6 +137,11 @@ const O_PRIMARY_MARKET_SOURCE = 40;
 const O_PRIMARY_MARKET_STATUS = 41;
 const O_PRIMARY_DIRECTIONAL_RESULT = 42;
 const O_REFERENCE_DIRECTIONAL_RESULT = 43;
+const O_REFERENCE_MARKET_CONVENTION = 44;
+const O_REFERENCE_MARKET_REPRESENTATION_STATUS = 45;
+const O_SYNTHETIC_NORMALIZED_REFERENCE_LINE = 46;
+const O_PRIMARY_MARKET_PROVENANCE = 47;
+const O_MARKET_GRADE_NOTES = 48;
 export const FROZEN_VEHICLE_REQUIRED_FROM_DATE = "2026-08-10";
 
 export const OUTCOMES_HEADER = [
@@ -159,6 +164,11 @@ export const OUTCOMES_HEADER = [
   "Executable_Market_Line", "Executable_Market_Source", "Executable_Market_TS",
   "Primary_Grade_Market_Line", "Primary_Grade_Market_Source", "Primary_Market_Grade_Status",
   "Primary_Directional_Result", "Reference_Directional_Result",
+  // v54 preserves the literal reference convention independently from any
+  // mechanical lower-half representation, so whole-number push mass cannot be
+  // silently erased by reference fallback grading.
+  "Reference_Market_Convention", "Reference_Market_Representation_Status",
+  "Synthetic_Normalized_Reference_Line", "Primary_Market_Provenance", "Market_Grade_Notes",
 ];
 
 export const PROJECTION_REPLAY_HEADER = [
@@ -272,6 +282,9 @@ export interface FrozenPacketMarketSnapshot {
   reference_market_line: number | null;
   reference_market_source: string;
   reference_market_ts: string;
+  reference_market_convention: string;
+  reference_market_representation_status: string;
+  synthetic_normalized_reference_line: number | null;
   executable_market_line: number | null;
   executable_market_source: string;
   executable_market_ts: string;
@@ -370,26 +383,47 @@ export function parseFrozenPacketMarketSnapshots(
       || packetSnapshotMs < (latestSnapshotMs.get(gameId) ?? Number.NEGATIVE_INFINITY)
     ) continue;
 
+    const representationStatus = starterName(
+      row[PACKET_INDEX.Reference_Market_Representation_Status],
+    );
+    // v54 packets preserve the literal reference separately. Never recover a
+    // synthetic lower-half `Market_Line` as a reference fallback. Pre-v54
+    // frozen packets retain their original behavior and values unchanged.
+    const isV54MarketPacket = representationStatus !== "";
     const referenceMarketLine = numberOrNull(row[PACKET_INDEX.Reference_Market_Line])
-      ?? numberOrNull(row[PACKET_INDEX.Market_Line]);
+      ?? (isV54MarketPacket ? null : numberOrNull(row[PACKET_INDEX.Market_Line]));
     const executableMarketLine = numberOrNull(row[PACKET_INDEX.Executable_Market_Line]);
     const primaryMarketLine = numberOrNull(row[PACKET_INDEX.Primary_Grade_Market_Line])
-      ?? executableMarketLine
-      ?? referenceMarketLine;
+      ?? (isV54MarketPacket
+        ? executableMarketLine ?? (representationStatus === "LITERAL_REFERENCE" ? referenceMarketLine : null)
+        : executableMarketLine ?? referenceMarketLine);
     const hasExecutable = executableMarketLine !== null;
     snapshots.set(gameId, {
       reference_market_line: referenceMarketLine,
-      reference_market_source: starterName(row[PACKET_INDEX.Reference_Market_Source])
-        || (referenceMarketLine === null ? "" : "LEGACY_PACKET_REFERENCE_MARKET"),
-      reference_market_ts: starterName(row[PACKET_INDEX.Reference_Market_TS]) || packetSnapshotTs,
+      reference_market_source: isV54MarketPacket
+        ? starterName(row[PACKET_INDEX.Reference_Market_Source])
+        : starterName(row[PACKET_INDEX.Reference_Market_Source])
+          || (referenceMarketLine === null ? "" : "LEGACY_PACKET_REFERENCE_MARKET"),
+      reference_market_ts: isV54MarketPacket
+        ? starterName(row[PACKET_INDEX.Reference_Market_TS])
+        : starterName(row[PACKET_INDEX.Reference_Market_TS]) || packetSnapshotTs,
+      reference_market_convention: starterName(row[PACKET_INDEX.Reference_Market_Convention]),
+      reference_market_representation_status: representationStatus,
+      synthetic_normalized_reference_line: numberOrNull(
+        row[PACKET_INDEX.Synthetic_Normalized_Reference_Line],
+      ),
       executable_market_line: executableMarketLine,
       executable_market_source: starterName(row[PACKET_INDEX.Executable_Market_Source]),
       executable_market_ts: starterName(row[PACKET_INDEX.Executable_Market_TS]),
       primary_grade_market_line: primaryMarketLine,
-      primary_grade_market_source: starterName(row[PACKET_INDEX.Primary_Grade_Market_Source])
-        || (hasExecutable ? "MANUAL_OPERATOR_HARD_ROCK" : "LEGACY_PACKET_REFERENCE_MARKET"),
-      primary_grade_market_status: starterName(row[PACKET_INDEX.Primary_Grade_Market_Status])
-        || (hasExecutable ? "EXECUTABLE_OPERATOR_CAPTURED" : "REFERENCE_ONLY_FALLBACK"),
+      primary_grade_market_source: isV54MarketPacket
+        ? starterName(row[PACKET_INDEX.Primary_Grade_Market_Source])
+        : starterName(row[PACKET_INDEX.Primary_Grade_Market_Source])
+          || (hasExecutable ? "MANUAL_OPERATOR_HARD_ROCK" : "LEGACY_PACKET_REFERENCE_MARKET"),
+      primary_grade_market_status: isV54MarketPacket
+        ? starterName(row[PACKET_INDEX.Primary_Grade_Market_Status])
+        : starterName(row[PACKET_INDEX.Primary_Grade_Market_Status])
+          || (hasExecutable ? "EXECUTABLE_OPERATOR_CAPTURED" : "REFERENCE_ONLY_FALLBACK"),
       packet_snapshot_ts: packetSnapshotTs,
       freeze_ts: starterName(row[P_FREEZE_TS]),
     });
@@ -448,12 +482,17 @@ export interface SettlementRow {
   reference_market_line?: number | null;
   reference_market_source?: string;
   reference_market_ts?: string;
+  reference_market_convention?: string;
+  reference_market_representation_status?: string;
+  synthetic_normalized_reference_line?: number | null;
   executable_market_line?: number | null;
   executable_market_source?: string;
   executable_market_ts?: string;
   primary_grade_market_line?: number | null;
   primary_grade_market_source?: string;
   primary_market_grade_status?: string;
+  primary_market_provenance?: string;
+  market_grade_notes?: string;
   primary_directional_result?: string;
   reference_directional_result?: string;
   projected_away_starter: string;
@@ -652,6 +691,11 @@ export function settlementRowToValues(row: SettlementRow): unknown[] {
     row.primary_grade_market_line ?? "", row.primary_grade_market_source,
     row.primary_market_grade_status, row.primary_directional_result,
     row.reference_directional_result,
+    row.reference_market_convention ?? "",
+    row.reference_market_representation_status ?? "",
+    row.synthetic_normalized_reference_line ?? "",
+    row.primary_market_provenance ?? "",
+    row.market_grade_notes ?? "",
   ];
 }
 
@@ -776,12 +820,17 @@ export interface SettlementMarketGrade {
   reference_market_line: number | null;
   reference_market_source: string;
   reference_market_ts: string;
+  reference_market_convention: string;
+  reference_market_representation_status: string;
+  synthetic_normalized_reference_line: number | null;
   executable_market_line: number | null;
   executable_market_source: string;
   executable_market_ts: string;
   primary_grade_market_line: number | null;
   primary_grade_market_source: string;
   primary_market_grade_status: string;
+  primary_market_provenance: string;
+  market_grade_notes: string;
   primary_directional_result: string;
   reference_directional_result: string;
 }
@@ -801,42 +850,80 @@ export function resolveSettlementMarketGrade(
     ?? numberOrNull(existing?.[17]);
   const referenceMarketLine = packet?.reference_market_line
     ?? legacyReferenceLine;
-  const referenceMarketSource = packet?.reference_market_source
-    || starterName(existing?.[O_REFERENCE_MARKET_SOURCE])
-    || (referenceMarketLine === null ? "" : "FROZEN_REFERENCE_MARKET");
-  const referenceMarketTs = packet?.reference_market_ts
-    || starterName(existing?.[O_REFERENCE_MARKET_TS]);
+  // A current frozen packet is complete market-provenance authority, including
+  // deliberate blanks. Do not resurrect labels from an earlier outcome row.
+  const referenceMarketSource = packet !== undefined
+    ? packet.reference_market_source
+    : starterName(existing?.[O_REFERENCE_MARKET_SOURCE])
+      || (referenceMarketLine === null ? "" : "FROZEN_REFERENCE_MARKET");
+  const referenceMarketTs = packet !== undefined
+    ? packet.reference_market_ts
+    : starterName(existing?.[O_REFERENCE_MARKET_TS]);
+  const referenceMarketConvention = packet !== undefined
+    ? packet.reference_market_convention
+    : starterName(existing?.[O_REFERENCE_MARKET_CONVENTION]);
+  const referenceMarketRepresentationStatus = packet !== undefined
+    ? packet.reference_market_representation_status
+    : starterName(existing?.[O_REFERENCE_MARKET_REPRESENTATION_STATUS])
+      || (referenceMarketLine === null ? "REFERENCE_MARKET_UNAVAILABLE" : "LITERAL_REFERENCE");
+  const syntheticNormalizedReferenceLine = packet?.synthetic_normalized_reference_line
+    ?? numberOrNull(existing?.[O_SYNTHETIC_NORMALIZED_REFERENCE_LINE]);
   const executableMarketLine = packet?.executable_market_line
     ?? numberOrNull(existing?.[O_EXECUTABLE_MARKET_LINE]);
-  const executableMarketSource = packet?.executable_market_source
-    || starterName(existing?.[O_EXECUTABLE_MARKET_SOURCE]);
-  const executableMarketTs = packet?.executable_market_ts
-    || starterName(existing?.[O_EXECUTABLE_MARKET_TS]);
-  const primaryMarketLine = packet?.primary_grade_market_line
-    ?? executableMarketLine
-    ?? referenceMarketLine;
-  const primaryMarketSource = packet?.primary_grade_market_source
-    || starterName(existing?.[O_PRIMARY_MARKET_SOURCE])
-    || (executableMarketLine === null
-      ? referenceMarketLine === null ? "" : "FROZEN_REFERENCE_MARKET"
-      : "MANUAL_OPERATOR_HARD_ROCK");
-  const primaryMarketStatus = packet?.primary_grade_market_status
-    || starterName(existing?.[O_PRIMARY_MARKET_STATUS])
-    || (executableMarketLine === null
-      ? referenceMarketLine === null ? "MISSING_MARKET" : "REFERENCE_ONLY_FALLBACK"
-      : "EXECUTABLE_OPERATOR_CAPTURED");
+  const executableMarketSource = packet !== undefined
+    ? packet.executable_market_source
+    : starterName(existing?.[O_EXECUTABLE_MARKET_SOURCE]);
+  const executableMarketTs = packet !== undefined
+    ? packet.executable_market_ts
+    : starterName(existing?.[O_EXECUTABLE_MARKET_TS]);
+  // A v54 packet with synthetic-only reference evidence must remain
+  // ungradeable rather than falling through to a fabricated half-number line.
+  const primaryMarketLine = packet !== undefined
+    ? packet.primary_grade_market_line
+    : executableMarketLine ?? referenceMarketLine;
+  const primaryMarketSource = packet !== undefined
+    ? packet.primary_grade_market_source
+    : starterName(existing?.[O_PRIMARY_MARKET_SOURCE])
+      || (executableMarketLine === null
+        ? referenceMarketLine === null ? "" : "FROZEN_REFERENCE_MARKET"
+        : "MANUAL_OPERATOR_HARD_ROCK");
+  const primaryMarketStatus = packet !== undefined
+    ? packet.primary_grade_market_status
+    : starterName(existing?.[O_PRIMARY_MARKET_STATUS])
+      || (executableMarketLine === null
+        ? referenceMarketLine === null ? "MISSING_MARKET" : "REFERENCE_ONLY_FALLBACK"
+        : "EXECUTABLE_OPERATOR_CAPTURED");
   const primaryDirection = directionForProjection(frozenProjection, primaryMarketLine);
   const referenceDirection = directionForProjection(frozenProjection, referenceMarketLine);
+  const primaryMarketProvenance = executableMarketLine !== null
+    && primaryMarketLine === executableMarketLine
+    ? "LITERAL_EXECUTABLE"
+    : referenceMarketRepresentationStatus === "LITERAL_REFERENCE"
+      && primaryMarketLine === referenceMarketLine
+      ? "LITERAL_REFERENCE"
+      : primaryMarketLine === null && referenceMarketRepresentationStatus === "SYNTHETIC_NORMALIZED_REFERENCE"
+        ? "SYNTHETIC_NORMALIZED_REFERENCE"
+        : "LEGACY_OR_UNRESOLVED";
+  const marketGradeNotes = primaryMarketProvenance === "SYNTHETIC_NORMALIZED_REFERENCE"
+    ? "SYNTHETIC_NORMALIZED_REFERENCE_NOT_GRADEABLE"
+    : referenceMarketConvention === "WHOLE_NUMBER"
+      ? "WHOLE_NUMBER_REFERENCE_PUSH_PRESERVED"
+      : "";
   return {
     reference_market_line: referenceMarketLine,
     reference_market_source: referenceMarketSource,
     reference_market_ts: referenceMarketTs,
+    reference_market_convention: referenceMarketConvention,
+    reference_market_representation_status: referenceMarketRepresentationStatus,
+    synthetic_normalized_reference_line: syntheticNormalizedReferenceLine,
     executable_market_line: executableMarketLine,
     executable_market_source: executableMarketSource,
     executable_market_ts: executableMarketTs,
     primary_grade_market_line: primaryMarketLine,
     primary_grade_market_source: primaryMarketSource,
     primary_market_grade_status: primaryMarketStatus,
+    primary_market_provenance: primaryMarketProvenance,
+    market_grade_notes: marketGradeNotes,
     primary_directional_result: gradeDirection(primaryDirection, primaryMarketLine, actualTotal),
     reference_directional_result: gradeDirection(referenceDirection, referenceMarketLine, actualTotal),
   };
