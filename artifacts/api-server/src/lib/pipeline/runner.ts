@@ -16,6 +16,8 @@ import { fetchPlateUmpires } from "./module04e_umpires.js";
 import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
 import { fetchTeamRosters, fetchBatterSeasonStats, normalizeForMatch } from "./module02c_batterSeasonStats.js";
 import { fetchStatcastBatterLeaderboard } from "./module02d_statcastBatters.js";
+import { fetchStatcastPitcherExpectedLeaderboard, isFullSlatePregameWindow } from "./module02f_statcastPitcherExpected.js";
+import { persistSourceSnapshot } from "./module02_sourceSnapshots.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { trackLineMovement } from "./module05d_oddsHistory.js";
 import { fetchMarketOddsWithFallback, buildOddsMap } from "./module05c_startingNineScraper.js";
@@ -441,7 +443,20 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     "Full pipeline: batter IDs resolved from lineup roster map",
   );
 
-  const [pitcherSeasonStats, batterSeasonStats, statcastBatterStats] = await Promise.all([
+  const dataThroughDate = new Date(`${date}T12:00:00.000Z`);
+  dataThroughDate.setUTCDate(dataThroughDate.getUTCDate() - 1);
+  const statcastDataThroughDate = dataThroughDate.toISOString().slice(0, 10);
+  const statcastExpectedAdmissible = isFullSlatePregameWindow(
+    slate.games.map((game) => game.scheduled_utc_time),
+  );
+  if (!statcastExpectedAdmissible) {
+    logger.info(
+      { date, protected_games: protectedIds.size },
+      "Full pipeline: Savant expected-pitching withheld outside the full-slate pregame window",
+    );
+  }
+
+  const [pitcherSeasonStats, batterSeasonStats, statcastBatterStats, statcastPitcherExpected] = await Promise.all([
     fetchPitcherSeasonStats(statIds, date.slice(0, 4)).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: pitcher season stats threw — skipping");
       return null;
@@ -454,7 +469,37 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: Statcast batter leaderboard threw — degrading to OPS-only");
       return null;
     }),
+    statcastExpectedAdmissible
+      ? fetchStatcastPitcherExpectedLeaderboard(date.slice(0, 4), statcastDataThroughDate).catch((err: unknown) => {
+          logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: expected-pitching fetch threw — retaining traditional quality only");
+          return null;
+        })
+      : Promise.resolve(null),
   ]);
+
+  // Raw response retention is part of source validity. If the exact Savant
+  // response cannot be preserved before feature engineering, do not allow the
+  // new source to fill a traditional-data gap as if it were durable evidence.
+  let statcastPitcherExpectedMap = statcastPitcherExpected?.stats ?? new Map();
+  if (statcastPitcherExpected?.source_snapshot) {
+    const snapshotWrite = await persistSourceSnapshot(
+      statcastPitcherExpected.source_snapshot,
+      workbookId,
+    ).catch((err: unknown) => ({
+      status: "failure" as const,
+      errors: [err instanceof Error ? err.message : String(err)],
+    }));
+    if (snapshotWrite.status !== "success") {
+      statcastPitcherExpectedMap = new Map();
+      const detail = snapshotWrite.errors.join("; ") || "raw response was not retained";
+      allErrors.push({
+        module: "02f_statcast_pitcher_expected",
+        error: `SOURCE_SNAPSHOT_RETENTION_GAP: ${detail}`,
+        timestamp: new Date().toISOString(),
+      });
+      logger.warn({ detail }, "Full pipeline: expected-pitching excluded because raw source retention failed");
+    }
+  }
 
   // Sources can take long enough for an initially mutable game to enter the
   // prospective write guard before the first Sheets mutation. Scope the feed
@@ -570,6 +615,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     batterSeasonStats?.stats ?? new Map(),
     rosterNameMap ?? new Map(),
     statcastBatterStats?.stats ?? new Map(),
+    statcastPitcherExpectedMap,
     recalculationProtection,
   );
   if (mod09.status === "error") {

@@ -95,6 +95,28 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     readNote:
       "Confirm identity, lineup status, timestamp, and missing fields before using it.",
   },
+  {
+    sheet: "SOURCE_ACQUISITION_LOG",
+    stage: "META",
+    timing: "Append before a newly connected external source can fill an active input gap",
+    purpose:
+      "Immutable source provenance: request, pregame cutoff, response hash, parser contract, coverage, status, fallback, and raw-storage state.",
+    boardRelationship:
+      "No direct board input. A retained valid source may support a documented active family; retention failure excludes that source from the run.",
+    readNote:
+      "Verify STORED raw state, schema status, data-through date, and MLBAM coverage before interpreting a source-derived fallback.",
+  },
+  {
+    sheet: "SOURCE_RAW_SNAPSHOT",
+    stage: "META",
+    timing: "Append with SOURCE_ACQUISITION_LOG for each new retained response",
+    purpose:
+      "Chunked untouched response bytes keyed by Snapshot_ID for parser audit and reproducible feature engineering.",
+    boardRelationship:
+      "Never a board or projection input directly; it is provenance evidence for the source that produced one.",
+    readNote:
+      "Concatenate chunks by Snapshot_ID and Chunk_Index only when auditing an exact retained source response.",
+  },
 
   {
     sheet: "GAME_INTEGRATION",

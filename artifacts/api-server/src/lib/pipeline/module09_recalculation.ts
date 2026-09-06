@@ -56,6 +56,10 @@ import { MIN_BATTER_PA } from "./module02c_batterSeasonStats.js";
 import type { StatcastBatterStats } from "./module02d_statcastBatters.js";
 import { MIN_STATCAST_PA } from "./module02d_statcastBatters.js";
 import {
+  MIN_EXPECTED_PITCHER_PA,
+  type StatcastPitcherExpectedStats,
+} from "./module02f_statcastPitcherExpected.js";
+import {
   resolveEnvironmentFactors,
   type EnvironmentCertainty,
   type RoofStatus,
@@ -529,17 +533,43 @@ function computeLineupStrength(
  * belongs to the damage path. A correlated pitcher signal must not be paid
  * into the team-run center twice.
  */
-function starterQualityFactor(
+export type PitcherQualitySource =
+  | "FIP"
+  | "ERA"
+  | "STATCAST_XERA_FALLBACK"
+  | "LEAGUE_NEUTRAL";
+
+export interface PitcherQualityResolution {
+  factor: number;
+  source: PitcherQualitySource;
+}
+
+/**
+ * Resolves one correlated pitcher true-skill family. Savant xERA fills a
+ * missing traditional FIP/ERA value only; it is never an additional vote
+ * beside the existing traffic or damage pathways.
+ */
+export function resolveStarterQuality(
   pitcherId: number | null,
   statsMap: Map<number, PitcherSeasonStats>,
-): number {
-  if (!pitcherId) return 1.0;
+  statcastPitcherMap: Map<number, StatcastPitcherExpectedStats> = new Map(),
+): PitcherQualityResolution {
+  if (!pitcherId) return { factor: 1.0, source: "LEAGUE_NEUTRAL" };
   const stats = statsMap.get(pitcherId);
-  if (!stats) return 1.0;
-
-  const fipOrEra = stats.fip ?? stats.era ?? LEAGUE_AVG_ERA;
-  const fipFactor = clampERA(fipOrEra) / LEAGUE_AVG_ERA;
-  return Math.max(0.4, Math.min(1.8, parseFloat(fipFactor.toFixed(4))));
+  const fipOrEra = stats?.fip ?? stats?.era ?? null;
+  if (fipOrEra !== null) {
+    const source: PitcherQualitySource = stats?.fip !== null && stats?.fip !== undefined
+      ? "FIP"
+      : "ERA";
+    const factor = clampERA(fipOrEra) / LEAGUE_AVG_ERA;
+    return { factor: Math.max(0.4, Math.min(1.8, parseFloat(factor.toFixed(4)))), source };
+  }
+  const expected = statcastPitcherMap.get(pitcherId);
+  if (expected?.xera !== null && expected?.xera !== undefined && expected.pa >= MIN_EXPECTED_PITCHER_PA) {
+    const factor = clampERA(expected.xera) / LEAGUE_AVG_ERA;
+    return { factor: Math.max(0.4, Math.min(1.8, parseFloat(factor.toFixed(4)))), source: "STATCAST_XERA_FALLBACK" };
+  }
+  return { factor: 1.0, source: "LEAGUE_NEUTRAL" };
 }
 
 
@@ -585,11 +615,21 @@ function activeStarterProfile(
  * Weight = innings pitched in the last 7 days (more frequent → higher weight).
  * Returns null when fewer than 2 relievers have season ERA data.
  */
-function computeTeamBullpenERA(
+export interface BullpenQualityResolution {
+  factor: number;
+  source:
+    | "SEASON_ERA"
+    | "STATCAST_XERA_FALLBACK"
+    | "MIXED_SEASON_ERA_XERA_FALLBACK"
+    | "LEAGUE_NEUTRAL";
+}
+
+export function computeTeamBullpenQuality(
   teamAbbr: string,
   relievers: RelieverStat[],
   statsMap: Map<number, PitcherSeasonStats>,
-): number | null {
+  statcastPitcherMap: Map<number, StatcastPitcherExpectedStats> = new Map(),
+): BullpenQualityResolution | null {
   const available = relievers.filter((r) => {
     if (r.team_abbr !== teamAbbr) return false;
     // The Starting Nine report directly declares whether an arm is usable
@@ -604,23 +644,40 @@ function computeTeamBullpenERA(
 
   let weightedERASum = 0;
   let totalWeight = 0;
+  let traditionalCount = 0;
+  let expectedFallbackCount = 0;
 
   for (const r of available) {
     if (!r.player_id) continue;
-    const era = statsMap.get(r.player_id)?.era;
+    const traditionalEra = statsMap.get(r.player_id)?.era;
+    const expected = statcastPitcherMap.get(r.player_id);
+    const expectedEra =
+      expected?.xera !== null &&
+      expected?.xera !== undefined &&
+      expected.pa >= MIN_EXPECTED_PITCHER_PA
+        ? expected.xera
+        : null;
+    const era = traditionalEra ?? expectedEra;
     if (era === null || era === undefined) continue;
     const workloadWeight = r.innings_last_7 > 0 ? r.innings_last_7 : r.games_last_7;
     const weight = Math.max(0.1, workloadWeight);
     weightedERASum += clampERA(era) * weight;
     totalWeight += weight;
+    if (traditionalEra !== null && traditionalEra !== undefined) traditionalCount++;
+    else expectedFallbackCount++;
   }
 
-  const relieversWithERA = available.filter(
-    (r) => r.player_id && statsMap.get(r.player_id ?? 0)?.era != null,
-  ).length;
+  const relieversWithQuality = traditionalCount + expectedFallbackCount;
 
-  if (totalWeight === 0 || relieversWithERA < 2) return null;
-  return parseFloat((weightedERASum / totalWeight).toFixed(2));
+  if (totalWeight === 0 || relieversWithQuality < 2) return null;
+  const era = parseFloat((weightedERASum / totalWeight).toFixed(2));
+  const source: BullpenQualityResolution["source"] =
+    expectedFallbackCount === 0
+      ? "SEASON_ERA"
+      : traditionalCount === 0
+        ? "STATCAST_XERA_FALLBACK"
+        : "MIXED_SEASON_ERA_XERA_FALLBACK";
+  return { factor: parseFloat((era / LEAGUE_AVG_ERA).toFixed(4)), source };
 }
 
 /**
@@ -871,10 +928,16 @@ export interface GameSummaryRow {
   // ── Derivative signals (step 5) ──
   /** Projected away runs minus projected home runs. Positive = away favoured. */
   proj_run_diff: number;
-  /** Starter quality factor for the away team's starter (FIP + K-BB%). 1.0 = league average. */
+  /** Starter quality factor for the away team's starter (FIP, ERA, or gated xERA fallback). 1.0 = league average. */
   away_starter_quality: number;
-  /** Starter quality factor for the home team's starter (FIP + K-BB%). 1.0 = league average. */
+  /** Starter quality factor for the home team's starter (FIP, ERA, or gated xERA fallback). 1.0 = league average. */
   home_starter_quality: number;
+  /** Literal pregame source selected inside the correlated starter-quality family. */
+  away_starter_quality_source?: PitcherQualitySource;
+  home_starter_quality_source?: PitcherQualitySource;
+  /** Source selected inside the available-bullpen true-skill family. */
+  away_bullpen_quality_source?: BullpenQualityResolution["source"];
+  home_bullpen_quality_source?: BullpenQualityResolution["source"];
   // ── Over survival gate projection components ──
   /**
    * Total runs expected during starter innings for both teams, at baseline offense rates
@@ -946,6 +1009,7 @@ export async function verifyRecalculation(
   batterStatsMap: Map<number, BatterSeasonStats> = new Map(),
   lineupNameToIdMap: Map<string, number> = new Map(),
   statcastBatterMap: Map<number, StatcastBatterStats> = new Map(),
+  statcastPitcherMap: Map<number, StatcastPitcherExpectedStats> = new Map(),
   protection?: PublicationProtection,
 ): Promise<Module09Result> {
   const startTime = Date.now();
@@ -955,7 +1019,7 @@ export async function verifyRecalculation(
   );
 
   // ── Build team Available_Bullpen_ERA map ──
-  const teamBullpenERAMap = new Map<string, number>();
+  const teamBullpenQualityMap = new Map<string, BullpenQualityResolution>();
   if (bullpenResult && bullpenResult.status !== "failure") {
     const teamsOnSlate = [
       ...new Set(
@@ -967,16 +1031,17 @@ export async function verifyRecalculation(
       ),
     ];
     for (const team of teamsOnSlate) {
-      const era = computeTeamBullpenERA(
+      const quality = computeTeamBullpenQuality(
         team,
         bullpenResult.relievers,
         pitcherStatsMap,
+        statcastPitcherMap,
       );
-      if (era !== null) teamBullpenERAMap.set(team, era);
+      if (quality !== null) teamBullpenQualityMap.set(team, quality);
     }
     logger.info(
-      { teams: teamBullpenERAMap.size },
-      "MODULE_09: Team bullpen ERA map built",
+      { teams: teamBullpenQualityMap.size },
+      "MODULE_09: Team bullpen quality map built",
     );
   }
 
@@ -1190,20 +1255,24 @@ export async function verifyRecalculation(
     // into one generic starter multiplier.
     const homePitchExp = g.home_pitcher.expected_innings ?? 5.5;
     const awayPitchExp = g.away_pitcher.expected_innings ?? 5.5;
-    const homeQual = starterQualityFactor(
+    const homeQuality = resolveStarterQuality(
       g.home_pitcher.player_id,
       pitcherStatsMap,
+      statcastPitcherMap,
     );
-    const awayQual = starterQualityFactor(
+    const awayQuality = resolveStarterQuality(
       g.away_pitcher.player_id,
       pitcherStatsMap,
+      statcastPitcherMap,
     );
-    const homeBullpenQual =
-      (teamBullpenERAMap.get(g.home_team.team_abbr ?? "") ?? LEAGUE_AVG_ERA) /
-      LEAGUE_AVG_ERA;
-    const awayBullpenQual =
-      (teamBullpenERAMap.get(g.away_team.team_abbr ?? "") ?? LEAGUE_AVG_ERA) /
-      LEAGUE_AVG_ERA;
+    const homeQual = homeQuality.factor;
+    const awayQual = awayQuality.factor;
+    const homeBullpenQuality = teamBullpenQualityMap.get(g.home_team.team_abbr ?? "")
+      ?? { factor: 1, source: "LEAGUE_NEUTRAL" as const };
+    const awayBullpenQuality = teamBullpenQualityMap.get(g.away_team.team_abbr ?? "")
+      ?? { factor: 1, source: "LEAGUE_NEUTRAL" as const };
+    const homeBullpenQual = homeBullpenQuality.factor;
+    const awayBullpenQual = awayBullpenQuality.factor;
 
     const awayRunProjection = computeActiveTeamProjection({
       baseline_offense_rate: awayBaselineRate,
@@ -1235,8 +1304,8 @@ export async function verifyRecalculation(
     const projTotal = parseFloat((projAway + projHome).toFixed(2));
 
     const bullpenCoverage =
-      teamBullpenERAMap.has(g.home_team.team_abbr ?? "") &&
-      teamBullpenERAMap.has(g.away_team.team_abbr ?? "");
+      teamBullpenQualityMap.has(g.home_team.team_abbr ?? "") &&
+      teamBullpenQualityMap.has(g.away_team.team_abbr ?? "");
 
     // ── Over survival gate: decompose projection into baseball vs environment ──
     // Traffic and damage are now active, signed matchup components. They are
@@ -1351,6 +1420,10 @@ export async function verifyRecalculation(
       proj_run_diff: parseFloat((projAway - projHome).toFixed(2)),
       away_starter_quality: parseFloat(awayQual.toFixed(4)),
       home_starter_quality: parseFloat(homeQual.toFixed(4)),
+      away_starter_quality_source: awayQuality.source,
+      home_starter_quality_source: homeQuality.source,
+      away_bullpen_quality_source: awayBullpenQuality.source,
+      home_bullpen_quality_source: homeBullpenQuality.source,
       // Over survival gate components
       starter_attack_runs: starterAttackRuns,
       bullpen_continuation_runs: bullpenContinuationRuns,
@@ -1438,6 +1511,10 @@ export async function verifyRecalculation(
       homeOffenseCenter.recent_form_multiplier, // BQ: Home_Recent_Form_Multiplier
       awayOffenseCenter.active_offense_center, // BR: Away_Active_Offense_Center
       homeOffenseCenter.active_offense_center, // BS: Home_Active_Offense_Center
+      awayQuality.source, // BT: Away_Starter_Quality_Source
+      homeQuality.source, // BU: Home_Starter_Quality_Source
+      awayBullpenQuality.source, // BV: Away_Bullpen_Quality_Source
+      homeBullpenQuality.source, // BW: Home_Bullpen_Quality_Source
     ]);
   }
 
@@ -1561,11 +1638,11 @@ export async function verifyRecalculation(
     logger.error({ err: msg }, "MODULE_09: GAME_INTEGRATION write failed");
   }
 
-  // Write GAME_SUMMARY (71 columns, A through BS).
+  // Write GAME_SUMMARY (75 columns, A through BW).
   let gsStatus: "verified" | "error" = "verified";
   const gsErrors: string[] = [];
   try {
-    await expandSheetColumns(workbookId, "GAME_SUMMARY", 71).catch(
+    await expandSheetColumns(workbookId, "GAME_SUMMARY", 75).catch(
       (err: unknown) => {
         logger.warn(
           { err: err instanceof Error ? err.message : String(err) },
@@ -1650,21 +1727,29 @@ export async function verifyRecalculation(
         "Home_Active_Offense_Center",
       ],
     ]).catch(() => {});
+    await writeRange(workbookId, "GAME_SUMMARY!BT1:BW1", [
+      [
+        "Away_Starter_Quality_Source",
+        "Home_Starter_Quality_Source",
+        "Away_Bullpen_Quality_Source",
+        "Home_Bullpen_Quality_Source",
+      ],
+    ]).catch(() => {});
     const gsRowsToWrite =
       protection && protection.protected_game_ids.size > 0
         ? mergeProtectedRows(
-            (await readRange(workbookId, "GAME_SUMMARY!A2:BS100")).values ?? [],
+            (await readRange(workbookId, "GAME_SUMMARY!A2:BW100")).values ?? [],
             gsRows,
             1,
             protection.protected_game_ids,
             protection.expected_game_ids,
           )
         : gsRows;
-    await clearRange(workbookId, "GAME_SUMMARY!A2:BS100");
+    await clearRange(workbookId, "GAME_SUMMARY!A2:BW100");
     if (gsRowsToWrite.length > 0) {
       await writeRange(
         workbookId,
-        `GAME_SUMMARY!A2:BS${1 + gsRowsToWrite.length}`,
+        `GAME_SUMMARY!A2:BW${1 + gsRowsToWrite.length}`,
         gsRowsToWrite,
       );
     }

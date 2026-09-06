@@ -352,6 +352,8 @@ Final results + frozen prospective state
 | `RUN_ENVIRONMENT`       | Every publish, shared resolver                | Park, weather, roof, wind, certainty, run multiplier, and HR factor.                         | Module 09 consumes the same resolver result.               | Check fallback and roof/weather vehicle status; environment cannot originate a thesis. |
 | `ODDS_HISTORY`          | Append every publish, Module 05d              | Opening and subsequent total snapshots.                                                      | Supplies movement and line provenance, not baseball truth. | Earliest daily row is opener; compare timestamps before calling a line stale.          |
 | `STATCAST_GAME_PREVIEW` | Every publish when available, Modules 02e/08b | Timestamped Savant identity, pitcher metrics, hitter aggregates, and parser status.          | Feeds estimate/audit surfaces, not direct authorization.   | Verify identity, lineup status, and pre-first-pitch timestamp.                         |
+| `SOURCE_ACQUISITION_LOG` | Append before a newly connected source can fill a gap | Request/cutoff/hash/schema/coverage/parser/fallback/raw-storage provenance. | No board input; validates the evidence behind a source-derived fallback. | Require `STORED`, a valid schema status, and a pregame data-through date. |
+| `SOURCE_RAW_SNAPSHOT` | With each retained source response | Chunked untouched external payload, keyed by `Snapshot_ID`. | Never a direct model or board input. | Use only to reproduce parser/feature behavior for a specific source snapshot. |
 
 ## Projection and decision tabs
 

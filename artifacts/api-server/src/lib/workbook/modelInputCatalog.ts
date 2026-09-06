@@ -94,6 +94,7 @@ type SourceFreshnessKey =
   | "PITCHER_SEASON"
   | "BATTER_SEASON"
   | "SAVANT_BATTER_SEASON"
+  | "SAVANT_PITCHER_EXPECTED"
   | "TEAM_FORM"
   | "STARTING_NINE_LINEUPS"
   | "STARTING_NINE_PARK"
@@ -189,6 +190,15 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     "GAME_SUMMARY matchup profile status + PLAYER_INTEGRATION",
     "Season xwOBA and hard-hit are active; xBA, xSLG, barrels, and EV are currently display-only.",
     "SAVANT_BATTER_SEASON",
+  ),
+  SOURCE(
+    "SOURCE_SAVANT_PITCHER_EXPECTED",
+    "Baseball Savant pitcher expected statistics",
+    "Baseball Savant expected_statistics CSV, type=pitcher, min=1",
+    "EVERY_PREGAME_RUN",
+    "SOURCE_ACQUISITION_LOG source hash/data-through/schema/MLBAM coverage",
+    "The untouched CSV is retained before feature engineering. xERA may fill a missing FIP/ERA value only at 100+ PA; xwOBA/xSLG remain in the correlated contact-quality family and are not second votes.",
+    "SAVANT_PITCHER_EXPECTED",
   ),
   SOURCE(
     "SOURCE_MLB_RECENT_SCORING",
@@ -341,13 +351,13 @@ const ENTRIES: ModelInputCatalogEntry[] = [
   {
     recordType: "INPUT", id: "STARTER_RUN_PREVENTION", label: "Starter run-prevention quality",
     layer: "BASEBALL_MODEL", outputClass: "ACTIVE_INPUT", operationalStatus: "ACTIVE",
-    definition: "FIP primary, ERA fallback; applies the central starter-quality multiplier over effective starter innings.",
+    definition: "FIP primary, ERA fallback, then sample-gated Savant xERA only when neither traditional field exists; applies one central starter-quality multiplier over effective starter innings.",
     statisticalWindow: "Season to date", gameWindow: "STARTER_WINDOW",
-    primarySource: "SOURCE_MLB_PITCHER_SEASON", fallbackSource: "Neutral league baseline factor",
+    primarySource: "SOURCE_MLB_PITCHER_SEASON", fallbackSource: "SOURCE_SAVANT_PITCHER_EXPECTED xERA at 100+ PA, then neutral league baseline factor",
     refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "DAILY_MATCHUPS AK:AP + GAME_SUMMARY starter components",
     workbookLocation: "DAILY_MATCHUPS AK:AP; GAME_SUMMARY Starter_Attack_Runs", feedsActiveProjection: "YES", feedsDecisionBoard: "YES",
     correlationFamily: "STARTER_QUALITY", missingBehavior: "Neutral baseline rather than fabricated pitcher quality.",
-    notes: "FIP contains some BB/K/HR information; companion traffic/damage fields are related, not independent votes.", freshnessKey: "PITCHER_SEASON",
+    notes: "FIP contains some BB/K/HR information; companion traffic/damage fields are related, not independent votes. Source lineage is frozen as Away/Home_Starter_Quality_Source.", freshnessKey: "PITCHER_SEASON",
   },
   {
     recordType: "INPUT", id: "STARTER_TRAFFIC", label: "Starter command/traffic pressure",
@@ -385,13 +395,13 @@ const ENTRIES: ModelInputCatalogEntry[] = [
   {
     recordType: "INPUT", id: "BULLPEN_QUALITY", label: "Available-bullpen season ERA and workload weighting",
     layer: "BASEBALL_MODEL", outputClass: "ACTIVE_INPUT", operationalStatus: "ACTIVE",
-    definition: "Available relievers' season ERA, weighted by L7 innings history or L5 appearances fallback, applied to inherited bullpen innings.",
+    definition: "Available relievers' season ERA, with xERA only for an arm missing ERA at 100+ PA, weighted by L7 innings history or L5 appearances fallback, applied to inherited bullpen innings.",
     statisticalWindow: "Season ERA; prior 7 days innings/games, L5 appearance fallback", gameWindow: "BULLPEN_WINDOW",
-    primarySource: "SOURCE_MLB_PITCHER_SEASON + SOURCE_INSIDE_THE_PEN", fallbackSource: "L5 appearances / neutral bullpen factor",
+    primarySource: "SOURCE_MLB_PITCHER_SEASON + SOURCE_INSIDE_THE_PEN", fallbackSource: "SOURCE_SAVANT_PITCHER_EXPECTED xERA for a missing ERA, then L5 appearances / neutral bullpen factor",
     refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "BULLPEN_USAGE_DAILY E:F, J:U + GAME_SUMMARY bullpen continuation",
     workbookLocation: "BULLPEN_USAGE_DAILY; GAME_SUMMARY Bullpen_Continuation_Runs", feedsActiveProjection: "YES", feedsDecisionBoard: "YES",
     correlationFamily: "BULLPEN_QUALITY", missingBehavior: "Minimum-arm requirement or neutral baseline.",
-    notes: "Reliever WHIP and role importance remain display-only today.", freshnessKey: "INSIDE_THE_PEN",
+    notes: "Reliever WHIP and role importance remain display-only today. A quality-source lineage is frozen per team; xERA is never counted beside ERA for the same arm.", freshnessKey: "INSIDE_THE_PEN",
   },
   {
     recordType: "INPUT", id: "PARK_ENVIRONMENT", label: "Park run factor",
@@ -713,7 +723,7 @@ async function collectSourceObservations(
   workbookId: string,
   date: string,
 ): Promise<Map<SourceFreshnessKey, SourceObservation>> {
-  const [daily, lineups, teamForm, bullpen, environment, preview, odds, player, outcomes, gameSummary, packet] = await Promise.all([
+  const [daily, lineups, teamForm, bullpen, environment, preview, odds, player, outcomes, gameSummary, packet, sourceLog] = await Promise.all([
     readTable(workbookId, "DAILY_MATCHUPS!A1:AU100"),
     readTable(workbookId, "TODAY_LINEUPS!A1:N1000"),
     readTable(workbookId, "TEAM_FORM_INPUT!A1:H100"),
@@ -723,8 +733,9 @@ async function collectSourceObservations(
     readTable(workbookId, "ODDS_HISTORY!A1:G5000"),
     readTable(workbookId, "PLAYER_INTEGRATION!A1:P1000"),
     readTable(workbookId, "SHADOW_OUTCOMES!A1:AZ5000"),
-    readTable(workbookId, "GAME_SUMMARY!A1:BS100"),
-    readTable(workbookId, "PREGAME_PACKET_HISTORY!A1:BS5000"),
+    readTable(workbookId, "GAME_SUMMARY!A1:BW100"),
+    readTable(workbookId, "PREGAME_PACKET_HISTORY!A1:ZZ5000"),
+    readTable(workbookId, "SOURCE_ACQUISITION_LOG!A1:P5000"),
   ]);
   const dailyRows = rowsForDate(daily, date);
   const lineupsRows = rowsForDate(lineups, date);
@@ -749,6 +760,32 @@ async function collectSourceObservations(
   });
   observations.set("SAVANT_BATTER_SEASON", {
     ...observation(date, playerRows, player.headers), timestamp: pipelineTs,
+  });
+  const sourceIdIndex = headerIndex(sourceLog.headers, "Canonical_Source_ID");
+  const sourceFetchIndex = headerIndex(sourceLog.headers, "Fetch_TS_UTC");
+  const sourceStatusIndex = headerIndex(sourceLog.headers, "Source_Status");
+  const sourceRawStorageIndex = headerIndex(sourceLog.headers, "Raw_Storage_Status");
+  const sourceRows = sourceLog.rows.filter((row) =>
+    sourceIdIndex >= 0 &&
+    sourceFetchIndex >= 0 &&
+    text(row[sourceIdIndex]) === "SOURCE_SAVANT_PITCHER_EXPECTED" &&
+    canonicalDate(row[sourceFetchIndex]) === date,
+  );
+  const retainedSourceRows = sourceRows.filter((row) =>
+    sourceRawStorageIndex >= 0 && text(row[sourceRawStorageIndex]) === "STORED",
+  );
+  observations.set("SAVANT_PITCHER_EXPECTED", {
+    date: retainedSourceRows.length > 0 ? date : "",
+    timestamp: sourceFetchIndex >= 0
+      ? retainedSourceRows.map((row) => text(row[sourceFetchIndex])).filter(Boolean).sort().at(-1) ?? ""
+      : "",
+    state: retainedSourceRows.length === 0
+      ? sourceRows.length > 0
+        ? "RETENTION_INCOMPLETE"
+        : "NOT_MATERIALIZED_FOR_SLATE"
+      : sourceStatusIndex >= 0
+        ? text(retainedSourceRows.at(-1)?.[sourceStatusIndex]) || `CURRENT_MATERIALIZED (${retainedSourceRows.length})`
+        : `CURRENT_MATERIALIZED (${retainedSourceRows.length})`,
   });
   observations.set("TEAM_FORM", observation(date, teamFormRows, teamForm.headers));
   const lineupStatusIndex = headerIndex(lineups.headers, "Notes");

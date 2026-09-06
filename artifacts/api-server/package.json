@@ -8,7 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx/esm --test 'src/**/*.test.ts'"
+    "test": "node ./run-tests.mjs"
   },
   "dependencies": {
     "@replit/connectors-sdk": "^0.4.1",

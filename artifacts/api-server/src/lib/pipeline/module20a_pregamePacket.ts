@@ -235,6 +235,13 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Strict_Check_Environment_Certainty_High",
   "Strict_Check_Weather_Vehicle_Active",
   "Strict_Structural_Check_Vector",
+  // Source-lineage fields for the price-blind quality family. These identify
+  // which already-frozen traditional or Savant fallback evidence actually
+  // produced the active value; they are not independent scores or votes.
+  "Away_Starter_Quality_Source",
+  "Home_Starter_Quality_Source",
+  "Away_Bullpen_Quality_Source",
+  "Home_Bullpen_Quality_Source",
 ] as const;
 
 export const PREGAME_PACKET_HISTORY_COLS =
@@ -777,6 +784,10 @@ export function buildPregamePacketInputs(
       strictStructural?.checks.ENVIRONMENT_CERTAINTY_HIGH ?? "",
       strictStructural?.checks.WEATHER_VEHICLE_ACTIVE ?? "",
       strictStructural?.check_vector ?? "",
+      summary.away_starter_quality_source ?? "LEAGUE_NEUTRAL",
+      summary.home_starter_quality_source ?? "LEAGUE_NEUTRAL",
+      summary.away_bullpen_quality_source ?? "LEAGUE_NEUTRAL",
+      summary.home_bullpen_quality_source ?? "LEAGUE_NEUTRAL",
     ];
     return [
       {

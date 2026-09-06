@@ -509,6 +509,8 @@ test("v41 packet header migration preserves old frozen fields by name", () => {
     "Executable_Market_Line", "Executable_Market_Price", "Executable_Market_Source",
     "Executable_Market_TS", "Executable_Market_Quoted_TS", "Executable_Market_Status",
     "Primary_Grade_Market_Line", "Primary_Grade_Market_Source", "Primary_Grade_Market_Status",
+    "Away_Starter_Quality_Source", "Home_Starter_Quality_Source",
+    "Away_Bullpen_Quality_Source", "Home_Bullpen_Quality_Source",
   ].includes(name));
   const oldRow = Array(oldHeader.length).fill("");
   oldRow[oldHeader.indexOf("Game_ID")] = "20260824_AAA_BBB";
@@ -528,6 +530,8 @@ test("v41 packet header migration preserves old frozen fields by name", () => {
   assert.equal(migrated.rows[0]![index.Strict_Structural_Cohort_Version], "");
   assert.equal(migrated.rows[0]![index.Strict_Structural_Verdict], "");
   assert.equal(migrated.rows[0]![index.Strict_Structural_Check_Vector], "");
+  assert.equal(migrated.rows[0]![index.Away_Starter_Quality_Source], "");
+  assert.equal(migrated.rows[0]![index.Home_Bullpen_Quality_Source], "");
 });
 
 test("packet contract preserves market and dependent shadow fields as explicit columns", () => {
@@ -598,6 +602,10 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Strict_Check_Environment_Certainty_High",
     "Strict_Check_Weather_Vehicle_Active",
     "Strict_Structural_Check_Vector",
+    "Away_Starter_Quality_Source",
+    "Home_Starter_Quality_Source",
+    "Away_Bullpen_Quality_Source",
+    "Home_Bullpen_Quality_Source",
   ])
     assert.ok(PREGAME_PACKET_HISTORY_HEADERS.includes(required as never));
 });
@@ -605,6 +613,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 54);
-  assert.equal(pregamePacketHistoryRange(5000), "A1:FK5000");
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 55);
+  assert.equal(pregamePacketHistoryRange(5000), "A1:FO5000");
 });

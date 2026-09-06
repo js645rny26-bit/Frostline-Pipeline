@@ -172,8 +172,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      settlement, including whole-number push semantics. Any lower-half
  *      normalization is separately labeled synthetic and cannot become an
  *      executable or economically equivalent grading market.
+ *  v55 (2026-09-06): Source-acquisition provenance/raw-response sheets and
+ *      Savant pitcher expected-quality lineage. xERA can fill a missing
+ *      FIP/ERA value only after raw source retention and a 100-PA gate; it
+ *      does not add a correlated second projection vote.
  */
-export const WORKBOOK_SCHEMA_VERSION = 54;
+export const WORKBOOK_SCHEMA_VERSION = 55;
 
 export interface ColumnDef {
   name: string;
@@ -396,6 +400,10 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Strict_Check_Environment_Certainty_High",
   "Strict_Check_Weather_Vehicle_Active",
   "Strict_Structural_Check_Vector",
+  "Away_Starter_Quality_Source",
+  "Home_Starter_Quality_Source",
+  "Away_Bullpen_Quality_Source",
+  "Home_Bullpen_Quality_Source",
 ] as const;
 
 const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
@@ -3916,6 +3924,50 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         description:
           "Home latent lineup rate × bounded recent-form multiplier. This is the active center passed into the away starter/bullpen calculation before environment.",
         exampleValue: "4.2428",
+      },
+      {
+        name: "Away_Starter_Quality_Source",
+        index: 71,
+        type: "string",
+        width: 220,
+        readOnly: true,
+        filledBy: "MODULE_09",
+        description:
+          "FIP | ERA | STATCAST_XERA_FALLBACK | LEAGUE_NEUTRAL. Exactly one correlated starter true-skill source supplies the active factor.",
+        exampleValue: "FIP",
+      },
+      {
+        name: "Home_Starter_Quality_Source",
+        index: 72,
+        type: "string",
+        width: 220,
+        readOnly: true,
+        filledBy: "MODULE_09",
+        description:
+          "FIP | ERA | STATCAST_XERA_FALLBACK | LEAGUE_NEUTRAL. Exactly one correlated starter true-skill source supplies the active factor.",
+        exampleValue: "STATCAST_XERA_FALLBACK",
+      },
+      {
+        name: "Away_Bullpen_Quality_Source",
+        index: 73,
+        type: "string",
+        width: 245,
+        readOnly: true,
+        filledBy: "MODULE_09",
+        description:
+          "SEASON_ERA | STATCAST_XERA_FALLBACK | MIXED_SEASON_ERA_XERA_FALLBACK | LEAGUE_NEUTRAL for the available bullpen pool.",
+        exampleValue: "SEASON_ERA",
+      },
+      {
+        name: "Home_Bullpen_Quality_Source",
+        index: 74,
+        type: "string",
+        width: 245,
+        readOnly: true,
+        filledBy: "MODULE_09",
+        description:
+          "SEASON_ERA | STATCAST_XERA_FALLBACK | MIXED_SEASON_ERA_XERA_FALLBACK | LEAGUE_NEUTRAL for the available bullpen pool.",
+        exampleValue: "MIXED_SEASON_ERA_XERA_FALLBACK",
       },
     ],
   },
@@ -12664,6 +12716,43 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         filledBy: "MODULE_14",
         readOnly: true,
       },
+    ],
+  },
+
+  {
+    name: "SOURCE_ACQUISITION_LOG",
+    description:
+      "Append-only provenance for every retained external baseball-source response. A source must have request, hash, schema, coverage, and raw-storage evidence before it can fill an active input gap.",
+    section: "META",
+    frozenRows: 1,
+    columns: [
+      "Snapshot_ID", "Canonical_Source_ID", "Request_URL", "Fetch_TS_UTC",
+      "Data_Through_Date", "Raw_Response_SHA256", "Raw_Response_Bytes", "Row_Count",
+      "Expected_Columns", "Observed_Columns", "MLBAM_Coverage", "Parser_Version",
+      "Source_Status", "Fallback_Used", "Raw_Storage_Status", "Notes",
+    ].map((name, index) => ({
+      name,
+      index,
+      type: "string" as const,
+      width: name === "Request_URL" || name === "Notes" || name === "Expected_Columns" || name === "Observed_Columns" ? 300 : 175,
+      filledBy: "SYSTEM" as const,
+      readOnly: true,
+      description:
+        "Immutable source-acquisition metadata. Raw response chunks are retained in SOURCE_RAW_SNAPSHOT and referenced by Snapshot_ID.",
+    })),
+  },
+
+  {
+    name: "SOURCE_RAW_SNAPSHOT",
+    description:
+      "Append-only, chunked untouched external source responses. Never a projection input; joins through SOURCE_ACQUISITION_LOG Snapshot_ID for replay and parser audit only.",
+    section: "META",
+    frozenRows: 1,
+    columns: [
+      { name: "Snapshot_ID", index: 0, type: "string", width: 275, filledBy: "SYSTEM", readOnly: true },
+      { name: "Chunk_Index", index: 1, type: "number", width: 110, filledBy: "SYSTEM", readOnly: true },
+      { name: "Chunk_Count", index: 2, type: "number", width: 110, filledBy: "SYSTEM", readOnly: true },
+      { name: "Raw_Response_Chunk", index: 3, type: "string", width: 500, filledBy: "SYSTEM", readOnly: true, description: "Untouched source payload chunk; concatenate by Snapshot_ID and Chunk_Index." },
     ],
   },
 
