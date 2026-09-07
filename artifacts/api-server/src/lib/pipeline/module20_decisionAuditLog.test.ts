@@ -5,6 +5,7 @@ import {
   DECISION_AUDIT_HEADER,
   DECISION_AUDIT_INDEX as C,
   DECISION_AUDIT_REQUIRED_FROM_DATE,
+  classifyDecisionAuditOutcomeGapMessages,
   classifyMissingDecisionAuditRows,
   markDecisionAuditOutcomeGaps,
   gradeAuditTruth,
@@ -289,9 +290,40 @@ test("an existing decision without an official outcome receives an explicit non-
   })], TS1);
   const marked = markDecisionAuditOutcomeGaps(pre.rows, "2026-08-26", new Set());
   assert.equal(marked.outcomeGaps, 1);
+  assert.equal(marked.auditGapOutcomeGaps, 0);
+  assert.equal(marked.missingOutcomeGaps, 1);
   assert.equal(marked.rows[0]![C.SETTLEMENT_STATUS], "MISSING_OFFICIAL_OUTCOME");
   assert.equal(marked.rows[0]![C.SETTLEMENT_GAP_REASON], "SETTLEMENT_OUTCOME_NOT_FOUND");
   assert.equal(marked.rows[0]![C.FROZEN_TOTAL], 9, "gap status must not rewrite frozen pregame evidence");
+});
+
+test("an explicit pregame audit gap is warning-only while a missing official outcome remains fatal", () => {
+  const auditGap = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-09-06",
+    game_id: "20260906_MIL_CIN",
+    scheduled_first_pitch: "2026-09-06T17:00:00.000Z",
+    lock_status: "LOCKED_IN",
+  })], "2026-09-06T18:00:00.000Z");
+  const markedAuditGap = markDecisionAuditOutcomeGaps(auditGap.rows, "2026-09-06", new Set());
+  const auditGapMessages = classifyDecisionAuditOutcomeGapMessages("2026-09-06", markedAuditGap);
+  assert.equal(markedAuditGap.auditGapOutcomeGaps, 1);
+  assert.equal(markedAuditGap.missingOutcomeGaps, 0);
+  assert.equal(markedAuditGap.rows[0]![C.SETTLEMENT_STATUS], "NOT_GRADABLE_PREGAME_AUDIT_GAP");
+  assert.equal(markedAuditGap.rows[0]![C.SETTLEMENT_GAP_REASON], "PREGAME_FREEZE_MISSING");
+  assert.match(auditGapMessages.warnings[0] ?? "", /DECISION_AUDIT_AUDIT_GAPS/);
+  assert.deepEqual(auditGapMessages.errors, []);
+  assert.equal(markedAuditGap.rows[0]![C.FROZEN_TOTAL], "", "audit gaps must not reconstruct a frozen total");
+
+  const frozen = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-09-06",
+    game_id: "20260906_ATL_PHI",
+    lock_status: "LOCKED_IN",
+  })], TS1);
+  const markedMissing = markDecisionAuditOutcomeGaps(frozen.rows, "2026-09-06", new Set());
+  const missingMessages = classifyDecisionAuditOutcomeGapMessages("2026-09-06", markedMissing);
+  assert.equal(markedMissing.auditGapOutcomeGaps, 0);
+  assert.equal(markedMissing.missingOutcomeGaps, 1);
+  assert.match(missingMessages.errors[0] ?? "", /MISSING_OFFICIAL_OUTCOME/);
 });
 
 test("settlement rerun is idempotent and cannot rewrite frozen reasoning", () => {

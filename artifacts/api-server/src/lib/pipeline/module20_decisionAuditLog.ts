@@ -87,6 +87,15 @@ export type AuthorizationGrade =
   | "QUESTIONABLE_PASS"
   | "NOT_GRADABLE";
 export type TruthGrade = "CORRECT" | "INCORRECT" | "PUSH" | "NOT_GRADABLE";
+export type DecisionAuditOutcomeGapResult = {
+  rows: unknown[][];
+  outcomeGaps: number;
+  auditGapOutcomeGaps: number;
+  missingOutcomeGaps: number;
+  auditGapReasons: string[];
+  missingOutcomeReasons: string[];
+  reasons: string[];
+};
 
 export const FINAL_REASONING_SOURCES = [
   "MODEL", "MANUAL", "MODEL_MANUAL_AGREEMENT", "MODEL_WITH_MANUAL_DOWNGRADE",
@@ -765,10 +774,14 @@ export function markDecisionAuditOutcomeGaps(
   existingRows: unknown[][],
   date: string,
   outcomeKeys: ReadonlySet<string>,
-): { rows: unknown[][]; outcomeGaps: number; reasons: string[] } {
+): DecisionAuditOutcomeGapResult {
   const rows = existingRows.map(padRow);
   const reasons: string[] = [];
+  const auditGapReasons: string[] = [];
+  const missingOutcomeReasons: string[] = [];
   let outcomeGaps = 0;
+  let auditGapOutcomeGaps = 0;
+  let missingOutcomeGaps = 0;
   for (const row of rows) {
     if (String(row[DECISION_AUDIT_INDEX.DATE] ?? "") !== date) continue;
     if (String(row[DECISION_AUDIT_INDEX.GRADED_TS] ?? "").trim()) continue;
@@ -786,9 +799,45 @@ export function markDecisionAuditOutcomeGaps(
     row[DECISION_AUDIT_INDEX.SETTLEMENT_STATUS] = status;
     row[DECISION_AUDIT_INDEX.SETTLEMENT_GAP_REASON] = reason;
     outcomeGaps++;
-    reasons.push(`${String(row[DECISION_AUDIT_INDEX.GAME_ID] ?? "")}:${status}:${reason}`);
+    if (isAuditGap) auditGapOutcomeGaps++;
+    else missingOutcomeGaps++;
+    const formattedReason = `${String(row[DECISION_AUDIT_INDEX.GAME_ID] ?? "")}:${status}:${reason}`;
+    reasons.push(formattedReason);
+    if (isAuditGap) auditGapReasons.push(formattedReason);
+    else missingOutcomeReasons.push(formattedReason);
   }
-  return { rows, outcomeGaps, reasons };
+  return {
+    rows,
+    outcomeGaps,
+    auditGapOutcomeGaps,
+    missingOutcomeGaps,
+    auditGapReasons,
+    missingOutcomeReasons,
+    reasons,
+  };
+}
+
+/**
+ * An explicit AUDIT_GAP truthfully records partial pregame coverage. It is
+ * visible but non-fatal. A decision record that should exist but lacks an
+ * official outcome remains a settlement integrity error for current slates.
+ */
+export function classifyDecisionAuditOutcomeGapMessages(
+  date: string,
+  gaps: Pick<DecisionAuditOutcomeGapResult,
+    "auditGapOutcomeGaps" | "missingOutcomeGaps" | "auditGapReasons" | "missingOutcomeReasons">,
+): { warnings: string[]; errors: string[] } {
+  const warnings: string[] = [];
+  const errors: string[] = [];
+  if (gaps.auditGapOutcomeGaps > 0) {
+    warnings.push(`DECISION_AUDIT_AUDIT_GAPS: ${gaps.auditGapReasons.join(", ")}`);
+  }
+  if (gaps.missingOutcomeGaps > 0) {
+    const message = `DECISION_AUDIT_OUTCOME_GAPS: ${gaps.missingOutcomeReasons.join(", ")}`;
+    if (date < DECISION_AUDIT_REQUIRED_FROM_DATE) warnings.push(`LEGACY_${message}`);
+    else errors.push(message);
+  }
+  return { warnings, errors };
 }
 
 async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
@@ -951,11 +1000,9 @@ export async function settleDecisionAuditLog(
     warnings.push(...missingClassification.warnings);
     errors.push(...missingClassification.errors);
     const gapMarked = markDecisionAuditOutcomeGaps(mutation.rows, date, expectedKeys);
-    if (gapMarked.outcomeGaps > 0) {
-      const message = `DECISION_AUDIT_OUTCOME_GAPS: ${gapMarked.reasons.join(", ")}`;
-      if (date < DECISION_AUDIT_REQUIRED_FROM_DATE) warnings.push(`LEGACY_${message}`);
-      else errors.push(message);
-    }
+    const gapMessages = classifyDecisionAuditOutcomeGapMessages(date, gapMarked);
+    warnings.push(...gapMessages.warnings);
+    errors.push(...gapMessages.errors);
     if (mutation.auditGaps > 0) {
       // The row is intentionally present and explicitly ungradable.  This is
       // a partial-pregame-scope fact, not a failed settlement write.  A truly
