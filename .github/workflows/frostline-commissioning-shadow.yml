@@ -64,7 +64,8 @@ jobs:
             slate_date="$requested_date"
           fi
 
-          if [ "${{ inputs.isolated_smoke }}" = "true" ] && [[ "$slate_date" <= "$(TZ=America/New_York date +%F)" ]]; then
+          today_et="$(TZ=America/New_York date +%F)"
+          if [ "${{ inputs.isolated_smoke }}" = "true" ] && { [[ "$slate_date" < "$today_et" ]] || [[ "$slate_date" == "$today_et" ]]; }; then
             echo "::error title=Unsafe isolated smoke date::An isolated smoke run must target a future slate."
             exit 1
           fi
