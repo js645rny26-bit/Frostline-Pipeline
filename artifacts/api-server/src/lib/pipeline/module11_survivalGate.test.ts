@@ -28,6 +28,7 @@ import {
   overSurvivalCheck,
   computeDecision,
   applyOverSurvivalGate,
+  boardProjectionComponentDisplay,
   type GameEligibilityContext,
   type OverSurvivalResult,
   type OverSurvivalGateResult,
@@ -209,6 +210,49 @@ describe("overSurvivalCheck", () => {
       PASS_COMPONENTS.marketLine,
     );
     assert.ok(passResult.survival_floor > 0, "floor must be computed on PASS");
+  });
+});
+
+// ─── §9: board component visibility is independent from survival eligibility ───
+
+describe("SLATE_BOARD component propagation", () => {
+  it("keeps valid Module 09 baseball/environment outputs visible when survival is N_A", () => {
+    // An Under/no-market/starter-blocked row legitimately skips the Over-only
+    // survival gate.  That must not erase its independently calculated Module
+    // 09 game-truth components on SLATE_BOARD.
+    const board = boardProjectionComponentDisplay(7.99, 0.34);
+
+    assert.deepEqual(board, {
+      baseball_only_projection: 7.99,
+      environment_run_adjustment: 0.34,
+    });
+  });
+
+  it("keeps valid board components when the survival audit rejects missing components", () => {
+    const survival = applyOverSurvivalGate(
+      7.94,
+      undefined, // missing starter component blocks only the survival audit
+      4.5,
+      0,
+      0,
+      -0.15,
+      8.5,
+    );
+    const board = boardProjectionComponentDisplay(7.94, -0.15);
+
+    assert.equal(survival.survival_check, "FAIL");
+    assert.equal(survival.survival_failure_reason, "COMPONENT_DATA_UNAVAILABLE");
+    assert.deepEqual(board, {
+      baseball_only_projection: 7.94,
+      environment_run_adjustment: -0.15,
+    });
+  });
+
+  it("preserves genuine upstream data gaps as blanks", () => {
+    assert.deepEqual(boardProjectionComponentDisplay(undefined, undefined), {
+      baseball_only_projection: null,
+      environment_run_adjustment: null,
+    });
   });
 });
 

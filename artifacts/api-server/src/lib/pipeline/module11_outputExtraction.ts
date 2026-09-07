@@ -76,7 +76,10 @@ export interface SlateBoardEntry {
   away_offense_source: string;
   /** Source of the home team's offensive rate. Same values as away_offense_source. */
   home_offense_source: string;
-  // ── Over survival gate audit fields (non-null for OVER games with a market line) ──
+  // ── Projection-component display fields ────────────────────────────────────
+  // These values are produced by Module 09 and are independently visible on the
+  // board whenever that calculation succeeded.  They must not be blanked merely
+  // because the Over-only survival audit is N_A or blocked.
   /**
    * All four baseball components summed: starter_attack_runs + bullpen_continuation_runs
    * + traffic_conversion_runs + hr_xbh_damage_runs.
@@ -87,6 +90,7 @@ export interface SlateBoardEntry {
   baseball_only_projection: number | null;
   /** park × weather run contribution: projected_total − baseball_only_projection. */
   environment_run_adjustment: number | null;
+  // ── Over survival gate audit fields ─────────────────────────────────────────
   /** Low-conversion stress floor: starter × 0.80 + bullpen × 0.75 + traffic × 0.70 + HR/XBH × 0.90. */
   survival_floor: number | null;
   /** survival_floor − market_line. Must be ≥ 0.25 for CORE. */
@@ -446,6 +450,32 @@ export interface OverSurvivalGateResult {
    * Empty string for PASS.
    */
   survival_failure_reason: string;
+}
+
+/**
+ * Projection components as they should appear on SLATE_BOARD.
+ *
+ * The published baseball-only and environment values are direct Module 09
+ * outputs.  They are not survival-gate outputs: the survival gate merely audits
+ * them for an Over with a market line.  Keep their board visibility independent
+ * from that gate so a blocked, Under, or no-market row retains the valid game
+ * truth that was already calculated upstream.
+ */
+export function boardProjectionComponentDisplay(
+  baseballOnlyProjection: number | undefined,
+  environmentRunAdjustment: number | undefined,
+): {
+  baseball_only_projection: number | null;
+  environment_run_adjustment: number | null;
+} {
+  return {
+    baseball_only_projection: Number.isFinite(baseballOnlyProjection)
+      ? baseballOnlyProjection!
+      : null,
+    environment_run_adjustment: Number.isFinite(environmentRunAdjustment)
+      ? environmentRunAdjustment!
+      : null,
+  };
 }
 
 /**
@@ -973,6 +1003,14 @@ export async function extractOutputBoards(
       const variance = market.line !== null
         ? parseFloat((gs.projected_total_runs - market.line).toFixed(2))
         : null;
+      // These are valid game-truth components independently of whether this
+      // row later qualifies for the Over-only survival audit.  In particular,
+      // a starter/survival blocker must not turn existing Module 09 outputs
+      // into apparent board data gaps.
+      const boardComponents = boardProjectionComponentDisplay(
+        gs.baseball_only_projection,
+        gs.environment_run_adjustment,
+      );
 
       const gameCtx: GameEligibilityContext = {
         awayPitcherRole:      gs.away_pitcher_role,
@@ -1269,8 +1307,6 @@ export async function extractOutputBoards(
       // the Over must survive on baseball grounds alone.
 
       // Initialise all survival audit fields (populated for all OVERs with a line)
-      let survivalBaseballOnly: number | null = null;
-      let survivalEnvAdj: number | null = null;
       let survivalFloor: number | null = null;
       let survivalFloorEdge: number | null = null;
       let survivalCheck: "PASS" | "FAIL" | "N_A" = "N_A";
@@ -1301,8 +1337,6 @@ export async function extractOutputBoards(
           gs.environment_run_adjustment,
           market.line,
         );
-        survivalBaseballOnly  = sg.baseball_only_projection;
-        survivalEnvAdj        = sg.environment_run_adjustment;
         survivalFloor         = sg.survival_floor;
         survivalFloorEdge     = sg.survival_floor_edge;
         survivalCheck         = sg.survival_check;
@@ -1455,8 +1489,8 @@ export async function extractOutputBoards(
         home_starter_quality:   gs.home_starter_quality ?? null,
         away_offense_source:    awayOffSrc,
         home_offense_source:    homeOffSrc,
-        baseball_only_projection:   survivalBaseballOnly,
-        environment_run_adjustment: survivalEnvAdj,
+        baseball_only_projection:   boardComponents.baseball_only_projection,
+        environment_run_adjustment: boardComponents.environment_run_adjustment,
         survival_floor:             survivalFloor,
         survival_floor_edge:        survivalFloorEdge,
         survival_check:             survivalCheck,
@@ -1517,8 +1551,8 @@ export async function extractOutputBoards(
         sideDecision,                                 // Y: Side_Decision
         gs.away_starter_quality ?? "",                // Z: Away_Starter_Quality
         gs.home_starter_quality ?? "",                // AA: Home_Starter_Quality
-        survivalBaseballOnly ?? "",                   // AB: Baseball_Only_Projection
-        survivalEnvAdj ?? "",                         // AC: Environment_Run_Adjustment
+        boardComponents.baseball_only_projection ?? "", // AB: Baseball_Only_Projection
+        boardComponents.environment_run_adjustment ?? "", // AC: Environment_Run_Adjustment
         survivalFloor ?? "",                          // AD: Survival_Floor
         survivalFloorEdge ?? "",                      // AE: Survival_Floor_Edge
         survivalCheck,                                // AF: Survival_Check (PASS | FAIL | N_A)
