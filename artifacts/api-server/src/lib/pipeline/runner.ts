@@ -5,7 +5,8 @@
 
 import { getTodayDateStr } from "./config.js";
 import { baseGameId, fetchMlbSchedule } from "./module01_mlbStatsApi.js";
-import { fetchPitcherWorkload } from "./module02_pitcherWorkload.js";
+import { fetchPitcherWorkload, type WorkloadResult } from "./module02_pitcherWorkload.js";
+import { buildWorkloadGameStates } from "./module02g_workloadState.js";
 import { classifyPitcherRoles } from "./module03_pitcherClassification.js";
 import { fetchWeatherForecasts } from "./module04_openMeteo.js";
 import { fetchTeamSplitsWithFallback } from "./module05_fangraphs.js";
@@ -17,6 +18,7 @@ import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
 import { fetchTeamRosters, fetchBatterSeasonStats, normalizeForMatch } from "./module02c_batterSeasonStats.js";
 import { fetchStatcastBatterLeaderboard } from "./module02d_statcastBatters.js";
 import { fetchStatcastPitcherExpectedLeaderboard, isFullSlatePregameWindow } from "./module02f_statcastPitcherExpected.js";
+import { fetchSavantPitchLevelDay } from "./module02h_savantPitchLevel.js";
 import { persistSourceSnapshot } from "./module02_sourceSnapshots.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { trackLineMovement } from "./module05d_oddsHistory.js";
@@ -96,6 +98,8 @@ export interface PipelineSlateResult {
   date: string;
   total_games: number;
   games: ReturnType<typeof normalizeSlate>["games"];
+  /** Frozen-source input for the workload shadow; never active Expected_IP. */
+  workload: WorkloadResult;
   validation: ReturnType<typeof validateNormalizedSlate>;
   module_statuses: ModuleStatus[];
   fangraphs_source: string;
@@ -143,6 +147,13 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
       date,
       total_games: 0,
       games: [],
+      workload: {
+        retrieval_timestamp_utc: runTimestamp,
+        retrieval_source: "mlb_stats_api",
+        data_through_date: "",
+        pitchers: [],
+        status: "no_pitchers",
+      },
       validation: {
         validation_timestamp_utc: new Date().toISOString(),
         status: "FAIL",
@@ -227,6 +238,7 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
     date,
     total_games: normalized.games.length,
     games: normalized.games,
+    workload,
     validation,
     module_statuses: moduleStatuses,
     fangraphs_source: splits.retrieval_source,
@@ -456,7 +468,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     );
   }
 
-  const [pitcherSeasonStats, batterSeasonStats, statcastBatterStats, statcastPitcherExpected] = await Promise.all([
+  const [pitcherSeasonStats, batterSeasonStats, statcastBatterStats, statcastPitcherExpected, savantPitchLevel] = await Promise.all([
     fetchPitcherSeasonStats(statIds, date.slice(0, 4)).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: pitcher season stats threw — skipping");
       return null;
@@ -475,6 +487,12 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
           return null;
         })
       : Promise.resolve(null),
+    // Cutoff-safe source storage: date-minus-one pitch events can be acquired
+    // on staggered slates without touching any active projection consumer.
+    fetchSavantPitchLevelDay(statcastDataThroughDate).catch((err: unknown) => {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: Savant pitch-level fetch threw — recording source gap");
+      return null;
+    }),
   ]);
 
   // Raw response retention is part of source validity. If the exact Savant
@@ -499,6 +517,35 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       });
       logger.warn({ detail }, "Full pipeline: expected-pitching excluded because raw source retention failed");
     }
+  }
+
+  // Module 02h deliberately remains source-only in this tranche. Persist its
+  // raw daily event ledger before any future feature engineer can consume it;
+  // retention failure is visible but cannot change today's baseball truth.
+  if (savantPitchLevel?.source_snapshot) {
+    const snapshotWrite = await persistSourceSnapshot(
+      savantPitchLevel.source_snapshot,
+      workbookId,
+    ).catch((err: unknown) => ({
+      status: "failure" as const,
+      errors: [err instanceof Error ? err.message : String(err)],
+    }));
+    if (snapshotWrite.status !== "success") {
+      logger.warn(
+        { errors: snapshotWrite.errors, data_through_date: statcastDataThroughDate },
+        "Full pipeline: Savant pitch-level source was not retained; no pitch-level evidence is available",
+      );
+    } else {
+      logger.info(
+        { events: savantPitchLevel.events.length, data_through_date: statcastDataThroughDate },
+        "Full pipeline: Savant pitch-level source retained (shadow-only)",
+      );
+    }
+  } else if (savantPitchLevel) {
+    logger.warn(
+      { errors: savantPitchLevel.errors, data_through_date: statcastDataThroughDate },
+      "Full pipeline: Savant pitch-level source unavailable (explicit evidence gap)",
+    );
   }
 
   // Sources can take long enough for an initially mutable game to enter the
@@ -849,6 +896,20 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     logger.warn({ warning }, "Full pipeline: Module 20b operator evidence warning");
   }
 
+  // Module 02g is a frozen, price-blind workload description for later
+  // allocation replay. It receives the same pregame-safe game-log snapshot
+  // used by role classification, but is not passed into Module 09 or board
+  // authorization and therefore cannot alter today's active Expected_IP.
+  const workloadStatesByGame = buildWorkloadGameStates(
+    slate.games,
+    slate.workload,
+    starterOutings?.outings,
+  );
+  logger.info(
+    { games: workloadStatesByGame.size, pitchers: slate.workload.pitchers.length },
+    "Full pipeline: workload-state shadow prepared",
+  );
+
   const mod20a: PregamePacketResult = await writePregamePacketHistory(
     date,
     mod09.game_summary_rows,
@@ -861,6 +922,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       workbookId,
       operatorEvidenceByGame: operatorEvidence.snapshots,
       referenceMarketEvidenceByGame: oddsMap,
+      workloadStatesByGame,
     },
   );
   if (mod20a.status !== "success") {

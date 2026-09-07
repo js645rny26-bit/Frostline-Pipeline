@@ -16,6 +16,19 @@ export interface PitcherRollingStats {
   avg_pitches_per_appearance: number;
 }
 
+/**
+ * Untuned, pregame-safe game-log evidence retained for workload shadow work.
+ * These are official MLB game-log fields, not a reconstructed postgame feed.
+ */
+export interface PitcherGameLogAppearance {
+  date: string;
+  game_pk: number | null;
+  games_started: number;
+  innings: number;
+  pitch_count: number | null;
+  batters_faced: number | null;
+}
+
 export interface PitcherWorkloadData {
   playerId: number;
   name: string;
@@ -26,6 +39,8 @@ export interface PitcherWorkloadData {
     season: PitcherRollingStats;
   };
   recent_games_count: number;
+  /** Most-recent-first, strictly through data_through_date. */
+  recent_appearances: PitcherGameLogAppearance[];
   error?: string;
 }
 
@@ -39,10 +54,12 @@ export interface WorkloadResult {
 
 interface GameLogSplit {
   date: string;
+  game?: { gamePk?: number };
   stat: {
     inningsPitched?: string | number;
     numberOfPitches?: number;
     battersFaced?: number;
+    gamesStarted?: number;
   };
 }
 
@@ -72,6 +89,23 @@ function rollingStats(splits: GameLogSplit[], afterDate: string, beforeOrOnDate:
   };
 }
 
+function recentAppearances(
+  splits: GameLogSplit[],
+  throughDate: string,
+): PitcherGameLogAppearance[] {
+  return splits
+    .filter((split) => split.date <= throughDate)
+    .sort((left, right) => right.date.localeCompare(left.date))
+    .map((split) => ({
+      date: split.date,
+      game_pk: split.game?.gamePk ?? null,
+      games_started: split.stat.gamesStarted ?? 0,
+      innings: Number.parseFloat(parseInnings(split.stat.inningsPitched).toFixed(3)),
+      pitch_count: split.stat.numberOfPitches ?? null,
+      batters_faced: split.stat.battersFaced ?? null,
+    }));
+}
+
 async function fetchSinglePitcher(pitcherId: number, endDate: string): Promise<PitcherWorkloadData> {
   const season = endDate.slice(0, 4);
   const url = `${MLB_API}/people/${pitcherId}/stats?stats=gameLog&group=pitching&season=${season}`;
@@ -98,6 +132,7 @@ async function fetchSinglePitcher(pitcherId: number, endDate: string): Promise<P
           season: { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
         },
         recent_games_count: 0,
+        recent_appearances: [],
       };
     }
 
@@ -115,6 +150,7 @@ async function fetchSinglePitcher(pitcherId: number, endDate: string): Promise<P
     const l14    = rollingStats(splits, d14.toISOString().split("T")[0]!, throughStr);
     const seasonStats = rollingStats(splits, seasonStart, throughStr);
     const l60    = rollingStats(splits, d60.toISOString().split("T")[0]!, throughStr);
+    const appearances = recentAppearances(splits, throughStr);
 
     // Determine status:
     // "active"             — pitched in last 30 days
@@ -135,6 +171,7 @@ async function fetchSinglePitcher(pitcherId: number, endDate: string): Promise<P
       status,
       rolling_stats: { l30, l14, season: seasonStats },
       recent_games_count: l30.appearances,
+      recent_appearances: appearances,
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -146,9 +183,10 @@ async function fetchSinglePitcher(pitcherId: number, endDate: string): Promise<P
         l30:    { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
         l14:    { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
         season: { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 },
-      },
-      recent_games_count: 0,
-      error: message,
+        },
+        recent_games_count: 0,
+        recent_appearances: [],
+        error: message,
     };
   }
 }

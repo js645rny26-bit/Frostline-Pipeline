@@ -11,6 +11,7 @@ import {
   type PregamePacketInput,
 } from "./module20a_pregamePacket.js";
 import { WORKBOOK_SCHEMA, WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
+import type { WorkloadGameState } from "./module02g_workloadState.js";
 
 const firstPitch = "2026-08-24T23:10:00.000Z";
 const input = (
@@ -532,6 +533,50 @@ test("v41 packet header migration preserves old frozen fields by name", () => {
   assert.equal(migrated.rows[0]![index.Strict_Structural_Check_Vector], "");
   assert.equal(migrated.rows[0]![index.Away_Starter_Quality_Source], "");
   assert.equal(migrated.rows[0]![index.Home_Bullpen_Quality_Source], "");
+  assert.equal(migrated.rows[0]![index.Away_Workload_State_Status], "");
+  assert.equal(migrated.rows[0]![index.Home_Workload_Notes], "");
+});
+
+test("workload-state shadow is frozen beside active Expected_IP without changing it", () => {
+  const summary = [{
+    date: "2026-09-07", game_id: "20260907_AAA_BBB", away_team: "AAA", home_team: "BBB",
+    projected_away_runs: 4, projected_home_runs: 4.5, projected_total_runs: 8.5,
+    away_expected_innings: 6, home_expected_innings: 6,
+  }] as never;
+  const board = [{
+    legacy_game_id: "20260907_AAA_BBB", market_line: 8.5, run_id: "run", model_version: "test",
+    direction: "OVER", vehicle_type: "GAME_TOTAL", final_decision: "PASS", core_blocker: "",
+    confidence: 50, variance: 0,
+  }] as never;
+  const workloadState: WorkloadGameState = {
+    away: {
+      workload_state_status: "AVAILABLE", projected_ip_shadow: 5.25, projected_bf_shadow: 22.31,
+      workload_confidence: "HIGH", role_state: "CONVENTIONAL_STARTER", rest_state: "STANDARD_REST",
+      recent_load_state: "NORMAL_PREVIOUS_OUTING", team_handling_state: "NOT_MODELED",
+      workload_source_status: "MLB_STATS_API_GAME_LOG_THROUGH_PRIOR_DAY_NO_TRANSACTION_OR_TEAM_HANDLING_SOURCE",
+      workload_notes: "fixture-away",
+    },
+    home: {
+      workload_state_status: "PARTIAL", projected_ip_shadow: 4.5, projected_bf_shadow: 19.13,
+      workload_confidence: "LOW", role_state: "CONVENTIONAL_STARTER", rest_state: "EXTRA_REST",
+      recent_load_state: "LIGHT_PREVIOUS_OUTING", team_handling_state: "NOT_MODELED",
+      workload_source_status: "MLB_STATS_API_GAME_LOG_THROUGH_PRIOR_DAY_NO_TRANSACTION_OR_TEAM_HANDLING_SOURCE",
+      workload_notes: "fixture-home",
+    },
+  };
+  const packet = buildPregamePacketInputs(
+    summary, board,
+    [{ legacy_game_id: "20260907_AAA_BBB", scheduled_utc_time: "2026-09-07T23:10:00.000Z" }] as never,
+    [], [], [], new Map(), new Map(), new Map([["20260907_AAA_BBB", workloadState]]),
+  )[0]!;
+  const index = Object.fromEntries(PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]));
+  assert.equal(packet.values[index.Away_Expected_IP], 6);
+  assert.equal(packet.values[index.Home_Expected_IP], 6);
+  assert.equal(packet.values[index.Away_Projected_IP_Shadow], 5.25);
+  assert.equal(packet.values[index.Home_Projected_IP_Shadow], 4.5);
+  assert.equal(packet.values[index.Away_Workload_Confidence], "HIGH");
+  assert.equal(packet.values[index.Home_Workload_State_Status], "PARTIAL");
+  assert.equal(packet.values[index.Home_Workload_Notes], "fixture-home");
 });
 
 test("packet contract preserves market and dependent shadow fields as explicit columns", () => {
@@ -606,6 +651,26 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Home_Starter_Quality_Source",
     "Away_Bullpen_Quality_Source",
     "Home_Bullpen_Quality_Source",
+    "Away_Workload_State_Status",
+    "Away_Projected_IP_Shadow",
+    "Away_Projected_BF_Shadow",
+    "Away_Workload_Confidence",
+    "Away_Role_State",
+    "Away_Rest_State",
+    "Away_Recent_Load_State",
+    "Away_Team_Handling_State",
+    "Away_Workload_Source_Status",
+    "Away_Workload_Notes",
+    "Home_Workload_State_Status",
+    "Home_Projected_IP_Shadow",
+    "Home_Projected_BF_Shadow",
+    "Home_Workload_Confidence",
+    "Home_Role_State",
+    "Home_Rest_State",
+    "Home_Recent_Load_State",
+    "Home_Team_Handling_State",
+    "Home_Workload_Source_Status",
+    "Home_Workload_Notes",
   ])
     assert.ok(PREGAME_PACKET_HISTORY_HEADERS.includes(required as never));
 });
@@ -613,6 +678,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 55);
-  assert.equal(pregamePacketHistoryRange(5000), "A1:FO5000");
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 56);
+  assert.equal(pregamePacketHistoryRange(5000), "A1:GI5000");
 });

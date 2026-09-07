@@ -74,9 +74,21 @@ export const STARTER_OUTCOME_HEADERS = [
   "Team",
   "Starter",
   "Expected_IP",
+  "Projected_IP_Shadow",
+  "Active_vs_Shadow_IP_Delta",
   "Actual_IP",
   "IP_Delta",
+  "Shadow_IP_Delta",
+  "Shadow_IP_Abs_Error",
   "Workload_Leash_Status",
+  "Workload_State_Status",
+  "Workload_Confidence",
+  "Role_State",
+  "Rest_State",
+  "Recent_Load_State",
+  "Team_Handling_State",
+  "Workload_Source_Status",
+  "Workload_Notes",
   "Actual_Pitches",
   "BB",
   "HBP",
@@ -140,6 +152,21 @@ export const BULLPEN_TIMING_HEADERS = [
   "Away_Starter_Exit_vs_Expected",
   "Home_Starter_Exit_vs_Expected",
   "Bullpen_Deployment_Status",
+  "Frozen_Away_Expected_Starter_IP",
+  "Frozen_Home_Expected_Starter_IP",
+  "Frozen_Away_Projected_IP_Shadow",
+  "Frozen_Home_Projected_IP_Shadow",
+  "Actual_Away_Starter_IP",
+  "Actual_Home_Starter_IP",
+  "Expected_Away_Bullpen_Window_IP",
+  "Expected_Home_Bullpen_Window_IP",
+  "Actual_Away_Bullpen_Window_IP",
+  "Actual_Home_Bullpen_Window_IP",
+  "Away_Starter_Allocation_Error",
+  "Home_Starter_Allocation_Error",
+  "Away_Bullpen_Allocation_Error",
+  "Home_Bullpen_Allocation_Error",
+  "Phase_Allocation_Error",
 ] as const;
 
 export const FULL_LADDER_SETTLEMENT_HEADERS = [
@@ -235,6 +262,17 @@ export const GAME_TRUTH_REPLAY_HEADERS = [
   "Both_Starter_And_Bullpen_Contributed",
   "Away_Conversion_Outcome",
   "Home_Conversion_Outcome",
+  "Frozen_Starter_Attack_Runs",
+  "Starter_Window_Error",
+  "Frozen_Bullpen_Continuation_Runs",
+  "Bullpen_Window_Error",
+  "Projected_Starter_Run_Share",
+  "Actual_Starter_Run_Share",
+  "Projected_Bullpen_Run_Share",
+  "Actual_Bullpen_Run_Share",
+  "Phase_Allocation_Error",
+  "Primary_Postmortem_Diagnosis",
+  "Secondary_Postmortem_Diagnoses",
   "Frozen_Collision_Status",
   "Frozen_Collision_Traffic_Estimate",
   "Frozen_Collision_Damage_Estimate",
@@ -262,6 +300,26 @@ export interface FrozenPacketDiagnosticInput {
   projected_total: number;
   away_expected_ip: number | null;
   home_expected_ip: number | null;
+  away_projected_ip_shadow?: number | null;
+  home_projected_ip_shadow?: number | null;
+  away_workload_state_status?: string;
+  home_workload_state_status?: string;
+  away_workload_confidence?: string;
+  home_workload_confidence?: string;
+  away_role_state?: string;
+  home_role_state?: string;
+  away_rest_state?: string;
+  home_rest_state?: string;
+  away_recent_load_state?: string;
+  home_recent_load_state?: string;
+  away_team_handling_state?: string;
+  home_team_handling_state?: string;
+  away_workload_source_status?: string;
+  home_workload_source_status?: string;
+  away_workload_notes?: string;
+  home_workload_notes?: string;
+  starter_attack_runs?: number | null;
+  bullpen_continuation_runs?: number | null;
   bullpen_data_status?: string;
   collision_status?: string;
   collision_traffic_estimate?: number | null;
@@ -413,6 +471,26 @@ export function parseFrozenPacketDiagnostics(
       projected_total: total,
       away_expected_ip: numeric(value(row, "Away_Expected_IP")),
       home_expected_ip: numeric(value(row, "Home_Expected_IP")),
+      away_projected_ip_shadow: numeric(value(row, "Away_Projected_IP_Shadow")),
+      home_projected_ip_shadow: numeric(value(row, "Home_Projected_IP_Shadow")),
+      away_workload_state_status: text(value(row, "Away_Workload_State_Status")) || "UNAVAILABLE",
+      home_workload_state_status: text(value(row, "Home_Workload_State_Status")) || "UNAVAILABLE",
+      away_workload_confidence: text(value(row, "Away_Workload_Confidence")) || "UNAVAILABLE",
+      home_workload_confidence: text(value(row, "Home_Workload_Confidence")) || "UNAVAILABLE",
+      away_role_state: text(value(row, "Away_Role_State")) || "UNRESOLVED",
+      home_role_state: text(value(row, "Home_Role_State")) || "UNRESOLVED",
+      away_rest_state: text(value(row, "Away_Rest_State")) || "UNAVAILABLE",
+      home_rest_state: text(value(row, "Home_Rest_State")) || "UNAVAILABLE",
+      away_recent_load_state: text(value(row, "Away_Recent_Load_State")) || "UNAVAILABLE",
+      home_recent_load_state: text(value(row, "Home_Recent_Load_State")) || "UNAVAILABLE",
+      away_team_handling_state: text(value(row, "Away_Team_Handling_State")) || "NOT_MODELED",
+      home_team_handling_state: text(value(row, "Home_Team_Handling_State")) || "NOT_MODELED",
+      away_workload_source_status: text(value(row, "Away_Workload_Source_Status")) || "WORKLOAD_EVIDENCE_UNAVAILABLE",
+      home_workload_source_status: text(value(row, "Home_Workload_Source_Status")) || "WORKLOAD_EVIDENCE_UNAVAILABLE",
+      away_workload_notes: text(value(row, "Away_Workload_Notes")),
+      home_workload_notes: text(value(row, "Home_Workload_Notes")),
+      starter_attack_runs: numeric(value(row, "Starter_Attack_Runs")),
+      bullpen_continuation_runs: numeric(value(row, "Bullpen_Continuation_Runs")),
       bullpen_data_status: text(value(row, "Bullpen_Data_Status")),
       collision_status: text(value(row, "Collision_Status")),
       collision_traffic_estimate: numeric(
@@ -833,6 +911,7 @@ function starterRows(
     side: TeamSide,
     starter: StarterDimension | null,
     expected: number | null,
+    shadow: number | null,
     team: string,
   ): unknown[] => {
     const actualIp = starter?.innings ?? null;
@@ -864,9 +943,21 @@ function starterRows(
       team,
       starter?.name ?? "",
       expected ?? "",
+      shadow ?? "",
+      expected === null || shadow === null ? "" : round2(expected - shadow),
       actualIp ?? "",
       expected === null || actualIp === null ? "" : round2(actualIp - expected),
+      shadow === null || actualIp === null ? "" : round2(actualIp - shadow),
+      shadow === null || actualIp === null ? "" : Math.abs(round2(actualIp - shadow)),
       workloadLeashStatus(expected, actualIp),
+      side === "AWAY" ? packet.away_workload_state_status : packet.home_workload_state_status,
+      side === "AWAY" ? packet.away_workload_confidence : packet.home_workload_confidence,
+      side === "AWAY" ? packet.away_role_state : packet.home_role_state,
+      side === "AWAY" ? packet.away_rest_state : packet.home_rest_state,
+      side === "AWAY" ? packet.away_recent_load_state : packet.home_recent_load_state,
+      side === "AWAY" ? packet.away_team_handling_state : packet.home_team_handling_state,
+      side === "AWAY" ? packet.away_workload_source_status : packet.home_workload_source_status,
+      side === "AWAY" ? packet.away_workload_notes : packet.home_workload_notes,
       starter?.pitches ?? "",
       bb ?? "",
       hbp ?? "",
@@ -898,8 +989,8 @@ function starterRows(
     ];
   };
   return [
-    rowFor("AWAY", detail.away, packet.away_expected_ip, packet.away_team),
-    rowFor("HOME", detail.home, packet.home_expected_ip, packet.home_team),
+    rowFor("AWAY", detail.away, packet.away_expected_ip, packet.away_projected_ip_shadow ?? null, packet.away_team),
+    rowFor("HOME", detail.home, packet.home_expected_ip, packet.home_projected_ip_shadow ?? null, packet.home_team),
   ];
 }
 
@@ -931,6 +1022,21 @@ export interface TimingDiagnosticEvidence {
   away_starter_exit_vs_expected: string;
   home_starter_exit_vs_expected: string;
   bullpen_deployment_status: string;
+  frozen_away_expected_starter_ip: number | "";
+  frozen_home_expected_starter_ip: number | "";
+  frozen_away_projected_ip_shadow: number | "";
+  frozen_home_projected_ip_shadow: number | "";
+  actual_away_starter_ip: number | "";
+  actual_home_starter_ip: number | "";
+  expected_away_bullpen_window_ip: number | "";
+  expected_home_bullpen_window_ip: number | "";
+  actual_away_bullpen_window_ip: number | "";
+  actual_home_bullpen_window_ip: number | "";
+  away_starter_allocation_error: number | "";
+  home_starter_allocation_error: number | "";
+  away_bullpen_allocation_error: number | "";
+  home_bullpen_allocation_error: number | "";
+  phase_allocation_error: number | "";
 }
 
 function chainText(appearances: BullpenAppearance[]): string {
@@ -949,6 +1055,17 @@ function starterExitVsExpected(
 ): string {
   if (expected === null || actual === null) return "NOT_COMPARABLE";
   return actual < expected ? "EARLIER_THAN_EXPECTED" : "AT_OR_AFTER_EXPECTED";
+}
+
+function inningsTotal(appearances: BullpenAppearance[]): number | null {
+  if (appearances.some((appearance) => appearance.innings === null)) return null;
+  return round2(
+    appearances.reduce((sum, appearance) => sum + (appearance.innings ?? 0), 0),
+  );
+}
+
+function allocationError(expected: number | null, actual: number | null): number | "" {
+  return expected === null || actual === null ? "" : round2(expected - actual);
 }
 
 export function buildTimingDiagnostic(
@@ -972,6 +1089,30 @@ export function buildTimingDiagnostic(
   const homeFirstReliever = detail.home_bullpen[0] ?? null;
   const awayExit = exitInning(detail.away);
   const homeExit = exitInning(detail.home);
+  const actualAwayStarterIp = detail.away?.innings ?? null;
+  const actualHomeStarterIp = detail.home?.innings ?? null;
+  const actualAwayBullpenIp = detail.status === "AVAILABLE"
+    ? inningsTotal(detail.away_bullpen)
+    : null;
+  const actualHomeBullpenIp = detail.status === "AVAILABLE"
+    ? inningsTotal(detail.home_bullpen)
+    : null;
+  const expectedAwayBullpenIp = packet.away_expected_ip === null
+    ? null
+    : round2(Math.max(0, 9 - packet.away_expected_ip));
+  const expectedHomeBullpenIp = packet.home_expected_ip === null
+    ? null
+    : round2(Math.max(0, 9 - packet.home_expected_ip));
+  const awayStarterAllocationError = allocationError(packet.away_expected_ip, actualAwayStarterIp);
+  const homeStarterAllocationError = allocationError(packet.home_expected_ip, actualHomeStarterIp);
+  const awayBullpenAllocationError = allocationError(expectedAwayBullpenIp, actualAwayBullpenIp);
+  const homeBullpenAllocationError = allocationError(expectedHomeBullpenIp, actualHomeBullpenIp);
+  const phaseErrors = [
+    awayStarterAllocationError,
+    homeStarterAllocationError,
+    awayBullpenAllocationError,
+    homeBullpenAllocationError,
+  ].filter((value): value is number => typeof value === "number");
   return {
     away_starter_exit_inning: awayExit,
     home_starter_exit_inning: homeExit,
@@ -1022,6 +1163,23 @@ export function buildTimingDiagnostic(
       detail.status === "AVAILABLE"
         ? "ACTUAL_CHAIN_RECORDED"
         : "POSTGAME_DETAIL_UNAVAILABLE",
+    frozen_away_expected_starter_ip: packet.away_expected_ip ?? "",
+    frozen_home_expected_starter_ip: packet.home_expected_ip ?? "",
+    frozen_away_projected_ip_shadow: packet.away_projected_ip_shadow ?? "",
+    frozen_home_projected_ip_shadow: packet.home_projected_ip_shadow ?? "",
+    actual_away_starter_ip: actualAwayStarterIp ?? "",
+    actual_home_starter_ip: actualHomeStarterIp ?? "",
+    expected_away_bullpen_window_ip: expectedAwayBullpenIp ?? "",
+    expected_home_bullpen_window_ip: expectedHomeBullpenIp ?? "",
+    actual_away_bullpen_window_ip: actualAwayBullpenIp ?? "",
+    actual_home_bullpen_window_ip: actualHomeBullpenIp ?? "",
+    away_starter_allocation_error: awayStarterAllocationError,
+    home_starter_allocation_error: homeStarterAllocationError,
+    away_bullpen_allocation_error: awayBullpenAllocationError,
+    home_bullpen_allocation_error: homeBullpenAllocationError,
+    phase_allocation_error: phaseErrors.length === 4
+      ? round2(phaseErrors.reduce((sum, value) => sum + Math.abs(value), 0) / phaseErrors.length)
+      : "",
   };
 }
 
@@ -1067,6 +1225,21 @@ function timingRow(
     timing.away_starter_exit_vs_expected,
     timing.home_starter_exit_vs_expected,
     timing.bullpen_deployment_status,
+    timing.frozen_away_expected_starter_ip,
+    timing.frozen_home_expected_starter_ip,
+    timing.frozen_away_projected_ip_shadow,
+    timing.frozen_home_projected_ip_shadow,
+    timing.actual_away_starter_ip,
+    timing.actual_home_starter_ip,
+    timing.expected_away_bullpen_window_ip,
+    timing.expected_home_bullpen_window_ip,
+    timing.actual_away_bullpen_window_ip,
+    timing.actual_home_bullpen_window_ip,
+    timing.away_starter_allocation_error,
+    timing.home_starter_allocation_error,
+    timing.away_bullpen_allocation_error,
+    timing.home_bullpen_allocation_error,
+    timing.phase_allocation_error,
   ];
 }
 
@@ -1283,6 +1456,71 @@ function timingTotals(timing: TimingDiagnosticEvidence): {
   };
 }
 
+const MATERIAL_PHASE_RUN_ERROR = 2;
+const MATERIAL_WORKLOAD_ALLOCATION_IP_ERROR = 1.25;
+const MATERIAL_CENTER_ERROR = 3;
+const TAIL_CANDIDATE_ERROR = 4;
+
+interface PostmortemTaxonomy {
+  primary: string;
+  secondary: string;
+}
+
+/**
+ * A transparent, settlement-only taxonomy. It ranks observed, named
+ * discrepancies rather than inferring a cause from a loud final score. The
+ * constants are diagnosis visibility thresholds, not projection coefficients
+ * or decision gates; every underlying error remains in the same replay row.
+ */
+function classifyPostmortemDiagnosis(
+  packet: FrozenPacketDiagnosticInput,
+  outcome: Pick<SettlementRow, "actual_total">,
+  timing: TimingDiagnosticEvidence,
+  totals: ReturnType<typeof timingTotals>,
+  awayConversion: ConversionDiagnosticEvidence,
+  homeConversion: ConversionDiagnosticEvidence,
+): PostmortemTaxonomy {
+  const candidates: Array<{ label: string; magnitude: number }> = [];
+  const phaseAllocation = timing.phase_allocation_error;
+  if (typeof phaseAllocation === "number" && phaseAllocation >= MATERIAL_WORKLOAD_ALLOCATION_IP_ERROR) {
+    candidates.push({ label: "WORKLOAD_ALLOCATION_WRONG", magnitude: phaseAllocation });
+  }
+  const starterError = packet.starter_attack_runs === null || packet.starter_attack_runs === undefined || totals.starter_total === null
+    ? null
+    : Math.abs(packet.starter_attack_runs - totals.starter_total);
+  if (starterError !== null && starterError >= MATERIAL_PHASE_RUN_ERROR) {
+    candidates.push({ label: "STARTER_MATCHUP_WRONG", magnitude: starterError });
+  }
+  const bullpenError = packet.bullpen_continuation_runs === null || packet.bullpen_continuation_runs === undefined || totals.bullpen_total === null
+    ? null
+    : Math.abs(packet.bullpen_continuation_runs - totals.bullpen_total);
+  if (bullpenError !== null && bullpenError >= MATERIAL_PHASE_RUN_ERROR) {
+    candidates.push({ label: "BULLPEN_DEPLOYMENT_WRONG", magnitude: bullpenError });
+  }
+  const conversionShortfall = [awayConversion, homeConversion].some(
+    (conversion) => conversion.conversion_outcome === "TRAFFIC_REALIZED_CONVERSION_SHORTFALL",
+  );
+  const centerError = Math.abs(packet.projected_total - outcome.actual_total);
+  if (conversionShortfall && centerError >= MATERIAL_PHASE_RUN_ERROR) {
+    candidates.push({ label: "CONVERSION_WRONG", magnitude: MATERIAL_PHASE_RUN_ERROR });
+  }
+  if (candidates.length === 0) {
+    if (centerError >= TAIL_CANDIDATE_ERROR) {
+      return { primary: "TAIL_REALIZATION", secondary: "NO_MATERIAL_PHASE_OR_CONVERSION_MISREPRESENTATION" };
+    }
+    return centerError >= MATERIAL_CENTER_ERROR
+      ? { primary: "CENTER_WRONG", secondary: "NO_MATERIAL_PHASE_OR_CONVERSION_MISREPRESENTATION" }
+      : { primary: "NO_MATERIAL_DIAGNOSIS", secondary: "" };
+  }
+  candidates.sort((left, right) => right.magnitude - left.magnitude || left.label.localeCompare(right.label));
+  const primary = candidates[0]!.label;
+  const secondary = candidates
+    .slice(1)
+    .map((candidate) => candidate.label)
+    .join(";");
+  return { primary, secondary };
+}
+
 function allocationReasonTags(
   packet: FrozenPacketDiagnosticInput,
   outcome: Pick<SettlementRow, "actual_away_runs" | "actual_home_runs">,
@@ -1381,6 +1619,32 @@ export function buildGameTruthReplay(
     awayConversion,
     homeConversion,
   );
+  const starterWindowError = packet.starter_attack_runs === null || packet.starter_attack_runs === undefined || totals.starter_total === null
+    ? null
+    : round2(packet.starter_attack_runs - totals.starter_total);
+  const bullpenWindowError = packet.bullpen_continuation_runs === null || packet.bullpen_continuation_runs === undefined || totals.bullpen_total === null
+    ? null
+    : round2(packet.bullpen_continuation_runs - totals.bullpen_total);
+  const projectedStarterShare = packet.starter_attack_runs === null || packet.starter_attack_runs === undefined || packet.projected_total <= 0
+    ? null
+    : round2(packet.starter_attack_runs / packet.projected_total);
+  const actualStarterShare = totals.starter_total === null || outcome.actual_total <= 0
+    ? null
+    : round2(totals.starter_total / outcome.actual_total);
+  const projectedBullpenShare = packet.bullpen_continuation_runs === null || packet.bullpen_continuation_runs === undefined || packet.projected_total <= 0
+    ? null
+    : round2(packet.bullpen_continuation_runs / packet.projected_total);
+  const actualBullpenShare = totals.bullpen_total === null || outcome.actual_total <= 0
+    ? null
+    : round2(totals.bullpen_total / outcome.actual_total);
+  const taxonomy = classifyPostmortemDiagnosis(
+    packet,
+    outcome,
+    timing,
+    totals,
+    awayConversion,
+    homeConversion,
+  );
   const observedMechanism =
     allocationReversal === "TRUE"
       ? `ALLOCATION_REVERSAL__${totals.primary}`
@@ -1420,6 +1684,17 @@ export function buildGameTruthReplay(
     totals.both_contributed,
     awayConversion.conversion_outcome,
     homeConversion.conversion_outcome,
+    packet.starter_attack_runs ?? "",
+    starterWindowError ?? "",
+    packet.bullpen_continuation_runs ?? "",
+    bullpenWindowError ?? "",
+    projectedStarterShare ?? "",
+    actualStarterShare ?? "",
+    projectedBullpenShare ?? "",
+    actualBullpenShare ?? "",
+    timing.phase_allocation_error,
+    taxonomy.primary,
+    taxonomy.secondary,
     packet.collision_status || "SOURCE_UNAVAILABLE",
     packet.collision_traffic_estimate ?? "",
     packet.collision_damage_estimate ?? "",

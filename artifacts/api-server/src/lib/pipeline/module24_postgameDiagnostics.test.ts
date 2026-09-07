@@ -370,9 +370,21 @@ test("Module 24 headers stay exactly aligned with the generated workbook schema"
     "Team",
     "Starter",
     "Expected_IP",
+    "Projected_IP_Shadow",
+    "Active_vs_Shadow_IP_Delta",
     "Actual_IP",
     "IP_Delta",
+    "Shadow_IP_Delta",
+    "Shadow_IP_Abs_Error",
     "Workload_Leash_Status",
+    "Workload_State_Status",
+    "Workload_Confidence",
+    "Role_State",
+    "Rest_State",
+    "Recent_Load_State",
+    "Team_Handling_State",
+    "Workload_Source_Status",
+    "Workload_Notes",
     "Actual_Pitches",
     "BB",
     "HBP",
@@ -439,13 +451,26 @@ test("game truth replay joins frozen allocation with starter and bullpen timing 
     actual_total: 8,
     settlement_ts: "2026-08-26T12:00:00.000Z",
   };
-  const timing = buildTimingDiagnostic(packet, outcome, deGromDetail);
+  const timing = buildTimingDiagnostic({
+    ...packet,
+    away_projected_ip_shadow: 5,
+    home_projected_ip_shadow: 5.5,
+    away_workload_state_status: "AVAILABLE",
+    home_workload_state_status: "AVAILABLE",
+  }, outcome, deGromDetail);
   assert.equal(timing.away_starter_exit_vs_expected, "EARLIER_THAN_EXPECTED");
   assert.equal(
     timing.expected_leverage_bridge_status,
     "NOT_EVALUABLE_NAMED_BRIDGE_NOT_FROZEN",
   );
   assert.equal(timing.bullpen_deployment_status, "ACTUAL_CHAIN_RECORDED");
+  assert.equal(timing.frozen_away_projected_ip_shadow, 5);
+  assert.equal(timing.actual_away_starter_ip, 3.67);
+  assert.equal(timing.expected_away_bullpen_window_ip, 3);
+  assert.equal(timing.actual_away_bullpen_window_ip, 2);
+  assert.equal(timing.away_starter_allocation_error, 2.33);
+  assert.equal(timing.away_bullpen_allocation_error, 1);
+  assert.equal(timing.phase_allocation_error, 0.83);
 
   const row = buildGameTruthReplay(packet, outcome, deGromDetail);
   const at = (name: (typeof GAME_TRUTH_REPLAY_HEADERS)[number]) =>
