@@ -144,22 +144,32 @@ jobs:
 
           workbook_id="${FROSTLINE_WORKBOOK_ID}"
           if [ "${{ inputs.isolated_smoke }}" = "true" ]; then
+            workbook_creation_mode="NEW_WORKBOOK"
             if ! curl --silent --show-error --fail-with-body --request POST \
               "http://127.0.0.1:3000/api/workbook/create?date=${SLATE_DATE}-SMOKE" \
               --output frostline-isolated-workbook.json; then
-              echo "Unable to create isolated smoke workbook."
-              cat frostline-isolated-workbook.json || true
-              cat frostline-api-server.log
-              exit 1
+              echo "New workbook creation unavailable; attempting a distinct Drive copy of the commissioning workbook."
+              workbook_creation_mode="COMMISSIONING_WORKBOOK_COPY_FALLBACK"
+              if ! curl --silent --show-error --fail-with-body --request POST \
+                "https://www.googleapis.com/drive/v3/files/${FROSTLINE_WORKBOOK_ID}/copy?fields=id,name,webViewLink" \
+                --header "Authorization: Bearer ${FROSTLINE_GOOGLE_ACCESS_TOKEN}" \
+                --header "Content-Type: application/json" \
+                --data "{\"name\":\"FROSTLINE_Pipeline_${SLATE_DATE}_SMOKE_COPY\"}" \
+                --output frostline-isolated-workbook.json; then
+                echo "Unable to create an isolated smoke workbook by either method."
+                cat frostline-isolated-workbook.json || true
+                cat frostline-api-server.log
+                exit 1
+              fi
             fi
-            workbook_id="$(node -e 'const fs = require("fs"); const result = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); if (!result.workbook_id) process.exit(2); process.stdout.write(result.workbook_id);' frostline-isolated-workbook.json)"
+            workbook_id="$(node -e 'const fs = require("fs"); const result = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const id = result.workbook_id ?? result.id; if (!id) process.exit(2); process.stdout.write(id);' frostline-isolated-workbook.json)"
             case "$workbook_id" in
               1KPYzbSawLIrOcckn5EXxO4vH5eABOhMIibhCgpF-oNs|1MWsGQYR13tFjwd-L4lMweGShKJkrOsSNJaHzdjiMNHs)
                 echo "::error title=Unsafe isolated workbook::A smoke run must never resolve to a known production workbook."
                 exit 1
                 ;;
             esac
-            echo "Isolated pregame smoke workbook: $workbook_id"
+            echo "Isolated pregame smoke workbook ($workbook_creation_mode): $workbook_id"
           fi
 
           set +e
