@@ -89,6 +89,10 @@ export function buildSavantPitchLevelUrl(date: string): string {
     game_date_gt: date,
     game_date_lt: date,
     hfGT: "R|",
+    // Savant otherwise returns a schema-valid header-only CSV for an
+    // unscoped details query. This requests the complete result set while
+    // the date and regular-season filters remain the pregame safety boundary.
+    all: "true",
   });
   return `https://baseballsavant.mlb.com/statcast_search/csv?${query.toString()}`;
 }

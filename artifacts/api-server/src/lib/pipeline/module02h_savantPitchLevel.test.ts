@@ -44,11 +44,12 @@ test("shared rolling windows are cutoff-safe and calendar-defined", () => {
   assert.equal(selectSavantPitchLevelWindow(events, "2026-09-06", "SEASON").length, 3);
 });
 
-test("direct CSV request retains the mandated details/date/regular-season filters", () => {
+test("direct CSV request retains the mandated complete/details/date/regular-season filters", () => {
   const url = buildSavantPitchLevelUrl("2026-09-06");
   assert.match(url, /type=details/);
   assert.match(url, /game_date_gt=2026-09-06/);
   assert.match(url, /game_date_lt=2026-09-06/);
   assert.match(url, /hfGT=R%7C/);
+  assert.match(url, /all=true/);
   assert.equal(SAVANT_PITCH_LEVEL_REQUIRED_COLUMNS.includes("description"), true);
 });
