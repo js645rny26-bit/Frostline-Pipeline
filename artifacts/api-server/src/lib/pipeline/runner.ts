@@ -1607,7 +1607,9 @@ export async function runDailySettlement(
   errors.push(...failure_classification.errors.map((message) => `failure_classification: ${message}`));
   errors.push(...failure_classification_replay.errors.map((message) => `failure_classification_replay: ${message}`));
   errors.push(...separation_gate_audit.errors.map((message) => `separation_gate_audit: ${message}`));
+  warnings.push(...distribution_benchmark.warnings.map((message) => `distribution_benchmark: ${message}`));
   errors.push(...distribution_benchmark.errors.map((message) => `distribution_benchmark: ${message}`));
+  warnings.push(...game_truth_distribution_research.warnings.map((message) => `game_truth_distribution_research: ${message}`));
   warnings.push(...game_truth_distribution_research.errors.map((message) => `game_truth_distribution_research: ${message}`));
 
   const failedCount = module_statuses.filter((module) => module.status === "failure").length;

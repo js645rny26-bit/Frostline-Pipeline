@@ -9,12 +9,16 @@ import {
   buildDistributionBenchmarkPairs,
   buildDistributionBenchmarkRows,
   buildDistributionBenchmarkSummary,
+  currentDistributionBenchmarkCorpus,
   evaluateDistributionBenchmarkWalkForward,
   fitNegativeBinomialAlpha,
   joinDistributionBenchmarkObservations,
+  mergeDistributionBenchmarkCorpus,
   pairedSignTestTwoSidedP,
   parseFrozenDistributionBenchmarkPackets,
+  parsePersistedDistributionBenchmarkLedger,
   parseSettledDistributionBenchmarkTruth,
+  resolveDistributionTrainingWindow,
 } from "./module28_distributionBenchmark.js";
 import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
 import { GAME_TRUTH_REPLAY_HEADERS } from "./module24_postgameDiagnostics.js";
@@ -121,6 +125,60 @@ test("walk-forward distribution benchmark requires 100 earlier settled games and
   assert.ok(nextSlate.every((evaluation) => evaluation.status === "WALK_FORWARD_ELIGIBLE"));
   assert.ok(nextSlate.every((evaluation) => evaluation.prior_settled_games === MIN_PRIOR_SETTLED_GAMES));
   assert.ok(nextSlate.every((evaluation) => evaluation.training_through_date === "2026-08-01"));
+});
+
+test("a missing persisted earlier frozen observation is unresolved, never reported as zero prior games", () => {
+  const current = [{
+    date: "2026-09-07",
+    game_id: "20260907_AAA_BBB",
+    snapshot_ts: "2026-09-07T18:00:00.000Z",
+    mean: 8,
+    actual_total: 9,
+    queried_threshold: null,
+    threshold_source: "NO_MARKET_USED",
+    settlement_ts: "2026-09-08T03:00:00.000Z",
+  }];
+  const resolution = resolveDistributionTrainingWindow(current, [{
+    date: "2026-09-06",
+    game_id: "20260906_AAA_BBB",
+    snapshot_ts: "2026-09-06T18:00:00.000Z",
+  }]);
+  const evaluation = evaluateDistributionBenchmarkWalkForward(current, resolution)[0];
+  assert.equal(evaluation?.status, "TRAINING_WINDOW_UNRESOLVED");
+  assert.equal(evaluation?.training_through_date, null);
+  assert.equal(evaluation?.prior_settled_games, null);
+  const row = buildDistributionBenchmarkRows([evaluation!])[0]!;
+  assert.equal(row[DISTRIBUTION_BENCHMARK_HEADERS.indexOf("Training_Through_Date")], null);
+  assert.equal(row[DISTRIBUTION_BENCHMARK_HEADERS.indexOf("Prior_Settled_Games")], null);
+  assert.equal(row[DISTRIBUTION_BENCHMARK_HEADERS.indexOf("Distribution_Status")], "TRAINING_WINDOW_UNRESOLVED");
+});
+
+test("V1 summary uses the retained frozen benchmark corpus when a current source read is incomplete", () => {
+  const historicalRows = buildDistributionBenchmarkRows(evaluateDistributionBenchmarkWalkForward(observationsWithTraining()));
+  const historicalEligible = historicalRows.filter((row) =>
+    row[DISTRIBUTION_BENCHMARK_HEADERS.indexOf("Distribution_Status")] === "WALK_FORWARD_ELIGIBLE");
+  assert.equal(historicalEligible.length, 2);
+  const current = [{
+    date: "2026-09-07",
+    game_id: "20260907_AAA_BBB",
+    snapshot_ts: "2026-09-07T18:00:00.000Z",
+    mean: 8,
+    actual_total: 9,
+    queried_threshold: null,
+    threshold_source: "NO_MARKET_USED",
+    settlement_ts: "2026-09-08T03:00:00.000Z",
+  }];
+  const resolution = resolveDistributionTrainingWindow(
+    current,
+    parsePersistedDistributionBenchmarkLedger([Array.from(DISTRIBUTION_BENCHMARK_HEADERS), ...historicalEligible]),
+  );
+  const generated = buildDistributionBenchmarkRows(evaluateDistributionBenchmarkWalkForward(current, resolution));
+  const corpus = currentDistributionBenchmarkCorpus(mergeDistributionBenchmarkCorpus(historicalEligible, generated));
+  const summary = buildDistributionBenchmarkSummary(corpus, "2026-09-08T06:00:00.000Z");
+  const nbCrps = summary.find((row) => row[1] === "NB" && row[2] === "CRPS");
+  assert.equal(nbCrps?.[4], 2);
+  assert.ok(summary.every((row) => row[11] === "2026-09-08T06:00:00.000Z"));
+  assert.equal(corpus.filter((row) => row[DISTRIBUTION_BENCHMARK_HEADERS.indexOf("Distribution_Status")] === "TRAINING_WINDOW_UNRESOLVED").length, 1);
 });
 
 test("negative-binomial dispersion is MLE-fit from earlier residual evidence and can exceed the Poisson floor", () => {

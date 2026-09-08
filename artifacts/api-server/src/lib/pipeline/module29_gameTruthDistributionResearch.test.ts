@@ -18,9 +18,11 @@ import {
   GAME_TRUTH_DISTRIBUTION_LINES_HEADERS,
   GAME_TRUTH_DISTRIBUTION_PAIRS_HEADERS,
   gameTruthDistributionFeatureGovernanceRows,
+  mergeGameTruthDistributionCorpus,
   MIN_PRIOR_SETTLED_GAMES_V2,
   nonrandomizedCountPit,
   pairedSlateBlockBootstrapCi,
+  parsePersistedGameTruthDistributionLedger,
   parseFrozenAllocationOutcomes,
   poolAdjacentViolators,
   STANDARD_TOTAL_LINES,
@@ -28,7 +30,7 @@ import {
   validatePmfAndLinePortability,
 } from "./module29_gameTruthDistributionResearch.js";
 import type { DistributionBenchmarkObservation } from "./module28_distributionBenchmark.js";
-import { buildPoissonDistribution } from "./module28_distributionBenchmark.js";
+import { buildPoissonDistribution, resolveDistributionTrainingWindow } from "./module28_distributionBenchmark.js";
 import { WORKBOOK_ROADMAP } from "../workbook/workbookRoadmap.js";
 import { WORKBOOK_SCHEMA } from "../workbook/workbookSchema.js";
 import { ALLOCATION_SETTLEMENT_HEADERS } from "./module24_postgameDiagnostics.js";
@@ -89,6 +91,50 @@ test("V2 remains expanding-window: all same-slate games use only earlier settled
   const rows = buildGameTruthDistributionRows(evaluations);
   assert.equal(rows.filter((row) => row[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Research_Status")] === "INSUFFICIENT_PRIOR_SETTLED_GAMES").length, MIN_PRIOR_SETTLED_GAMES_V2);
   assert.ok(rows.some((row) => row[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Model")] === "NO_COMPARATOR"));
+});
+
+test("V2 marks missing persisted pre-slate evidence unresolved instead of a false zero training count", () => {
+  const current = [observation("2026-09-07", "20260907_AAA_BBB", 9)];
+  const resolution = resolveDistributionTrainingWindow(current, [{
+    date: "2026-09-06",
+    game_id: "20260906_AAA_BBB",
+    snapshot_ts: "2026-09-06T18:00:00.000Z",
+  }]);
+  const evaluation = evaluateGameTruthDistributionWalkForward(current, resolution)[0];
+  assert.equal(evaluation?.status, "TRAINING_WINDOW_UNRESOLVED");
+  assert.equal(evaluation?.training_through_date, null);
+  assert.equal(evaluation?.prior_settled_games, null);
+  const row = buildGameTruthDistributionRows([evaluation!])[0]!;
+  assert.equal(row[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Training_Through_Date")], null);
+  assert.equal(row[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Prior_Settled_Games")], null);
+  assert.equal(row[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Research_Status")], "TRAINING_WINDOW_UNRESOLVED");
+});
+
+test("V2 rebuilds summaries and paired metrics from its retained current-version corpus", () => {
+  const historicalEvaluations = evaluateGameTruthDistributionWalkForward(observationsWithTraining());
+  const historicalRows = buildGameTruthDistributionRows(historicalEvaluations)
+    .filter((row) => row[GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Research_Status")] === "WALK_FORWARD_ELIGIBLE");
+  const historicalLines = buildGameTruthDistributionLineRows(historicalEvaluations);
+  assert.equal(historicalRows.length, 10);
+  const current = [observation("2026-09-07", "20260907_AAA_BBB", 9)];
+  const resolution = resolveDistributionTrainingWindow(
+    current,
+    parsePersistedGameTruthDistributionLedger([Array.from(GAME_TRUTH_DISTRIBUTION_HEADERS), ...historicalRows]),
+  );
+  const generatedEvaluations = evaluateGameTruthDistributionWalkForward(current, resolution);
+  const corpus = mergeGameTruthDistributionCorpus(historicalRows, buildGameTruthDistributionRows(generatedEvaluations));
+  const lineCorpus = mergeGameTruthDistributionCorpus(
+    historicalLines,
+    buildGameTruthDistributionLineRows(generatedEvaluations),
+    GAME_TRUTH_DISTRIBUTION_LINES_HEADERS,
+  );
+  const replayTimestamp = "2026-09-08T06:00:00.000Z";
+  const summary = buildGameTruthDistributionSummary(corpus, lineCorpus, replayTimestamp);
+  const pairs = buildGameTruthDistributionPairs(corpus, replayTimestamp);
+  assert.ok(summary.some((row) => row[0] === "ALL_WALK_FORWARD" && row[1] === "NB" && row[2] === "CRPS" && row[4] === 2));
+  assert.ok(pairs.some((row) => row[1] === "CRPS" && row[5] === 2));
+  assert.ok(summary.every((row) => row[12] === replayTimestamp));
+  assert.ok(pairs.every((row) => row[24] === replayTimestamp));
 });
 
 test("zero-total-free training leaves the hurdle comparator explicitly zero-rate unsupported rather than inventing zero evidence", () => {

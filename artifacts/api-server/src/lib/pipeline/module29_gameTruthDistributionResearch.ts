@@ -19,6 +19,7 @@
 
 import {
   addSheet,
+  clearRange,
   expandSheetColumns,
   getSpreadsheetSheetProperties,
   readRange,
@@ -34,12 +35,17 @@ import {
   logGamma,
   parseFrozenDistributionBenchmarkPackets,
   parseSettledDistributionBenchmarkTruth,
+  resolveDistributionTrainingWindow,
   joinDistributionBenchmarkObservations,
   pairedSignTestTwoSidedP,
   pmfAt,
   quantile,
   buildNegativeBinomialDistribution,
   buildPoissonDistribution,
+} from "./module28_distributionBenchmark.js";
+import type {
+  DistributionTrainingStatus,
+  DistributionTrainingWindowResolution,
 } from "./module28_distributionBenchmark.js";
 import {
   pregamePacketHistoryRange,
@@ -271,9 +277,9 @@ interface AllocationOutcome {
 
 export interface GameTruthDistributionEvaluation {
   observation: DistributionBenchmarkObservation;
-  training_through_date: string;
-  prior_settled_games: number;
-  status: "WALK_FORWARD_ELIGIBLE" | "INSUFFICIENT_PRIOR_SETTLED_GAMES";
+  training_through_date: string | null;
+  prior_settled_games: number | null;
+  status: DistributionTrainingStatus;
   zero_total_rate: number | null;
   models: EvaluatedModel[];
 }
@@ -600,6 +606,7 @@ function buildEmpiricalResidualDistribution(meanTarget: number, residuals: reado
 /** Expanding, strictly earlier-slate walk-forward research. */
 export function evaluateGameTruthDistributionWalkForward(
   observations: readonly DistributionBenchmarkObservation[],
+  resolution?: DistributionTrainingWindowResolution,
 ): GameTruthDistributionEvaluation[] {
   const byDate = new Map<string, DistributionBenchmarkObservation[]>();
   for (const observation of observations) {
@@ -612,10 +619,20 @@ export function evaluateGameTruthDistributionWalkForward(
   for (const date of [...byDate.keys()].sort()) {
     const slate = [...(byDate.get(date) ?? [])].sort((left, right) => left.game_id.localeCompare(right.game_id));
     const trainingThroughDate = training[training.length - 1]?.date ?? "";
-    if (training.length < MIN_PRIOR_SETTLED_GAMES_V2) {
+    const trainingWindowUnresolved = resolution?.missing_persisted_observation_dates.some((missingDate) => missingDate < date) ?? false;
+    if (trainingWindowUnresolved) {
       output.push(...slate.map((observation) => ({
         observation,
-        training_through_date: trainingThroughDate,
+        training_through_date: null,
+        prior_settled_games: null,
+        status: "TRAINING_WINDOW_UNRESOLVED" as const,
+        zero_total_rate: null,
+        models: [],
+      })));
+    } else if (training.length < MIN_PRIOR_SETTLED_GAMES_V2) {
+      output.push(...slate.map((observation) => ({
+        observation,
+        training_through_date: trainingThroughDate || null,
         prior_settled_games: training.length,
         status: "INSUFFICIENT_PRIOR_SETTLED_GAMES" as const,
         zero_total_rate: null,
@@ -636,7 +653,7 @@ export function evaluateGameTruthDistributionWalkForward(
         const empirical = buildEmpiricalResidualDistribution(observation.mean, residuals, minimumSupport);
         output.push({
           observation,
-          training_through_date: trainingThroughDate,
+          training_through_date: trainingThroughDate || null,
           prior_settled_games: training.length,
           status: "WALK_FORWARD_ELIGIBLE",
           zero_total_rate: round(zeroRate, 8),
@@ -720,6 +737,85 @@ function text(value: unknown): string {
 
 function packetKey(date: string, gameId: string, snapshotTs: string): string {
   return `${date}|${gameId}|${snapshotTs}`;
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (value === "" || value === null || value === undefined) return null;
+  const parsed = Number.parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function v2ObservationIdentity(row: unknown[], header: readonly string[]): string | null {
+  const date = text(row[header.indexOf("Date")]);
+  const gameId = text(row[header.indexOf("Game_ID")]);
+  const snapshotTs = text(row[header.indexOf("Frozen_Packet_Snapshot_TS")]);
+  return date && gameId && snapshotTs ? packetKey(date, gameId, snapshotTs) : null;
+}
+
+/**
+ * V2 retains a separate ledger, but it uses the exact same sentinel law as
+ * V1: missing prior frozen evidence is an unresolved training window, never
+ * a real count of zero settled games.
+ */
+export function parsePersistedGameTruthDistributionLedger(
+  rows: readonly unknown[][],
+): Array<{ date: string; game_id: string; snapshot_ts: string }> {
+  const [header = [], ...data] = rows;
+  const versionIndex = header.indexOf("Distribution_Research_Version");
+  const dateIndex = header.indexOf("Date");
+  const gameIndex = header.indexOf("Game_ID");
+  const snapshotIndex = header.indexOf("Frozen_Packet_Snapshot_TS");
+  const meanIndex = header.indexOf("Frozen_Price_Blind_Mean");
+  const actualIndex = header.indexOf("Actual_Total");
+  const output = new Map<string, { date: string; game_id: string; snapshot_ts: string }>();
+  for (const row of data) {
+    const date = text(row[dateIndex]);
+    const gameId = text(row[gameIndex]);
+    const snapshotTs = text(row[snapshotIndex]);
+    const mean = finiteNumber(row[meanIndex]);
+    const actual = finiteNumber(row[actualIndex]);
+    if (
+      text(row[versionIndex]) !== GAME_TRUTH_DISTRIBUTION_VERSION
+      || !date
+      || !gameId
+      || !snapshotTs
+      || mean === null
+      || mean <= 0
+      || actual === null
+      || actual < 0
+      || !Number.isInteger(actual)
+    ) continue;
+    output.set(packetKey(date, gameId, snapshotTs), { date, game_id: gameId, snapshot_ts: snapshotTs });
+  }
+  return [...output.values()];
+}
+
+/**
+ * New output replaces every model/line row for the same frozen observation;
+ * rows for observations absent from an incomplete source read are retained.
+ */
+export function mergeGameTruthDistributionCorpus(
+  existing: readonly unknown[][],
+  replacements: readonly unknown[][],
+  header: readonly string[] = GAME_TRUTH_DISTRIBUTION_HEADERS,
+): unknown[][] {
+  const versionIndex = header.indexOf("Distribution_Research_Version");
+  const replacementKeys = new Set(
+    replacements.map((row) => v2ObservationIdentity(row, header)).filter((identity): identity is string => identity !== null),
+  );
+  return [
+    ...existing.filter((row) => {
+      if (text(row[versionIndex]) !== GAME_TRUTH_DISTRIBUTION_VERSION) return true;
+      const identity = v2ObservationIdentity(row, header);
+      return identity === null || !replacementKeys.has(identity);
+    }),
+    ...replacements,
+  ];
+}
+
+function currentV2Corpus(rows: readonly unknown[][], header: readonly string[] = GAME_TRUTH_DISTRIBUTION_HEADERS): unknown[][] {
+  const versionIndex = header.indexOf("Distribution_Research_Version");
+  return rows.filter((row) => text(row[versionIndex]) === GAME_TRUTH_DISTRIBUTION_VERSION);
 }
 
 /**
@@ -1300,6 +1396,46 @@ async function readOptionalSheet(workbookId: string, range: string, warnings: st
   }
 }
 
+async function readOptionalOutputSheet(workbookId: string, range: string): Promise<unknown[][]> {
+  try {
+    return ((await readRange(workbookId, range)).values ?? []) as unknown[][];
+  } catch (error: unknown) {
+    if (!isMissingSheetError(error)) throw error;
+    return [];
+  }
+}
+
+function spreadsheetColumnName(columnCount: number): string {
+  let value = columnCount;
+  let result = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    value = Math.floor((value - 1) / 26);
+  }
+  return result;
+}
+
+/**
+ * Prevent stale tail rows after a shorter rebuilt research output without
+ * clearing a valid surface before the replacement values have been accepted.
+ */
+async function replaceOwnedSheetRows(
+  workbookId: string,
+  sheet: string,
+  header: readonly string[],
+  rows: readonly unknown[][],
+): Promise<void> {
+  await writeRange(workbookId, `${sheet}!A1`, [Array.from(header), ...rows]);
+  const firstStaleRow = rows.length + 2;
+  await clearRange(workbookId, `${sheet}!A${firstStaleRow}:${spreadsheetColumnName(header.length)}10000`);
+}
+
+function mergeSlateDiagnosticsCorpus(existing: readonly unknown[][], replacements: readonly unknown[][]): unknown[][] {
+  const replacementDates = new Set(replacements.map((row) => text(row[0])).filter(Boolean));
+  return [...existing.filter((row) => !replacementDates.has(text(row[0]))), ...replacements];
+}
+
 export async function runGameTruthDistributionResearch(
   options: { workbookId?: string } = {},
 ): Promise<GameTruthDistributionResearchResult> {
@@ -1308,24 +1444,57 @@ export async function runGameTruthDistributionResearch(
   const warnings: string[] = [];
   const errors: string[] = [];
   try {
-    const [packetRows, truthRows, allocationRows] = await Promise.all([
+    const [
+      packetRows,
+      truthRows,
+      allocationRows,
+      existingDistributionRows,
+      existingLineRows,
+      existingSlateRows,
+    ] = await Promise.all([
       readOptionalSheet(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}`, warnings),
       readOptionalSheet(workbookId, "GAME_TRUTH_REPLAY_V1!A1:AZ10000", warnings),
       readOptionalSheet(workbookId, "ALLOCATION_SETTLEMENT_DIAGNOSTICS!A1:AB10000", warnings),
+      readOptionalOutputSheet(workbookId, `${GAME_TRUTH_DISTRIBUTION_RESEARCH_SHEET}!A1:AZ10000`),
+      readOptionalOutputSheet(workbookId, `${GAME_TRUTH_DISTRIBUTION_LINES_SHEET}!A1:AZ10000`),
+      readOptionalOutputSheet(workbookId, `${GAME_TRUTH_SLATE_DIAGNOSTICS_SHEET}!A1:AZ10000`),
     ]);
     const packets = parseFrozenDistributionBenchmarkPackets(packetRows);
     const truth = parseSettledDistributionBenchmarkTruth(truthRows);
     const joined = joinDistributionBenchmarkObservations(packets, truth);
-    const evaluations = evaluateGameTruthDistributionWalkForward(joined.observations);
-    const distributionRows = buildGameTruthDistributionRows(evaluations);
-    const lineRows = buildGameTruthDistributionLineRows(evaluations);
-    const summaryRows = buildGameTruthDistributionSummary(distributionRows, lineRows, replayTimestamp);
-    const pairRows = buildGameTruthDistributionPairs(distributionRows, replayTimestamp);
-    const corpRows = buildGameTruthDistributionCorpRows(lineRows, replayTimestamp);
+    const trainingWindow = resolveDistributionTrainingWindow(
+      joined.observations,
+      parsePersistedGameTruthDistributionLedger(existingDistributionRows),
+    );
+    const evaluations = evaluateGameTruthDistributionWalkForward(joined.observations, trainingWindow);
+    const generatedDistributionRows = buildGameTruthDistributionRows(evaluations);
+    const generatedLineRows = buildGameTruthDistributionLineRows(evaluations);
+    const distributionRows = mergeGameTruthDistributionCorpus(
+      existingDistributionRows.slice(1),
+      generatedDistributionRows,
+    );
+    const lineRows = mergeGameTruthDistributionCorpus(
+      existingLineRows.slice(1),
+      generatedLineRows,
+      GAME_TRUTH_DISTRIBUTION_LINES_HEADERS,
+    );
+    const currentDistributionRows = currentV2Corpus(distributionRows);
+    const currentLineRows = currentV2Corpus(lineRows, GAME_TRUTH_DISTRIBUTION_LINES_HEADERS);
+    const summaryRows = buildGameTruthDistributionSummary(currentDistributionRows, currentLineRows, replayTimestamp);
+    const pairRows = buildGameTruthDistributionPairs(currentDistributionRows, replayTimestamp);
+    const corpRows = buildGameTruthDistributionCorpRows(currentLineRows, replayTimestamp);
     const featureGovernanceRows = gameTruthDistributionFeatureGovernanceRows();
     const allocation = parseFrozenAllocationOutcomes(allocationRows);
-    const slateRows = buildGameTruthSlateDiagnostics(joined.observations, replayTimestamp, allocation);
+    const slateRows = mergeSlateDiagnosticsCorpus(
+      existingSlateRows.slice(1),
+      buildGameTruthSlateDiagnostics(joined.observations, replayTimestamp, allocation),
+    );
     if (joined.snapshot_mismatches > 0) warnings.push(`FROZEN_PACKET_SNAPSHOT_MISMATCH: ${joined.snapshot_mismatches} observations excluded`);
+    if (trainingWindow.missing_persisted_observation_dates.length > 0) {
+      warnings.push(
+        `TRAINING_WINDOW_UNRESOLVED: ${trainingWindow.missing_persisted_observation_dates.length} persisted frozen date(s) could not be rediscovered from canonical settlement inputs`,
+      );
+    }
     await ensureSheets(workbookId, [
       { sheet: GAME_TRUTH_DISTRIBUTION_RESEARCH_SHEET, column_count: GAME_TRUTH_DISTRIBUTION_HEADERS.length },
       { sheet: GAME_TRUTH_DISTRIBUTION_LINES_SHEET, column_count: GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.length },
@@ -1336,13 +1505,13 @@ export async function runGameTruthDistributionResearch(
       { sheet: GAME_TRUTH_SLATE_DIAGNOSTICS_SHEET, column_count: GAME_TRUTH_SLATE_DIAGNOSTICS_HEADERS.length },
     ]);
     await Promise.all([
-      writeRange(workbookId, `${GAME_TRUTH_DISTRIBUTION_RESEARCH_SHEET}!A1`, [Array.from(GAME_TRUTH_DISTRIBUTION_HEADERS), ...distributionRows]),
-      writeRange(workbookId, `${GAME_TRUTH_DISTRIBUTION_LINES_SHEET}!A1`, [Array.from(GAME_TRUTH_DISTRIBUTION_LINES_HEADERS), ...lineRows]),
-      writeRange(workbookId, `${GAME_TRUTH_DISTRIBUTION_SUMMARY_SHEET}!A1`, [Array.from(GAME_TRUTH_DISTRIBUTION_SUMMARY_HEADERS), ...summaryRows]),
-      writeRange(workbookId, `${GAME_TRUTH_DISTRIBUTION_PAIRS_SHEET}!A1`, [Array.from(GAME_TRUTH_DISTRIBUTION_PAIRS_HEADERS), ...pairRows]),
-      writeRange(workbookId, `${GAME_TRUTH_DISTRIBUTION_CORP_SHEET}!A1`, [Array.from(GAME_TRUTH_DISTRIBUTION_CORP_HEADERS), ...corpRows]),
-      writeRange(workbookId, `${GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_SHEET}!A1`, [Array.from(GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_HEADERS), ...featureGovernanceRows]),
-      writeRange(workbookId, `${GAME_TRUTH_SLATE_DIAGNOSTICS_SHEET}!A1`, [Array.from(GAME_TRUTH_SLATE_DIAGNOSTICS_HEADERS), ...slateRows]),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_RESEARCH_SHEET, GAME_TRUTH_DISTRIBUTION_HEADERS, distributionRows),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_LINES_SHEET, GAME_TRUTH_DISTRIBUTION_LINES_HEADERS, lineRows),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_SUMMARY_SHEET, GAME_TRUTH_DISTRIBUTION_SUMMARY_HEADERS, summaryRows),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_PAIRS_SHEET, GAME_TRUTH_DISTRIBUTION_PAIRS_HEADERS, pairRows),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_CORP_SHEET, GAME_TRUTH_DISTRIBUTION_CORP_HEADERS, corpRows),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_SHEET, GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_HEADERS, featureGovernanceRows),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_SLATE_DIAGNOSTICS_SHEET, GAME_TRUTH_SLATE_DIAGNOSTICS_HEADERS, slateRows),
     ]);
     const eligibleGames = evaluations.filter((evaluation) => evaluation.status === "WALK_FORWARD_ELIGIBLE").length;
     logger.info({ frozen_packets_seen: packets.size, settled_observations_seen: joined.observations.length, eligible_games: eligibleGames }, "MODULE_29: direct-total distribution research written (research-only)");

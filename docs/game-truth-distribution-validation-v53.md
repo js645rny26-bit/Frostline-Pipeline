@@ -22,6 +22,21 @@ query.
 `GAME_TRUTH_DIST_PAIRS_V2` is the paired comparator evidence, and
 `GAME_TRUTH_SLATE_DIAG_V2` tests aggregate run volume versus game placement.
 
+## Training-window integrity sentinel
+
+Both V1 and V2 treat the canonical frozen-packet/settlement join as the only
+training source. Their own persisted research ledgers are never used to fit a
+distribution. They are retained as immutable evidence, however: if a later
+run cannot rediscover an earlier persisted frozen observation from canonical
+inputs, every affected later slate is marked `TRAINING_WINDOW_UNRESOLVED` with
+`Training_Through_Date` and `Prior_Settled_Games` left null. It must never be
+represented as zero prior settlements.
+
+Summary, paired-score, and reliability surfaces are rebuilt from the retained
+same-version evaluation corpus and fully replaced on each run. This prevents a
+partial source read from erasing valid historical research metrics or a shorter
+output from leaving stale metric rows below the new range.
+
 ## Validation added in v53
 
 | Need | Reproducible artifact | Rule |

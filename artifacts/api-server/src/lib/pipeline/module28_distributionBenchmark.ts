@@ -14,6 +14,7 @@
 
 import {
   addSheet,
+  clearRange,
   expandSheetColumns,
   getSpreadsheetSheetProperties,
   readRange,
@@ -182,11 +183,33 @@ interface ModelEvaluation {
   interval_90: Interval;
 }
 
+export type DistributionTrainingStatus =
+  | "WALK_FORWARD_ELIGIBLE"
+  | "INSUFFICIENT_PRIOR_SETTLED_GAMES"
+  | "TRAINING_WINDOW_UNRESOLVED";
+
+/**
+ * A persisted research ledger is not a training source.  It is, however,
+ * immutable evidence that a previously resolved frozen observation existed.
+ * If the live canonical join can no longer rediscover an earlier ledger row,
+ * a later slate must report that evidence gap rather than call it zero prior
+ * settled games.
+ */
+export interface PersistedDistributionLedgerIdentity {
+  date: string;
+  game_id: string;
+  snapshot_ts: string;
+}
+
+export interface DistributionTrainingWindowResolution {
+  missing_persisted_observation_dates: readonly string[];
+}
+
 interface BenchmarkEvaluation {
   observation: DistributionBenchmarkObservation;
-  training_through_date: string;
-  prior_settled_games: number;
-  status: "WALK_FORWARD_ELIGIBLE" | "INSUFFICIENT_PRIOR_SETTLED_GAMES";
+  training_through_date: string | null;
+  prior_settled_games: number | null;
+  status: DistributionTrainingStatus;
   alpha: number | null;
   alpha_fit_status: string;
   threshold_status: string;
@@ -225,6 +248,36 @@ function round(value: number, digits = 6): number {
 
 function key(date: string, gameId: string): string {
   return `${date}|${gameId}`;
+}
+
+function snapshotKey(date: string, gameId: string, snapshotTs: string): string {
+  return `${date}|${gameId}|${snapshotTs}`;
+}
+
+/**
+ * Derives an observability-only sentinel from the immutable output ledger.
+ * It never restores source data or uses old output rows as a training sample.
+ */
+export function resolveDistributionTrainingWindow(
+  observations: readonly DistributionBenchmarkObservation[],
+  persisted: readonly PersistedDistributionLedgerIdentity[],
+): DistributionTrainingWindowResolution {
+  const currentlyResolved = new Set(
+    observations.map((observation) => snapshotKey(observation.date, observation.game_id, observation.snapshot_ts)),
+  );
+  const missingDates = new Set(
+    persisted
+      .filter((row) => !currentlyResolved.has(snapshotKey(row.date, row.game_id, row.snapshot_ts)))
+      .map((row) => row.date),
+  );
+  return { missing_persisted_observation_dates: [...missingDates].sort() };
+}
+
+function trainingWindowUnresolvedForDate(
+  resolution: DistributionTrainingWindowResolution | undefined,
+  date: string,
+): boolean {
+  return resolution?.missing_persisted_observation_dates.some((missingDate) => missingDate < date) ?? false;
 }
 
 function headerIndex(header: unknown[]): Map<string, number> {
@@ -590,6 +643,7 @@ function evaluateModel(
  */
 export function evaluateDistributionBenchmarkWalkForward(
   observations: readonly DistributionBenchmarkObservation[],
+  resolution?: DistributionTrainingWindowResolution,
 ): BenchmarkEvaluation[] {
   const byDate = new Map<string, DistributionBenchmarkObservation[]>();
   for (const observation of observations) {
@@ -602,10 +656,23 @@ export function evaluateDistributionBenchmarkWalkForward(
   for (const date of [...byDate.keys()].sort()) {
     const slate = [...(byDate.get(date) ?? [])].sort((left, right) => left.game_id.localeCompare(right.game_id));
     const trainingThroughDate = training.length === 0 ? "" : training[training.length - 1]!.date;
-    if (training.length < MIN_PRIOR_SETTLED_GAMES) {
+    if (trainingWindowUnresolvedForDate(resolution, date)) {
       evaluations.push(...slate.map((observation) => ({
         observation,
-        training_through_date: trainingThroughDate,
+        training_through_date: null,
+        prior_settled_games: null,
+        status: "TRAINING_WINDOW_UNRESOLVED" as const,
+        alpha: null,
+        alpha_fit_status: "TRAINING_WINDOW_UNRESOLVED",
+        threshold_status: thresholdStatus(observation.queried_threshold),
+        nb: null,
+        poisson: null,
+        empirical: null,
+      })));
+    } else if (training.length < MIN_PRIOR_SETTLED_GAMES) {
+      evaluations.push(...slate.map((observation) => ({
+        observation,
+        training_through_date: trainingThroughDate || null,
         prior_settled_games: training.length,
         status: "INSUFFICIENT_PRIOR_SETTLED_GAMES" as const,
         alpha: null,
@@ -625,7 +692,7 @@ export function evaluateDistributionBenchmarkWalkForward(
         const empirical = buildEmpiricalResidualDistribution(observation.mean, residuals, minimumSupport);
         evaluations.push({
           observation,
-          training_through_date: trainingThroughDate,
+          training_through_date: trainingThroughDate || null,
           prior_settled_games: training.length,
           status: "WALK_FORWARD_ELIGIBLE",
           alpha: alphaFit.alpha,
@@ -688,6 +755,70 @@ export function buildDistributionBenchmarkRows(evaluations: readonly BenchmarkEv
       observation.settlement_ts,
     ];
   });
+}
+
+/** Extracts only valid, same-version frozen identities from the persisted V1 ledger. */
+export function parsePersistedDistributionBenchmarkLedger(
+  rows: readonly unknown[][],
+): PersistedDistributionLedgerIdentity[] {
+  const [header = [], ...data] = rows;
+  const index = headerIndex([...header]);
+  const identities = new Map<string, PersistedDistributionLedgerIdentity>();
+  for (const row of data) {
+    const date = text(value(row, index, "Date"));
+    const gameId = text(value(row, index, "Game_ID"));
+    const snapshotTs = text(value(row, index, "Frozen_Packet_Snapshot_TS"));
+    const version = text(value(row, index, "Distribution_Benchmark_Version"));
+    const mean = numeric(value(row, index, "Frozen_Price_Blind_Mean"));
+    const actual = numeric(value(row, index, "Actual_Total"));
+    if (
+      version !== SHADOW_DISTRIBUTION_BENCHMARK_VERSION
+      || !date
+      || !gameId
+      || !snapshotTs
+      || !validTotal(mean)
+      || !validObservedTotal(actual)
+    ) continue;
+    identities.set(snapshotKey(date, gameId, snapshotTs), { date, game_id: gameId, snapshot_ts: snapshotTs });
+  }
+  return [...identities.values()];
+}
+
+function benchmarkObservationIdentity(row: unknown[]): string | null {
+  const date = text(at(row, "Date"));
+  const gameId = text(at(row, "Game_ID"));
+  const snapshotTs = text(at(row, "Frozen_Packet_Snapshot_TS"));
+  return date && gameId && snapshotTs ? snapshotKey(date, gameId, snapshotTs) : null;
+}
+
+function isCurrentBenchmarkRow(row: unknown[]): boolean {
+  return text(at(row, "Distribution_Benchmark_Version")) === SHADOW_DISTRIBUTION_BENCHMARK_VERSION;
+}
+
+/**
+ * Retains immutable prior research rows when a later source read is incomplete.
+ * Replacements are whole frozen observations, so an unresolved rerun cannot
+ * leave an old scored row beside a new sentinel row for the same snapshot.
+ */
+export function mergeDistributionBenchmarkCorpus(
+  existing: readonly unknown[][],
+  replacements: readonly unknown[][],
+): unknown[][] {
+  const replacementKeys = new Set(
+    replacements.map(benchmarkObservationIdentity).filter((identity): identity is string => identity !== null),
+  );
+  return [
+    ...existing.filter((row) => {
+      if (!isCurrentBenchmarkRow(row)) return true;
+      const identity = benchmarkObservationIdentity(row);
+      return identity === null || !replacementKeys.has(identity);
+    }),
+    ...replacements,
+  ];
+}
+
+export function currentDistributionBenchmarkCorpus(rows: readonly unknown[][]): unknown[][] {
+  return rows.filter(isCurrentBenchmarkRow);
 }
 
 function at(row: unknown[], name: (typeof DISTRIBUTION_BENCHMARK_HEADERS)[number]): unknown {
@@ -925,6 +1056,42 @@ async function readOptionalSheet(workbookId: string, range: string, warnings: st
   }
 }
 
+async function readOptionalOutputSheet(workbookId: string, range: string): Promise<unknown[][]> {
+  try {
+    return ((await readRange(workbookId, range)).values ?? []) as unknown[][];
+  } catch (error: unknown) {
+    if (!isMissingSheetError(error)) throw error;
+    return [];
+  }
+}
+
+function spreadsheetColumnName(columnCount: number): string {
+  let value = columnCount;
+  let result = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    value = Math.floor((value - 1) / 26);
+  }
+  return result;
+}
+
+/**
+ * Sheets PUT does not remove rows beyond its new payload.  Write the fresh
+ * range first, then clear only the tail so a failed write cannot blank an
+ * otherwise valid research surface.
+ */
+async function replaceOwnedSheetRows(
+  workbookId: string,
+  sheet: string,
+  header: readonly string[],
+  rows: readonly unknown[][],
+): Promise<void> {
+  await writeRange(workbookId, `${sheet}!A1`, [Array.from(header), ...rows]);
+  const firstStaleRow = rows.length + 2;
+  await clearRange(workbookId, `${sheet}!A${firstStaleRow}:${spreadsheetColumnName(header.length)}10000`);
+}
+
 export async function runDistributionBenchmark(
   options: { workbookId?: string } = {},
 ): Promise<DistributionBenchmarkResult> {
@@ -933,19 +1100,31 @@ export async function runDistributionBenchmark(
   const warnings: string[] = [];
   const errors: string[] = [];
   try {
-    const [packetRows, truthRows] = await Promise.all([
+    const [packetRows, truthRows, existingBenchmarkRows] = await Promise.all([
       readOptionalSheet(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}`, warnings),
       readOptionalSheet(workbookId, "GAME_TRUTH_REPLAY_V1!A1:AZ10000", warnings),
+      readOptionalOutputSheet(workbookId, `${SHADOW_DISTRIBUTION_BENCHMARK_SHEET}!A1:BL10000`),
     ]);
     const packets = parseFrozenDistributionBenchmarkPackets(packetRows);
     const truth = parseSettledDistributionBenchmarkTruth(truthRows);
     const joined = joinDistributionBenchmarkObservations(packets, truth);
-    const evaluations = evaluateDistributionBenchmarkWalkForward(joined.observations);
-    const rows = buildDistributionBenchmarkRows(evaluations);
-    const summaryRows = buildDistributionBenchmarkSummary(rows, replayTimestamp);
-    const pairRows = buildDistributionBenchmarkPairs(rows, replayTimestamp);
+    const trainingWindow = resolveDistributionTrainingWindow(
+      joined.observations,
+      parsePersistedDistributionBenchmarkLedger(existingBenchmarkRows),
+    );
+    const evaluations = evaluateDistributionBenchmarkWalkForward(joined.observations, trainingWindow);
+    const generatedRows = buildDistributionBenchmarkRows(evaluations);
+    const rows = mergeDistributionBenchmarkCorpus(existingBenchmarkRows.slice(1), generatedRows);
+    const summaryCorpus = currentDistributionBenchmarkCorpus(rows);
+    const summaryRows = buildDistributionBenchmarkSummary(summaryCorpus, replayTimestamp);
+    const pairRows = buildDistributionBenchmarkPairs(summaryCorpus, replayTimestamp);
     if (joined.snapshot_mismatches > 0) {
       warnings.push(`FROZEN_PACKET_SNAPSHOT_MISMATCH: ${joined.snapshot_mismatches} distribution benchmark joins were excluded`);
+    }
+    if (trainingWindow.missing_persisted_observation_dates.length > 0) {
+      warnings.push(
+        `TRAINING_WINDOW_UNRESOLVED: ${trainingWindow.missing_persisted_observation_dates.length} persisted frozen date(s) could not be rediscovered from canonical settlement inputs`,
+      );
     }
     await ensureSheets(workbookId, [
       { sheet: SHADOW_DISTRIBUTION_BENCHMARK_SHEET, column_count: DISTRIBUTION_BENCHMARK_HEADERS.length },
@@ -953,9 +1132,9 @@ export async function runDistributionBenchmark(
       { sheet: SHADOW_DISTRIBUTION_BENCHMARK_PAIRS_SHEET, column_count: DISTRIBUTION_BENCHMARK_PAIR_HEADERS.length },
     ]);
     await Promise.all([
-      writeRange(workbookId, `${SHADOW_DISTRIBUTION_BENCHMARK_SHEET}!A1`, [Array.from(DISTRIBUTION_BENCHMARK_HEADERS), ...rows]),
-      writeRange(workbookId, `${SHADOW_DISTRIBUTION_BENCHMARK_SUMMARY_SHEET}!A1`, [Array.from(DISTRIBUTION_BENCHMARK_SUMMARY_HEADERS), ...summaryRows]),
-      writeRange(workbookId, `${SHADOW_DISTRIBUTION_BENCHMARK_PAIRS_SHEET}!A1`, [Array.from(DISTRIBUTION_BENCHMARK_PAIR_HEADERS), ...pairRows]),
+      replaceOwnedSheetRows(workbookId, SHADOW_DISTRIBUTION_BENCHMARK_SHEET, DISTRIBUTION_BENCHMARK_HEADERS, rows),
+      replaceOwnedSheetRows(workbookId, SHADOW_DISTRIBUTION_BENCHMARK_SUMMARY_SHEET, DISTRIBUTION_BENCHMARK_SUMMARY_HEADERS, summaryRows),
+      replaceOwnedSheetRows(workbookId, SHADOW_DISTRIBUTION_BENCHMARK_PAIRS_SHEET, DISTRIBUTION_BENCHMARK_PAIR_HEADERS, pairRows),
     ]);
     const eligibleGames = evaluations.filter((evaluation) => evaluation.status === "WALK_FORWARD_ELIGIBLE").length;
     logger.info(
