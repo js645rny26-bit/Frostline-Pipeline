@@ -17,7 +17,7 @@ import {
   writeRange,
   WORKBOOK_ID,
 } from "../sheets/client.js";
-import type { SettlementRow } from "./module14_shadowSettlement.js";
+import { OUTCOMES_HEADER, type SettlementRow } from "./module14_shadowSettlement.js";
 import {
   FULL_LADDER_AUDIT_HEADERS,
   FULL_LADDER_AUDIT_SHEET,
@@ -35,6 +35,7 @@ const TIMING_SHEET = "BULLPEN_TIMING_DIAGNOSTICS";
 const LADDER_SETTLEMENT_SHEET = "FULL_LADDER_SETTLEMENT";
 const CONVERSION_SHEET = "CONVERSION_SETTLEMENT_DIAGNOSTICS";
 const GAME_TRUTH_REPLAY_SHEET = "GAME_TRUTH_REPLAY_V1";
+const OUTCOMES_SHEET = "SHADOW_OUTCOMES";
 
 export const ALLOCATION_SETTLEMENT_HEADERS = [
   "Date",
@@ -445,6 +446,18 @@ function pad(row: unknown[], length: number): unknown[] {
   while (next.length < length) next.push("");
   return next;
 }
+
+function headerIndex(header: readonly unknown[]): Map<string, number> {
+  return new Map(header.map((value, position) => [text(value), position]));
+}
+
+function headerValue(row: readonly unknown[], index: ReadonlyMap<string, number>, name: string): unknown {
+  return row[index.get(name) ?? -1];
+}
+
+function equalNumeric(left: number | null, right: number | null): boolean {
+  return left !== null && right !== null && Math.abs(left - right) < 1e-9;
+}
 function validBefore(snapshotTs: string, firstPitch: string): boolean {
   const snapshot = Date.parse(snapshotTs);
   const first = Date.parse(firstPitch);
@@ -559,6 +572,105 @@ export function parseFrozenPacketDiagnostics(
     });
   }
   return packetByGame;
+}
+
+export interface GameTruthProvenanceRepair {
+  rows: unknown[][];
+  repaired: number;
+  unverified: number;
+}
+
+/**
+ * Older GAME_TRUTH_REPLAY_V1 rows predate its explicit replay-provenance
+ * columns.  This repairs only those two blank cells when three immutable
+ * records agree: the frozen packet identity and center, the already-settled
+ * SHADOW_OUTCOMES final/settlement timestamp, and the existing replay row.
+ *
+ * It never derives a new projection, actual, diagnostic, or snapshot.  A
+ * partial or conflicting row remains visibly unverified.
+ */
+export function repairLegacyGameTruthReplayProvenance(
+  gameTruthRows: readonly unknown[][],
+  packetRows: readonly unknown[][],
+  outcomeRows: readonly unknown[][],
+): GameTruthProvenanceRepair {
+  const [packetHeader = [], ...packetData] = packetRows;
+  const packetIndex = headerIndex(packetHeader);
+  const frozenPackets = new Map<string, { snapshotTs: string; projectedTotal: number }>();
+  for (const row of packetData) {
+    const date = text(headerValue(row, packetIndex, "Date"));
+    const gameId = text(headerValue(row, packetIndex, "Game_ID"));
+    const snapshotTs = text(headerValue(row, packetIndex, "Packet_Snapshot_TS"));
+    const firstPitch = text(headerValue(row, packetIndex, "Scheduled_First_Pitch"));
+    const projectedTotal = numeric(headerValue(row, packetIndex, "Base_Projection"));
+    if (
+      !date
+      || !gameId
+      || text(headerValue(row, packetIndex, "Packet_Status")) !== "FROZEN_PREGAME"
+      || !validBefore(snapshotTs, firstPitch)
+      || projectedTotal === null
+    ) continue;
+    const identity = key(date, gameId);
+    const prior = frozenPackets.get(identity);
+    if (!prior || Date.parse(snapshotTs) > Date.parse(prior.snapshotTs)) {
+      frozenPackets.set(identity, { snapshotTs, projectedTotal });
+    }
+  }
+
+  const [outcomeHeader = [], ...outcomeData] = outcomeRows;
+  const outcomeIndex = headerIndex(outcomeHeader);
+  const settledOutcomes = new Map<string, { actualTotal: number; frozenTotal: number; settlementTs: string }>();
+  for (const row of outcomeData) {
+    const date = text(headerValue(row, outcomeIndex, "Date"));
+    const gameId = text(headerValue(row, outcomeIndex, "Game_ID"));
+    const actualTotal = numeric(headerValue(row, outcomeIndex, "Actual_Total"));
+    const frozenTotal = numeric(headerValue(row, outcomeIndex, "Frozen_Published_Total"));
+    const settlementTs = text(headerValue(row, outcomeIndex, "Settlement_TS"));
+    if (
+      !date
+      || !gameId
+      || actualTotal === null
+      || frozenTotal === null
+      || !Number.isFinite(Date.parse(settlementTs))
+    ) continue;
+    const identity = key(date, gameId);
+    const prior = settledOutcomes.get(identity);
+    if (!prior || Date.parse(settlementTs) > Date.parse(prior.settlementTs)) {
+      settledOutcomes.set(identity, { actualTotal, frozenTotal, settlementTs });
+    }
+  }
+
+  const replayStatusIndex = GAME_TRUTH_REPLAY_HEADERS.indexOf("Replay_Status");
+  const settlementIndex = GAME_TRUTH_REPLAY_HEADERS.indexOf("Settlement_TS");
+  const snapshotIndex = GAME_TRUTH_REPLAY_HEADERS.indexOf("Frozen_Packet_Snapshot_TS");
+  const projectedTotalIndex = GAME_TRUTH_REPLAY_HEADERS.indexOf("Frozen_Projected_Total");
+  const actualTotalIndex = GAME_TRUTH_REPLAY_HEADERS.indexOf("Actual_Total");
+  let repaired = 0;
+  let unverified = 0;
+  const rows = gameTruthRows.map((raw) => {
+    const row = pad([...raw], GAME_TRUTH_REPLAY_HEADERS.length);
+    if (text(row[replayStatusIndex]) || text(row[settlementIndex])) return row;
+    const date = text(row[GAME_TRUTH_REPLAY_HEADERS.indexOf("Date")]);
+    const gameId = text(row[GAME_TRUTH_REPLAY_HEADERS.indexOf("Game_ID")]);
+    const packet = frozenPackets.get(key(date, gameId));
+    const outcome = settledOutcomes.get(key(date, gameId));
+    if (
+      !packet
+      || !outcome
+      || text(row[snapshotIndex]) !== packet.snapshotTs
+      || !equalNumeric(numeric(row[projectedTotalIndex]), packet.projectedTotal)
+      || !equalNumeric(numeric(row[projectedTotalIndex]), outcome.frozenTotal)
+      || !equalNumeric(numeric(row[actualTotalIndex]), outcome.actualTotal)
+    ) {
+      unverified++;
+      return row;
+    }
+    row[replayStatusIndex] = "FROZEN_PACKET_AND_FINAL_VERIFIED";
+    row[settlementIndex] = outcome.settlementTs;
+    repaired++;
+    return row;
+  });
+  return { rows, repaired, unverified };
 }
 
 export function buildAllocationDiagnostic(
@@ -2208,6 +2320,7 @@ export async function runPostgameDiagnostics(
       existingConversion,
       existingGameTruth,
       existingLadderSettlement,
+      allSettledOutcomes,
     ] = await Promise.all([
       readOptionalDataRows(workbookId, ALLOCATION_SHEET, "AB"),
       readOptionalDataRows(workbookId, STARTER_SHEET, "AZ"),
@@ -2215,6 +2328,7 @@ export async function runPostgameDiagnostics(
       readOptionalDataRows(workbookId, CONVERSION_SHEET, "AZ"),
       readOptionalDataRows(workbookId, GAME_TRUTH_REPLAY_SHEET, "AZ"),
       readOptionalDataRows(workbookId, LADDER_SETTLEMENT_SHEET, "T"),
+      readOptionalDataRows(workbookId, OUTCOMES_SHEET, "AW"),
     ]);
     await writeUpsertedRows(
       workbookId,
@@ -2248,14 +2362,27 @@ export async function runPostgameDiagnostics(
       conversionRows,
       [0, 1, 2],
     );
-    await writeUpsertedRows(
-      workbookId,
-      GAME_TRUTH_REPLAY_SHEET,
-      GAME_TRUTH_REPLAY_HEADERS,
-      existingGameTruth,
-      gameTruthRows,
+    await ensureSheet(workbookId, GAME_TRUTH_REPLAY_SHEET, GAME_TRUTH_REPLAY_HEADERS.length);
+    const mergedGameTruthRows = replaceByKey(
+      existingGameTruth.map((row) => pad(row, GAME_TRUTH_REPLAY_HEADERS.length)),
+      gameTruthRows.map((row) => pad(row, GAME_TRUTH_REPLAY_HEADERS.length)),
       [0, 1],
     );
+    const provenanceRepair = repairLegacyGameTruthReplayProvenance(
+      mergedGameTruthRows,
+      packetRaw,
+      [Array.from(OUTCOMES_HEADER), ...allSettledOutcomes],
+    );
+    await writeRange(workbookId, `${GAME_TRUTH_REPLAY_SHEET}!A1`, [
+      Array.from(GAME_TRUTH_REPLAY_HEADERS),
+      ...provenanceRepair.rows,
+    ]);
+    if (provenanceRepair.repaired > 0) {
+      warnings.push(`GAME_TRUTH_REPLAY_PROVENANCE_REPAIRED: ${provenanceRepair.repaired} legacy row(s) verified from frozen packet and canonical settlement evidence`);
+    }
+    if (provenanceRepair.unverified > 0) {
+      warnings.push(`GAME_TRUTH_REPLAY_PROVENANCE_UNVERIFIED: ${provenanceRepair.unverified} blank legacy row(s) retained without provenance repair`);
+    }
     await writeUpsertedRows(
       workbookId,
       LADDER_SETTLEMENT_SHEET,

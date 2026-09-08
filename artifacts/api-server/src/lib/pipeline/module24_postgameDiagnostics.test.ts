@@ -13,6 +13,7 @@ import {
   parsePostgameDetailPayload,
   parseFrozenPacketDiagnostics,
   parseHalfNumberLines,
+  repairLegacyGameTruthReplayProvenance,
   starterPathEvidence,
   workloadLeashStatus,
   type FrozenPacketDiagnosticInput,
@@ -367,6 +368,43 @@ test("Module 24 headers stay exactly aligned with the generated workbook schema"
   assert.deepEqual(expected("STARTER_OUTCOME_DIAGNOSTICS"), STARTER_OUTCOME_HEADERS);
   assert.equal(expected("CONVERSION_SETTLEMENT_DIAGNOSTICS")?.[0], "Date");
   assert.equal(expected("GAME_TRUTH_REPLAY_V1")?.at(-1), "Settlement_TS");
+});
+
+test("legacy game-truth provenance is filled only after an exact frozen-packet and settled-final match", () => {
+  const replayRow = (gameId: string, actualTotal: number) => {
+    const row = Array<unknown>(GAME_TRUTH_REPLAY_HEADERS.length).fill("");
+    row[GAME_TRUTH_REPLAY_HEADERS.indexOf("Date")] = "2026-09-06";
+    row[GAME_TRUTH_REPLAY_HEADERS.indexOf("Game_ID")] = gameId;
+    row[GAME_TRUTH_REPLAY_HEADERS.indexOf("Frozen_Packet_Snapshot_TS")] = "2026-09-06T18:00:00.000Z";
+    row[GAME_TRUTH_REPLAY_HEADERS.indexOf("Frozen_Projected_Total")] = 8.86;
+    row[GAME_TRUTH_REPLAY_HEADERS.indexOf("Actual_Total")] = actualTotal;
+    return row;
+  };
+  const repaired = repairLegacyGameTruthReplayProvenance(
+    [replayRow("20260906_STL_COL", 18), replayRow("20260906_MISMATCH", 17)],
+    [
+      ["Date", "Game_ID", "Packet_Status", "Packet_Snapshot_TS", "Scheduled_First_Pitch", "Base_Projection"],
+      ["2026-09-06", "20260906_STL_COL", "FROZEN_PREGAME", "2026-09-06T18:00:00.000Z", "2026-09-06T19:10:00.000Z", 8.86],
+      ["2026-09-06", "20260906_MISMATCH", "FROZEN_PREGAME", "2026-09-06T18:00:00.000Z", "2026-09-06T19:10:00.000Z", 8.86],
+    ],
+    [
+      ["Date", "Game_ID", "Actual_Total", "Settlement_TS", "Frozen_Published_Total"],
+      ["2026-09-06", "20260906_STL_COL", 18, "2026-09-07T05:13:50.440Z", 8.86],
+      ["2026-09-06", "20260906_MISMATCH", 18, "2026-09-07T05:13:50.440Z", 8.86],
+    ],
+  );
+  assert.equal(repaired.repaired, 1);
+  assert.equal(repaired.unverified, 1);
+  assert.equal(
+    repaired.rows[0]?.[GAME_TRUTH_REPLAY_HEADERS.indexOf("Replay_Status")],
+    "FROZEN_PACKET_AND_FINAL_VERIFIED",
+  );
+  assert.equal(
+    repaired.rows[0]?.[GAME_TRUTH_REPLAY_HEADERS.indexOf("Settlement_TS")],
+    "2026-09-07T05:13:50.440Z",
+  );
+  assert.equal(repaired.rows[1]?.[GAME_TRUTH_REPLAY_HEADERS.indexOf("Replay_Status")], "");
+  assert.equal(repaired.rows[1]?.[GAME_TRUTH_REPLAY_HEADERS.indexOf("Settlement_TS")], "");
 });
 
 test("conversion diagnostics preserve a positive frozen traffic signal without turning it into a projection adjustment", () => {
