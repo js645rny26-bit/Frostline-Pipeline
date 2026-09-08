@@ -75,6 +75,24 @@ export const STARTER_OUTCOME_HEADERS = [
   "Starter",
   "Expected_IP",
   "Projected_IP_Shadow",
+  "SWE_Version",
+  "SWE_Expected_IP",
+  "SWE_Status",
+  "SWE_N_Starts",
+  "SWE_L3_IP",
+  "SWE_L5_IP",
+  "SWE_Season_IP",
+  "SWE_Shrinkage_Weight",
+  "SWE_Role_Prior_Used",
+  "SWE_Data_Through_Date",
+  "SWE_Snapshot_Primary",
+  "SWE_Actual_IP",
+  "SWE_Error",
+  "SWE_Abs_Error",
+  "Legacy_Expected_IP",
+  "Legacy_Error",
+  "Legacy_Abs_Error",
+  "SWE_Better",
   "Active_vs_Shadow_IP_Delta",
   "Actual_IP",
   "IP_Delta",
@@ -302,6 +320,24 @@ export interface FrozenPacketDiagnosticInput {
   home_expected_ip: number | null;
   away_projected_ip_shadow?: number | null;
   home_projected_ip_shadow?: number | null;
+  swe_version?: string;
+  swe_away_expected_ip?: number | null;
+  swe_home_expected_ip?: number | null;
+  swe_away_status?: string;
+  swe_home_status?: string;
+  swe_away_n_starts?: number | null;
+  swe_home_n_starts?: number | null;
+  swe_away_l3_ip?: number | null;
+  swe_home_l3_ip?: number | null;
+  swe_away_l5_ip?: number | null;
+  swe_home_l5_ip?: number | null;
+  swe_away_season_ip?: number | null;
+  swe_home_season_ip?: number | null;
+  swe_away_shrinkage_weight?: number | null;
+  swe_home_shrinkage_weight?: number | null;
+  swe_role_prior_used?: number | null;
+  swe_data_through_date?: string;
+  swe_snapshot_primary?: string;
   away_workload_state_status?: string;
   home_workload_state_status?: string;
   away_workload_confidence?: string;
@@ -473,6 +509,24 @@ export function parseFrozenPacketDiagnostics(
       home_expected_ip: numeric(value(row, "Home_Expected_IP")),
       away_projected_ip_shadow: numeric(value(row, "Away_Projected_IP_Shadow")),
       home_projected_ip_shadow: numeric(value(row, "Home_Projected_IP_Shadow")),
+      swe_version: text(value(row, "SWE_Version")),
+      swe_away_expected_ip: numeric(value(row, "SWE_Away_Expected_IP")),
+      swe_home_expected_ip: numeric(value(row, "SWE_Home_Expected_IP")),
+      swe_away_status: text(value(row, "SWE_Away_Status")) || "INSUFFICIENT_HISTORY",
+      swe_home_status: text(value(row, "SWE_Home_Status")) || "INSUFFICIENT_HISTORY",
+      swe_away_n_starts: numeric(value(row, "SWE_Away_N_Starts")),
+      swe_home_n_starts: numeric(value(row, "SWE_Home_N_Starts")),
+      swe_away_l3_ip: numeric(value(row, "SWE_Away_L3_IP")),
+      swe_home_l3_ip: numeric(value(row, "SWE_Home_L3_IP")),
+      swe_away_l5_ip: numeric(value(row, "SWE_Away_L5_IP")),
+      swe_home_l5_ip: numeric(value(row, "SWE_Home_L5_IP")),
+      swe_away_season_ip: numeric(value(row, "SWE_Away_Season_IP")),
+      swe_home_season_ip: numeric(value(row, "SWE_Home_Season_IP")),
+      swe_away_shrinkage_weight: numeric(value(row, "SWE_Away_Shrinkage_Weight")),
+      swe_home_shrinkage_weight: numeric(value(row, "SWE_Home_Shrinkage_Weight")),
+      swe_role_prior_used: numeric(value(row, "SWE_Role_Prior_Used")),
+      swe_data_through_date: text(value(row, "SWE_Data_Through_Date")),
+      swe_snapshot_primary: text(value(row, "SWE_Snapshot_Primary")),
       away_workload_state_status: text(value(row, "Away_Workload_State_Status")) || "UNAVAILABLE",
       home_workload_state_status: text(value(row, "Home_Workload_State_Status")) || "UNAVAILABLE",
       away_workload_confidence: text(value(row, "Away_Workload_Confidence")) || "UNAVAILABLE",
@@ -912,6 +966,13 @@ function starterRows(
     starter: StarterDimension | null,
     expected: number | null,
     shadow: number | null,
+    sweExpected: number | null,
+    sweStatus: string | undefined,
+    sweNStarts: number | null | undefined,
+    sweL3: number | null | undefined,
+    sweL5: number | null | undefined,
+    sweSeason: number | null | undefined,
+    sweWeight: number | null | undefined,
     team: string,
   ): unknown[] => {
     const actualIp = starter?.innings ?? null;
@@ -944,6 +1005,26 @@ function starterRows(
       starter?.name ?? "",
       expected ?? "",
       shadow ?? "",
+      packet.swe_version ?? "",
+      sweExpected ?? "",
+      sweStatus ?? "INSUFFICIENT_HISTORY",
+      sweNStarts ?? "",
+      sweL3 ?? "",
+      sweL5 ?? "",
+      sweSeason ?? "",
+      sweWeight ?? "",
+      packet.swe_role_prior_used ?? "",
+      packet.swe_data_through_date ?? "",
+      packet.swe_snapshot_primary ?? "",
+      actualIp ?? "",
+      sweExpected === null || actualIp === null ? "" : round2(actualIp - sweExpected),
+      sweExpected === null || actualIp === null ? "" : Math.abs(round2(actualIp - sweExpected)),
+      expected ?? "",
+      expected === null || actualIp === null ? "" : round2(actualIp - expected),
+      expected === null || actualIp === null ? "" : Math.abs(round2(actualIp - expected)),
+      sweExpected === null || expected === null || actualIp === null
+        ? ""
+        : Math.abs(actualIp - sweExpected) < Math.abs(actualIp - expected) ? "TRUE" : "FALSE",
       expected === null || shadow === null ? "" : round2(expected - shadow),
       actualIp ?? "",
       expected === null || actualIp === null ? "" : round2(actualIp - expected),
@@ -989,8 +1070,8 @@ function starterRows(
     ];
   };
   return [
-    rowFor("AWAY", detail.away, packet.away_expected_ip, packet.away_projected_ip_shadow ?? null, packet.away_team),
-    rowFor("HOME", detail.home, packet.home_expected_ip, packet.home_projected_ip_shadow ?? null, packet.home_team),
+    rowFor("AWAY", detail.away, packet.away_expected_ip, packet.away_projected_ip_shadow ?? null, packet.swe_away_expected_ip ?? null, packet.swe_away_status, packet.swe_away_n_starts, packet.swe_away_l3_ip, packet.swe_away_l5_ip, packet.swe_away_season_ip, packet.swe_away_shrinkage_weight, packet.away_team),
+    rowFor("HOME", detail.home, packet.home_expected_ip, packet.home_projected_ip_shadow ?? null, packet.swe_home_expected_ip ?? null, packet.swe_home_status, packet.swe_home_n_starts, packet.swe_home_l3_ip, packet.swe_home_l5_ip, packet.swe_home_season_ip, packet.swe_home_shrinkage_weight, packet.home_team),
   ];
 }
 

@@ -181,8 +181,11 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      shared Savant pitch-level source retains cutoff-safe raw daily events
  *      in the existing source-provenance ledger. Neither can affect active
  *      projection, board, market, or authorization logic.
+ *  v57 (2026-09-07): Starter Workload Estimator V1 (SWE) freezes
+ *      source-only pitcher-specific innings windows, shrinkage, and status
+ *      beside active Expected_IP. Its paired innings replay is shadow-only.
  */
-export const WORKBOOK_SCHEMA_VERSION = 56;
+export const WORKBOOK_SCHEMA_VERSION = 57;
 
 export interface ColumnDef {
   name: string;
@@ -429,6 +432,24 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Home_Team_Handling_State",
   "Home_Workload_Source_Status",
   "Home_Workload_Notes",
+  "SWE_Version",
+  "SWE_Away_Expected_IP",
+  "SWE_Away_Status",
+  "SWE_Away_N_Starts",
+  "SWE_Away_L3_IP",
+  "SWE_Away_L5_IP",
+  "SWE_Away_Season_IP",
+  "SWE_Away_Shrinkage_Weight",
+  "SWE_Home_Expected_IP",
+  "SWE_Home_Status",
+  "SWE_Home_N_Starts",
+  "SWE_Home_L3_IP",
+  "SWE_Home_L5_IP",
+  "SWE_Home_Season_IP",
+  "SWE_Home_Shrinkage_Weight",
+  "SWE_Role_Prior_Used",
+  "SWE_Data_Through_Date",
+  "SWE_Snapshot_Primary",
 ] as const;
 
 const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
@@ -453,6 +474,19 @@ const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
   "Away_Projected_BF_Shadow",
   "Home_Projected_IP_Shadow",
   "Home_Projected_BF_Shadow",
+  "SWE_Away_Expected_IP",
+  "SWE_Away_N_Starts",
+  "SWE_Away_L3_IP",
+  "SWE_Away_L5_IP",
+  "SWE_Away_Season_IP",
+  "SWE_Away_Shrinkage_Weight",
+  "SWE_Home_Expected_IP",
+  "SWE_Home_N_Starts",
+  "SWE_Home_L3_IP",
+  "SWE_Home_L5_IP",
+  "SWE_Home_Season_IP",
+  "SWE_Home_Shrinkage_Weight",
+  "SWE_Role_Prior_Used",
   "Away_Starter_Quality",
   "Home_Starter_Quality",
   "Starter_Attack_Runs",
@@ -591,6 +625,24 @@ const STARTER_OUTCOME_DIAGNOSTIC_COLUMN_NAMES = [
   "Starter",
   "Expected_IP",
   "Projected_IP_Shadow",
+  "SWE_Version",
+  "SWE_Expected_IP",
+  "SWE_Status",
+  "SWE_N_Starts",
+  "SWE_L3_IP",
+  "SWE_L5_IP",
+  "SWE_Season_IP",
+  "SWE_Shrinkage_Weight",
+  "SWE_Role_Prior_Used",
+  "SWE_Data_Through_Date",
+  "SWE_Snapshot_Primary",
+  "SWE_Actual_IP",
+  "SWE_Error",
+  "SWE_Abs_Error",
+  "Legacy_Expected_IP",
+  "Legacy_Error",
+  "Legacy_Abs_Error",
+  "SWE_Better",
   "Active_vs_Shadow_IP_Delta",
   "Actual_IP",
   "IP_Delta",
@@ -7402,6 +7454,19 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       [
         "Expected_IP",
         "Projected_IP_Shadow",
+        "SWE_Expected_IP",
+        "SWE_N_Starts",
+        "SWE_L3_IP",
+        "SWE_L5_IP",
+        "SWE_Season_IP",
+        "SWE_Shrinkage_Weight",
+        "SWE_Role_Prior_Used",
+        "SWE_Actual_IP",
+        "SWE_Error",
+        "SWE_Abs_Error",
+        "Legacy_Expected_IP",
+        "Legacy_Error",
+        "Legacy_Abs_Error",
         "Active_vs_Shadow_IP_Delta",
         "Actual_IP",
         "IP_Delta",
@@ -12849,6 +12914,40 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Chunk_Count", index: 2, type: "number", width: 110, filledBy: "SYSTEM", readOnly: true },
       { name: "Raw_Response_Chunk", index: 3, type: "string", width: 500, filledBy: "SYSTEM", readOnly: true, description: "Untouched source payload chunk; concatenate by Snapshot_ID and Chunk_Index." },
     ],
+  },
+
+  {
+    name: "SWE_APPEARANCE_HISTORY_V1",
+    description:
+      "Append-only, source-derived pitcher appearance ledger for Starter Workload Estimator V1. It preserves exact pregame-safe pitch-derived innings evidence; OUTS_UNRESOLVED remains explicit and cannot be imputed.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Game_Date", "Game_PK", "Pitcher_MLBAM_ID", "Pitches_Thrown", "Batters_Faced",
+        "Outs_Recorded", "Innings_Pitched", "Max_Through_Order", "Started_Game",
+        "Pitcher_Days_Since_Prev_Game", "Outs_Status", "Data_Through_Date", "SWE_Version",
+      ],
+      ["Game_PK", "Pitcher_MLBAM_ID", "Pitches_Thrown", "Batters_Faced", "Outs_Recorded", "Innings_Pitched", "Max_Through_Order", "Pitcher_Days_Since_Prev_Game"],
+      "SYSTEM",
+    ),
+  },
+
+  {
+    name: "SWE_WORKLOAD_REPLAY_SUMMARY_V1",
+    description:
+      "Paired, settlement-only innings grading for frozen SWE V1 versus active Expected_IP. It has a pre-registered N=150 checkpoint and cannot promote or modify a projection automatically.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "SWE_Version", "Evaluation_Population", "Eligible_Starter_N", "SWE_MAE", "Legacy_MAE",
+        "Mean_Abs_Error_Delta_SWE_Minus_Legacy", "SWE_Better_Count", "Legacy_Better_Count", "Tie_Count",
+        "Wilcoxon_Non_Tied_N", "Wilcoxon_W_Plus", "Wilcoxon_Two_Sided_P", "Decision_Status", "Replay_TS",
+      ],
+      ["Eligible_Starter_N", "SWE_MAE", "Legacy_MAE", "Mean_Abs_Error_Delta_SWE_Minus_Legacy", "SWE_Better_Count", "Legacy_Better_Count", "Tie_Count", "Wilcoxon_Non_Tied_N", "Wilcoxon_W_Plus", "Wilcoxon_Two_Sided_P"],
+      "MODULE_29",
+    ),
   },
 
   {

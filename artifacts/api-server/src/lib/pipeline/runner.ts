@@ -19,6 +19,15 @@ import { fetchTeamRosters, fetchBatterSeasonStats, normalizeForMatch } from "./m
 import { fetchStatcastBatterLeaderboard } from "./module02d_statcastBatters.js";
 import { fetchStatcastPitcherExpectedLeaderboard, isFullSlatePregameWindow } from "./module02f_statcastPitcherExpected.js";
 import { fetchSavantPitchLevelDay } from "./module02h_savantPitchLevel.js";
+import {
+  buildStarterWorkloadEstimatorStates,
+  deriveSWEAppearances,
+  type SWEAppearance,
+} from "./module02i_starterWorkloadEstimator.js";
+import {
+  loadSWEAppearanceHistory,
+  persistSWEAppearanceHistory,
+} from "./module02i_starterWorkloadHistory.js";
 import { persistSourceSnapshot } from "./module02_sourceSnapshots.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { trackLineMovement } from "./module05d_oddsHistory.js";
@@ -51,6 +60,7 @@ import { runDistributionWidthReplay, type DistributionWidthReplayResult } from "
 import { runSeparationGateAudit, type SeparationGateAuditResult } from "./module27_separationGateAudit.js";
 import { runDistributionBenchmark, type DistributionBenchmarkResult } from "./module28_distributionBenchmark.js";
 import { runGameTruthDistributionResearch, type GameTruthDistributionResearchResult } from "./module29_gameTruthDistributionResearch.js";
+import { runStarterWorkloadReplay } from "./module30_starterWorkloadReplay.js";
 import {
   runFailureClassificationReplay,
   syncFailureClassificationShadow,
@@ -522,6 +532,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // Module 02h deliberately remains source-only in this tranche. Persist its
   // raw daily event ledger before any future feature engineer can consume it;
   // retention failure is visible but cannot change today's baseball truth.
+  let currentSWEAppearances: SWEAppearance[] = [];
   if (savantPitchLevel?.source_snapshot) {
     const snapshotWrite = await persistSourceSnapshot(
       savantPitchLevel.source_snapshot,
@@ -536,9 +547,24 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
         "Full pipeline: Savant pitch-level source was not retained; no pitch-level evidence is available",
       );
     } else {
+      currentSWEAppearances = deriveSWEAppearances(
+        savantPitchLevel.events,
+        statcastDataThroughDate,
+      );
+      const historyWrite = await persistSWEAppearanceHistory(
+        currentSWEAppearances,
+        statcastDataThroughDate,
+        workbookId,
+      );
+      if (historyWrite.errors.length > 0) {
+        logger.warn(
+          { errors: historyWrite.errors, data_through_date: statcastDataThroughDate },
+          "Full pipeline: SWE derived appearance ledger failed to persist; source retention remains available",
+        );
+      }
       logger.info(
-        { events: savantPitchLevel.events.length, data_through_date: statcastDataThroughDate },
-        "Full pipeline: Savant pitch-level source retained (shadow-only)",
+        { events: savantPitchLevel.events.length, appearances: currentSWEAppearances.length, data_through_date: statcastDataThroughDate },
+        "Full pipeline: Savant pitch-level source retained and SWE appearance ledger prepared (shadow-only)",
       );
     }
   } else if (savantPitchLevel) {
@@ -910,6 +936,34 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     "Full pipeline: workload-state shadow prepared",
   );
 
+  // SWE V1 reads only source-derived, pregame-safe pitch appearances. It has
+  // no Module 09/11 input path. An early source corpus is expected to yield
+  // INSUFFICIENT_HISTORY rather than fabricated pitcher-specific workload.
+  const historicalSWEAppearances = await loadSWEAppearanceHistory(workbookId).catch((err: unknown) => {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: SWE appearance history unavailable");
+    return [] as SWEAppearance[];
+  });
+  const appearanceByKey = new Map<string, SWEAppearance>();
+  for (const appearance of [...historicalSWEAppearances, ...currentSWEAppearances]) {
+    appearanceByKey.set(`${appearance.game_date}|${appearance.game_pk}|${appearance.pitcher_id}`, appearance);
+  }
+  const swe = buildStarterWorkloadEstimatorStates(
+    slate.games,
+    [...appearanceByKey.values()],
+    date,
+    statcastDataThroughDate,
+  );
+  if (swe.distinct_expected_ip <= 10) {
+    logger.warn(
+      { distinct_expected_ip: swe.distinct_expected_ip, appearances: appearanceByKey.size },
+      "Full pipeline: SWE non-degeneracy not yet satisfied; estimator remains source-only shadow evidence",
+    );
+  }
+  logger.info(
+    { games: swe.states.size, conventional_role_prior: swe.conventional_role_prior, distinct_expected_ip: swe.distinct_expected_ip },
+    "Full pipeline: Starter Workload Estimator V1 shadow prepared",
+  );
+
   const mod20a: PregamePacketResult = await writePregamePacketHistory(
     date,
     mod09.game_summary_rows,
@@ -923,6 +977,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       operatorEvidenceByGame: operatorEvidence.snapshots,
       referenceMarketEvidenceByGame: oddsMap,
       workloadStatesByGame,
+      sweStatesByGame: swe.states,
     },
   );
   if (mod20a.status !== "success") {
@@ -1325,6 +1380,14 @@ export async function runDailySettlement(
       };
     },
   );
+
+  // Module 30 compares frozen SWE V1 innings estimates with the untouched
+  // active role lookup after official detail exists. It is research-only and
+  // may never invalidate canonical settlement rows or authorize a model move.
+  const starter_workload_replay = await runStarterWorkloadReplay(workbookId);
+  if (starter_workload_replay.status === "failure") {
+    warnings.push(...starter_workload_replay.errors.map((message) => `starter_workload_replay: ${message}`));
+  }
 
   // Module 25 replays the complete frozen-packet history, including the
   // current Module 24 rows, to test conditional error width without changing

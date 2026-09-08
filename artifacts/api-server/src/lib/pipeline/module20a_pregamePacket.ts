@@ -45,6 +45,7 @@ import type { ShadowAuditRow } from "./module09s_statcastShadow.js";
 import type { StarterSurvivalRow } from "./module09t_starterSurvivalShadow.js";
 import type { StarterSurvivalV2Row } from "./module09u_starterSurvivalV2Shadow.js";
 import type { WorkloadGameState } from "./module02g_workloadState.js";
+import type { SWEGameState } from "./module02i_starterWorkloadEstimator.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
 import type { MarketLine } from "./module05b_marketOdds.js";
 import type {
@@ -265,6 +266,26 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Home_Team_Handling_State",
   "Home_Workload_Source_Status",
   "Home_Workload_Notes",
+  // Starter Workload Estimator V1. This source-only object is frozen for
+  // innings replay; no active projection or decision consumer may read it.
+  "SWE_Version",
+  "SWE_Away_Expected_IP",
+  "SWE_Away_Status",
+  "SWE_Away_N_Starts",
+  "SWE_Away_L3_IP",
+  "SWE_Away_L5_IP",
+  "SWE_Away_Season_IP",
+  "SWE_Away_Shrinkage_Weight",
+  "SWE_Home_Expected_IP",
+  "SWE_Home_Status",
+  "SWE_Home_N_Starts",
+  "SWE_Home_L3_IP",
+  "SWE_Home_L5_IP",
+  "SWE_Home_Season_IP",
+  "SWE_Home_Shrinkage_Weight",
+  "SWE_Role_Prior_Used",
+  "SWE_Data_Through_Date",
+  "SWE_Snapshot_Primary",
 ] as const;
 
 export const PREGAME_PACKET_HISTORY_COLS =
@@ -467,6 +488,7 @@ export function buildPregamePacketInputs(
   > = new Map(),
   referenceMarketEvidenceByGame: ReadonlyMap<string, MarketLine> = new Map(),
   workloadStatesByGame: ReadonlyMap<string, WorkloadGameState> = new Map(),
+  sweStatesByGame: ReadonlyMap<string, SWEGameState> = new Map(),
 ): PregamePacketInput[] {
   const boardByGame = new Map(board.map((row) => [row.legacy_game_id, row]));
   const gameById = new Map(games.map((row) => [row.legacy_game_id, row]));
@@ -484,6 +506,7 @@ export function buildPregamePacketInputs(
     const v1 = v1ByGame.get(summary.game_id);
     const v2 = v2ByGame.get(summary.game_id);
     const workloadState = workloadStatesByGame.get(summary.game_id);
+    const sweState = sweStatesByGame.get(summary.game_id);
     const operator = operatorEvidenceByGame.get(summary.game_id);
     const referenceEvidence = referenceMarketEvidenceByGame.get(summary.game_id);
     const suppliedOperatorMarketLine = operatorNumber(
@@ -833,6 +856,24 @@ export function buildPregamePacketInputs(
       workloadState?.home.team_handling_state ?? "NOT_MODELED",
       workloadState?.home.workload_source_status ?? "WORKLOAD_EVIDENCE_UNAVAILABLE",
       workloadState?.home.workload_notes ?? "No workload state was supplied for this packet.",
+      "1.0.0",
+      blank(sweState?.away.expected_ip),
+      sweState?.away.status ?? "INSUFFICIENT_HISTORY",
+      sweState?.away.n_starts ?? 0,
+      blank(sweState?.away.l3_ip),
+      blank(sweState?.away.l5_ip),
+      blank(sweState?.away.season_ip),
+      blank(sweState?.away.shrinkage_weight),
+      blank(sweState?.home.expected_ip),
+      sweState?.home.status ?? "INSUFFICIENT_HISTORY",
+      sweState?.home.n_starts ?? 0,
+      blank(sweState?.home.l3_ip),
+      blank(sweState?.home.l5_ip),
+      blank(sweState?.home.season_ip),
+      blank(sweState?.home.shrinkage_weight),
+      blank(sweState?.away.role_prior_used ?? sweState?.home.role_prior_used),
+      sweState?.away.data_through_date ?? sweState?.home.data_through_date ?? "",
+      "",
     ];
     return [
       {
@@ -892,6 +933,8 @@ export function upsertPregamePacketRows(
     }
     if (input.packet_status === "FROZEN_PREGAME")
       next[I.Freeze_TS] = snapshotTs;
+    if (input.packet_status === "FROZEN_PREGAME")
+      next[I.SWE_Snapshot_Primary] = "YES";
     if (existingIndex === undefined) {
       rows.push(next);
       byKey.set(rowKey, rows.length - 1);
@@ -949,6 +992,7 @@ export function finalizeOpenPregamePacketRows(
     const frozen = pad(existing);
     frozen[I.Packet_Status] = "FROZEN_PREGAME";
     frozen[I.Freeze_TS] = snapshotTs;
+    frozen[I.SWE_Snapshot_Primary] = "YES";
     rows[rowIndex] = frozen;
     rowsUpdated++;
     rowsFrozen++;
@@ -984,6 +1028,7 @@ export async function writePregamePacketHistory(
     operatorEvidenceByGame?: ReadonlyMap<string, OperatorEvidenceSnapshot>;
     referenceMarketEvidenceByGame?: ReadonlyMap<string, MarketLine>;
     workloadStatesByGame?: ReadonlyMap<string, WorkloadGameState>;
+    sweStatesByGame?: ReadonlyMap<string, SWEGameState>;
   } = {},
 ): Promise<PregamePacketResult> {
   const workbookId = options.workbookId ?? WORKBOOK_ID;
@@ -1014,6 +1059,7 @@ export async function writePregamePacketHistory(
         options.operatorEvidenceByGame,
         options.referenceMarketEvidenceByGame,
         options.workloadStatesByGame,
+        options.sweStatesByGame,
       ),
       snapshotTs,
     );

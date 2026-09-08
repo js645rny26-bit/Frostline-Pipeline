@@ -95,6 +95,7 @@ type SourceFreshnessKey =
   | "BATTER_SEASON"
   | "SAVANT_BATTER_SEASON"
   | "SAVANT_PITCHER_EXPECTED"
+  | "SAVANT_PITCH_LEVEL"
   | "TEAM_FORM"
   | "STARTING_NINE_LINEUPS"
   | "STARTING_NINE_PARK"
@@ -201,6 +202,15 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     "SAVANT_PITCHER_EXPECTED",
   ),
   SOURCE(
+    "SOURCE_SAVANT_PITCH_LEVEL",
+    "Baseball Savant pitch-level Statcast events",
+    "Baseball Savant statcast_search CSV, type=details, all=true, regular season",
+    "EVERY_PREGAME_RUN",
+    "SOURCE_ACQUISITION_LOG raw hash/data-through/schema/MLBAM coverage + SWE_APPEARANCE_HISTORY_V1",
+    "Raw daily events are retained before source-only workload engineering. Starter Workload Estimator V1 is SHADOW_ONLY and does not alter active Expected_IP, survival, projection, or authorization.",
+    "SAVANT_PITCH_LEVEL",
+  ),
+  SOURCE(
     "SOURCE_MLB_RECENT_SCORING",
     "MLB recent team scoring results",
     "MLB Stats API completed schedules",
@@ -303,6 +313,17 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     workbookLocation: "DAILY_MATCHUPS L:O; PREGAME_PACKET_HISTORY AD:AE", feedsActiveProjection: "YES", feedsDecisionBoard: "YES",
     correlationFamily: "STARTER_WORKLOAD", missingBehavior: "Explicit unresolved/default workload; never a postgame reconstruction.",
     notes: "Workload is not a generic pitcher-success label.", freshnessKey: "STARTER_WORKLOAD",
+  },
+  {
+    recordType: "INPUT", id: "SWE_V1_STARTER_WORKLOAD_SHADOW", label: "Starter Workload Estimator V1 innings shadow",
+    layer: "BASEBALL_MODEL", outputClass: "SHADOW_CHALLENGER", operationalStatus: "SHADOW_ONLY",
+    definition: "Frozen pitcher-specific expected innings from source-only prior starts: L3/L5/season windows, declared renormalized 0.50/0.30/0.20 weights, and k=4 conventional-role shrinkage.",
+    statisticalWindow: "All retained source starts through slate date minus one; L3, L5, and season", gameWindow: "STARTER_WINDOW -> BULLPEN_WINDOW (REPLAY ONLY)",
+    primarySource: "SOURCE_SAVANT_PITCH_LEVEL", fallbackSource: "Explicit INSUFFICIENT_HISTORY / OUTS_UNRESOLVED; designed opener/bulk priors only",
+    refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "PREGAME_PACKET_HISTORY SWE_* + SWE_APPEARANCE_HISTORY_V1",
+    workbookLocation: "PREGAME_PACKET_HISTORY SWE_*; STARTER_OUTCOME_DIAGNOSTICS SWE_*; SWE_WORKLOAD_REPLAY_SUMMARY_V1", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
+    correlationFamily: "STARTER_WORKLOAD", missingBehavior: "No source history creates a named status; it never silently falls back to active Expected_IP.",
+    notes: "Pre-registered N=150 paired innings checkpoint. No projection/survival/collision/authorization consumer exists in V1.", freshnessKey: "SAVANT_PITCH_LEVEL",
   },
   {
     recordType: "INPUT", id: "LINEUP_IDENTITY", label: "Exact lineup identity, order, hand, coverage",
@@ -786,6 +807,26 @@ async function collectSourceObservations(
       : sourceStatusIndex >= 0
         ? text(retainedSourceRows.at(-1)?.[sourceStatusIndex]) || `CURRENT_MATERIALIZED (${retainedSourceRows.length})`
         : `CURRENT_MATERIALIZED (${retainedSourceRows.length})`,
+  });
+  const pitchLevelSourceRows = sourceLog.rows.filter((row) =>
+    sourceIdIndex >= 0 &&
+    sourceFetchIndex >= 0 &&
+    text(row[sourceIdIndex]) === "SOURCE_SAVANT_PITCH_LEVEL" &&
+    canonicalDate(row[sourceFetchIndex]) === date,
+  );
+  const retainedPitchLevelRows = pitchLevelSourceRows.filter((row) =>
+    sourceRawStorageIndex >= 0 && text(row[sourceRawStorageIndex]) === "STORED",
+  );
+  observations.set("SAVANT_PITCH_LEVEL", {
+    date: retainedPitchLevelRows.length > 0 ? date : "",
+    timestamp: sourceFetchIndex >= 0
+      ? retainedPitchLevelRows.map((row) => text(row[sourceFetchIndex])).filter(Boolean).sort().at(-1) ?? ""
+      : "",
+    state: retainedPitchLevelRows.length === 0
+      ? pitchLevelSourceRows.length > 0 ? "RETENTION_INCOMPLETE" : "NOT_MATERIALIZED_FOR_SLATE"
+      : sourceStatusIndex >= 0
+        ? text(retainedPitchLevelRows.at(-1)?.[sourceStatusIndex]) || `CURRENT_MATERIALIZED (${retainedPitchLevelRows.length})`
+        : `CURRENT_MATERIALIZED (${retainedPitchLevelRows.length})`,
   });
   observations.set("TEAM_FORM", observation(date, teamFormRows, teamForm.headers));
   const lineupStatusIndex = headerIndex(lineups.headers, "Notes");

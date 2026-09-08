@@ -117,6 +117,28 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     readNote:
       "Concatenate chunks by Snapshot_ID and Chunk_Index only when auditing an exact retained source response.",
   },
+  {
+    sheet: "SWE_APPEARANCE_HISTORY_V1",
+    stage: "AUDIT",
+    timing: "Append on each retained Savant pitch-level refresh (Module 02i)",
+    purpose:
+      "Source-derived pitcher appearances with exact pitch counts, batters faced, reconstructed outs, innings, start flag, and explicit unresolved-outs state for Starter Workload Estimator V1.",
+    boardRelationship:
+      "Shadow-only source evidence. It cannot feed the active Expected_IP lookup, projection, survival, market, or authorization paths.",
+    readNote:
+      "Use to audit source coverage and the strict pregame cutoff. OUTS_UNRESOLVED is an exclusion, never a zero-inning imputation.",
+  },
+  {
+    sheet: "SWE_WORKLOAD_REPLAY_SUMMARY_V1",
+    stage: "REPLAY",
+    timing: "Every settlement after starter diagnostics (Module 30)",
+    purpose:
+      "Pre-registered paired innings-error comparison of frozen SWE V1 against active Expected_IP, including the N=150 Wilcoxon checkpoint and declared retirement branch.",
+    boardRelationship:
+      "No board input. A positive result can only propose a separate promotion review; it cannot change today’s innings or decision output.",
+    readNote:
+      "Treat results below 150 eligible frozen starters as PRE_CHECKPOINT_DESCRIPTIVE. At N=300 ambiguity retires V1 rather than inviting retuning.",
+  },
 
   {
     sheet: "GAME_INTEGRATION",

@@ -468,9 +468,10 @@ test("a legitimate OPEN packet becomes immutable after first pitch without chang
   assert.equal(after[5], "FROZEN_PREGAME");
   assert.equal(after[10], "2026-08-24T23:11:00.000Z");
   assert.equal(after[11], before[11]);
+  assert.equal(after[PREGAME_PACKET_HISTORY_HEADERS.indexOf("SWE_Snapshot_Primary")], "YES");
   assert.deepEqual(
     after.map((value, index) =>
-      index === 5 || index === 10 ? before[index] : value,
+      index === 5 || index === 10 || index === PREGAME_PACKET_HISTORY_HEADERS.indexOf("SWE_Snapshot_Primary") ? before[index] : value,
     ),
     before,
   );
@@ -564,10 +565,22 @@ test("workload-state shadow is frozen beside active Expected_IP without changing
       workload_notes: "fixture-home",
     },
   };
+  const sweState = {
+    away: {
+      expected_ip: 5.41, status: "SHRUNK", n_starts: 6, l3_ip: 5.33, l5_ip: 5.4,
+      season_ip: 5.5, shrinkage_weight: 0.6, role_prior_used: 5.3,
+      data_through_date: "2026-09-06", role: "CONVENTIONAL_STARTER", notes: "fixture",
+    },
+    home: {
+      expected_ip: 4.9, status: "SHRUNK", n_starts: 4, l3_ip: 4.67, l5_ip: null,
+      season_ip: 5, shrinkage_weight: 0.5, role_prior_used: 5.3,
+      data_through_date: "2026-09-06", role: "CONVENTIONAL_STARTER", notes: "fixture",
+    },
+  } as const;
   const packet = buildPregamePacketInputs(
     summary, board,
     [{ legacy_game_id: "20260907_AAA_BBB", scheduled_utc_time: "2026-09-07T23:10:00.000Z" }] as never,
-    [], [], [], new Map(), new Map(), new Map([["20260907_AAA_BBB", workloadState]]),
+    [], [], [], new Map(), new Map(), new Map([["20260907_AAA_BBB", workloadState]]), new Map([["20260907_AAA_BBB", sweState]]),
   )[0]!;
   const index = Object.fromEntries(PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]));
   assert.equal(packet.values[index.Away_Expected_IP], 6);
@@ -577,6 +590,11 @@ test("workload-state shadow is frozen beside active Expected_IP without changing
   assert.equal(packet.values[index.Away_Workload_Confidence], "HIGH");
   assert.equal(packet.values[index.Home_Workload_State_Status], "PARTIAL");
   assert.equal(packet.values[index.Home_Workload_Notes], "fixture-home");
+  assert.equal(packet.values[index.SWE_Away_Expected_IP], 5.41);
+  assert.equal(packet.values[index.SWE_Home_Status], "SHRUNK");
+  assert.equal(packet.values[index.SWE_Role_Prior_Used], 5.3);
+  assert.equal(packet.values[index.SWE_Data_Through_Date], "2026-09-06");
+  assert.equal(packet.values[index.SWE_Snapshot_Primary], "");
 });
 
 test("packet contract preserves market and dependent shadow fields as explicit columns", () => {
@@ -671,6 +689,24 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Home_Team_Handling_State",
     "Home_Workload_Source_Status",
     "Home_Workload_Notes",
+    "SWE_Version",
+    "SWE_Away_Expected_IP",
+    "SWE_Away_Status",
+    "SWE_Away_N_Starts",
+    "SWE_Away_L3_IP",
+    "SWE_Away_L5_IP",
+    "SWE_Away_Season_IP",
+    "SWE_Away_Shrinkage_Weight",
+    "SWE_Home_Expected_IP",
+    "SWE_Home_Status",
+    "SWE_Home_N_Starts",
+    "SWE_Home_L3_IP",
+    "SWE_Home_L5_IP",
+    "SWE_Home_Season_IP",
+    "SWE_Home_Shrinkage_Weight",
+    "SWE_Role_Prior_Used",
+    "SWE_Data_Through_Date",
+    "SWE_Snapshot_Primary",
   ])
     assert.ok(PREGAME_PACKET_HISTORY_HEADERS.includes(required as never));
 });
@@ -678,6 +714,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 56);
-  assert.equal(pregamePacketHistoryRange(5000), "A1:GI5000");
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 57);
+  assert.equal(pregamePacketHistoryRange(5000), "A1:HA5000");
 });
