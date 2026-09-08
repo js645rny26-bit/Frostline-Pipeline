@@ -9,6 +9,7 @@ import {
   buildDistributionBenchmarkPairs,
   buildDistributionBenchmarkRows,
   buildDistributionBenchmarkSummary,
+  boundedOwnedSheetTailRange,
   currentDistributionBenchmarkCorpus,
   evaluateDistributionBenchmarkWalkForward,
   fitNegativeBinomialAlpha,
@@ -151,6 +152,21 @@ test("a missing persisted earlier frozen observation is unresolved, never report
   assert.equal(row[DISTRIBUTION_BENCHMARK_HEADERS.indexOf("Training_Through_Date")], null);
   assert.equal(row[DISTRIBUTION_BENCHMARK_HEADERS.indexOf("Prior_Settled_Games")], null);
   assert.equal(row[DISTRIBUTION_BENCHMARK_HEADERS.indexOf("Distribution_Status")], "TRAINING_WINDOW_UNRESOLVED");
+});
+
+test("owned-sheet tail cleanup never extends beyond the actual Google Sheets grid", () => {
+  assert.equal(
+    boundedOwnedSheetTailRange("GAME_TRUTH_DIST_LINES_V2", 17, 3301, 3300),
+    null,
+  );
+  assert.equal(
+    boundedOwnedSheetTailRange("GAME_TRUTH_DIST_LINES_V2", 17, 3301, 100),
+    "GAME_TRUTH_DIST_LINES_V2!A102:Q3301",
+  );
+  assert.equal(
+    boundedOwnedSheetTailRange("GAME_TRUTH_DIST_LINES_V2", 17, undefined, 100),
+    null,
+  );
 });
 
 test("V1 summary uses the retained frozen benchmark corpus when a current source read is incomplete", () => {

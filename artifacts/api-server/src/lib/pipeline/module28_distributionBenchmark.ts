@@ -1030,15 +1030,20 @@ export function buildDistributionBenchmarkPairs(rows: unknown[][], replayTs: str
 async function ensureSheets(
   workbookId: string,
   sheets: Array<{ sheet: string; column_count: number }>,
-): Promise<void> {
-  const existing = new Set((await getSpreadsheetSheetProperties(workbookId)).map((sheet) => sheet.title));
+): Promise<Map<string, number | undefined>> {
+  let properties = await getSpreadsheetSheetProperties(workbookId);
+  const existing = new Set(properties.map((sheet) => sheet.title));
+  let createdSheet = false;
   for (const { sheet } of sheets) {
     if (!existing.has(sheet)) {
       await addSheet(workbookId, sheet);
       existing.add(sheet);
+      createdSheet = true;
     }
   }
+  if (createdSheet) properties = await getSpreadsheetSheetProperties(workbookId);
   await Promise.all(sheets.map(({ sheet, column_count }) => expandSheetColumns(workbookId, sheet, column_count)));
+  return new Map(properties.map((sheet) => [sheet.title, sheet.rowCount]));
 }
 
 function isMissingSheetError(error: unknown): boolean {
@@ -1077,6 +1082,21 @@ function spreadsheetColumnName(columnCount: number): string {
 }
 
 /**
+ * Keep stale-tail cleanup inside the sheet's real grid.  The Google Sheets
+ * values API rejects ranges that extend beyond a sheet's row limit.
+ */
+export function boundedOwnedSheetTailRange(
+  sheet: string,
+  columnCount: number,
+  rowCount: number | undefined,
+  dataRowCount: number,
+): string | null {
+  const firstStaleRow = dataRowCount + 2;
+  if (typeof rowCount !== "number" || !Number.isInteger(rowCount) || rowCount < firstStaleRow) return null;
+  return `${sheet}!A${firstStaleRow}:${spreadsheetColumnName(columnCount)}${rowCount}`;
+}
+
+/**
  * Sheets PUT does not remove rows beyond its new payload.  Write the fresh
  * range first, then clear only the tail so a failed write cannot blank an
  * otherwise valid research surface.
@@ -1086,10 +1106,11 @@ async function replaceOwnedSheetRows(
   sheet: string,
   header: readonly string[],
   rows: readonly unknown[][],
+  rowCount: number | undefined,
 ): Promise<void> {
   await writeRange(workbookId, `${sheet}!A1`, [Array.from(header), ...rows]);
-  const firstStaleRow = rows.length + 2;
-  await clearRange(workbookId, `${sheet}!A${firstStaleRow}:${spreadsheetColumnName(header.length)}10000`);
+  const staleTailRange = boundedOwnedSheetTailRange(sheet, header.length, rowCount, rows.length);
+  if (staleTailRange) await clearRange(workbookId, staleTailRange);
 }
 
 export async function runDistributionBenchmark(
@@ -1126,15 +1147,15 @@ export async function runDistributionBenchmark(
         `TRAINING_WINDOW_UNRESOLVED: ${trainingWindow.missing_persisted_observation_dates.length} persisted frozen date(s) could not be rediscovered from canonical settlement inputs`,
       );
     }
-    await ensureSheets(workbookId, [
+    const sheetRowCounts = await ensureSheets(workbookId, [
       { sheet: SHADOW_DISTRIBUTION_BENCHMARK_SHEET, column_count: DISTRIBUTION_BENCHMARK_HEADERS.length },
       { sheet: SHADOW_DISTRIBUTION_BENCHMARK_SUMMARY_SHEET, column_count: DISTRIBUTION_BENCHMARK_SUMMARY_HEADERS.length },
       { sheet: SHADOW_DISTRIBUTION_BENCHMARK_PAIRS_SHEET, column_count: DISTRIBUTION_BENCHMARK_PAIR_HEADERS.length },
     ]);
     await Promise.all([
-      replaceOwnedSheetRows(workbookId, SHADOW_DISTRIBUTION_BENCHMARK_SHEET, DISTRIBUTION_BENCHMARK_HEADERS, rows),
-      replaceOwnedSheetRows(workbookId, SHADOW_DISTRIBUTION_BENCHMARK_SUMMARY_SHEET, DISTRIBUTION_BENCHMARK_SUMMARY_HEADERS, summaryRows),
-      replaceOwnedSheetRows(workbookId, SHADOW_DISTRIBUTION_BENCHMARK_PAIRS_SHEET, DISTRIBUTION_BENCHMARK_PAIR_HEADERS, pairRows),
+      replaceOwnedSheetRows(workbookId, SHADOW_DISTRIBUTION_BENCHMARK_SHEET, DISTRIBUTION_BENCHMARK_HEADERS, rows, sheetRowCounts.get(SHADOW_DISTRIBUTION_BENCHMARK_SHEET)),
+      replaceOwnedSheetRows(workbookId, SHADOW_DISTRIBUTION_BENCHMARK_SUMMARY_SHEET, DISTRIBUTION_BENCHMARK_SUMMARY_HEADERS, summaryRows, sheetRowCounts.get(SHADOW_DISTRIBUTION_BENCHMARK_SUMMARY_SHEET)),
+      replaceOwnedSheetRows(workbookId, SHADOW_DISTRIBUTION_BENCHMARK_PAIRS_SHEET, DISTRIBUTION_BENCHMARK_PAIR_HEADERS, pairRows, sheetRowCounts.get(SHADOW_DISTRIBUTION_BENCHMARK_PAIRS_SHEET)),
     ]);
     const eligibleGames = evaluations.filter((evaluation) => evaluation.status === "WALK_FORWARD_ELIGIBLE").length;
     logger.info(

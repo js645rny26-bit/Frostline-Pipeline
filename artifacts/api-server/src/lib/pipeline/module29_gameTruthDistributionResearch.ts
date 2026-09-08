@@ -41,6 +41,7 @@ import {
   pmfAt,
   quantile,
   buildNegativeBinomialDistribution,
+  boundedOwnedSheetTailRange,
   buildPoissonDistribution,
 } from "./module28_distributionBenchmark.js";
 import type {
@@ -1370,15 +1371,23 @@ export function buildGameTruthSlateDiagnostics(
   });
 }
 
-async function ensureSheets(workbookId: string, sheets: Array<{ sheet: string; column_count: number }>): Promise<void> {
-  const existing = new Set((await getSpreadsheetSheetProperties(workbookId)).map((sheet) => sheet.title));
+async function ensureSheets(
+  workbookId: string,
+  sheets: Array<{ sheet: string; column_count: number }>,
+): Promise<Map<string, number | undefined>> {
+  let properties = await getSpreadsheetSheetProperties(workbookId);
+  const existing = new Set(properties.map((sheet) => sheet.title));
+  let createdSheet = false;
   for (const { sheet } of sheets) {
     if (!existing.has(sheet)) {
       await addSheet(workbookId, sheet);
       existing.add(sheet);
+      createdSheet = true;
     }
   }
+  if (createdSheet) properties = await getSpreadsheetSheetProperties(workbookId);
   await Promise.all(sheets.map(({ sheet, column_count }) => expandSheetColumns(workbookId, sheet, column_count)));
+  return new Map(properties.map((sheet) => [sheet.title, sheet.rowCount]));
 }
 
 function isMissingSheetError(error: unknown): boolean {
@@ -1405,17 +1414,6 @@ async function readOptionalOutputSheet(workbookId: string, range: string): Promi
   }
 }
 
-function spreadsheetColumnName(columnCount: number): string {
-  let value = columnCount;
-  let result = "";
-  while (value > 0) {
-    const remainder = (value - 1) % 26;
-    result = String.fromCharCode(65 + remainder) + result;
-    value = Math.floor((value - 1) / 26);
-  }
-  return result;
-}
-
 /**
  * Prevent stale tail rows after a shorter rebuilt research output without
  * clearing a valid surface before the replacement values have been accepted.
@@ -1425,10 +1423,11 @@ async function replaceOwnedSheetRows(
   sheet: string,
   header: readonly string[],
   rows: readonly unknown[][],
+  rowCount: number | undefined,
 ): Promise<void> {
   await writeRange(workbookId, `${sheet}!A1`, [Array.from(header), ...rows]);
-  const firstStaleRow = rows.length + 2;
-  await clearRange(workbookId, `${sheet}!A${firstStaleRow}:${spreadsheetColumnName(header.length)}10000`);
+  const staleTailRange = boundedOwnedSheetTailRange(sheet, header.length, rowCount, rows.length);
+  if (staleTailRange) await clearRange(workbookId, staleTailRange);
 }
 
 function mergeSlateDiagnosticsCorpus(existing: readonly unknown[][], replacements: readonly unknown[][]): unknown[][] {
@@ -1495,7 +1494,7 @@ export async function runGameTruthDistributionResearch(
         `TRAINING_WINDOW_UNRESOLVED: ${trainingWindow.missing_persisted_observation_dates.length} persisted frozen date(s) could not be rediscovered from canonical settlement inputs`,
       );
     }
-    await ensureSheets(workbookId, [
+    const sheetRowCounts = await ensureSheets(workbookId, [
       { sheet: GAME_TRUTH_DISTRIBUTION_RESEARCH_SHEET, column_count: GAME_TRUTH_DISTRIBUTION_HEADERS.length },
       { sheet: GAME_TRUTH_DISTRIBUTION_LINES_SHEET, column_count: GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.length },
       { sheet: GAME_TRUTH_DISTRIBUTION_SUMMARY_SHEET, column_count: GAME_TRUTH_DISTRIBUTION_SUMMARY_HEADERS.length },
@@ -1505,13 +1504,13 @@ export async function runGameTruthDistributionResearch(
       { sheet: GAME_TRUTH_SLATE_DIAGNOSTICS_SHEET, column_count: GAME_TRUTH_SLATE_DIAGNOSTICS_HEADERS.length },
     ]);
     await Promise.all([
-      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_RESEARCH_SHEET, GAME_TRUTH_DISTRIBUTION_HEADERS, distributionRows),
-      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_LINES_SHEET, GAME_TRUTH_DISTRIBUTION_LINES_HEADERS, lineRows),
-      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_SUMMARY_SHEET, GAME_TRUTH_DISTRIBUTION_SUMMARY_HEADERS, summaryRows),
-      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_PAIRS_SHEET, GAME_TRUTH_DISTRIBUTION_PAIRS_HEADERS, pairRows),
-      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_CORP_SHEET, GAME_TRUTH_DISTRIBUTION_CORP_HEADERS, corpRows),
-      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_SHEET, GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_HEADERS, featureGovernanceRows),
-      replaceOwnedSheetRows(workbookId, GAME_TRUTH_SLATE_DIAGNOSTICS_SHEET, GAME_TRUTH_SLATE_DIAGNOSTICS_HEADERS, slateRows),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_RESEARCH_SHEET, GAME_TRUTH_DISTRIBUTION_HEADERS, distributionRows, sheetRowCounts.get(GAME_TRUTH_DISTRIBUTION_RESEARCH_SHEET)),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_LINES_SHEET, GAME_TRUTH_DISTRIBUTION_LINES_HEADERS, lineRows, sheetRowCounts.get(GAME_TRUTH_DISTRIBUTION_LINES_SHEET)),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_SUMMARY_SHEET, GAME_TRUTH_DISTRIBUTION_SUMMARY_HEADERS, summaryRows, sheetRowCounts.get(GAME_TRUTH_DISTRIBUTION_SUMMARY_SHEET)),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_PAIRS_SHEET, GAME_TRUTH_DISTRIBUTION_PAIRS_HEADERS, pairRows, sheetRowCounts.get(GAME_TRUTH_DISTRIBUTION_PAIRS_SHEET)),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_CORP_SHEET, GAME_TRUTH_DISTRIBUTION_CORP_HEADERS, corpRows, sheetRowCounts.get(GAME_TRUTH_DISTRIBUTION_CORP_SHEET)),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_SHEET, GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_HEADERS, featureGovernanceRows, sheetRowCounts.get(GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_SHEET)),
+      replaceOwnedSheetRows(workbookId, GAME_TRUTH_SLATE_DIAGNOSTICS_SHEET, GAME_TRUTH_SLATE_DIAGNOSTICS_HEADERS, slateRows, sheetRowCounts.get(GAME_TRUTH_SLATE_DIAGNOSTICS_SHEET)),
     ]);
     const eligibleGames = evaluations.filter((evaluation) => evaluation.status === "WALK_FORWARD_ELIGIBLE").length;
     logger.info({ frozen_packets_seen: packets.size, settled_observations_seen: joined.observations.length, eligible_games: eligibleGames }, "MODULE_29: direct-total distribution research written (research-only)");

@@ -277,6 +277,9 @@ export interface SheetValues { values?: unknown[][]; }
 export interface SpreadsheetSheetProperties {
   sheetId: number;
   title: string;
+  /** Current grid bounds, used to keep owned-range cleanup inside the sheet. */
+  rowCount?: number;
+  columnCount?: number;
 }
 
 export async function readRange(workbookId: string, range: string): Promise<SheetValues> {
@@ -288,13 +291,24 @@ export async function getSpreadsheetSheetProperties(
   workbookId: string,
 ): Promise<SpreadsheetSheetProperties[]> {
   const response = await sheetsRequest(
-    `/v4/spreadsheets/${workbookId}?fields=sheets.properties(sheetId,title)`,
-  ) as { sheets?: Array<{ properties?: Partial<SpreadsheetSheetProperties> }> };
+    `/v4/spreadsheets/${workbookId}?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))`,
+  ) as {
+    sheets?: Array<{
+      properties?: Partial<SpreadsheetSheetProperties> & {
+        gridProperties?: { rowCount?: unknown; columnCount?: unknown };
+      };
+    }>;
+  };
 
   return (response.sheets ?? []).flatMap((sheet) => {
-    const { sheetId, title } = sheet.properties ?? {};
+    const { sheetId, title, gridProperties } = sheet.properties ?? {};
     return typeof sheetId === "number" && typeof title === "string"
-      ? [{ sheetId, title }]
+      ? [{
+        sheetId,
+        title,
+        ...(typeof gridProperties?.rowCount === "number" ? { rowCount: gridProperties.rowCount } : {}),
+        ...(typeof gridProperties?.columnCount === "number" ? { columnCount: gridProperties.columnCount } : {}),
+      }]
       : [];
   });
 }
