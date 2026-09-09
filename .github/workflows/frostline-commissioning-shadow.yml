@@ -18,6 +18,11 @@ on:
         required: false
         default: ""
         type: string
+      bootstrap_bvh_history:
+        description: One-time source-only BVH history seed for the authoritative workbook; does not publish or rewrite frozen packets
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -174,6 +179,18 @@ jobs:
             ) > frostline-bvh-backfill.json
             cat frostline-bvh-backfill.json
             echo "Isolated pregame smoke workbook: $workbook_id"
+          elif [ "${{ inputs.bootstrap_bvh_history }}" = "true" ]; then
+            history_start="2026-09-01"
+            history_end="$(TZ=America/New_York date --date='yesterday' +%F)"
+            slate_cutoff="$(date --date="${SLATE_DATE} - 1 day" +%F)"
+            if [[ "$history_end" > "$slate_cutoff" ]]; then history_end="$slate_cutoff"; fi
+            (
+              cd artifacts/api-server
+              pnpm exec tsx src/scripts/backfillBvhTestCopy.ts \
+                "$history_start" "$history_end" "$SLATE_DATE" "$workbook_id" \
+                "CANONICAL_SOURCE_BOOTSTRAP"
+            ) > frostline-bvh-backfill.json
+            cat frostline-bvh-backfill.json
           fi
 
           set +e
@@ -230,7 +247,7 @@ jobs:
           console.log("Commissioning semantic gate passed.");
           NODE
 
-          if [ "${{ inputs.isolated_smoke }}" = "true" ]; then
+          if [ "${{ inputs.isolated_smoke }}" = "true" ] || [ "${{ inputs.bootstrap_bvh_history }}" = "true" ]; then
             (
               cd artifacts/api-server
               FROSTLINE_WORKBOOK_ID="$workbook_id" pnpm exec tsx src/scripts/auditBvhWorkbook.ts --assert

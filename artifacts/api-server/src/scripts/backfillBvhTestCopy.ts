@@ -1,12 +1,14 @@
 /**
- * Explicit BVH V1 history loader for a disposable/non-canonical workbook.
+ * Explicit BVH V1 history loader for a disposable workbook or an expressly
+ * authorized, source-only canonical bootstrap.
  *
  * Usage:
- *   tsx src/scripts/backfillBvhTestCopy.ts START END SLATE_DATE WORKBOOK_ID
+ *   tsx src/scripts/backfillBvhTestCopy.ts START END SLATE_DATE WORKBOOK_ID [MODE]
  *
  * Every scheduled regular-season day is fetched independently. The untouched
  * Savant response is retained before its PA aggregates can be appended. This
- * script never publishes projections and hard-rejects the canonical workbook.
+ * This script never publishes projections. The canonical workbook is rejected
+ * unless MODE is the exact CANONICAL_SOURCE_BOOTSTRAP token.
  */
 
 import { CANONICAL_WORKBOOK_ID } from "../lib/sheets/client.js";
@@ -41,6 +43,7 @@ export function assertBVHBackfillRequest(
   endDate: string,
   slateDate: string,
   workbookId: string,
+  mode = "DISPOSABLE_TEST_COPY_ONLY",
 ): void {
   if (![startDate, endDate, slateDate].every((value) => ISO_DATE.test(value))) {
     throw new Error("BVH_BACKFILL_INVALID_DATE: expected YYYY-MM-DD");
@@ -52,8 +55,8 @@ export function assertBVHBackfillRequest(
     throw new Error(`BVH_BACKFILL_RANGE_LIMIT: maximum ${MAX_CALENDAR_DAYS} calendar days per run`);
   }
   if (!workbookId) throw new Error("BVH_BACKFILL_WORKBOOK_REQUIRED");
-  if (workbookId === CANONICAL_WORKBOOK_ID) {
-    throw new Error("BVH_BACKFILL_CANONICAL_FORBIDDEN: use a disposable/test workbook");
+  if (workbookId === CANONICAL_WORKBOOK_ID && mode !== "CANONICAL_SOURCE_BOOTSTRAP") {
+    throw new Error("BVH_BACKFILL_CANONICAL_FORBIDDEN: explicit CANONICAL_SOURCE_BOOTSTRAP mode required");
   }
 }
 
@@ -110,8 +113,14 @@ function addIntegrity(target: BVHPAIntegrity, source: BVHPAIntegrity): void {
 }
 
 async function main(): Promise<void> {
-  const [startDate = "", endDate = "", slateDate = "", workbookId = ""] = process.argv.slice(2);
-  assertBVHBackfillRequest(startDate, endDate, slateDate, workbookId);
+  const [
+    startDate = "",
+    endDate = "",
+    slateDate = "",
+    workbookId = "",
+    mode = "DISPOSABLE_TEST_COPY_ONLY",
+  ] = process.argv.slice(2);
+  assertBVHBackfillRequest(startDate, endDate, slateDate, workbookId, mode);
   const dates = await scheduledDates(startDate, endDate);
   const integrity = blankIntegrity();
   const days: Array<{ date: string; pitch_rows: number; aggregate_rows: number; source_snapshot_id: string }> = [];
@@ -166,7 +175,7 @@ async function main(): Promise<void> {
   await writeBVHBatterSplits(dataset, workbookId);
   process.stdout.write(JSON.stringify({
     status: "success",
-    mode: "DISPOSABLE_TEST_COPY_ONLY",
+    mode,
     workbook_id: workbookId,
     start_date: startDate,
     end_date: endDate,
