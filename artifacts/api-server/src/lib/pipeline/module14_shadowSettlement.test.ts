@@ -503,6 +503,38 @@ test("v54 literal whole-number reference fallback preserves below, above, and pu
   assert.equal(push.market_grade_notes, "WHOLE_NUMBER_REFERENCE_PUSH_PRESERVED");
 });
 
+test("settlement grades the frozen direction instead of re-originating it from a different market representation", () => {
+  const index = Object.fromEntries(
+    PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]),
+  ) as Record<(typeof PREGAME_PACKET_HISTORY_HEADERS)[number], number>;
+  const packet = Array(PREGAME_PACKET_HISTORY_HEADERS.length).fill("");
+  packet[index.Date] = "2026-09-08";
+  packet[index.Game_ID] = "20260908_CIN_LAD";
+  packet[index.Scheduled_First_Pitch] = "2026-09-09T02:10:00.000Z";
+  packet[index.Packet_Status] = "FROZEN_PREGAME";
+  packet[index.Packet_Snapshot_TS] = "2026-09-08T23:03:58.930Z";
+  packet[index.Freeze_TS] = "2026-09-09T02:11:00.000Z";
+  packet[index.Direction] = "OVER";
+  packet[index.Market_Line] = 7.5;
+  packet[index.Reference_Market_Line] = 8;
+  packet[index.Reference_Market_Convention] = "WHOLE_NUMBER";
+  packet[index.Reference_Market_Representation_Status] = "LITERAL_REFERENCE";
+  packet[index.Synthetic_Normalized_Reference_Line] = 7.5;
+  packet[index.Primary_Grade_Market_Line] = 8;
+  packet[index.Primary_Grade_Market_Source] = "MLB_STARTING_NINE_CARD";
+  packet[index.Primary_Grade_Market_Status] = "LITERAL_REFERENCE";
+
+  const snapshot = parseFrozenPacketMarketSnapshots([packet], "2026-09-08")
+    .get("20260908_CIN_LAD");
+  assert.equal(snapshot?.frozen_direction, "OVER");
+
+  // The frozen projection is below the restored literal 8, but the actual
+  // pregame decision was OVER 7.5. Settlement must not silently turn it UNDER.
+  const grade = resolveSettlementMarketGrade(7.95, 5, snapshot, undefined);
+  assert.equal(grade.primary_directional_result, "LOSS");
+  assert.equal(grade.reference_directional_result, "LOSS");
+});
+
 test("v54 synthetic normalized reference is never executable or a fallback grading line", () => {
   const index = Object.fromEntries(
     PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]),

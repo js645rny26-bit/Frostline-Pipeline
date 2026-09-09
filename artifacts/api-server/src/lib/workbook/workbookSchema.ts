@@ -7457,7 +7457,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         width: 190,
         filledBy: "MODULE_14",
         readOnly: true,
-        description: "Directional result from frozen projection versus Primary_Grade_Market_Line.",
+        description: "Result of the preserved frozen model direction against Primary_Grade_Market_Line; settlement never re-originates direction from another market representation.",
       },
       {
         name: "Reference_Directional_Result",
@@ -7466,7 +7466,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         width: 200,
         filledBy: "MODULE_14",
         readOnly: true,
-        description: "Counterfactual directional result against the preserved reference line.",
+        description: "Result of the preserved frozen model direction against the literal reference line, including PUSH on whole numbers.",
       },
     ],
   },

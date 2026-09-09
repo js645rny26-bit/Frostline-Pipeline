@@ -279,6 +279,8 @@ export interface FrozenPacketStarterSnapshot {
  * first pitch. Neither is a projection input.
  */
 export interface FrozenPacketMarketSnapshot {
+  /** Frozen model direction. Settlement must grade this fact, not re-originate direction from another line. */
+  frozen_direction?: string;
   reference_market_line: number | null;
   reference_market_source: string;
   reference_market_ts: string;
@@ -399,6 +401,7 @@ export function parseFrozenPacketMarketSnapshots(
         : executableMarketLine ?? referenceMarketLine);
     const hasExecutable = executableMarketLine !== null;
     snapshots.set(gameId, {
+      frozen_direction: starterName(row[PACKET_INDEX.Direction]),
       reference_market_line: referenceMarketLine,
       reference_market_source: isV54MarketPacket
         ? starterName(row[PACKET_INDEX.Reference_Market_Source])
@@ -845,6 +848,7 @@ export function resolveSettlementMarketGrade(
   actualTotal: number,
   packet: FrozenPacketMarketSnapshot | undefined,
   existing: unknown[] | undefined,
+  frozenDirection?: string,
 ): SettlementMarketGrade {
   const legacyReferenceLine = numberOrNull(existing?.[O_REFERENCE_MARKET_LINE])
     ?? numberOrNull(existing?.[17]);
@@ -893,8 +897,18 @@ export function resolveSettlementMarketGrade(
       || (executableMarketLine === null
         ? referenceMarketLine === null ? "MISSING_MARKET" : "REFERENCE_ONLY_FALLBACK"
         : "EXECUTABLE_OPERATOR_CAPTURED");
-  const primaryDirection = directionForProjection(frozenProjection, primaryMarketLine);
-  const referenceDirection = directionForProjection(frozenProjection, referenceMarketLine);
+  // Direction is immutable pregame evidence. A literal/reference line can
+  // differ from the normalized line that originated the frozen decision, so
+  // re-deriving direction from frozenProjection versus another representation
+  // can silently invert OVER to UNDER (or vice versa). Only legacy rows with
+  // no preserved direction retain the projection-versus-line fallback.
+  const preservedDirection = [packet?.frozen_direction, frozenDirection]
+    .map((value) => starterName(value).toUpperCase())
+    .find((value) => value === "OVER" || value === "UNDER");
+  const primaryDirection = preservedDirection
+    ?? directionForProjection(frozenProjection, primaryMarketLine);
+  const referenceDirection = preservedDirection
+    ?? directionForProjection(frozenProjection, referenceMarketLine);
   const primaryMarketProvenance = executableMarketLine !== null
     && primaryMarketLine === executableMarketLine
     ? "LITERAL_EXECUTABLE"
@@ -1699,6 +1713,7 @@ export async function runShadowSettlement(
       final.actual_total,
       frozenPacketMarketsByGame.get(gameId),
       existing?.values,
+      prospectiveProjection?.direction,
     );
     const row: SettlementRow = {
       date: String(existing?.values[0] || history[H_DATE] || date),
