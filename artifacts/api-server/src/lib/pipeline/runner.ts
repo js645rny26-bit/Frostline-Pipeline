@@ -17,7 +17,11 @@ import { fetchPlateUmpires } from "./module04e_umpires.js";
 import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
 import { fetchTeamRosters, fetchBatterSeasonStats, normalizeForMatch } from "./module02c_batterSeasonStats.js";
 import { fetchStatcastBatterLeaderboard } from "./module02d_statcastBatters.js";
-import { fetchStatcastPitcherExpectedLeaderboard, isFullSlatePregameWindow } from "./module02f_statcastPitcherExpected.js";
+import {
+  fetchStatcastPitcherExpectedLeaderboard,
+  isFullSlatePregameWindow,
+  pregameEligiblePitcherExpectedStats,
+} from "./module02f_statcastPitcherExpected.js";
 import { fetchSavantPitchLevelDay } from "./module02h_savantPitchLevel.js";
 import {
   buildStarterWorkloadEstimatorStates,
@@ -505,7 +509,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       return null;
     }),
     statcastExpectedAdmissible
-      ? fetchStatcastPitcherExpectedLeaderboard(date.slice(0, 4), statcastDataThroughDate).catch((err: unknown) => {
+      ? fetchStatcastPitcherExpectedLeaderboard(date.slice(0, 4), date, statcastDataThroughDate).catch((err: unknown) => {
           logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: expected-pitching fetch threw — retaining traditional quality only");
           return null;
         })
@@ -521,7 +525,17 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // Raw response retention is part of source validity. If the exact Savant
   // response cannot be preserved before feature engineering, do not allow the
   // new source to fill a traditional-data gap as if it were durable evidence.
-  let statcastPitcherExpectedMap = statcastPitcherExpected?.stats ?? new Map();
+  let statcastPitcherExpectedMap = pregameEligiblePitcherExpectedStats(statcastPitcherExpected);
+  if (statcastPitcherExpected && !statcastPitcherExpected.pregame_eligible) {
+    logger.warn(
+      {
+        cutoffStatus: statcastPitcherExpected.cutoff_status,
+        cutoffProvenance: statcastPitcherExpected.cutoff_provenance,
+        requestedThroughDate: statcastPitcherExpected.requested_through_date,
+      },
+      "Full pipeline: expected-pitching retained but excluded from pregame consumers because cutoff is unverified or unsafe",
+    );
+  }
   if (statcastPitcherExpected?.source_snapshot) {
     const snapshotWrite = await persistSourceSnapshot(
       statcastPitcherExpected.source_snapshot,

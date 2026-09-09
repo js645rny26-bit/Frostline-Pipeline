@@ -42,7 +42,7 @@ export interface SourceSnapshot {
   canonical_source_id: string;
   request_url: string;
   fetch_timestamp_utc: string;
-  /** Latest date the caller is permitted to use. Never a post-pregame date. */
+  /** Source-proven evidence horizon; blank when the source cannot establish it. */
   data_through_date: string;
   raw_response: string;
   row_count: number;
@@ -112,12 +112,25 @@ async function ensureSheet(workbookId: string, sheet: string, headers: readonly 
   await expandSheetColumns(workbookId, sheet, headers.length);
 }
 
+export function sourceSnapshotMetadataMatchesStoredRow(
+  snapshot: MaterializedSourceSnapshot,
+  row: readonly unknown[],
+): boolean {
+  return String(row[1] ?? "") === snapshot.canonical_source_id &&
+    String(row[4] ?? "") === snapshot.data_through_date &&
+    String(row[5] ?? "") === snapshot.raw_response_sha256 &&
+    String(row[11] ?? "") === snapshot.parser_version &&
+    String(row[12] ?? "") === snapshot.source_status &&
+    String(row[13] ?? "") === snapshot.fallback_used &&
+    String(row[15] ?? "") === snapshot.notes;
+}
+
 async function alreadyStored(workbookId: string, snapshot: MaterializedSourceSnapshot): Promise<boolean> {
   const raw = (await readRange(workbookId, `${SOURCE_ACQUISITION_LOG_SHEET}!A2:P5000`)).values ?? [];
-  return raw.some((row) =>
-    String(row[1] ?? "") === snapshot.canonical_source_id &&
-    String(row[5] ?? "") === snapshot.raw_response_sha256,
-  );
+  // Identical bytes may be reacquired under materially different cutoff or
+  // availability evidence. Deduplicate only when both bytes and governing
+  // metadata match; otherwise append the new acquisition state.
+  return raw.some((row) => sourceSnapshotMetadataMatchesStoredRow(snapshot, row));
 }
 
 /**

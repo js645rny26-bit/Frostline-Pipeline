@@ -199,7 +199,7 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     "Baseball Savant expected_statistics CSV, type=pitcher, min=1",
     "EVERY_PREGAME_RUN",
     "SOURCE_ACQUISITION_LOG source hash/data-through/schema/MLBAM coverage",
-    "The untouched CSV is retained before feature engineering. xERA may fill a missing FIP/ERA value only at 100+ PA; xwOBA/xSLG remain in the correlated contact-quality family and are not second votes.",
+    "The untouched CSV is retained before feature engineering. The season leaderboard is withheld from pregame consumers unless its evidence-through date is source-proven at D-1 or earlier. Only a cutoff-verified xERA may fill a missing FIP/ERA value at 100+ PA; xwOBA/xSLG remain in the correlated contact-quality family and are not second votes.",
     "SAVANT_PITCHER_EXPECTED",
   ),
   SOURCE(
@@ -386,7 +386,7 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     layer: "BASEBALL_MODEL", outputClass: "ACTIVE_INPUT", operationalStatus: "ACTIVE",
     definition: "FIP primary, ERA fallback, then sample-gated Savant xERA only when neither traditional field exists; applies one central starter-quality multiplier over effective starter innings.",
     statisticalWindow: "Season to date", gameWindow: "STARTER_WINDOW",
-    primarySource: "SOURCE_MLB_PITCHER_SEASON", fallbackSource: "SOURCE_SAVANT_PITCHER_EXPECTED xERA at 100+ PA, then neutral league baseline factor",
+    primarySource: "SOURCE_MLB_PITCHER_SEASON", fallbackSource: "Cutoff-verified SOURCE_SAVANT_PITCHER_EXPECTED xERA at 100+ PA, then neutral league baseline factor",
     refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "DAILY_MATCHUPS AK:AP + GAME_SUMMARY starter components",
     workbookLocation: "DAILY_MATCHUPS AK:AP; GAME_SUMMARY Starter_Attack_Runs", feedsActiveProjection: "YES", feedsDecisionBoard: "YES",
     correlationFamily: "STARTER_QUALITY", missingBehavior: "Neutral baseline rather than fabricated pitcher quality.",
@@ -430,7 +430,7 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     layer: "BASEBALL_MODEL", outputClass: "ACTIVE_INPUT", operationalStatus: "ACTIVE",
     definition: "Available relievers' season ERA, with xERA only for an arm missing ERA at 100+ PA, weighted by L7 innings history or L5 appearances fallback, applied to inherited bullpen innings.",
     statisticalWindow: "Season ERA; prior 7 days innings/games, L5 appearance fallback", gameWindow: "BULLPEN_WINDOW",
-    primarySource: "SOURCE_MLB_PITCHER_SEASON + SOURCE_INSIDE_THE_PEN", fallbackSource: "SOURCE_SAVANT_PITCHER_EXPECTED xERA for a missing ERA, then L5 appearances / neutral bullpen factor",
+    primarySource: "SOURCE_MLB_PITCHER_SEASON + SOURCE_INSIDE_THE_PEN", fallbackSource: "Cutoff-verified SOURCE_SAVANT_PITCHER_EXPECTED xERA for a missing ERA, then L5 appearances / neutral bullpen factor",
     refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "BULLPEN_USAGE_DAILY E:F, J:U + GAME_SUMMARY bullpen continuation",
     workbookLocation: "BULLPEN_USAGE_DAILY; GAME_SUMMARY Bullpen_Continuation_Runs", feedsActiveProjection: "YES", feedsDecisionBoard: "YES",
     correlationFamily: "BULLPEN_QUALITY", missingBehavior: "Minimum-arm requirement or neutral baseline.",
@@ -807,8 +807,15 @@ async function collectSourceObservations(
   const retainedSourceRows = sourceRows.filter((row) =>
     sourceRawStorageIndex >= 0 && text(row[sourceRawStorageIndex]) === "STORED",
   );
+  const latestRetainedSourceRow = retainedSourceRows
+    .slice()
+    .sort((left, right) => text(left[sourceFetchIndex]).localeCompare(text(right[sourceFetchIndex])))
+    .at(-1);
+  const latestRetainedSourceStatus = sourceStatusIndex >= 0
+    ? text(latestRetainedSourceRow?.[sourceStatusIndex])
+    : "";
   observations.set("SAVANT_PITCHER_EXPECTED", {
-    date: retainedSourceRows.length > 0 ? date : "",
+    date: latestRetainedSourceStatus === "CURRENT" ? date : "",
     timestamp: sourceFetchIndex >= 0
       ? retainedSourceRows.map((row) => text(row[sourceFetchIndex])).filter(Boolean).sort().at(-1) ?? ""
       : "",
@@ -816,9 +823,9 @@ async function collectSourceObservations(
       ? sourceRows.length > 0
         ? "RETENTION_INCOMPLETE"
         : "NOT_MATERIALIZED_FOR_SLATE"
-      : sourceStatusIndex >= 0
-        ? text(retainedSourceRows.at(-1)?.[sourceStatusIndex]) || `CURRENT_MATERIALIZED (${retainedSourceRows.length})`
-        : `CURRENT_MATERIALIZED (${retainedSourceRows.length})`,
+      : latestRetainedSourceStatus !== "CURRENT"
+        ? `${latestRetainedSourceStatus || "UNAVAILABLE"}_MATERIALIZED_NOT_PREGAME_ADMISSIBLE (${retainedSourceRows.length})`
+        : `CURRENT_MATERIALIZED (1)`,
   });
   const pitchLevelSourceRows = sourceLog.rows.filter((row) =>
     sourceIdIndex >= 0 &&
