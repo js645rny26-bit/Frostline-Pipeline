@@ -144,9 +144,9 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "AUDIT",
     timing: "Append for every legitimate pre-first-pitch projection snapshot (Module 09b)",
     purpose:
-      "Preserves current-versus-BVH candidate team runs and the exact starter-window matchup factors, coverage, hand, and cutoff lineage.",
+      "Preserves the former coarse-hand control versus active prospective BVH team runs and the exact starter-window evidence, coverage, hand, and cutoff lineage.",
     boardRelationship:
-      "BUILD_TEST_COPY only until commissioning. No board, vehicle, market, or authorization consumer.",
+      "BVH feeds the price-blind projection only through the existing starter-window handedness slot. It is not a separate board vote and never reads market evidence.",
     readNote:
       "Use for regression and manual high-delta review; opener-chain uncertainty and missing identities must remain visible.",
   },

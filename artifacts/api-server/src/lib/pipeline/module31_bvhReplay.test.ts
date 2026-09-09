@@ -11,7 +11,7 @@ function row(headers: readonly string[], values: Record<string, unknown>): unkno
 function candidate(overrides: Record<string, unknown> = {}): unknown[] {
   return row(BVH_PROJECTION_HISTORY_HEADERS, {
     Date: "2026-09-08", Game_ID: "20260908_AAA_BBB", Snapshot_TS: "2026-09-08T20:00:00.000Z",
-    BVH_Version: "1.0.0", Integration_Status: "BUILD_TEST_COPY", Active_Input: "NO",
+    BVH_Version: "1.0.0", Integration_Status: "ACTIVE_PROSPECTIVE_V1", Active_Input: "YES",
     Away_Opposing_Starter_Hand: "R", Home_Opposing_Starter_Hand: "L",
     Away_BVH_Coverage: 0.8, Home_BVH_Coverage: 0.7, Away_BVH_Identity_Coverage: 1, Home_BVH_Identity_Coverage: 1,
     Away_BVH_Chain_Uncertainty: "FALSE", Home_BVH_Chain_Uncertainty: "FALSE",

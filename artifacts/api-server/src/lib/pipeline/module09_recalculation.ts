@@ -60,6 +60,7 @@ import {
 } from "./module02j_batterVsHand.js";
 import {
   BVH_ACTIVE_INPUT,
+  BVH_PROJECTION_STATUS,
   appendBVHProjectionHistory,
   isBVHProfileUsable,
   mapBVHStarterWindowFactor,
@@ -1013,6 +1014,29 @@ export interface GameSummaryRow {
    * Must not independently manufacture an Over thesis.
    */
   environment_run_adjustment: number;
+  // ── BVH V1 prospective active/control provenance ──
+  bvh_version?: string;
+  bvh_integration_status?: string;
+  bvh_active_input?: "YES" | "NO";
+  bvh_away_opposing_starter_hand?: string;
+  bvh_home_opposing_starter_hand?: string;
+  bvh_away_status?: string;
+  bvh_home_status?: string;
+  /** Immutable slot-level MLBAM/raw/prior/weight/shrunk evidence vectors. */
+  bvh_away_evidence_vector?: string;
+  bvh_home_evidence_vector?: string;
+  bvh_away_matchup_factor?: number;
+  bvh_home_matchup_factor?: number;
+  bvh_control_away_runs?: number;
+  bvh_control_home_runs?: number;
+  bvh_control_total?: number;
+  bvh_active_away_runs?: number;
+  bvh_active_home_runs?: number;
+  bvh_active_total?: number;
+  bvh_requested_through_date?: string;
+  bvh_actual_data_through_date?: string;
+  bvh_freshness_status?: string;
+  bvh_deterministic_hash?: string;
 }
 
 export interface Module09Result {
@@ -1300,9 +1324,6 @@ export async function verifyRecalculation(
     );
     const awayBaselineRate = awayOffenseCenter.active_offense_center;
     const homeBaselineRate = homeOffenseCenter.active_offense_center;
-    const awayAdjFinal = parseFloat((awayBaselineRate * cappedMult).toFixed(3));
-    const homeAdjFinal = parseFloat((homeBaselineRate * cappedMult).toFixed(3));
-
     // Away team bats against HOME pitcher; home team bats against AWAY pitcher.
     // The active trunk keeps starter quality, traffic/conversion, damage, and
     // resulting bullpen exposure distinct instead of collapsing all of them
@@ -1374,8 +1395,15 @@ export async function verifyRecalculation(
       starter_window_matchup_factor: homeBVHMatchupFactor,
     }) : homeRunProjection;
 
+    // BVH replaces the fixed handedness approximation only when that side's
+    // evidence is usable. Any fallback to the former coarse path is explicit
+    // in the frozen BVH status/evidence rather than becoming a neutral zero.
     const selectedAwayProjection = BVH_ACTIVE_INPUT && awayBVHAvailable ? awayBVHCandidate : awayRunProjection;
     const selectedHomeProjection = BVH_ACTIVE_INPUT && homeBVHAvailable ? homeBVHCandidate : homeRunProjection;
+    const selectedAwayOffenseCenter = BVH_ACTIVE_INPUT && awayBVHAvailable
+      ? awayBVHOffenseCenter : awayOffenseCenter;
+    const selectedHomeOffenseCenter = BVH_ACTIVE_INPUT && homeBVHAvailable
+      ? homeBVHOffenseCenter : homeOffenseCenter;
     const projAway = selectedAwayProjection.projected_runs;
     const projHome = selectedHomeProjection.projected_runs;
     const projTotal = parseFloat((projAway + projHome).toFixed(2));
@@ -1412,36 +1440,36 @@ export async function verifyRecalculation(
     // mutually moderated rather than bolted on as independent tail bonuses.
     const starterAttackRuns = parseFloat(
       (
-        awayRunProjection.starter_attack_runs +
-        homeRunProjection.starter_attack_runs
+        selectedAwayProjection.starter_attack_runs +
+        selectedHomeProjection.starter_attack_runs
       ).toFixed(2),
     );
     const bullpenContinuationRuns = parseFloat(
       (
-        awayRunProjection.bullpen_continuation_runs +
-        homeRunProjection.bullpen_continuation_runs
+        selectedAwayProjection.bullpen_continuation_runs +
+        selectedHomeProjection.bullpen_continuation_runs
       ).toFixed(2),
     );
     const trafficConversionRuns = parseFloat(
       (
-        awayRunProjection.traffic_conversion_runs +
-        homeRunProjection.traffic_conversion_runs
+        selectedAwayProjection.traffic_conversion_runs +
+        selectedHomeProjection.traffic_conversion_runs
       ).toFixed(2),
     );
     const hrXbhDamageRuns = parseFloat(
       (
-        awayRunProjection.hr_xbh_damage_runs +
-        homeRunProjection.hr_xbh_damage_runs
+        selectedAwayProjection.hr_xbh_damage_runs +
+        selectedHomeProjection.hr_xbh_damage_runs
       ).toFixed(2),
     );
     const baseballOnlyProj = parseFloat(
       (
-        awayRunProjection.baseball_only_runs +
-        homeRunProjection.baseball_only_runs
+        selectedAwayProjection.baseball_only_runs +
+        selectedHomeProjection.baseball_only_runs
       ).toFixed(2),
     );
     const baselineOffRuns = parseFloat(
-      (awayBaselineRate + homeBaselineRate).toFixed(2),
+      (selectedAwayOffenseCenter.active_offense_center + selectedHomeOffenseCenter.active_offense_center).toFixed(2),
     );
     // Environment contribution = projected_total minus all baseball components.
     const envRunAdj = parseFloat((projTotal - baseballOnlyProj).toFixed(2));
@@ -1474,12 +1502,12 @@ export async function verifyRecalculation(
       home_offense_rate_used: homeOff.rate_used,
       away_offense_source_status: awayOff.source_status,
       home_offense_source_status: homeOff.source_status,
-      away_latent_lineup_rate: awayOffenseCenter.latent_lineup_rate,
-      home_latent_lineup_rate: homeOffenseCenter.latent_lineup_rate,
-      away_recent_form_multiplier: awayOffenseCenter.recent_form_multiplier,
-      home_recent_form_multiplier: homeOffenseCenter.recent_form_multiplier,
-      away_active_offense_center: awayOffenseCenter.active_offense_center,
-      home_active_offense_center: homeOffenseCenter.active_offense_center,
+      away_latent_lineup_rate: selectedAwayOffenseCenter.latent_lineup_rate,
+      home_latent_lineup_rate: selectedHomeOffenseCenter.latent_lineup_rate,
+      away_recent_form_multiplier: selectedAwayOffenseCenter.recent_form_multiplier,
+      home_recent_form_multiplier: selectedHomeOffenseCenter.recent_form_multiplier,
+      away_active_offense_center: selectedAwayOffenseCenter.active_offense_center,
+      home_active_offense_center: selectedHomeOffenseCenter.active_offense_center,
       // Park / weather audit (raw uncapped values for traceability)
       park_runs_pct: runMult.park_runs_pct,
       park_multiplier: runMult.park_multiplier,
@@ -1493,6 +1521,9 @@ export async function verifyRecalculation(
       environment_certainty: runMult.environment_certainty,
       weather_vehicle_status: runMult.weather_vehicle_status,
       // Lineup strength audit
+      // Retain the legacy factor on this backwards-compatible audit field so
+      // existing shadow modules do not silently change semantics. The active
+      // BVH factor is frozen separately and consumed only in the live starter window.
       away_lineup_factor: awayLineup.factor,
       home_lineup_factor: homeLineup.factor,
       away_lineup_weighted_ops: awayLineup.weighted_ops,
@@ -1506,17 +1537,17 @@ export async function verifyRecalculation(
       away_lineup_xwoba_coverage: awayLineup.xwoba_coverage,
       home_lineup_xwoba_coverage: homeLineup.xwoba_coverage,
       away_pitcher_effective_innings:
-        homeRunProjection.effective_starter_innings,
+        selectedHomeProjection.effective_starter_innings,
       home_pitcher_effective_innings:
-        awayRunProjection.effective_starter_innings,
-      away_bullpen_exposure_innings: homeRunProjection.bullpen_exposure_innings,
-      home_bullpen_exposure_innings: awayRunProjection.bullpen_exposure_innings,
-      away_traffic_matchup_factor: awayRunProjection.traffic_matchup_factor,
-      home_traffic_matchup_factor: homeRunProjection.traffic_matchup_factor,
-      away_damage_matchup_factor: awayRunProjection.damage_matchup_factor,
-      home_damage_matchup_factor: homeRunProjection.damage_matchup_factor,
-      away_matchup_profile_status: awayRunProjection.matchup_profile_status,
-      home_matchup_profile_status: homeRunProjection.matchup_profile_status,
+        selectedAwayProjection.effective_starter_innings,
+      away_bullpen_exposure_innings: selectedHomeProjection.bullpen_exposure_innings,
+      home_bullpen_exposure_innings: selectedAwayProjection.bullpen_exposure_innings,
+      away_traffic_matchup_factor: selectedAwayProjection.traffic_matchup_factor,
+      home_traffic_matchup_factor: selectedHomeProjection.traffic_matchup_factor,
+      away_damage_matchup_factor: selectedAwayProjection.damage_matchup_factor,
+      home_damage_matchup_factor: selectedHomeProjection.damage_matchup_factor,
+      away_matchup_profile_status: selectedAwayProjection.matchup_profile_status,
+      home_matchup_profile_status: selectedHomeProjection.matchup_profile_status,
       proj_run_diff: parseFloat((projAway - projHome).toFixed(2)),
       away_starter_quality: parseFloat(awayQual.toFixed(4)),
       home_starter_quality: parseFloat(homeQual.toFixed(4)),
@@ -1532,6 +1563,27 @@ export async function verifyRecalculation(
       hr_xbh_damage_runs: hrXbhDamageRuns,
       baseball_only_projection: baseballOnlyProj, // = starter + bullpen + traffic + HR/XBH
       environment_run_adjustment: envRunAdj,
+      bvh_version: bvhDataset?.version ?? "1.0.0",
+      bvh_integration_status: BVH_PROJECTION_STATUS,
+      bvh_active_input: BVH_ACTIVE_INPUT ? "YES" : "NO",
+      bvh_away_opposing_starter_hand: homePitHand ?? "",
+      bvh_home_opposing_starter_hand: awayPitHand ?? "",
+      bvh_away_status: awayBVHAvailable ? awayBVHProfile.status : `FALLBACK_COARSE_PLATOON:${awayBVHProfile.status}`,
+      bvh_home_status: homeBVHAvailable ? homeBVHProfile.status : `FALLBACK_COARSE_PLATOON:${homeBVHProfile.status}`,
+      bvh_away_evidence_vector: awayBVHProfile.driver_trace,
+      bvh_home_evidence_vector: homeBVHProfile.driver_trace,
+      bvh_away_matchup_factor: awayBVHAvailable ? awayBVHMatchupFactor : 1,
+      bvh_home_matchup_factor: homeBVHAvailable ? homeBVHMatchupFactor : 1,
+      bvh_control_away_runs: awayRunProjection.projected_runs,
+      bvh_control_home_runs: homeRunProjection.projected_runs,
+      bvh_control_total: Number((awayRunProjection.projected_runs + homeRunProjection.projected_runs).toFixed(2)),
+      bvh_active_away_runs: projAway,
+      bvh_active_home_runs: projHome,
+      bvh_active_total: projTotal,
+      bvh_requested_through_date: bvhDataset?.requested_through_date ?? "",
+      bvh_actual_data_through_date: bvhDataset?.actual_data_through_date ?? "",
+      bvh_freshness_status: bvhDataset?.freshness_status ?? "NO_SOURCE_DATA",
+      bvh_deterministic_hash: bvhDataset?.deterministic_hash ?? "",
     });
 
     gsRows.push([
@@ -1541,10 +1593,10 @@ export async function verifyRecalculation(
       g.home_team.team_abbr ?? "", // D: Home_Team
       g.away_pitcher.name ?? "", // E: Away_Pitcher
       g.home_pitcher.name ?? "", // F: Home_Pitcher
-      awayLineup.factor, // G: Away_Lineup_Factor (weighted OPS multiplier)
-      homeLineup.factor, // H: Home_Lineup_Factor (weighted OPS multiplier)
-      parseFloat(awayAdjFinal.toFixed(2)), // I: Away_Adjusted_Scoring_Rate (post-lineup)
-      parseFloat(homeAdjFinal.toFixed(2)), // J: Home_Adjusted_Scoring_Rate (post-lineup)
+      awayLineup.factor, // G: legacy/audit lineup factor; active BVH is starter-window-only
+      homeLineup.factor, // H: legacy/audit lineup factor; active BVH is starter-window-only
+      parseFloat((selectedAwayOffenseCenter.active_offense_center * cappedMult).toFixed(2)), // I: active pre-pitch-window rate
+      parseFloat((selectedHomeOffenseCenter.active_offense_center * cappedMult).toFixed(2)), // J: active pre-pitch-window rate
       projAway, // K: Projected_Away_Runs
       projHome, // L: Projected_Home_Runs
       projTotal, // M: Projected_Total_Runs
@@ -1595,22 +1647,22 @@ export async function verifyRecalculation(
       homeLineup.coverage, // BA: Home_Lineup_Coverage
       awayLineup.xwoba_coverage, // BB: Away_Lineup_xwOBA_Coverage
       homeLineup.xwoba_coverage, // BC: Home_Lineup_xwOBA_Coverage
-      homeRunProjection.effective_starter_innings, // BD: Away_Pitcher_Effective_IP
-      awayRunProjection.effective_starter_innings, // BE: Home_Pitcher_Effective_IP
-      homeRunProjection.bullpen_exposure_innings, // BF: Away_Bullpen_Exposure_IP
-      awayRunProjection.bullpen_exposure_innings, // BG: Home_Bullpen_Exposure_IP
-      awayRunProjection.traffic_matchup_factor, // BH: Away_Traffic_Matchup_Factor
-      homeRunProjection.traffic_matchup_factor, // BI: Home_Traffic_Matchup_Factor
-      awayRunProjection.damage_matchup_factor, // BJ: Away_Damage_Matchup_Factor
-      homeRunProjection.damage_matchup_factor, // BK: Home_Damage_Matchup_Factor
-      awayRunProjection.matchup_profile_status, // BL: Away_Matchup_Profile_Status
-      homeRunProjection.matchup_profile_status, // BM: Home_Matchup_Profile_Status
-      awayOffenseCenter.latent_lineup_rate, // BN: Away_Latent_Lineup_Rate
-      homeOffenseCenter.latent_lineup_rate, // BO: Home_Latent_Lineup_Rate
-      awayOffenseCenter.recent_form_multiplier, // BP: Away_Recent_Form_Multiplier
-      homeOffenseCenter.recent_form_multiplier, // BQ: Home_Recent_Form_Multiplier
-      awayOffenseCenter.active_offense_center, // BR: Away_Active_Offense_Center
-      homeOffenseCenter.active_offense_center, // BS: Home_Active_Offense_Center
+      selectedHomeProjection.effective_starter_innings, // BD: Away_Pitcher_Effective_IP
+      selectedAwayProjection.effective_starter_innings, // BE: Home_Pitcher_Effective_IP
+      selectedHomeProjection.bullpen_exposure_innings, // BF: Away_Bullpen_Exposure_IP
+      selectedAwayProjection.bullpen_exposure_innings, // BG: Home_Bullpen_Exposure_IP
+      selectedAwayProjection.traffic_matchup_factor, // BH: Away_Traffic_Matchup_Factor
+      selectedHomeProjection.traffic_matchup_factor, // BI: Home_Traffic_Matchup_Factor
+      selectedAwayProjection.damage_matchup_factor, // BJ: Away_Damage_Matchup_Factor
+      selectedHomeProjection.damage_matchup_factor, // BK: Home_Damage_Matchup_Factor
+      selectedAwayProjection.matchup_profile_status, // BL: Away_Matchup_Profile_Status
+      selectedHomeProjection.matchup_profile_status, // BM: Home_Matchup_Profile_Status
+      selectedAwayOffenseCenter.latent_lineup_rate, // BN: Away_Latent_Lineup_Rate
+      selectedHomeOffenseCenter.latent_lineup_rate, // BO: Home_Latent_Lineup_Rate
+      selectedAwayOffenseCenter.recent_form_multiplier, // BP: Away_Recent_Form_Multiplier
+      selectedHomeOffenseCenter.recent_form_multiplier, // BQ: Home_Recent_Form_Multiplier
+      selectedAwayOffenseCenter.active_offense_center, // BR: Away_Active_Offense_Center
+      selectedHomeOffenseCenter.active_offense_center, // BS: Home_Active_Offense_Center
       awayQuality.source, // BT: Away_Starter_Quality_Source
       homeQuality.source, // BU: Home_Starter_Quality_Source
       awayBullpenQuality.source, // BV: Away_Bullpen_Quality_Source

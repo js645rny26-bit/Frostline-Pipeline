@@ -22,9 +22,9 @@ test("BVH mapping reuses the commissioned lineup blend and attenuates projected 
   assert.equal(mapBVHStarterWindowFactor(profile, "projected"), 1.024);
 });
 
-test("unavailable BVH evidence is neutral and the test copy cannot alter active projection", () => {
+test("unavailable BVH evidence is neutral while commissioned BVH is active prospectively", () => {
   assert.equal(mapBVHStarterWindowFactor({ ...profile, status: "NO_SOURCE_DATA" }, "official"), 1);
-  assert.equal(BVH_ACTIVE_INPUT, false);
+  assert.equal(BVH_ACTIVE_INPUT, true);
 });
 
 test("BVH availability is side-local so one unresolved pitching hand cannot erase the other side", () => {

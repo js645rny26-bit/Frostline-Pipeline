@@ -188,8 +188,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      shrinkage-aware OPS splits from retained Savant pitches; materializes
  *      TODAY_LINEUPS lineage and an isolated starter-window projection audit.
  *      Active projection remains unchanged until commissioning is complete.
+ *  v59 (2026-09-09): BVH V1 prospectively replaces the fixed coarse
+ *      handedness approximation inside the starter window only. New frozen
+ *      packets preserve exact hitter evidence plus the pre-BVH control;
+ *      legacy packets remain untouched and non-replayable for BVH.
  */
-export const WORKBOOK_SCHEMA_VERSION = 58;
+export const WORKBOOK_SCHEMA_VERSION = 59;
 
 export interface ColumnDef {
   name: string;
@@ -455,6 +459,31 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "SWE_Role_Prior_Used",
   "SWE_Data_Through_Date",
   "SWE_Snapshot_Primary",
+  "BVH_Version",
+  "BVH_Integration_Status",
+  "BVH_Active_Input",
+  "BVH_Research_Population_Status",
+  "BVH_Away_Opposing_Starter_Hand",
+  "BVH_Home_Opposing_Starter_Hand",
+  "BVH_Away_Status",
+  "BVH_Home_Status",
+  "BVH_Away_Evidence_Vector",
+  "BVH_Home_Evidence_Vector",
+  "BVH_Away_Matchup_Factor",
+  "BVH_Home_Matchup_Factor",
+  "BVH_Control_Away_Runs",
+  "BVH_Control_Home_Runs",
+  "BVH_Control_Total",
+  "BVH_Active_Away_Runs",
+  "BVH_Active_Home_Runs",
+  "BVH_Active_Total",
+  "BVH_Delta_Away",
+  "BVH_Delta_Home",
+  "BVH_Delta_Total",
+  "BVH_Requested_Through_Date",
+  "BVH_Actual_Data_Through_Date",
+  "BVH_Freshness_Status",
+  "BVH_Deterministic_Hash",
 ] as const;
 
 const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
@@ -533,6 +562,17 @@ const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
   "Home_Active_Offense_Center",
   "Separation_Query_Line",
   "Separation_Continuous",
+  "BVH_Away_Matchup_Factor",
+  "BVH_Home_Matchup_Factor",
+  "BVH_Control_Away_Runs",
+  "BVH_Control_Home_Runs",
+  "BVH_Control_Total",
+  "BVH_Active_Away_Runs",
+  "BVH_Active_Home_Runs",
+  "BVH_Active_Total",
+  "BVH_Delta_Away",
+  "BVH_Delta_Home",
+  "BVH_Delta_Total",
 ]);
 
 const PREGAME_PACKET_HISTORY_COLUMNS: ColumnDef[] =
@@ -12981,7 +13021,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "BVH_PROJECTION_HISTORY_V1",
     description:
-      "Immutable pregame comparison of the commissioned projection and the isolated BVH starter-window candidate. It preserves exact lineup coverage, hand, factor, and source-cutoff lineage and cannot authorize a decision.",
+      "Immutable pregame comparison of the former coarse-hand control and active prospective BVH V1 starter-window projection. It preserves exact lineup evidence, hand, factor, and source-cutoff lineage; it is not an independent decision vote.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(

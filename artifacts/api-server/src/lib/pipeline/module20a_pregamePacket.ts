@@ -286,6 +286,33 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "SWE_Role_Prior_Used",
   "SWE_Data_Through_Date",
   "SWE_Snapshot_Primary",
+  // BVH V1 prospective control/evidence boundary. Pre-v59 historical rows stay
+  // blank because their frozen packets did not retain hitter identities.
+  "BVH_Version",
+  "BVH_Integration_Status",
+  "BVH_Active_Input",
+  "BVH_Research_Population_Status",
+  "BVH_Away_Opposing_Starter_Hand",
+  "BVH_Home_Opposing_Starter_Hand",
+  "BVH_Away_Status",
+  "BVH_Home_Status",
+  "BVH_Away_Evidence_Vector",
+  "BVH_Home_Evidence_Vector",
+  "BVH_Away_Matchup_Factor",
+  "BVH_Home_Matchup_Factor",
+  "BVH_Control_Away_Runs",
+  "BVH_Control_Home_Runs",
+  "BVH_Control_Total",
+  "BVH_Active_Away_Runs",
+  "BVH_Active_Home_Runs",
+  "BVH_Active_Total",
+  "BVH_Delta_Away",
+  "BVH_Delta_Home",
+  "BVH_Delta_Total",
+  "BVH_Requested_Through_Date",
+  "BVH_Actual_Data_Through_Date",
+  "BVH_Freshness_Status",
+  "BVH_Deterministic_Hash",
 ] as const;
 
 export const PREGAME_PACKET_HISTORY_COLS =
@@ -874,6 +901,36 @@ export function buildPregamePacketInputs(
       blank(sweState?.away.role_prior_used ?? sweState?.home.role_prior_used),
       sweState?.away.data_through_date ?? sweState?.home.data_through_date ?? "",
       "",
+      summary.bvh_version ?? "1.0.0",
+      summary.bvh_integration_status ?? "",
+      summary.bvh_active_input ?? "NO",
+      summary.bvh_active_input === "YES"
+        ? "PROSPECTIVE_COUNTERFACTUAL"
+        : "NON_REPLAYABLE_FOR_BVH — FROZEN_PACKETS_LACK_HITTER_IDENTITY",
+      summary.bvh_away_opposing_starter_hand ?? "",
+      summary.bvh_home_opposing_starter_hand ?? "",
+      summary.bvh_away_status ?? "",
+      summary.bvh_home_status ?? "",
+      summary.bvh_away_evidence_vector ?? "",
+      summary.bvh_home_evidence_vector ?? "",
+      blank(summary.bvh_away_matchup_factor),
+      blank(summary.bvh_home_matchup_factor),
+      blank(summary.bvh_control_away_runs),
+      blank(summary.bvh_control_home_runs),
+      blank(summary.bvh_control_total),
+      blank(summary.bvh_active_away_runs),
+      blank(summary.bvh_active_home_runs),
+      blank(summary.bvh_active_total),
+      summary.bvh_active_away_runs === undefined || summary.bvh_control_away_runs === undefined
+        ? "" : Number((summary.bvh_active_away_runs - summary.bvh_control_away_runs).toFixed(2)),
+      summary.bvh_active_home_runs === undefined || summary.bvh_control_home_runs === undefined
+        ? "" : Number((summary.bvh_active_home_runs - summary.bvh_control_home_runs).toFixed(2)),
+      summary.bvh_active_total === undefined || summary.bvh_control_total === undefined
+        ? "" : Number((summary.bvh_active_total - summary.bvh_control_total).toFixed(2)),
+      summary.bvh_requested_through_date ?? "",
+      summary.bvh_actual_data_through_date ?? "",
+      summary.bvh_freshness_status ?? "NO_SOURCE_DATA",
+      summary.bvh_deterministic_hash ?? "",
     ];
     return [
       {

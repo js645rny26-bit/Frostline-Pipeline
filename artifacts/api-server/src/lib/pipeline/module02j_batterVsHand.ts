@@ -461,8 +461,15 @@ export function buildBVHLineupProfile(
     if (estimate.status === "NO_SPLIT_SAMPLE") noSample++;
     const stableOps = batterStatsMap.get(id)?.ops ?? league;
     const factor = stableOps > 0 ? estimate.shrunk_ops / stableOps : 1;
+    // This vector is the prospective replay boundary. Preserve the raw split,
+    // selected prior, shrinkage weight, and final value now; never reconstruct
+    // them later from a refreshed Savant corpus.
     drivers.push(
-      `${slot + 1}:${id}:PA=${estimate.raw.pa}:SHRUNK=${estimate.shrunk_ops}:STABLE=${round(stableOps)}:RATIO=${round(factor)}:${estimate.status}`,
+      `${slot + 1}:${id}:HAND=${hand}:RAW_PA=${estimate.raw.pa}:RAW_OBP=${estimate.raw.obp ?? "MISSING"}`
+      + `:RAW_SLG=${estimate.raw.slg ?? "MISSING"}:RAW_OPS=${estimate.raw.ops ?? "MISSING"}`
+      + `:PRIOR=${estimate.prior_ops}:PRIOR_SOURCE=${estimate.prior_source}`
+      + `:WEIGHT=${estimate.shrinkage_weight}:SHRUNK=${estimate.shrunk_ops}`
+      + `:STABLE=${round(stableOps)}:RATIO=${round(factor)}:STATUS=${estimate.status}`,
     );
     opsSum += estimate.shrunk_ops * weight;
     factorSum += factor * weight;

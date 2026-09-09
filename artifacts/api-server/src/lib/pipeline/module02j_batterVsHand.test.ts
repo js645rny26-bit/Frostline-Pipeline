@@ -151,7 +151,9 @@ test("BVH lineup aggregation uses exact MLBAM identity, established weights, and
   assert.ok(profile.weighted_shrunk_ops !== null);
   assert.ok(profile.performance_matchup_factor > 0);
   assert.equal(profile.missing_hitters.length, 0);
-  assert.match(profile.driver_trace, /1:101:PA=60/);
+  assert.match(profile.driver_trace, /1:101:HAND=R:RAW_PA=60/);
+  assert.match(profile.driver_trace, /RAW_OBP=.*:RAW_SLG=.*:RAW_OPS=.*/);
+  assert.match(profile.driver_trace, /PRIOR=.*:PRIOR_SOURCE=LEAGUE_BASELINE:WEIGHT=.*:SHRUNK=.*/);
 });
 
 test("TODAY_LINEUPS materializes MLBAM identity, both shrunk splits, raw PA, status, and prior source", () => {

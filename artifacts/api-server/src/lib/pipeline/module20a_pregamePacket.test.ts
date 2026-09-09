@@ -7,6 +7,7 @@ import {
   pregamePacketHistoryRange,
   PREGAME_PACKET_HISTORY_COLS,
   PREGAME_PACKET_HISTORY_HEADERS,
+  PREGAME_PACKET_HISTORY_INDEX,
   upsertPregamePacketRows,
   type PregamePacketInput,
 } from "./module20a_pregamePacket.js";
@@ -124,6 +125,42 @@ test("a board-locked decision still permits pre-first-pitch packet refresh", () 
   );
   assert.equal(frozen.rows[0]?.[5], "FROZEN_PREGAME");
   assert.equal(frozen.rows[0]?.[15], 8.8);
+});
+
+test("prospective BVH activation freezes full hitter evidence and the former projection control", () => {
+  const packets = buildPregamePacketInputs(
+    [{
+      date: "2026-09-09", game_id: "20260909_AAA_BBB", away_team: "AAA", home_team: "BBB",
+      projected_away_runs: 4.2, projected_home_runs: 4.7, projected_total_runs: 8.9,
+      bvh_version: "1.0.0", bvh_integration_status: "ACTIVE_PROSPECTIVE_V1", bvh_active_input: "YES",
+      bvh_away_opposing_starter_hand: "R", bvh_home_opposing_starter_hand: "L",
+      bvh_away_status: "AVAILABLE", bvh_home_status: "AVAILABLE",
+      bvh_away_evidence_vector: "1:101:HAND=R:RAW_PA=80:RAW_OBP=.340:RAW_SLG=.470:RAW_OPS=.810:PRIOR=.730:PRIOR_SOURCE=LEAGUE_BASELINE:WEIGHT=.348:SHRUNK=.758",
+      bvh_home_evidence_vector: "1:201:HAND=L:RAW_PA=60:RAW_OBP=.310:RAW_SLG=.420:RAW_OPS=.730:PRIOR=.700:PRIOR_SOURCE=PLAYER_HISTORICAL:WEIGHT=.286:SHRUNK=.709",
+      bvh_away_matchup_factor: 1.03, bvh_home_matchup_factor: .98,
+      bvh_control_away_runs: 4.1, bvh_control_home_runs: 4.8, bvh_control_total: 8.9,
+      bvh_active_away_runs: 4.2, bvh_active_home_runs: 4.7, bvh_active_total: 8.9,
+      bvh_requested_through_date: "2026-09-08", bvh_actual_data_through_date: "2026-09-08",
+      bvh_freshness_status: "CURRENT", bvh_deterministic_hash: "bvh-hash",
+    }] as never,
+    [{
+      legacy_game_id: "20260909_AAA_BBB", lock_status: "OPEN", market_line: 8.5,
+      run_id: "run", model_version: "test", direction: "OVER", vehicle_type: "GAME_TOTAL",
+      final_decision: "NO_CORE", core_blocker: "", confidence: 50, variance: 0,
+      truth_components: "", stability_components: "",
+    }] as never,
+    [{ legacy_game_id: "20260909_AAA_BBB", scheduled_utc_time: "2026-09-10T00:00:00.000Z" }] as never,
+    [], [], [],
+  );
+  const packet = packets[0]!.values;
+  const index = PREGAME_PACKET_HISTORY_INDEX;
+  assert.equal(packet[index.BVH_Active_Input], "YES");
+  assert.equal(packet[index.BVH_Research_Population_Status], "PROSPECTIVE_COUNTERFACTUAL");
+  assert.match(String(packet[index.BVH_Away_Evidence_Vector]), /RAW_PA=80.*PRIOR_SOURCE=LEAGUE_BASELINE.*WEIGHT=/);
+  assert.equal(packet[index.BVH_Control_Away_Runs], 4.1);
+  assert.equal(packet[index.BVH_Active_Away_Runs], 4.2);
+  assert.equal(packet[index.BVH_Delta_Away], .1);
+  assert.equal(packet[index.BVH_Deterministic_Hash], "bvh-hash");
 });
 
 test("an executable market overlay changes only market provenance, never price-blind projections", () => {
@@ -707,6 +744,16 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "SWE_Role_Prior_Used",
     "SWE_Data_Through_Date",
     "SWE_Snapshot_Primary",
+    "BVH_Version",
+    "BVH_Integration_Status",
+    "BVH_Active_Input",
+    "BVH_Research_Population_Status",
+    "BVH_Away_Evidence_Vector",
+    "BVH_Home_Evidence_Vector",
+    "BVH_Control_Total",
+    "BVH_Active_Total",
+    "BVH_Delta_Total",
+    "BVH_Deterministic_Hash",
   ])
     assert.ok(PREGAME_PACKET_HISTORY_HEADERS.includes(required as never));
 });
@@ -714,6 +761,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 58);
-  assert.equal(pregamePacketHistoryRange(5000), "A1:HA5000");
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 59);
+  assert.equal(pregamePacketHistoryRange(5000), "A1:HZ5000");
 });

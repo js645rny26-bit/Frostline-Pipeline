@@ -395,6 +395,7 @@ export async function repairWorkbookSchemaReference(
         "v56 (2026-09-07): PREGAME_PACKET_HISTORY freezes behavior-neutral collision compression observability, including pre-combination-cap tail, cap-bound status, and discarded magnitude.",
         "v57 (2026-09-07): Starter Workload Estimator V1 adds a frozen shadow workload object and paired innings replay while leaving active Expected_IP unchanged.",
         "v58 (2026-09-08): BVH V1 adds cutoff-safe PA-reduced batter-vs-hand evidence, fixed-k shrinkage provenance, TODAY_LINEUPS split fields, and an isolated starter-window counterfactual. BVH_ACTIVE_INPUT remains false until the test-copy, replay, and review gates pass.",
+        "v59 (2026-09-09): BVH V1 is ACTIVE prospectively inside the existing starter-window handedness slot. Every new packet freezes MLBAM/raw/prior/weight/shrunk evidence and the former projection as a counterfactual control; pre-v59 packets remain untouched and NON_REPLAYABLE_FOR_BVH.",
     ],
     [
       "Workbook_Purpose",
