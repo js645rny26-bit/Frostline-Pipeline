@@ -28,6 +28,18 @@ import {
   loadSWEAppearanceHistory,
   persistSWEAppearanceHistory,
 } from "./module02i_starterWorkloadHistory.js";
+import {
+  buildBVHDatasetFromDailyAggregates,
+  deriveBVHDailyAggregates,
+  type BVHDataset,
+  type BVHPAIntegrity,
+} from "./module02j_batterVsHand.js";
+import {
+  loadBVHDailyHistory,
+  persistBVHDailyHistory,
+  selectCanonicalBVHDailyHistory,
+  writeBVHBatterSplits,
+} from "./module02j_batterVsHandHistory.js";
 import { persistSourceSnapshot } from "./module02_sourceSnapshots.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { trackLineMovement } from "./module05d_oddsHistory.js";
@@ -60,6 +72,7 @@ import { runDistributionWidthReplay, type DistributionWidthReplayResult } from "
 import { runSeparationGateAudit, type SeparationGateAuditResult } from "./module27_separationGateAudit.js";
 import { runDistributionBenchmark, type DistributionBenchmarkResult } from "./module28_distributionBenchmark.js";
 import { runGameTruthDistributionResearch, type GameTruthDistributionResearchResult } from "./module29_gameTruthDistributionResearch.js";
+import { runBVHProjectionReplay, type BVHReplayResult } from "./module31_bvhReplay.js";
 import { runStarterWorkloadReplay } from "./module30_starterWorkloadReplay.js";
 import {
   runFailureClassificationReplay,
@@ -533,6 +546,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   // raw daily event ledger before any future feature engineer can consume it;
   // retention failure is visible but cannot change today's baseball truth.
   let currentSWEAppearances: SWEAppearance[] = [];
+  let bvhDataset: BVHDataset | null = null;
+  let bvhIntegrity: BVHPAIntegrity | undefined;
   if (savantPitchLevel?.source_snapshot) {
     const snapshotWrite = await persistSourceSnapshot(
       savantPitchLevel.source_snapshot,
@@ -547,6 +562,21 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
         "Full pipeline: Savant pitch-level source was not retained; no pitch-level evidence is available",
       );
     } else {
+      const bvhDaily = deriveBVHDailyAggregates(savantPitchLevel.events);
+      bvhIntegrity = bvhDaily.integrity;
+      const bvhHistoryWrite = await persistBVHDailyHistory(
+        bvhDaily.aggregates,
+        snapshotWrite.snapshot_id,
+        savantPitchLevel.source_snapshot.fetch_timestamp_utc,
+        statcastDataThroughDate,
+        workbookId,
+      );
+      if (bvhHistoryWrite.errors.length > 0) {
+        logger.warn(
+          { errors: bvhHistoryWrite.errors, data_through_date: statcastDataThroughDate },
+          "Full pipeline: BVH daily derived history failed to persist",
+        );
+      }
       currentSWEAppearances = deriveSWEAppearances(
         savantPitchLevel.events,
         statcastDataThroughDate,
@@ -563,8 +593,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
         );
       }
       logger.info(
-        { events: savantPitchLevel.events.length, appearances: currentSWEAppearances.length, data_through_date: statcastDataThroughDate },
-        "Full pipeline: Savant pitch-level source retained and SWE appearance ledger prepared (shadow-only)",
+        { events: savantPitchLevel.events.length, appearances: currentSWEAppearances.length, bvh_rows: bvhDaily.aggregates.length, data_through_date: statcastDataThroughDate },
+        "Full pipeline: Savant pitch-level source retained; SWE and BVH derived ledgers prepared",
       );
     }
   } else if (savantPitchLevel) {
@@ -572,6 +602,18 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       { errors: savantPitchLevel.errors, data_through_date: statcastDataThroughDate },
       "Full pipeline: Savant pitch-level source unavailable (explicit evidence gap)",
     );
+  }
+
+  // BVH may use only immutable, cutoff-safe daily aggregates whose raw Savant
+  // source was retained first. An unavailable history is an explicit gap.
+  try {
+    const bvhHistory = selectCanonicalBVHDailyHistory(await loadBVHDailyHistory(workbookId));
+    bvhDataset = buildBVHDatasetFromDailyAggregates(bvhHistory, date, bvhIntegrity, [...batterIdSet]);
+    await writeBVHBatterSplits(bvhDataset, workbookId);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    bvhDataset = null;
+    logger.warn({ err: message }, "Full pipeline: BVH dataset unavailable; split evidence remains explicit gap");
   }
 
   // Sources can take long enough for an initially mutable game to enter the
@@ -595,6 +637,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     teamRunRates,
     lineMovement,
     feedWriteProtection,
+    bvhDataset,
+    rosterNameMap ?? new Map(),
   );
   const shadowSkipped: ShadowValidationResult = {
     status: "failure",
@@ -690,6 +734,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     statcastBatterStats?.stats ?? new Map(),
     statcastPitcherExpectedMap,
     recalculationProtection,
+    bvhDataset,
   );
   if (mod09.status === "error") {
     const mod09Errors = [
@@ -1196,6 +1241,7 @@ export interface DailySettlementResult {
   separation_gate_audit_status: SeparationGateAuditResult["status"];
   distribution_benchmark_status: DistributionBenchmarkResult["status"];
   game_truth_distribution_research_status: GameTruthDistributionResearchResult["status"];
+  bvh_projection_replay_status: BVHReplayResult["status"];
   packet_finalization_status: PregamePacketFinalizationResult["status"];
   full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
@@ -1215,6 +1261,7 @@ export interface DailySettlementResult {
   separation_gate_audit: SeparationGateAuditResult;
   distribution_benchmark: DistributionBenchmarkResult;
   game_truth_distribution_research: GameTruthDistributionResearchResult;
+  bvh_projection_replay: BVHReplayResult;
   packet_finalization: PregamePacketFinalizationResult;
   full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
@@ -1380,6 +1427,14 @@ export async function runDailySettlement(
       };
     },
   );
+
+  // Module 31 grades only a prospectively frozen BVH test-copy candidate.
+  // Absence or failure is research visibility, never a settlement or model
+  // failure, and settlement may not reconstruct a missing pregame candidate.
+  const bvh_projection_replay = await runBVHProjectionReplay(workbookId);
+  if (bvh_projection_replay.status === "failure") {
+    warnings.push(...bvh_projection_replay.errors.map((message) => `bvh_projection_replay: ${message}`));
+  }
 
   // Module 30 compares frozen SWE V1 innings estimates with the untouched
   // active role lookup after official detail exists. It is research-only and
@@ -1590,6 +1645,7 @@ export async function runDailySettlement(
     // report, but a tab-write failure cannot invalidate immutable settlement
     // rows or turn an otherwise valid settlement request into HTTP 500.
     { module: "MODULE_29_GAME_TRUTH_DISTRIBUTION_RESEARCH", status: game_truth_distribution_research.status === "failure" ? "warning" : "success" },
+    { module: "MODULE_31_BVH_PROJECTION_REPLAY", status: bvh_projection_replay.status === "failure" ? "warning" : "success" },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
@@ -1611,6 +1667,7 @@ export async function runDailySettlement(
   errors.push(...distribution_benchmark.errors.map((message) => `distribution_benchmark: ${message}`));
   warnings.push(...game_truth_distribution_research.warnings.map((message) => `game_truth_distribution_research: ${message}`));
   warnings.push(...game_truth_distribution_research.errors.map((message) => `game_truth_distribution_research: ${message}`));
+  warnings.push(...bvh_projection_replay.warnings.map((message) => `bvh_projection_replay: ${message}`));
 
   const failedCount = module_statuses.filter((module) => module.status === "failure").length;
   const incompleteCount = module_statuses.filter((module) => module.status !== "success").length;
@@ -1638,6 +1695,7 @@ export async function runDailySettlement(
       separation_gate_audit_status: separation_gate_audit.status,
       distribution_benchmark_status: distribution_benchmark.status,
       game_truth_distribution_research_status: game_truth_distribution_research.status,
+      bvh_projection_replay_status: bvh_projection_replay.status,
       packet_finalization_status: packet_finalization.status,
       full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
@@ -1673,6 +1731,7 @@ export async function runDailySettlement(
     separation_gate_audit_status: separation_gate_audit.status,
     distribution_benchmark_status: distribution_benchmark.status,
     game_truth_distribution_research_status: game_truth_distribution_research.status,
+    bvh_projection_replay_status: bvh_projection_replay.status,
     packet_finalization_status: packet_finalization.status,
     full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
@@ -1691,6 +1750,7 @@ export async function runDailySettlement(
     separation_gate_audit,
     distribution_benchmark,
     game_truth_distribution_research,
+    bvh_projection_replay,
     packet_finalization,
     full_ladder_sync,
     schema_documentation,

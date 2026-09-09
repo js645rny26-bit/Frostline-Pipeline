@@ -45,6 +45,11 @@ export interface ActiveTeamProjectionInput {
   lineup: ActiveLineupProfile;
   opposing_starter: ActiveStarterProfile;
   opposing_bullpen_quality: number;
+  /**
+   * Sample-aware batter-vs-hand modifier consumed only inside the starter
+   * window. Neutral/omitted = 1.0. It never describes bullpen innings.
+   */
+  starter_window_matchup_factor?: number;
 }
 
 /** Inputs used to build the active team-run center before pitching is applied. */
@@ -253,6 +258,13 @@ export function computeActiveTeamProjection(
   const expectedInnings = clamp(input.opposing_starter.expected_innings, 0, 9);
   const starterQuality = Math.max(input.opposing_starter.quality_factor, 0);
   const bullpenQuality = Math.max(input.opposing_bullpen_quality, 0);
+  const starterWindowMatchup = clamp(
+    valid(input.starter_window_matchup_factor)
+      ? input.starter_window_matchup_factor
+      : 1,
+    0.82,
+    1.18,
+  );
   const confidence = lineupConfidence(input.lineup);
 
   const lineupTraffic = lineupTrafficIndex(input.lineup);
@@ -303,7 +315,7 @@ export function computeActiveTeamProjection(
   const bullpenExposureInnings = round(9 - effectiveStarterInnings, 3);
 
   const starterAttackRuns =
-    baselineRate * (effectiveStarterInnings / 9) * starterQuality;
+    baselineRate * (effectiveStarterInnings / 9) * starterQuality * starterWindowMatchup;
   const trafficRuns = starterAttackRuns * trafficEffect;
   const damageRuns = (starterAttackRuns + trafficRuns) * damageEffect;
   const bullpenRuns =

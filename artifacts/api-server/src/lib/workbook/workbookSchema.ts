@@ -184,8 +184,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *  v57 (2026-09-07): Starter Workload Estimator V1 (SWE) freezes
  *      source-only pitcher-specific innings windows, shrinkage, and status
  *      beside active Expected_IP. Its paired innings replay is shadow-only.
+ *  v58 (2026-09-08): Batter-vs-Hand V1 derives PA-correct, cutoff-safe,
+ *      shrinkage-aware OPS splits from retained Savant pitches; materializes
+ *      TODAY_LINEUPS lineage and an isolated starter-window projection audit.
+ *      Active projection remains unchanged until commissioning is complete.
  */
-export const WORKBOOK_SCHEMA_VERSION = 57;
+export const WORKBOOK_SCHEMA_VERSION = 58;
 
 export interface ColumnDef {
   name: string;
@@ -224,7 +228,8 @@ export interface ColumnDef {
     | "MODULE_26"
     | "MODULE_27"
     | "MODULE_28"
-    | "MODULE_29"
+      | "MODULE_29"
+      | "MODULE_31"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -1841,22 +1846,24 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         exampleValue: "RF",
       },
       {
-        name: "vs_LHP_wRC_plus",
+        name: "vs_LHP_OPS",
         index: 7,
         type: "number",
         width: 100,
-        format: "0",
+        format: "0.000",
         filledBy: "MODULE_08",
-        exampleValue: "198",
+        description: "BVH V1 shrinkage-aware batter OPS versus LHP; raw PA and prior lineage are adjacent.",
+        exampleValue: "0.812",
       },
       {
-        name: "vs_RHP_wRC_plus",
+        name: "vs_RHP_OPS",
         index: 8,
         type: "number",
         width: 100,
-        format: "0",
+        format: "0.000",
         filledBy: "MODULE_08",
-        exampleValue: "172",
+        description: "BVH V1 shrinkage-aware batter OPS versus RHP; raw PA and prior lineage are adjacent.",
+        exampleValue: "0.774",
       },
       {
         name: "Last_30_Days_wRC_plus",
@@ -1903,6 +1910,18 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         filledBy: "OPERATOR",
         exampleValue: "",
       },
+      ...[
+        "vs_LHP_OPS_Status", "vs_RHP_OPS_Status", "vs_LHP_OPS_Raw_PA", "vs_RHP_OPS_Raw_PA",
+        "vs_LHP_OPS_Prior_Source", "vs_RHP_OPS_Prior_Source",
+      ].map((name, offset) => ({
+        name,
+        index: 14 + offset,
+        type: name.includes("Raw_PA") ? "number" as const : "string" as const,
+        width: 145,
+        filledBy: "MODULE_08" as const,
+        readOnly: true,
+        description: "BVH V1 per-hand evidence status, raw PA, or selected prior source.",
+      })),
     ],
   },
 
@@ -12914,6 +12933,148 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Chunk_Count", index: 2, type: "number", width: 110, filledBy: "SYSTEM", readOnly: true },
       { name: "Raw_Response_Chunk", index: 3, type: "string", width: 500, filledBy: "SYSTEM", readOnly: true, description: "Untouched source payload chunk; concatenate by Snapshot_ID and Chunk_Index." },
     ],
+  },
+
+  {
+    name: "BVH_DAILY_HISTORY_V1",
+    description:
+      "Append-only PA-reduced batter-vs-pitcher-hand counts derived only after the exact Savant pitch-level response is retained. One canonical immutable source snapshot is selected per game date.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Game_Date", "Batter_MLBAM_ID", "Pitcher_Hand", "PA", "AB", "H", "BB", "IBB", "HBP", "SF", "Total_Bases",
+        "Source_Snapshot_ID", "Source_Fetch_TS", "Data_Through_Date", "BVH_Version",
+      ],
+      ["Batter_MLBAM_ID", "PA", "AB", "H", "BB", "IBB", "HBP", "SF", "Total_Bases"],
+      "SYSTEM",
+    ),
+  },
+
+  {
+    name: "BVH_BATTER_SPLITS_V1",
+    description:
+      "Current cutoff-safe batter-vs-LHP/RHP raw rates, selected prior, fixed-k shrinkage, freshness, parser integrity, and deterministic-build lineage.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "BVH_Version", "Batter_MLBAM_ID",
+        "Raw_vs_LHP_PA", "Raw_vs_RHP_PA", "Raw_vs_LHP_OBP", "Raw_vs_RHP_OBP", "Raw_vs_LHP_SLG", "Raw_vs_RHP_SLG", "Raw_vs_LHP_OPS", "Raw_vs_RHP_OPS",
+        "Prior_vs_LHP_OPS", "Prior_vs_RHP_OPS", "Prior_Source_LHP", "Prior_Source_RHP", "Shrinkage_Weight_LHP", "Shrinkage_Weight_RHP",
+        "Shrunk_vs_LHP_OPS", "Shrunk_vs_RHP_OPS", "BVH_Status_LHP", "BVH_Status_RHP",
+        "BVH_Requested_Through_Date", "BVH_Actual_Data_Through_Date", "BVH_Freshness_Lag_Days", "BVH_Freshness_Status",
+          "BVH_League_Baseline_LHP", "BVH_League_Baseline_RHP", "BVH_Unclassified_Events", "BVH_Unclassified_Event_Values",
+          "BVH_Excluded_NonPA_Events", "BVH_Excluded_NonPA_Event_Values",
+          "BVH_Malformed_PA_Count", "BVH_Pitch_Rows_Inspected", "BVH_Terminal_PA_Count", "BVH_Deterministic_Hash",
+      ],
+      [
+        "Batter_MLBAM_ID", "Raw_vs_LHP_PA", "Raw_vs_RHP_PA", "Raw_vs_LHP_OBP", "Raw_vs_RHP_OBP", "Raw_vs_LHP_SLG", "Raw_vs_RHP_SLG",
+        "Raw_vs_LHP_OPS", "Raw_vs_RHP_OPS", "Prior_vs_LHP_OPS", "Prior_vs_RHP_OPS", "Shrinkage_Weight_LHP", "Shrinkage_Weight_RHP",
+          "Shrunk_vs_LHP_OPS", "Shrunk_vs_RHP_OPS", "BVH_Freshness_Lag_Days", "BVH_League_Baseline_LHP", "BVH_League_Baseline_RHP",
+          "BVH_Unclassified_Events", "BVH_Excluded_NonPA_Events", "BVH_Malformed_PA_Count", "BVH_Pitch_Rows_Inspected", "BVH_Terminal_PA_Count",
+      ],
+      "SYSTEM",
+    ),
+  },
+
+  {
+    name: "BVH_PROJECTION_HISTORY_V1",
+    description:
+      "Immutable pregame comparison of the commissioned projection and the isolated BVH starter-window candidate. It preserves exact lineup coverage, hand, factor, and source-cutoff lineage and cannot authorize a decision.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Date", "Game_ID", "Snapshot_TS", "BVH_Version", "Integration_Status", "Active_Input",
+          "Away_Opposing_Starter_Hand", "Home_Opposing_Starter_Hand", "Away_BVH_Lineup_OPS", "Home_BVH_Lineup_OPS",
+        "Away_BVH_Mean_Raw_PA", "Home_BVH_Mean_Raw_PA", "Away_BVH_NoSample_Count", "Home_BVH_NoSample_Count",
+        "Away_BVH_Coverage", "Home_BVH_Coverage", "Away_BVH_Identity_Coverage", "Home_BVH_Identity_Coverage",
+          "Away_BVH_Chain_Uncertainty", "Home_BVH_Chain_Uncertainty", "Away_BVH_Status", "Home_BVH_Status",
+          "Away_BVH_Driver_Trace", "Home_BVH_Driver_Trace",
+        "Existing_Platoon_Matchup_Factor_Away", "Existing_Platoon_Matchup_Factor_Home",
+        "BVH_Performance_Matchup_Factor_Away", "BVH_Performance_Matchup_Factor_Home",
+        "BVH_vs_Platoon_Delta_Away", "BVH_vs_Platoon_Delta_Home",
+        "Existing_Away_Runs", "Existing_Home_Runs", "Existing_Total", "BVH_Away_Runs", "BVH_Home_Runs", "BVH_Total",
+        "BVH_Delta_Away", "BVH_Delta_Home", "BVH_Delta_Total", "BVH_Requested_Through_Date", "BVH_Actual_Data_Through_Date",
+        "BVH_Freshness_Status", "BVH_Deterministic_Hash",
+      ],
+      [
+        "Away_BVH_Lineup_OPS", "Home_BVH_Lineup_OPS", "Away_BVH_Mean_Raw_PA", "Home_BVH_Mean_Raw_PA",
+        "Away_BVH_NoSample_Count", "Home_BVH_NoSample_Count", "Away_BVH_Coverage", "Home_BVH_Coverage",
+        "Away_BVH_Identity_Coverage", "Home_BVH_Identity_Coverage", "Existing_Platoon_Matchup_Factor_Away",
+        "Existing_Platoon_Matchup_Factor_Home", "BVH_Performance_Matchup_Factor_Away", "BVH_Performance_Matchup_Factor_Home",
+        "BVH_vs_Platoon_Delta_Away", "BVH_vs_Platoon_Delta_Home", "Existing_Away_Runs", "Existing_Home_Runs", "Existing_Total",
+        "BVH_Away_Runs", "BVH_Home_Runs", "BVH_Total", "BVH_Delta_Away", "BVH_Delta_Home", "BVH_Delta_Total",
+      ],
+      "MODULE_09",
+    ),
+  },
+
+  {
+    name: "BVH_PROJECTION_REPLAY_V1",
+    description:
+      "Settlement-only grading of the final legitimate prospective BVH counterfactual against canonical game and team totals. It never reconstructs a missing pregame candidate.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Date", "Game_ID", "BVH_Snapshot_TS", "BVH_Version", "Integration_Status",
+        "Away_Opposing_Starter_Hand", "Home_Opposing_Starter_Hand",
+        "Away_BVH_Coverage", "Home_BVH_Coverage", "Away_BVH_Identity_Coverage", "Home_BVH_Identity_Coverage",
+        "Away_BVH_Chain_Uncertainty", "Home_BVH_Chain_Uncertainty", "Away_BVH_Status", "Home_BVH_Status",
+        "Away_BVH_Driver_Trace", "Home_BVH_Driver_Trace",
+        "Away_BVH_vs_Platoon_Delta", "Home_BVH_vs_Platoon_Delta", "Max_Abs_BVH_vs_Platoon_Delta",
+        "Existing_Away_Runs", "Existing_Home_Runs", "Existing_Total", "BVH_Away_Runs", "BVH_Home_Runs", "BVH_Total",
+        "Actual_Away_Runs", "Actual_Home_Runs", "Actual_Total",
+        "Existing_Total_Error", "Existing_Total_Abs_Error", "BVH_Total_Error", "BVH_Total_Abs_Error",
+        "BVH_Minus_Existing_Abs_Error", "Existing_Away_Abs_Error", "Existing_Home_Abs_Error",
+        "BVH_Away_Abs_Error", "BVH_Home_Abs_Error", "Existing_Allocation_MAE", "BVH_Allocation_MAE",
+        "BVH_Minus_Existing_Allocation_MAE", "BVH_Delta_Away", "BVH_Delta_Home", "BVH_Delta_Total",
+        "Material_Manual_Review", "Settlement_TS", "Replay_TS", "Replay_Status",
+      ],
+      [
+        "Away_BVH_Coverage", "Home_BVH_Coverage", "Away_BVH_Identity_Coverage", "Home_BVH_Identity_Coverage",
+        "Away_BVH_vs_Platoon_Delta", "Home_BVH_vs_Platoon_Delta", "Max_Abs_BVH_vs_Platoon_Delta",
+        "Existing_Away_Runs", "Existing_Home_Runs", "Existing_Total", "BVH_Away_Runs", "BVH_Home_Runs", "BVH_Total",
+        "Actual_Away_Runs", "Actual_Home_Runs", "Actual_Total", "Existing_Total_Error", "Existing_Total_Abs_Error",
+        "BVH_Total_Error", "BVH_Total_Abs_Error", "BVH_Minus_Existing_Abs_Error", "Existing_Away_Abs_Error",
+        "Existing_Home_Abs_Error", "BVH_Away_Abs_Error", "BVH_Home_Abs_Error", "Existing_Allocation_MAE",
+        "BVH_Allocation_MAE", "BVH_Minus_Existing_Allocation_MAE", "BVH_Delta_Away", "BVH_Delta_Home", "BVH_Delta_Total",
+      ],
+      "MODULE_31",
+    ),
+  },
+
+  {
+    name: "BVH_PROJECTION_SUMMARY_V1",
+    description:
+      "Descriptive current-versus-BVH replay metrics by declared hand, coverage, and chain cohorts. Small samples cannot promote or retune BVH.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "BVH_Version", "Population", "Eligible_N", "Existing_Total_MAE", "BVH_Total_MAE",
+        "Mean_Abs_Error_Delta_BVH_Minus_Existing", "Existing_Median_AE", "BVH_Median_AE",
+        "Existing_Bias", "BVH_Bias", "Existing_4Plus_Misses", "BVH_4Plus_Misses",
+        "Existing_4Plus_Overprojection", "BVH_4Plus_Overprojection", "Existing_4Plus_Underprojection", "BVH_4Plus_Underprojection",
+        "Existing_Away_MAE", "BVH_Away_MAE", "Existing_Home_MAE", "BVH_Home_MAE",
+        "Existing_Allocation_MAE", "BVH_Allocation_MAE", "Mean_Abs_BVH_Total_Delta", "Median_Abs_BVH_Total_Delta",
+        "Max_Abs_BVH_Total_Delta", "Mean_Abs_Away_Delta", "Mean_Abs_Home_Delta", "Games_Total_Delta_GTE_0_5",
+        "Games_Total_Delta_GTE_1_0", "Material_Manual_Review_N", "Replay_TS", "Research_Status",
+      ],
+      [
+        "Eligible_N", "Existing_Total_MAE", "BVH_Total_MAE", "Mean_Abs_Error_Delta_BVH_Minus_Existing",
+        "Existing_Median_AE", "BVH_Median_AE", "Existing_Bias", "BVH_Bias", "Existing_4Plus_Misses",
+        "BVH_4Plus_Misses", "Existing_4Plus_Overprojection", "BVH_4Plus_Overprojection",
+        "Existing_4Plus_Underprojection", "BVH_4Plus_Underprojection", "Existing_Away_MAE", "BVH_Away_MAE",
+        "Existing_Home_MAE", "BVH_Home_MAE", "Existing_Allocation_MAE", "BVH_Allocation_MAE",
+        "Mean_Abs_BVH_Total_Delta", "Median_Abs_BVH_Total_Delta", "Max_Abs_BVH_Total_Delta",
+        "Mean_Abs_Away_Delta", "Mean_Abs_Home_Delta", "Games_Total_Delta_GTE_0_5", "Games_Total_Delta_GTE_1_0",
+        "Material_Manual_Review_N",
+      ],
+      "MODULE_31",
+    ),
   },
 
   {

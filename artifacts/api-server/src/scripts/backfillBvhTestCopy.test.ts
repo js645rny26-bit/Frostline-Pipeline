@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { CANONICAL_WORKBOOK_ID } from "../lib/sheets/client.js";
+import { assertBVHBackfillRequest } from "./backfillBvhTestCopy.js";
+
+test("BVH backfill is date-bounded, pregame-only, and cannot target canonical", () => {
+  assert.doesNotThrow(() => assertBVHBackfillRequest("2026-08-01", "2026-08-07", "2026-09-08", "test-workbook"));
+  assert.throws(() => assertBVHBackfillRequest("2026-08-01", "2026-08-07", "2026-09-08", CANONICAL_WORKBOOK_ID), /CANONICAL_FORBIDDEN/);
+  assert.throws(() => assertBVHBackfillRequest("2026-08-01", "2026-09-08", "2026-09-08", "test"), /CUTOFF_VIOLATION|RANGE_LIMIT/);
+  assert.throws(() => assertBVHBackfillRequest("2026-08-01", "2026-09-01", "2026-09-08", "test"), /RANGE_LIMIT/);
+});

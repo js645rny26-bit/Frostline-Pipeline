@@ -16,6 +16,7 @@ export const SAVANT_PITCH_LEVEL_PARSER_VERSION = "1.0.0";
 export const SAVANT_PITCH_LEVEL_REQUIRED_COLUMNS = [
   "game_date",
   "game_pk",
+  "at_bat_number",
   "batter",
   "pitcher",
   "stand",
@@ -30,6 +31,7 @@ export type PitchLevelWindow = "SEASON" | "L30" | "L14" | "L5";
 export interface SavantPitchLevelEvent {
   game_date: string;
   game_pk: number;
+  at_bat_number: number;
   batter: number;
   pitcher: number;
   stand: string;
@@ -162,13 +164,15 @@ export function parseSavantPitchLevelCsv(
   for (const line of lines.slice(1)) {
     const values = parseCsvRow(line);
     const gamePk = parseId(values[indices.game_pk]);
+    const atBatNumber = Number.parseInt(String(values[indices.at_bat_number] ?? "").trim(), 10);
     const batter = parseId(values[indices.batter]);
     const pitcher = parseId(values[indices.pitcher]);
     const gameDate = String(values[indices.game_date] ?? "").trim();
-    if (!gamePk || !batter || !pitcher || !gameDate || gameDate > dataThroughDate) continue;
+    if (!gamePk || !Number.isFinite(atBatNumber) || atBatNumber < 0 || !batter || !pitcher || !gameDate || gameDate > dataThroughDate) continue;
     events.push({
       game_date: gameDate,
       game_pk: gamePk,
+      at_bat_number: atBatNumber,
       batter,
       pitcher,
       stand: String(values[indices.stand] ?? "").trim(),

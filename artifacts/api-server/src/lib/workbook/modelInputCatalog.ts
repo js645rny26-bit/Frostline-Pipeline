@@ -71,7 +71,8 @@ interface ModelInputCatalogEntry {
     | "MISSING"
     | "FALLBACK_ONLY"
     | "LEGACY_ALIAS"
-    | "DORMANT_UNCONSUMED";
+    | "DORMANT_UNCONSUMED"
+    | "BUILD_TEST_COPY";
   definition: string;
   statisticalWindow: string;
   gameWindow: string;
@@ -206,8 +207,8 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     "Baseball Savant pitch-level Statcast events",
     "Baseball Savant statcast_search CSV, type=details, all=true, regular season",
     "EVERY_PREGAME_RUN",
-    "SOURCE_ACQUISITION_LOG raw hash/data-through/schema/MLBAM coverage + SWE_APPEARANCE_HISTORY_V1",
-    "Raw daily events are retained before source-only workload engineering. Starter Workload Estimator V1 is SHADOW_ONLY and does not alter active Expected_IP, survival, projection, or authorization.",
+    "SOURCE_ACQUISITION_LOG raw hash/data-through/schema/MLBAM coverage + SWE_APPEARANCE_HISTORY_V1 + BVH_DAILY_HISTORY_V1",
+    "Raw daily events are retained before workload or PA-reduced batter-vs-hand engineering. Every consumer retains its own cutoff and status lineage.",
     "SAVANT_PITCH_LEVEL",
   ),
   SOURCE(
@@ -346,6 +347,17 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     workbookLocation: "PLAYER_INTEGRATION; GAME_SUMMARY lineup factors", feedsActiveProjection: "YES", feedsDecisionBoard: "YES",
     correlationFamily: "LINEUP_QUALITY", missingBehavior: "Insufficient coverage reduces lineup confidence and exact-profile activation.",
     notes: "Do not treat OPS and later traffic terms as independent votes.", freshnessKey: "BATTER_SEASON",
+  },
+  {
+    recordType: "INPUT", id: "BVH_V1_BATTER_VS_HAND", label: "Batter-vs-Hand Performance Split V1",
+    layer: "BASEBALL_MODEL", outputClass: "SHADOW_CHALLENGER", operationalStatus: "BUILD_TEST_COPY",
+    definition: "PA-correct batter OPS versus LHP/RHP, shrunk with fixed k=150 toward an eligible player-history or same-hand league prior and aggregated over the exact lineup.",
+    statisticalWindow: "Season through slate date minus one; prior-season/career prior where 200+ retained PA", gameWindow: "STARTER_WINDOW_ONLY (TEST COPY)",
+    primarySource: "SOURCE_SAVANT_PITCH_LEVEL", fallbackSource: "Same-hand league prior; explicit NO_SOURCE_DATA when no retained corpus exists",
+    refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "BVH_BATTER_SPLITS_V1 requested/actual through dates + deterministic hash",
+    workbookLocation: "TODAY_LINEUPS H:I,O:T; BVH_BATTER_SPLITS_V1; BVH_PROJECTION_HISTORY_V1", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
+    correlationFamily: "LINEUP_QUALITY / STARTER_HAND_MATCHUP", missingBehavior: "Zero sample uses an explicit prior; missing source or identity remains a named evidence gap and never becomes zero OPS.",
+    notes: "Candidate replaces the coarse fixed hand adjustment inside starter innings only. It is never an additive run bonus and does not describe bullpen innings.", freshnessKey: "SAVANT_PITCH_LEVEL",
   },
   {
     recordType: "INPUT", id: "SAVANT_SEASON_CONTACT", label: "Season xwOBA and hard-hit rate",
@@ -647,7 +659,7 @@ const ENTRIES: ModelInputCatalogEntry[] = [
   {
     recordType: "GAP", id: "MISSING_ALLOCATION_INPUTS", label: "Unmodeled allocation inputs",
     layer: "GOVERNANCE", outputClass: "MISSING_INPUT", operationalStatus: "MISSING",
-    definition: "No active batter-vs-hand performance split, home/away offensive split, defense, baserunning, catcher/framing, or umpire effect.",
+    definition: "No active home/away offensive split, defense, baserunning, catcher/framing, or umpire effect. BVH V1 is separately tracked in BUILD_TEST_COPY.",
     statisticalWindow: "Not currently sourced/commissioned", gameWindow: "TEAM_ALLOCATION",
     primarySource: "NONE", fallbackSource: "Existing lineup/quality model", refreshCadence: "NOT_APPLICABLE",
     freshnessEvidence: "MODEL_INPUT_CATALOG gap record", workbookLocation: "No active workbook field",
@@ -746,7 +758,7 @@ async function collectSourceObservations(
 ): Promise<Map<SourceFreshnessKey, SourceObservation>> {
   const [daily, lineups, teamForm, bullpen, environment, preview, odds, player, outcomes, gameSummary, packet, sourceLog] = await Promise.all([
     readTable(workbookId, "DAILY_MATCHUPS!A1:AU100"),
-    readTable(workbookId, "TODAY_LINEUPS!A1:N1000"),
+    readTable(workbookId, "TODAY_LINEUPS!A1:T1000"),
     readTable(workbookId, "TEAM_FORM_INPUT!A1:H100"),
     readTable(workbookId, "BULLPEN_USAGE_DAILY!A1:U500"),
     readTable(workbookId, "RUN_ENVIRONMENT!A1:L100"),

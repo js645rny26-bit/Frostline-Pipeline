@@ -31,7 +31,8 @@ function game(id: string, awayId: number, homeId: number): NormalizedGame {
 
 function event(gamePk: number, pitcher: number, atBat: number, outsWhenUp: number, next: number | null, inning = 1, half = "Top"): SavantPitchLevelEvent {
   return {
-    game_date: "2026-09-01", game_pk: gamePk, batter: 500 + atBat, pitcher,
+    game_date: "2026-09-01", game_pk: gamePk, at_bat_number: atBat,
+    batter: 500 + atBat, pitcher,
     stand: "L", p_throws: "R", pitch_type: "FF", events: "", description: "ball",
     raw: new Map([
       ["inning", String(inning)], ["inning_topbot", half], ["at_bat_number", String(atBat)],

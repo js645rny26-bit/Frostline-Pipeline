@@ -53,6 +53,18 @@ import {
 } from "./module04c_startingNine.js";
 import type { BatterSeasonStats } from "./module02c_batterSeasonStats.js";
 import { MIN_BATTER_PA } from "./module02c_batterSeasonStats.js";
+import {
+  buildBVHLineupProfile,
+  FROSTLINE_BATTING_ORDER_WEIGHTS,
+  type BVHDataset,
+} from "./module02j_batterVsHand.js";
+import {
+  BVH_ACTIVE_INPUT,
+  appendBVHProjectionHistory,
+  isBVHProfileUsable,
+  mapBVHStarterWindowFactor,
+  type BVHProjectionAuditRow,
+} from "./module09b_bvhIntegration.js";
 import type { StatcastBatterStats } from "./module02d_statcastBatters.js";
 import { MIN_STATCAST_PA } from "./module02d_statcastBatters.js";
 import {
@@ -111,7 +123,6 @@ const LEAGUE_AVG_OPS = 0.73;
  * Represents relative run-contribution importance; top-of-order and cleanup
  * positions carry more weight. Sum = 9.00 (equivalent to 9 equal slots).
  */
-const BATTING_ORDER_WEIGHTS = [1.15, 1.1, 1.2, 1.2, 1.05, 1.0, 0.9, 0.8, 0.6];
 
 /**
  * Blend weight controlling how strongly lineup OPS deviation from league
@@ -237,8 +248,11 @@ function normalizeNameForMatch(name: string): string {
 export interface LineupStrengthResolution {
   /** Multiplier applied to team offensive rate. 1.0 = league-average or fallback. */
   factor: number;
+  /** Same exact lineup quality before the legacy fixed platoon adjustment. */
+  stable_factor: number;
   /** Batting-order-weighted lineup OPS (post platoon adjustment). Null when coverage is insufficient. */
   weighted_ops: number | null;
+  stable_weighted_ops: number | null;
   /** Fraction of the 9 lineup slots with valid batter stats (PA ≥ MIN_BATTER_PA). */
   coverage: number;
   /** FULL = all 9 resolved; PARTIAL = ≥ MIN_LINEUP_COVERAGE; FALLBACK = too sparse; NO_LINEUP = no lineup data. */
@@ -326,7 +340,9 @@ function computeLineupStrength(
 ): LineupStrengthResolution {
   const noData = {
     factor: 1.0,
+    stable_factor: 1.0,
     weighted_ops: null,
+    stable_weighted_ops: null,
     coverage: 0,
     status: "NO_LINEUP" as const,
     lineup_status: null,
@@ -343,6 +359,7 @@ function computeLineupStrength(
   if (lineup.length === 0) return noData;
 
   let weightedOpsSum = 0;
+  let stableWeightedOpsSum = 0;
   let totalWeight = 0;
   let coveredSlots = 0;
   let platoonAdv = 0;
@@ -371,7 +388,7 @@ function computeLineupStrength(
         (player.batting_order > 0 ? player.batting_order : i + 1) - 1,
       ),
     );
-    const weight = BATTING_ORDER_WEIGHTS[slotIdx] ?? 1.0;
+    const weight = FROSTLINE_BATTING_ORDER_WEIGHTS[slotIdx] ?? 1.0;
 
     const playerId = nameToIdMap.get(normalizeNameForMatch(player.name));
     const stats =
@@ -454,6 +471,7 @@ function computeLineupStrength(
     const effOps = Math.max(0.4, baseOps + platoonAdj);
 
     weightedOpsSum += effOps * weight;
+    stableWeightedOpsSum += Math.max(0.4, baseOps) * weight;
     if (hasValidStats) coveredSlots++;
     totalWeight += weight;
   }
@@ -462,6 +480,10 @@ function computeLineupStrength(
   const weightedOps =
     totalWeight > 0
       ? parseFloat((weightedOpsSum / totalWeight).toFixed(3))
+      : null;
+  const stableWeightedOps =
+    totalWeight > 0
+      ? parseFloat((stableWeightedOpsSum / totalWeight).toFixed(3))
       : null;
   const xwoba_coverage =
     totalSlots > 0 ? parseFloat((xwobaCovered / totalSlots).toFixed(2)) : 0;
@@ -480,7 +502,9 @@ function computeLineupStrength(
   if (coverage < MIN_LINEUP_COVERAGE || weightedOps === null) {
     return {
       factor: 1.0,
+      stable_factor: 1.0,
       weighted_ops: weightedOps,
+      stable_weighted_ops: stableWeightedOps,
       coverage,
       status: "FALLBACK",
       lineup_status: lineupStatus,
@@ -505,11 +529,18 @@ function computeLineupStrength(
   const factor = parseFloat(
     Math.max(0.82, Math.min(1.18, rawFactor)).toFixed(4),
   );
+  const stableRawDev = stableWeightedOps! / LEAGUE_AVG_OPS - 1;
+  const stableRawFactor = 1 + stableRawDev * effWt;
+  const stableFactor = parseFloat(
+    Math.max(0.82, Math.min(1.18, stableRawFactor)).toFixed(4),
+  );
   const status = coverage >= 1.0 ? "FULL" : "PARTIAL";
 
   return {
     factor,
+    stable_factor: stableFactor,
     weighted_ops: weightedOps,
+    stable_weighted_ops: stableWeightedOps,
     coverage,
     status,
     lineup_status: lineupStatus,
@@ -1011,6 +1042,7 @@ export async function verifyRecalculation(
   statcastBatterMap: Map<number, StatcastBatterStats> = new Map(),
   statcastPitcherMap: Map<number, StatcastPitcherExpectedStats> = new Map(),
   protection?: PublicationProtection,
+  bvhDataset: BVHDataset | null = null,
 ): Promise<Module09Result> {
   const startTime = Date.now();
   logger.info(
@@ -1089,6 +1121,8 @@ export async function verifyRecalculation(
   );
 
   const gameSummaryRows: GameSummaryRow[] = [];
+  const bvhProjectionAuditRows: BVHProjectionAuditRow[] = [];
+  const bvhSnapshotTs = new Date().toISOString();
 
   // ── GAME_INTEGRATION — 2 rows per game ──
   const giRows: unknown[][] = [];
@@ -1225,6 +1259,16 @@ export async function verifyRecalculation(
       awayPitHand, // home lineup bats against the away starter
       statcastBatterMap,
     );
+    const awayBVHProfile = buildBVHLineupProfile(
+      sg?.away_lineup ?? [], g.home_pitcher.role === "UNRESOLVED" ? null : homePitHand, lineupNameToIdMap, batterStatsMap,
+      bvhDataset, g.home_pitcher.role === "OPENER" || g.home_pitcher.role === "UNRESOLVED",
+    );
+    const homeBVHProfile = buildBVHLineupProfile(
+      sg?.home_lineup ?? [], g.away_pitcher.role === "UNRESOLVED" ? null : awayPitHand, lineupNameToIdMap, batterStatsMap,
+      bvhDataset, g.away_pitcher.role === "OPENER" || g.away_pitcher.role === "UNRESOLVED",
+    );
+    const awayBVHMatchupFactor = mapBVHStarterWindowFactor(awayBVHProfile, awayLineup.lineup_status);
+    const homeBVHMatchupFactor = mapBVHStarterWindowFactor(homeBVHProfile, homeLineup.lineup_status);
 
     // Recent actual scoring is form evidence, not today's run center. Build
     // the center from the league environment and exact lineup quality first;
@@ -1237,6 +1281,16 @@ export async function verifyRecalculation(
     const homeOffenseCenter = computeActiveOffenseCenter({
       recent_form_rate: homeOff.rate_used,
       lineup_factor: homeLineup.factor,
+      lineup: activeLineupProfile(homeLineup),
+    });
+    const awayBVHOffenseCenter = computeActiveOffenseCenter({
+      recent_form_rate: awayOff.rate_used,
+      lineup_factor: awayLineup.stable_factor,
+      lineup: activeLineupProfile(awayLineup),
+    });
+    const homeBVHOffenseCenter = computeActiveOffenseCenter({
+      recent_form_rate: homeOff.rate_used,
+      lineup_factor: homeLineup.stable_factor,
       lineup: activeLineupProfile(homeLineup),
     });
     cappedMult = capRunMultiplierAddition(
@@ -1299,9 +1353,55 @@ export async function verifyRecalculation(
       opposing_bullpen_quality: awayBullpenQual,
     });
 
-    const projAway = awayRunProjection.projected_runs;
-    const projHome = homeRunProjection.projected_runs;
+    // Each batting side owns its own evidence boundary. An unresolved hand or
+    // lineup on one side must not erase a usable candidate for the other.
+    const awayBVHAvailable = bvhDataset !== null && isBVHProfileUsable(awayBVHProfile);
+    const homeBVHAvailable = bvhDataset !== null && isBVHProfileUsable(homeBVHProfile);
+    const awayBVHCandidate = awayBVHAvailable ? computeActiveTeamProjection({
+      baseline_offense_rate: awayBVHOffenseCenter.active_offense_center,
+      environment_multiplier: cappedMult,
+      lineup: activeLineupProfile(awayLineup),
+      opposing_starter: activeStarterProfile(g.home_pitcher.player_id, homePitchExp, homeQual, pitcherStatsMap),
+      opposing_bullpen_quality: homeBullpenQual,
+      starter_window_matchup_factor: awayBVHMatchupFactor,
+    }) : awayRunProjection;
+    const homeBVHCandidate = homeBVHAvailable ? computeActiveTeamProjection({
+      baseline_offense_rate: homeBVHOffenseCenter.active_offense_center,
+      environment_multiplier: cappedMult,
+      lineup: activeLineupProfile(homeLineup),
+      opposing_starter: activeStarterProfile(g.away_pitcher.player_id, awayPitchExp, awayQual, pitcherStatsMap),
+      opposing_bullpen_quality: awayBullpenQual,
+      starter_window_matchup_factor: homeBVHMatchupFactor,
+    }) : homeRunProjection;
+
+    const selectedAwayProjection = BVH_ACTIVE_INPUT && awayBVHAvailable ? awayBVHCandidate : awayRunProjection;
+    const selectedHomeProjection = BVH_ACTIVE_INPUT && homeBVHAvailable ? homeBVHCandidate : homeRunProjection;
+    const projAway = selectedAwayProjection.projected_runs;
+    const projHome = selectedHomeProjection.projected_runs;
     const projTotal = parseFloat((projAway + projHome).toFixed(2));
+
+    if (!protection?.protected_game_ids.has(g.legacy_game_id)) {
+      bvhProjectionAuditRows.push({
+        date: g.date, game_id: g.legacy_game_id, snapshot_ts: bvhSnapshotTs,
+        bvh_version: bvhDataset?.version ?? "1.0.0",
+        away_starter_hand: homePitHand, home_starter_hand: awayPitHand,
+        away_profile: awayBVHProfile, home_profile: homeBVHProfile,
+        existing_platoon_factor_away: awayLineup.stable_factor > 0
+          ? Number((awayLineup.factor / awayLineup.stable_factor).toFixed(4)) : 1,
+        existing_platoon_factor_home: homeLineup.stable_factor > 0
+          ? Number((homeLineup.factor / homeLineup.stable_factor).toFixed(4)) : 1,
+        bvh_matchup_factor_away: awayBVHMatchupFactor,
+        bvh_matchup_factor_home: homeBVHMatchupFactor,
+        existing_away_runs: awayRunProjection.projected_runs,
+        existing_home_runs: homeRunProjection.projected_runs,
+        bvh_away_runs: awayBVHCandidate.projected_runs,
+        bvh_home_runs: homeBVHCandidate.projected_runs,
+        requested_through_date: bvhDataset?.requested_through_date ?? "",
+        actual_data_through_date: bvhDataset?.actual_data_through_date ?? null,
+        freshness_status: bvhDataset?.freshness_status ?? "NO_SOURCE_DATA",
+        deterministic_hash: bvhDataset?.deterministic_hash ?? "",
+      });
+    }
 
     const bullpenCoverage =
       teamBullpenQualityMap.has(g.home_team.team_abbr ?? "") &&
@@ -1754,6 +1854,11 @@ export async function verifyRecalculation(
       );
     }
     logger.info({ rows: gsRows.length }, "MODULE_09: GAME_SUMMARY written");
+
+    const bvhHistory = await appendBVHProjectionHistory(bvhProjectionAuditRows, workbookId);
+    if (bvhHistory.errors.length > 0) {
+      logger.warn({ errors: bvhHistory.errors }, "MODULE_09b: BVH projection audit history did not persist");
+    }
 
     const playerRowsToWrite =
       protection && protection.protected_game_ids.size > 0

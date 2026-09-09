@@ -8,16 +8,17 @@ import {
 } from "./module02h_savantPitchLevel.js";
 
 const HEADER = [
-  "release_speed", "game_date", "game_pk", "batter", "pitcher", "stand", "p_throws", "pitch_type", "events", "description", "pfx_x",
+  "release_speed", "game_date", "game_pk", "at_bat_number", "batter", "pitcher", "stand", "p_throws", "pitch_type", "events", "description", "pfx_x",
 ];
 const row = (date: string, gamePk: number, batter: number, pitcher: number) =>
-  ["95.1", date, String(gamePk), String(batter), String(pitcher), "L", "R", "FF", "single", "hit_into_play", "0.12"].join(",");
+  ["95.1", date, String(gamePk), "1", String(batter), String(pitcher), "L", "R", "FF", "single", "hit_into_play", "0.12"].join(",");
 
 test("pitch-level parser preserves Savant headers, required identities, and raw values", () => {
   const raw = `${HEADER.join(",")}\n${row("2026-09-06", 12, 101, 201)}\n`;
   const result = parseSavantPitchLevelCsv(raw, "2026-09-06", "https://example.test/csv");
   assert.equal(result.status, "success");
   assert.equal(result.events.length, 1);
+  assert.equal(result.events[0]?.at_bat_number, 1);
   assert.equal(result.events[0]?.raw.get("release_speed"), "95.1");
   assert.deepEqual(result.source_snapshot?.observed_columns, HEADER);
   assert.equal(result.source_snapshot?.mlbam_coverage, 2);
@@ -52,4 +53,5 @@ test("direct CSV request retains the mandated complete/details/date/regular-seas
   assert.match(url, /hfGT=R%7C/);
   assert.match(url, /all=true/);
   assert.equal(SAVANT_PITCH_LEVEL_REQUIRED_COLUMNS.includes("description"), true);
+  assert.equal(SAVANT_PITCH_LEVEL_REQUIRED_COLUMNS.includes("at_bat_number"), true);
 });

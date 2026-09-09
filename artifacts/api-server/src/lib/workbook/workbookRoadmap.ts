@@ -118,6 +118,61 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Concatenate chunks by Snapshot_ID and Chunk_Index only when auditing an exact retained source response.",
   },
   {
+    sheet: "BVH_DAILY_HISTORY_V1",
+    stage: "AUDIT",
+    timing: "Append after each retained Savant pitch-level daily response (Module 02j)",
+    purpose:
+      "PA-correct daily batter-versus-pitcher-hand outcome counts with immutable source snapshot lineage.",
+    boardRelationship:
+      "No direct board input. It is the compact cutoff-safe evidence ledger from which current BVH splits are rebuilt.",
+    readNote:
+      "Audit PA rather than pitch counts, source snapshot identity, and date cutoff before trusting a split.",
+  },
+  {
+    sheet: "BVH_BATTER_SPLITS_V1",
+    stage: "AUDIT",
+    timing: "Rebuild every pregame run from canonical BVH daily history (Module 02j)",
+    purpose:
+      "Raw vs-hand OBP/SLG/OPS, PA, prior, fixed-k shrinkage, status, freshness, parser counters, and deterministic hash for every batter.",
+    boardRelationship:
+      "Populates TODAY_LINEUPS split evidence. It cannot create an independent run bonus or decision.",
+    readNote:
+      "Read raw PA, prior source, shrinkage weight, freshness, and status beside every shrunk OPS.",
+  },
+  {
+    sheet: "BVH_PROJECTION_HISTORY_V1",
+    stage: "AUDIT",
+    timing: "Append for every legitimate pre-first-pitch projection snapshot (Module 09b)",
+    purpose:
+      "Preserves current-versus-BVH candidate team runs and the exact starter-window matchup factors, coverage, hand, and cutoff lineage.",
+    boardRelationship:
+      "BUILD_TEST_COPY only until commissioning. No board, vehicle, market, or authorization consumer.",
+    readNote:
+      "Use for regression and manual high-delta review; opener-chain uncertainty and missing identities must remain visible.",
+  },
+  {
+    sheet: "BVH_PROJECTION_REPLAY_V1",
+    stage: "SETTLEMENT",
+    timing: "Every settlement after allocation diagnostics (Module 31)",
+    purpose:
+      "Grades only prospectively frozen BVH counterfactual team/total projections against canonical team scores.",
+    boardRelationship:
+      "No board input. Missing pregame BVH evidence is never reconstructed at settlement.",
+    readNote:
+      "Inspect total and allocation deltas together; REVIEW_REQUIRED is a manual-review threshold, not a promotion signal.",
+  },
+  {
+    sheet: "BVH_PROJECTION_SUMMARY_V1",
+    stage: "SETTLEMENT",
+    timing: "Every settlement after BVH replay (Module 31)",
+    purpose:
+      "Summarizes existing-versus-BVH center and team-allocation error for declared coverage, hand, and chain cohorts.",
+    boardRelationship:
+      "Research only; no row changes projections, vehicles, markets, or authorization.",
+    readNote:
+      "Treat small samples descriptively. N=200 is the later validation checkpoint, not an automatic promotion rule.",
+  },
+  {
     sheet: "SWE_APPEARANCE_HISTORY_V1",
     stage: "AUDIT",
     timing: "Append on each retained Savant pitch-level refresh (Module 02i)",

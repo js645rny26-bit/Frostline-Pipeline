@@ -53,6 +53,17 @@ test("neutral or unavailable matchup inputs preserve the established rate split"
   assert.equal(result.matchup_profile_status, "NEUTRAL");
 });
 
+test("BVH matchup modifies only the starter window and leaves bullpen exposure and quality untouched", () => {
+  const neutral = computeActiveTeamProjection(input());
+  const bvh = computeActiveTeamProjection(input({ starter_window_matchup_factor: 1.1 }));
+  assert.equal(neutral.starter_attack_runs, 3);
+  assert.equal(bvh.starter_attack_runs, 3.3);
+  assert.equal(bvh.bullpen_continuation_runs, neutral.bullpen_continuation_runs);
+  assert.equal(bvh.effective_starter_innings, neutral.effective_starter_innings);
+  assert.equal(bvh.bullpen_exposure_innings, neutral.bullpen_exposure_innings);
+  assert.equal(bvh.baseball_only_runs, 4.8);
+});
+
 test("same frozen active inputs reproduce the exact same price-blind team projection", () => {
   const frozenInput = input({
     environment_multiplier: 0.96,

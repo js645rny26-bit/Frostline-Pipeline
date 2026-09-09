@@ -24,6 +24,8 @@ import type { PitcherSeasonStatsResult, PitcherSeasonStats } from "./module02b_p
 import type { TeamRunRatesResult } from "./module05c_teamRunRates.js";
 import type { LineMovementResult } from "./module05d_oddsHistory.js";
 import type { LineupPlayer } from "./module04c_startingNine.js";
+import { normalizeForMatch } from "./module02c_batterSeasonStats.js";
+import type { BVHDataset } from "./module02j_batterVsHand.js";
 import {
   clearDecommissionedDisplayColumns,
   mergeProtectedRows,
@@ -175,10 +177,12 @@ function buildWeatherTag(g: NormalizedGame): string {
   return "NEUTRAL";
 }
 
-// Schema: TODAY_LINEUPS — 14 cols A–N, data starts row 2 (frozenRows: 1)
-function buildTodayLineupsRows(
+// Schema: TODAY_LINEUPS — 20 cols A–T, data starts row 2 (frozenRows: 1)
+export function buildTodayLineupsRows(
   games: NormalizedGame[],
   sn: Map<string, StartingNineGame>,
+  bvh: BVHDataset | null,
+  rosterNameMap: ReadonlyMap<string, number>,
 ): unknown[][] {
   const rows: unknown[][] = [];
 
@@ -192,21 +196,38 @@ function buildTodayLineupsRows(
 
       for (let order = 1; order <= 9; order++) {
         const player = lineup.find((p) => p.batting_order === order);
+        const playerId = player ? rosterNameMap.get(normalizeForMatch(player.name)) : undefined;
+        const estimate = playerId === undefined ? undefined : bvh?.estimates.get(playerId);
+        const lhp = estimate?.vs_lhp;
+        const rhp = estimate?.vs_rhp;
+        const missingSplitStatus = !player
+          ? "NO_LINEUP_DATA"
+          : !bvh || bvh.freshness_status === "NO_SOURCE_DATA"
+            ? "NO_SOURCE_DATA"
+            : playerId === undefined
+              ? "IDENTITY_UNRESOLVED"
+              : "NO_SPLIT_SAMPLE";
         rows.push([
           g.date,                                    // A: Date
           g.legacy_game_id,                          // B: Game_ID
           team.team_abbr ?? "",                      // C: Team
           order,                                     // D: Batting_Order
           player?.name ?? "",                        // E: Player_Name
-          "",                                        // F: Player_ID (not available from this source)
+          playerId ?? "",                           // F: Player_ID (MLBAM)
           player?.position ?? "",                    // G: Position
-          "",                                        // H: vs_LHP_wRC_plus (not available)
-          "",                                        // I: vs_RHP_wRC_plus (not available)
+          lhp?.shrunk_ops ?? "",                     // H: vs_LHP_OPS
+          rhp?.shrunk_ops ?? "",                     // I: vs_RHP_OPS
           "",                                        // J: Last_30_Days_wRC_plus (not available)
           player?.handedness ? `${player.handedness} | ACTIVE` : "ACTIVE", // K: Injury_Status / Bats
           "",                                        // L: Salary (not available)
           "",                                        // M: FanGraphs_Projection (not available)
           player ? status.toUpperCase() : "NO_LINEUP_DATA", // N: Notes
+          lhp?.status ?? missingSplitStatus,            // O
+          rhp?.status ?? missingSplitStatus,            // P
+          lhp?.raw.pa ?? "",                         // Q
+          rhp?.raw.pa ?? "",                         // R
+          lhp?.prior_source ?? "",                   // S
+          rhp?.prior_source ?? "",                   // T
         ]);
       }
     }
@@ -422,6 +443,8 @@ export async function writeGoogleSheetsFeed(
   teamRunRates: TeamRunRatesResult | null = null,
   lineMovement: LineMovementResult | null = null,
   protection?: PublicationProtection,
+  bvhDataset: BVHDataset | null = null,
+  rosterNameMap: ReadonlyMap<string, number> = new Map(),
 ): Promise<Module08Result> {
   logger.info({ games: normalized.games.length }, "MODULE_08: Writing feeds to Google Sheets");
 
@@ -477,12 +500,18 @@ export async function writeGoogleSheetsFeed(
     errors.push({ module: "08_daily_matchups", error: dmResult.error ?? "write failed", timestamp: new Date().toISOString() });
   }
 
-  // 2. TODAY_LINEUPS — 14 cols A–N, starts row 2
-  const tlRows = buildTodayLineupsRows(normalized.games, snMap);
+  // 2. TODAY_LINEUPS — 20 cols A–T, starts row 2
+  await expandSheetColumns(workbookId, "TODAY_LINEUPS", 20);
+  await writeRange(workbookId, "TODAY_LINEUPS!H1:T1", [[
+    "vs_LHP_OPS", "vs_RHP_OPS", "Last_30_Days_wRC_plus", "Injury_Status", "Salary",
+    "Uncommissioned_Player_Projection", "Notes", "vs_LHP_OPS_Status", "vs_RHP_OPS_Status",
+    "vs_LHP_OPS_Raw_PA", "vs_RHP_OPS_Raw_PA", "vs_LHP_OPS_Prior_Source", "vs_RHP_OPS_Prior_Source",
+  ]]);
+  const tlRows = buildTodayLineupsRows(normalized.games, snMap, bvhDataset, rosterNameMap);
   const tlResult = await safeWrite(
     "TODAY_LINEUPS",
-    "TODAY_LINEUPS!A2:N602",
-    `TODAY_LINEUPS!A2:N${1 + Math.max(tlRows.length, 1)}`,
+    "TODAY_LINEUPS!A2:T602",
+    `TODAY_LINEUPS!A2:T${1 + Math.max(tlRows.length, 1)}`,
     tlRows,
     workbookId,
     protection ? { keyColumn: 1, protectedKeys: protection.protected_game_ids, orderedKeys: protection.expected_game_ids } : undefined,
