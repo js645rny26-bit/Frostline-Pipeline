@@ -12,7 +12,10 @@
 import { CANONICAL_WORKBOOK_ID } from "../lib/sheets/client.js";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
-import { fetchSavantPitchLevelDay } from "../lib/pipeline/module02h_savantPitchLevel.js";
+import {
+  fetchSavantPitchLevelDay,
+  type SavantPitchLevelResult,
+} from "../lib/pipeline/module02h_savantPitchLevel.js";
 import { persistSourceSnapshot } from "../lib/pipeline/module02_sourceSnapshots.js";
 import {
   buildBVHDatasetFromDailyAggregates,
@@ -52,6 +55,21 @@ export function assertBVHBackfillRequest(
   if (workbookId === CANONICAL_WORKBOOK_ID) {
     throw new Error("BVH_BACKFILL_CANONICAL_FORBIDDEN: use a disposable/test workbook");
   }
+}
+
+export type BVHBackfillSourceDisposition = "ACCEPT" | "SKIP_EXPLICIT_PARTIAL" | "FAIL";
+
+/**
+ * A schema-valid, header-only Savant day is an observable freshness gap, not
+ * baseball evidence and not a reason to discard earlier valid days. Schema
+ * drift and unretained/unexplained failures still fail the commissioning run.
+ */
+export function bvhBackfillSourceDisposition(
+  source: Pick<SavantPitchLevelResult, "status" | "source_snapshot">,
+): BVHBackfillSourceDisposition {
+  if (source.status === "success" && source.source_snapshot) return "ACCEPT";
+  if (source.status === "partial" && source.source_snapshot) return "SKIP_EXPLICIT_PARTIAL";
+  return "FAIL";
 }
 
 async function scheduledDates(startDate: string, endDate: string): Promise<string[]> {
@@ -97,15 +115,26 @@ async function main(): Promise<void> {
   const dates = await scheduledDates(startDate, endDate);
   const integrity = blankIntegrity();
   const days: Array<{ date: string; pitch_rows: number; aggregate_rows: number; source_snapshot_id: string }> = [];
+  const skippedDays: Array<{ date: string; status: string; reason: string; source_snapshot_id: string }> = [];
 
   for (const date of dates) {
     const source = await fetchSavantPitchLevelDay(date);
-    if (source.status !== "success" || !source.source_snapshot) {
+    const disposition = bvhBackfillSourceDisposition(source);
+    if (disposition === "FAIL" || !source.source_snapshot) {
       throw new Error(`BVH_BACKFILL_SOURCE_FAILURE: ${date}: ${source.errors.join(" | ") || source.status}`);
     }
     const retained = await persistSourceSnapshot(source.source_snapshot, workbookId);
     if (retained.status !== "success") {
       throw new Error(`BVH_BACKFILL_RAW_RETENTION_FAILURE: ${date}: ${retained.errors.join(" | ")}`);
+    }
+    if (disposition === "SKIP_EXPLICIT_PARTIAL") {
+      skippedDays.push({
+        date,
+        status: source.source_snapshot.source_status,
+        reason: source.source_snapshot.notes || "NO_PARSABLE_EVENTS",
+        source_snapshot_id: retained.snapshot_id,
+      });
+      continue;
     }
     const daily = deriveBVHDailyAggregates(source.events);
     addIntegrity(integrity, daily.integrity);
@@ -143,7 +172,9 @@ async function main(): Promise<void> {
     end_date: endDate,
     slate_date: slateDate,
     scheduled_days: dates.length,
+    loaded_days: days.length,
     days,
+    skipped_days: skippedDays,
     integrity,
     total_history_rows: history.length,
     batter_estimates: dataset.estimates.size,
