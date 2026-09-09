@@ -14,7 +14,7 @@ on:
         default: false
         type: boolean
       isolated_workbook_id:
-        description: User-provisioned sandbox workbook ID; required only when isolated_smoke is true
+        description: Optional sandbox workbook ID; blank creates a disposable workbook when isolated_smoke is true
         required: false
         default: ""
         type: string
@@ -84,6 +84,8 @@ jobs:
           : > frostline-api-server.log
           echo '{"status":"NOT_RUN"}' > frostline-commissioning-report.json
           echo '{"status":"NOT_RUN"}' > frostline-isolated-workbook.json
+          echo '{"status":"NOT_RUN"}' > frostline-bvh-backfill.json
+          echo '{"status":"NOT_RUN"}' > frostline-bvh-audit.json
 
       - name: Authenticate Google ADC through GitHub OIDC
         id: google-auth
@@ -148,11 +150,15 @@ jobs:
           fi
 
           workbook_id="${FROSTLINE_WORKBOOK_ID}"
+          auto_created_isolated="false"
           if [ "${{ inputs.isolated_smoke }}" = "true" ]; then
             workbook_id="${{ inputs.isolated_workbook_id }}"
             if [ -z "$workbook_id" ]; then
-              echo "::error title=Missing isolated workbook::isolated_workbook_id is required when isolated_smoke is true."
-              exit 1
+              curl --silent --show-error --fail-with-body --request POST \
+                "http://127.0.0.1:3000/api/workbook/create?date=${SLATE_DATE}" \
+                --output frostline-isolated-workbook.json
+              workbook_id="$(node -e 'const fs=require("fs"); const r=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(!r.workbook_id||r.errors?.length) process.exit(1); process.stdout.write(r.workbook_id);' frostline-isolated-workbook.json)"
+              auto_created_isolated="true"
             fi
             case "$workbook_id" in
               1KPYzbSawLIrOcckn5EXxO4vH5eABOhMIibhCgpF-oNs|1MWsGQYR13tFjwd-L4lMweGShKJkrOsSNJaHzdjiMNHs)
@@ -160,8 +166,21 @@ jobs:
                 exit 1
                 ;;
             esac
-            node -e 'const fs = require("fs"); fs.writeFileSync(process.argv[1], JSON.stringify({ workbook_id: process.argv[2], mode: "USER_PROVISIONED_ISOLATED_WORKBOOK" }, null, 2));' frostline-isolated-workbook.json "$workbook_id"
-            echo "Isolated pregame smoke workbook (user provisioned): $workbook_id"
+            if [ "$auto_created_isolated" = "false" ]; then
+              node -e 'const fs = require("fs"); fs.writeFileSync(process.argv[1], JSON.stringify({ workbook_id: process.argv[2], mode: "USER_PROVISIONED_ISOLATED_WORKBOOK" }, null, 2));' frostline-isolated-workbook.json "$workbook_id"
+            else
+              history_start="2026-09-01"
+              history_end="$(TZ=America/New_York date --date='yesterday' +%F)"
+              slate_cutoff="$(date --date="${SLATE_DATE} - 1 day" +%F)"
+              if [[ "$history_end" > "$slate_cutoff" ]]; then history_end="$slate_cutoff"; fi
+              (
+                cd artifacts/api-server
+                pnpm exec tsx src/scripts/backfillBvhTestCopy.ts \
+                  "$history_start" "$history_end" "$SLATE_DATE" "$workbook_id"
+              ) > frostline-bvh-backfill.json
+              cat frostline-bvh-backfill.json
+            fi
+            echo "Isolated pregame smoke workbook: $workbook_id"
           fi
 
           set +e
@@ -218,6 +237,14 @@ jobs:
           console.log("Commissioning semantic gate passed.");
           NODE
 
+          if [ "$auto_created_isolated" = "true" ]; then
+            (
+              cd artifacts/api-server
+              FROSTLINE_WORKBOOK_ID="$workbook_id" pnpm exec tsx src/scripts/auditBvhWorkbook.ts --assert
+            ) > frostline-bvh-audit.json
+            cat frostline-bvh-audit.json
+          fi
+
       - name: Upload commissioning evidence
         uses: actions/upload-artifact@v4
         if: always()
@@ -226,5 +253,7 @@ jobs:
           path: |
             frostline-commissioning-report.json
             frostline-isolated-workbook.json
+            frostline-bvh-backfill.json
+            frostline-bvh-audit.json
             frostline-api-server.log
           if-no-files-found: error
