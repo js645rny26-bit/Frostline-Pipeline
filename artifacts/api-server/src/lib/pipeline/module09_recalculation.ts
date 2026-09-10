@@ -1014,7 +1014,7 @@ export interface GameSummaryRow {
    * Must not independently manufacture an Over thesis.
    */
   environment_run_adjustment: number;
-  // ── BVH V1 prospective active/control provenance ──
+  // ── BVH V1 prospective shadow/control provenance ──
   bvh_version?: string;
   bvh_integration_status?: string;
   bvh_active_input?: "YES" | "NO";
@@ -1395,9 +1395,9 @@ export async function verifyRecalculation(
       starter_window_matchup_factor: homeBVHMatchupFactor,
     }) : homeRunProjection;
 
-    // BVH replaces the fixed handedness approximation only when that side's
-    // evidence is usable. Any fallback to the former coarse path is explicit
-    // in the frozen BVH status/evidence rather than becoming a neutral zero.
+    // The selector is the commissioning boundary. While false, the coarse
+    // handedness path stays active and usable BVH evidence remains a frozen
+    // counterfactual rather than becoming a second projection vote.
     const selectedAwayProjection = BVH_ACTIVE_INPUT && awayBVHAvailable ? awayBVHCandidate : awayRunProjection;
     const selectedHomeProjection = BVH_ACTIVE_INPUT && homeBVHAvailable ? homeBVHCandidate : homeRunProjection;
     const selectedAwayOffenseCenter = BVH_ACTIVE_INPUT && awayBVHAvailable
@@ -1521,9 +1521,9 @@ export async function verifyRecalculation(
       environment_certainty: runMult.environment_certainty,
       weather_vehicle_status: runMult.weather_vehicle_status,
       // Lineup strength audit
-      // Retain the legacy factor on this backwards-compatible audit field so
-      // existing shadow modules do not silently change semantics. The active
-      // BVH factor is frozen separately and consumed only in the live starter window.
+      // Retain the active coarse factor on this backwards-compatible audit
+      // field. The BVH factor is frozen separately as a starter-window-only
+      // counterfactual while its promotion gate remains closed.
       away_lineup_factor: awayLineup.factor,
       home_lineup_factor: homeLineup.factor,
       away_lineup_weighted_ops: awayLineup.weighted_ops,
@@ -1593,8 +1593,8 @@ export async function verifyRecalculation(
       g.home_team.team_abbr ?? "", // D: Home_Team
       g.away_pitcher.name ?? "", // E: Away_Pitcher
       g.home_pitcher.name ?? "", // F: Home_Pitcher
-      awayLineup.factor, // G: legacy/audit lineup factor; active BVH is starter-window-only
-      homeLineup.factor, // H: legacy/audit lineup factor; active BVH is starter-window-only
+      awayLineup.factor, // G: active coarse lineup factor; BVH remains a starter-window shadow
+      homeLineup.factor, // H: active coarse lineup factor; BVH remains a starter-window shadow
       parseFloat((selectedAwayOffenseCenter.active_offense_center * cappedMult).toFixed(2)), // I: active pre-pitch-window rate
       parseFloat((selectedHomeOffenseCenter.active_offense_center * cappedMult).toFixed(2)), // J: active pre-pitch-window rate
       projAway, // K: Projected_Away_Runs

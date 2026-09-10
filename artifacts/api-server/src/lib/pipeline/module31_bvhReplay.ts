@@ -5,7 +5,11 @@ import {
   readRange, writeRange, WORKBOOK_ID,
 } from "../sheets/client.js";
 import { ALLOCATION_SETTLEMENT_HEADERS, ALLOCATION_SETTLEMENT_SHEET } from "./module24_postgameDiagnostics.js";
-import { BVH_PROJECTION_HISTORY_HEADERS, BVH_PROJECTION_HISTORY_SHEET } from "./module09b_bvhIntegration.js";
+import {
+  BVH_PROJECTION_HISTORY_HEADERS,
+  BVH_PROJECTION_HISTORY_SHEET,
+  BVH_PROMOTION_REVIEW_MIN_N,
+} from "./module09b_bvhIntegration.js";
 
 export const BVH_PROJECTION_REPLAY_SHEET = "BVH_PROJECTION_REPLAY_V1";
 export const BVH_PROJECTION_SUMMARY_SHEET = "BVH_PROJECTION_SUMMARY_V1";
@@ -166,6 +170,12 @@ function median(values: readonly number[]): number | null {
   return round(ordered.length % 2 ? ordered[middle]! : (ordered[middle - 1]! + ordered[middle]!) / 2);
 }
 
+export function bvhResearchStatus(n: number): string {
+  if (n <= 0) return "NO_PROSPECTIVE_SETTLEMENTS";
+  if (n < BVH_PROMOTION_REVIEW_MIN_N) return "SHADOW_ONLY_PRECHECKPOINT";
+  return "PROMOTION_REVIEW_DUE_PAIRED_TEST_REQUIRED";
+}
+
 export function summarizeBVHReplay(rows: readonly BVHReplayRow[], population = "ALL_PROSPECTIVE"): BVHReplaySummary {
   const existingErrors = rows.map((row) => row.existing_total - row.actual_total);
   const bvhErrors = rows.map((row) => row.bvh_total - row.actual_total);
@@ -230,7 +240,7 @@ function replayValues(row: BVHReplayRow, replayTs: string): unknown[] {
     round((existingAwayAbs + existingHomeAbs) / 2), round((bvhAwayAbs + bvhHomeAbs) / 2),
     round((bvhAwayAbs + bvhHomeAbs - existingAwayAbs - existingHomeAbs) / 2),
     round(row.bvh_away - row.existing_away), round(row.bvh_home - row.existing_home), round(row.bvh_total - row.existing_total),
-    material ? "REVIEW_REQUIRED" : "BELOW_MATERIAL_REVIEW_THRESHOLD", row.settlement_ts, replayTs, "ACTIVE_PROSPECTIVE_COUNTERFACTUAL",
+    material ? "REVIEW_REQUIRED" : "BELOW_MATERIAL_REVIEW_THRESHOLD", row.settlement_ts, replayTs, "PROSPECTIVE_COUNTERFACTUAL",
   ];
 }
 
@@ -244,7 +254,7 @@ function summaryValues(summary: BVHReplaySummary, replayTs: string): unknown[] {
     summary.existing_allocation_mae ?? "", summary.bvh_allocation_mae ?? "", summary.mean_abs_total_delta ?? "",
     summary.median_abs_total_delta ?? "", summary.max_abs_total_delta ?? "", summary.mean_abs_away_delta ?? "",
     summary.mean_abs_home_delta ?? "", summary.games_delta_gte_0_5, summary.games_delta_gte_1_0,
-    summary.manual_review_n, replayTs, summary.n > 0 ? "ACTIVE_PROSPECTIVE_MONITORING" : "NO_PROSPECTIVE_SETTLEMENTS",
+    summary.manual_review_n, replayTs, bvhResearchStatus(summary.n),
   ];
 }
 

@@ -91,6 +91,17 @@ test("SSAT V2 failure run cost is explicitly dormant and cannot be mistaken for 
   assert.match(entry?.notes ?? "", /not authorized/i);
 });
 
+test("BVH V1 is cataloged as shadow-only until its prospective promotion review", () => {
+  const entry = getModelInputCatalogEntries().find(
+    (candidate) => candidate.id === "BVH_V1_BATTER_VS_HAND",
+  );
+  assert.equal(entry?.outputClass, "SHADOW_CHALLENGER");
+  assert.equal(entry?.operationalStatus, "SHADOW_ONLY");
+  assert.equal(entry?.feedsActiveProjection, "NO");
+  assert.equal(entry?.feedsDecisionBoard, "NO");
+  assert.match(entry?.notes ?? "", /N=200.*paired review/i);
+});
+
 test("catalog sheet existence is determined from workbook metadata", async () => {
   let addCalls = 0;
   await ensureModelInputCatalogSheet("workbook", {

@@ -195,8 +195,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *  v60 (2026-09-10): pitcher-specific workload remains shadow-only while
  *      each packet freezes the candidate pitches, D-1 source horizon, sample,
  *      recent workload, dispersion, and history weight needed for commissioning.
+ *  v61 (2026-09-10): BVH V1 returns to shadow-only prospective monitoring.
+ *      The coarse platoon path is active for new unfrozen packets; BVH retains
+ *      its exact pregame counterfactual and cannot enter projection or decisions
+ *      before the declared N=200 paired review. Frozen packets remain immutable.
  */
-export const WORKBOOK_SCHEMA_VERSION = 60;
+export const WORKBOOK_SCHEMA_VERSION = 61;
 
 export interface ColumnDef {
   name: string;
@@ -13057,7 +13061,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "BVH_PROJECTION_HISTORY_V1",
     description:
-      "Immutable pregame comparison of the former coarse-hand control and active prospective BVH V1 starter-window projection. It preserves exact lineup evidence, hand, factor, and source-cutoff lineage; it is not an independent decision vote.",
+      "Immutable pregame comparison of the active coarse-hand control and shadow-only BVH V1 starter-window candidate. It preserves exact lineup evidence, hand, factor, and source-cutoff lineage; it is not an independent decision vote.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(

@@ -350,14 +350,14 @@ const ENTRIES: ModelInputCatalogEntry[] = [
   },
   {
     recordType: "INPUT", id: "BVH_V1_BATTER_VS_HAND", label: "Batter-vs-Hand Performance Split V1",
-    layer: "BASEBALL_MODEL", outputClass: "ACTIVE_INPUT", operationalStatus: "ACTIVE",
+    layer: "BASEBALL_MODEL", outputClass: "SHADOW_CHALLENGER", operationalStatus: "SHADOW_ONLY",
     definition: "PA-correct batter OPS versus LHP/RHP, shrunk with fixed k=150 toward an eligible player-history or same-hand league prior and aggregated over the exact lineup.",
     statisticalWindow: "Season through slate date minus one; prior-season/career prior where 200+ retained PA", gameWindow: "STARTER_WINDOW_ONLY",
     primarySource: "SOURCE_SAVANT_PITCH_LEVEL", fallbackSource: "Same-hand league prior; explicit NO_SOURCE_DATA when no retained corpus exists",
     refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "BVH_BATTER_SPLITS_V1 requested/actual through dates + deterministic hash",
-    workbookLocation: "TODAY_LINEUPS H:I,O:T; PREGAME_PACKET_HISTORY BVH_*; BVH_BATTER_SPLITS_V1; BVH_PROJECTION_HISTORY_V1", feedsActiveProjection: "YES", feedsDecisionBoard: "YES",
+    workbookLocation: "TODAY_LINEUPS H:I,O:T; PREGAME_PACKET_HISTORY BVH_*; BVH_BATTER_SPLITS_V1; BVH_PROJECTION_HISTORY_V1", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
     correlationFamily: "LINEUP_QUALITY / STARTER_HAND_MATCHUP", missingBehavior: "Zero sample uses an explicit prior; missing source or identity remains a named evidence gap and never becomes zero OPS.",
-    notes: "Prospectively replaces the coarse fixed hand adjustment inside starter innings only. It is never an additive run bonus and does not describe bullpen innings. Pre-v59 packets are NON_REPLAYABLE_FOR_BVH because hitter identities were not frozen.", freshnessKey: "SAVANT_PITCH_LEVEL",
+    notes: "Coarse platoon remains active. BVH is preserved as a prospective starter-window counterfactual until N=200 and the declared paired review; it is never an additive run bonus and does not describe bullpen innings. Pre-v59 packets are NON_REPLAYABLE_FOR_BVH because hitter identities were not frozen.", freshnessKey: "SAVANT_PITCH_LEVEL",
   },
   {
     recordType: "INPUT", id: "SAVANT_SEASON_CONTACT", label: "Season xwOBA and hard-hit rate",
@@ -659,7 +659,7 @@ const ENTRIES: ModelInputCatalogEntry[] = [
   {
     recordType: "GAP", id: "MISSING_ALLOCATION_INPUTS", label: "Unmodeled allocation inputs",
     layer: "GOVERNANCE", outputClass: "MISSING_INPUT", operationalStatus: "MISSING",
-    definition: "No active home/away defense, baserunning, catcher/framing, or umpire effect. Batter-vs-hand performance is now active prospectively through BVH V1.",
+    definition: "No active home/away defense, baserunning, catcher/framing, or umpire effect. Batter-vs-hand performance is commissioned as BVH V1 evidence but remains shadow-only pending its declared prospective checkpoint.",
     statisticalWindow: "Not currently sourced/commissioned", gameWindow: "TEAM_ALLOCATION",
     primarySource: "NONE", fallbackSource: "Existing lineup/quality model", refreshCadence: "NOT_APPLICABLE",
     freshnessEvidence: "MODEL_INPUT_CATALOG gap record", workbookLocation: "No active workbook field",

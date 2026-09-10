@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   BVH_ACTIVE_INPUT,
   BVH_MATCHUP_BLEND_WEIGHT,
+  BVH_PROJECTION_STATUS,
+  BVH_PROMOTION_REVIEW_MIN_N,
   isBVHProfileUsable,
   mapBVHStarterWindowFactor,
 } from "./module09b_bvhIntegration.js";
@@ -22,9 +24,11 @@ test("BVH mapping reuses the commissioned lineup blend and attenuates projected 
   assert.equal(mapBVHStarterWindowFactor(profile, "projected"), 1.024);
 });
 
-test("unavailable BVH evidence is neutral while commissioned BVH is active prospectively", () => {
+test("BVH remains a prospective shadow until its declared review checkpoint", () => {
   assert.equal(mapBVHStarterWindowFactor({ ...profile, status: "NO_SOURCE_DATA" }, "official"), 1);
-  assert.equal(BVH_ACTIVE_INPUT, true);
+  assert.equal(BVH_ACTIVE_INPUT, false);
+  assert.equal(BVH_PROJECTION_STATUS, "SHADOW_ONLY_PROSPECTIVE_V1");
+  assert.equal(BVH_PROMOTION_REVIEW_MIN_N, 200);
 });
 
 test("BVH availability is side-local so one unresolved pitching hand cannot erase the other side", () => {

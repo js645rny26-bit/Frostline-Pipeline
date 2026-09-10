@@ -3,7 +3,7 @@
 ## Status
 
 - Version: `1.0.0`
-- Build state: `BUILD_TEST_COPY`
+- Build state: `SHADOW_ONLY_PROSPECTIVE_V1`
 - Active projection input: `NO` (`BVH_ACTIVE_INPUT = false`)
 - Source: `SOURCE_SAVANT_PITCH_LEVEL`
 - Market input: none
@@ -16,11 +16,11 @@ BVH V1 refines the existing exact-lineup offense-versus-opposing-starter-hand ob
 |---|---|---|---|---|---|
 | `game_date`, `game_pk`, `at_bat_number`, `batter`, `p_throws`, `events` | Confirmed-lineup offense vs starter | Fixed `+0.012 OPS` nominal platoon proxy | One terminal event per `(game_pk, at_bat_number)`; official AB/OBP/TB rules; group by MLBAM batter and pitcher hand | Same-season raw PA; historical same-hand player prior only at 200+ PA, otherwise cutoff-specific same-hand league prior; fixed `k=150`; zero sample returns the prior with `NO_SPLIT_SAMPLE` | Starter-window matchup factor only |
 
-The current stable lineup baseline remains season OPS/xwOBA based. The BVH candidate removes the fixed nominal platoon increment from that baseline and maps the shrinkage-aware split-to-stable-OPS ratio through the already commissioned lineup blend (`0.40`; projected lineups receive the existing `0.60` confidence discount). The mapped factor is applied only to `starter_attack_runs`. Bullpen continuation, traffic, damage, park/weather, vehicle, and authorization logic are not changed.
+The active projection retains the commissioned coarse platoon path. The BVH counterfactual removes the fixed nominal platoon increment from its candidate baseline and maps the shrinkage-aware split-to-stable-OPS ratio through the already commissioned lineup blend (`0.40`; projected lineups receive the existing `0.60` confidence discount). The candidate factor is applied only to `starter_attack_runs`. Bullpen continuation, traffic, damage, park/weather, vehicle, and authorization logic are not changed.
 
 ## Correlation and double-count protection
 
-- BVH replaces/refines the existing handedness contribution; it is not added beside it.
+- The BVH candidate replaces/refines the existing handedness contribution inside its counterfactual; it is not added beside the active coarse path.
 - Each hitter is consumed once through the lineup-weighted opposing-hand profile.
 - The exact same exported batting-order weight vector used by the commissioned lineup calculation is reused; BVH does not maintain a second weighting policy.
 - Stable OPS/xwOBA remains the talent center; raw split OPS is shrunk rather than treated as a second talent estimate.
@@ -53,8 +53,10 @@ This commissions the parser behavior in local/network validation. It does not by
 
 ## Replay boundary
 
-Historical packets before BVH did not freeze exact hitter MLBAM identities and split evidence. They cannot be reconstructed after results without violating the temporal firewall. Therefore the active historical replay begins only with prospectively frozen `BVH_PROJECTION_HISTORY_V1` rows. The Aug. 24 target is usable only where an exact, cutoff-safe lineup snapshot already exists; otherwise the row is explicitly unavailable rather than backfilled from postgame data.
+Historical packets before BVH did not freeze exact hitter MLBAM identities and split evidence. They cannot be reconstructed after results without violating the temporal firewall. Therefore the legitimate replay begins only with prospectively frozen `BVH_PROJECTION_HISTORY_V1` rows. The Aug. 24 target is usable only where an exact, cutoff-safe lineup snapshot already exists; otherwise the row is explicitly unavailable rather than backfilled from postgame data.
 
 ## Promotion gate
 
-Promotion requires disposable-workbook materialization, dependency/double-count/smoke checks, prospective frozen replay, manual review of material deltas, and the complete regression suite. The later N=200 review evaluates incremental value; it is not a prerequisite for recognizing correctly derived split data.
+BVH data derivation is commissioned, but projection consumption remains shadow-only. Promotion review cannot begin before 200 eligible prospectively settled games. At that checkpoint, run the declared paired error comparison and acceptance checks, inspect total and team-allocation error, coverage/hand cohorts, materially changed games, cutoff integrity, and double-count protection. N=200 does not auto-promote the feature; it authorizes a documented `PROMOTE`, `HOLD`, or `REJECT` review.
+
+The first 15 prospectively settled games remain immutable evidence of the period in which BVH was active. They are not rewritten or discarded. New unfrozen packets use the coarse platoon projection as active truth while continuing to freeze BVH as the paired candidate.

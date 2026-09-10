@@ -68,15 +68,15 @@ async function main(): Promise<void> {
   if (dailyRows.length <= 1) failures.push("BVH_DAILY_HISTORY_EMPTY");
   if (splitData.length === 0) failures.push("BVH_BATTER_SPLITS_EMPTY");
   if (candidateRows.length === 0) failures.push("BVH_PROJECTION_HISTORY_EMPTY");
-  if (activeIndex < 0 || activeProspectiveRows.length === 0 || activeProspectiveRows.some((row) => text(row[activeIndex]) !== "YES")) failures.push("BVH_ACTIVE_INPUT_NOT_MATERIALIZED");
-  if (integrationIndex < 0 || activeProspectiveRows.some((row) => text(row[integrationIndex]) !== "ACTIVE_PROSPECTIVE_V1")) failures.push("BVH_INTEGRATION_STATUS_INVALID");
+  if (activeIndex < 0 || activeProspectiveRows.length === 0 || activeProspectiveRows.some((row) => text(row[activeIndex]) !== "NO")) failures.push("BVH_SHADOW_ONLY_NOT_MATERIALIZED");
+  if (integrationIndex < 0 || activeProspectiveRows.some((row) => text(row[integrationIndex]) !== "SHADOW_ONLY_PROSPECTIVE_V1")) failures.push("BVH_INTEGRATION_STATUS_INVALID");
   if (hashIndex < 0 || candidateRows.some((row) => !text(row[hashIndex]))) failures.push("BVH_PROJECTION_HASH_MISSING");
   if (unclassifiedIndex < 0 || splitData.some((row) => Number(row[unclassifiedIndex] ?? 0) !== 0)) failures.push("BVH_UNCLASSIFIED_EVENT_PRESENT");
   for (const required of ["BVH_DAILY_HISTORY_V1", "BVH_BATTER_SPLITS_V1", "BVH_PROJECTION_HISTORY_V1", "BVH_PROJECTION_REPLAY_V1", "BVH_PROJECTION_SUMMARY_V1"]) {
     if (!schemaCells.has(required)) failures.push(`SCHEMA_REFERENCE_MISSING_${required}`);
   }
   const report = {
-    status: failures.length === 0 ? "BVH_ACTIVE_PROSPECTIVE_COMMISSIONING_PASS" : "BVH_ACTIVE_PROSPECTIVE_COMMISSIONING_FAIL",
+    status: failures.length === 0 ? "BVH_SHADOW_ONLY_COMMISSIONING_PASS" : "BVH_SHADOW_ONLY_COMMISSIONING_FAIL",
     failures,
     workbook_id: WORKBOOK_ID,
     schema_version: WORKBOOK_SCHEMA_VERSION,

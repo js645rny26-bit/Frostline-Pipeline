@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ALLOCATION_SETTLEMENT_HEADERS } from "./module24_postgameDiagnostics.js";
 import { BVH_PROJECTION_HISTORY_HEADERS } from "./module09b_bvhIntegration.js";
-import { buildBVHReplay, selectLatestBVHCandidates, summarizeBVHReplay } from "./module31_bvhReplay.js";
+import {
+  buildBVHReplay,
+  bvhResearchStatus,
+  selectLatestBVHCandidates,
+  summarizeBVHReplay,
+} from "./module31_bvhReplay.js";
 
 function row(headers: readonly string[], values: Record<string, unknown>): unknown[] {
   return headers.map((header) => values[header] ?? "");
@@ -11,7 +16,7 @@ function row(headers: readonly string[], values: Record<string, unknown>): unkno
 function candidate(overrides: Record<string, unknown> = {}): unknown[] {
   return row(BVH_PROJECTION_HISTORY_HEADERS, {
     Date: "2026-09-08", Game_ID: "20260908_AAA_BBB", Snapshot_TS: "2026-09-08T20:00:00.000Z",
-    BVH_Version: "1.0.0", Integration_Status: "ACTIVE_PROSPECTIVE_V1", Active_Input: "YES",
+    BVH_Version: "1.0.0", Integration_Status: "SHADOW_ONLY_PROSPECTIVE_V1", Active_Input: "NO",
     Away_Opposing_Starter_Hand: "R", Home_Opposing_Starter_Hand: "L",
     Away_BVH_Coverage: 0.8, Home_BVH_Coverage: 0.7, Away_BVH_Identity_Coverage: 1, Home_BVH_Identity_Coverage: 1,
     Away_BVH_Chain_Uncertainty: "FALSE", Home_BVH_Chain_Uncertainty: "FALSE",
@@ -62,4 +67,11 @@ test("BVH replay never reconstructs a candidate when no prospective row exists",
   );
   assert.deepEqual(replay, []);
   assert.equal(summarizeBVHReplay(replay).n, 0);
+});
+
+test("BVH governance cannot reach promotion review before 200 eligible settlements", () => {
+  assert.equal(bvhResearchStatus(0), "NO_PROSPECTIVE_SETTLEMENTS");
+  assert.equal(bvhResearchStatus(15), "SHADOW_ONLY_PRECHECKPOINT");
+  assert.equal(bvhResearchStatus(199), "SHADOW_ONLY_PRECHECKPOINT");
+  assert.equal(bvhResearchStatus(200), "PROMOTION_REVIEW_DUE_PAIRED_TEST_REQUIRED");
 });

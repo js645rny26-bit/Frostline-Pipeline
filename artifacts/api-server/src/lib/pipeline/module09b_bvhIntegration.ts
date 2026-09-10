@@ -12,8 +12,9 @@ import {
 import type { BVHLineupProfile } from "./module02j_batterVsHand.js";
 
 export const BVH_PROJECTION_HISTORY_SHEET = "BVH_PROJECTION_HISTORY_V1";
-export const BVH_PROJECTION_STATUS = "ACTIVE_PROSPECTIVE_V1" as const;
-export const BVH_ACTIVE_INPUT = true;
+export const BVH_PROJECTION_STATUS = "SHADOW_ONLY_PROSPECTIVE_V1" as const;
+export const BVH_ACTIVE_INPUT = false;
+export const BVH_PROMOTION_REVIEW_MIN_N = 200;
 export const BVH_HISTORICAL_REPLAY_STATUS =
   "NON_REPLAYABLE_FOR_BVH — FROZEN_PACKETS_LACK_HITTER_IDENTITY" as const;
 /** Reuses the already commissioned lineup-strength blend; no new coefficient. */

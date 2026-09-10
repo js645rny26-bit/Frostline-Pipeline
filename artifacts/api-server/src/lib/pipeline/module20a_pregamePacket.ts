@@ -944,8 +944,10 @@ export function buildPregamePacketInputs(
       summary.bvh_version ?? "1.0.0",
       summary.bvh_integration_status ?? "",
       summary.bvh_active_input ?? "NO",
-      summary.bvh_active_input === "YES"
-        ? "PROSPECTIVE_COUNTERFACTUAL"
+      summary.bvh_deterministic_hash
+        ? summary.bvh_active_input === "YES"
+          ? "PROSPECTIVE_ACTIVE_COUNTERFACTUAL"
+          : "PROSPECTIVE_SHADOW_COUNTERFACTUAL"
         : "NON_REPLAYABLE_FOR_BVH — FROZEN_PACKETS_LACK_HITTER_IDENTITY",
       summary.bvh_away_opposing_starter_hand ?? "",
       summary.bvh_home_opposing_starter_hand ?? "",

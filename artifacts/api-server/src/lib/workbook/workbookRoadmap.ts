@@ -144,9 +144,9 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "AUDIT",
     timing: "Append for every legitimate pre-first-pitch projection snapshot (Module 09b)",
     purpose:
-      "Preserves the former coarse-hand control versus active prospective BVH team runs and the exact starter-window evidence, coverage, hand, and cutoff lineage.",
+      "Preserves the active coarse-hand control versus shadow-only BVH team runs and the exact starter-window evidence, coverage, hand, and cutoff lineage.",
     boardRelationship:
-      "BVH feeds the price-blind projection only through the existing starter-window handedness slot. It is not a separate board vote and never reads market evidence.",
+      "BVH is shadow-only and cannot feed the price-blind projection or board. The coarse handedness path remains active; neither path reads market evidence.",
     readNote:
       "Use for regression and manual high-delta review; opener-chain uncertainty and missing identities must remain visible.",
   },
@@ -170,7 +170,7 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     boardRelationship:
       "Research only; no row changes projections, vehicles, markets, or authorization.",
     readNote:
-      "Treat small samples descriptively. N=200 is the later validation checkpoint, not an automatic promotion rule.",
+      "Treat N<200 descriptively. At N=200 run the declared paired review and acceptance checks; the checkpoint starts a promotion decision and never promotes automatically.",
   },
   {
     sheet: "SWE_APPEARANCE_HISTORY_V1",
