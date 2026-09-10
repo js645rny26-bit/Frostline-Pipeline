@@ -2,7 +2,7 @@
 
 Candidate base: `0bde8e3`
 
-Commissioning state: **HOLD — LIVE SHADOW SETTLEMENT PENDING**
+Commissioning state: **HOLD — LIVE SHADOW PREGAME MATERIALIZED; SETTLEMENT PENDING**
 
 Active projection state: **UNCHANGED LEGACY MODULE 03 WORKLOAD**
 
@@ -119,9 +119,26 @@ Schema v60 adds the following to each new pregame packet while leaving active Ex
 
 Tests prove that the same workload history yields an individual shadow value while Module 03 still emits 92/6.0 for the active conventional starter. The commissioning branch may now run one legitimate pregame shadow. Settlement will compare the frozen legacy and candidate IP to actual IP.
 
+### September 10 materialization
+
+GitHub Actions commissioning run [#162](https://github.com/js645rny26-bit/Frostline-Pipeline/actions/runs/34485656912) completed successfully on commit `3036882`.
+
+- authoritative workbook schema: v60;
+- publication scope: `FULL_PREGAME_SCOPE`, five games;
+- validation: PASS; critical failures: 0; RUN_LOG integrity: PASS;
+- expected pitchers resolved: 10/10;
+- packet timestamp: `2026-09-10T13:57:43.880Z`, before first pitch;
+- active Expected_IP distinct values: 6.0 and 1.2, proving the commissioned legacy path remained active;
+- candidate Projected_IP_Shadow: 10 distinct values across 10 pitchers;
+- candidate status: `PITCHER_SPECIFIC` for 10/10;
+- source data-through: 2026-09-09 (D-1) for 10/10;
+- candidate pitches, five-appearance sample, recent IP/pitches, IP SD, pitch SD, history weight, role, rest, and confidence: populated for 10/10.
+
+All five packet rows are currently `OPEN_PROSPECTIVE`, as expected before their games start. The normal lifecycle must freeze these exact pre-first-pitch snapshots before settlement; no post-start rebuild is permitted.
+
 ## 6. Current verdict
 
-**HOLD**, pending live-shadow settlement. The replay justifies promotion consideration but does not satisfy the user's final gate by itself.
+**HOLD**, pending September 10 live-shadow settlement. The replay and real pregame materialization justify promotion consideration but do not satisfy the final gate by themselves.
 
 After settlement:
 
@@ -138,3 +155,4 @@ If promoted, STARTER_WORKLOAD will be deployed as one isolated change. Recent co
 - API build: pass.
 - Authoritative workbook and frozen packets: untouched by local validation.
 - Active Module 03 projection workload: unchanged.
+- Live commissioning run #162: PASS; v60 shadow evidence materialized for 10/10 pitchers.
