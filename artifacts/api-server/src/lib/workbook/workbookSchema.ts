@@ -192,8 +192,11 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      handedness approximation inside the starter window only. New frozen
  *      packets preserve exact hitter evidence plus the pre-BVH control;
  *      legacy packets remain untouched and non-replayable for BVH.
+ *  v60 (2026-09-10): pitcher-specific workload remains shadow-only while
+ *      each packet freezes the candidate pitches, D-1 source horizon, sample,
+ *      recent workload, dispersion, and history weight needed for commissioning.
  */
-export const WORKBOOK_SCHEMA_VERSION = 59;
+export const WORKBOOK_SCHEMA_VERSION = 60;
 
 export interface ColumnDef {
   name: string;
@@ -421,6 +424,16 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Home_Starter_Quality_Source",
   "Away_Bullpen_Quality_Source",
   "Home_Bullpen_Quality_Source",
+  "Workload_Candidate_Version",
+  "Away_Workload_Candidate_Status",
+  "Away_Projected_Pitches_Shadow",
+  "Away_Workload_Data_Through_Date",
+  "Away_Workload_Relevant_Appearances",
+  "Away_Workload_Recent_IP",
+  "Away_Workload_Recent_Pitches",
+  "Away_Workload_IP_SD",
+  "Away_Workload_Pitch_SD",
+  "Away_Workload_History_Weight",
   "Away_Workload_State_Status",
   "Away_Projected_IP_Shadow",
   "Away_Projected_BF_Shadow",
@@ -431,6 +444,15 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Away_Team_Handling_State",
   "Away_Workload_Source_Status",
   "Away_Workload_Notes",
+  "Home_Workload_Candidate_Status",
+  "Home_Projected_Pitches_Shadow",
+  "Home_Workload_Data_Through_Date",
+  "Home_Workload_Relevant_Appearances",
+  "Home_Workload_Recent_IP",
+  "Home_Workload_Recent_Pitches",
+  "Home_Workload_IP_SD",
+  "Home_Workload_Pitch_SD",
+  "Home_Workload_History_Weight",
   "Home_Workload_State_Status",
   "Home_Projected_IP_Shadow",
   "Home_Projected_BF_Shadow",
@@ -505,9 +527,23 @@ const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
   "Away_Expected_IP",
   "Home_Expected_IP",
   "Away_Projected_IP_Shadow",
+  "Away_Projected_Pitches_Shadow",
   "Away_Projected_BF_Shadow",
+  "Away_Workload_Relevant_Appearances",
+  "Away_Workload_Recent_IP",
+  "Away_Workload_Recent_Pitches",
+  "Away_Workload_IP_SD",
+  "Away_Workload_Pitch_SD",
+  "Away_Workload_History_Weight",
   "Home_Projected_IP_Shadow",
+  "Home_Projected_Pitches_Shadow",
   "Home_Projected_BF_Shadow",
+  "Home_Workload_Relevant_Appearances",
+  "Home_Workload_Recent_IP",
+  "Home_Workload_Recent_Pitches",
+  "Home_Workload_IP_SD",
+  "Home_Workload_Pitch_SD",
+  "Home_Workload_History_Weight",
   "SWE_Away_Expected_IP",
   "SWE_Away_N_Starts",
   "SWE_Away_L3_IP",

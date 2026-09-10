@@ -1,22 +1,16 @@
 /**
- * Module 02g: Workload State Shadow
+ * Module 02g: pitcher-specific workload commissioning shadow.
  *
- * A frozen, price-blind description of the likely starter workload. It is a
- * research object only: no field here changes active Expected_IP, projection,
- * board authorization, market comparison, or vehicle selection.
- *
- * The first version uses only official MLB game logs through the prior day and
- * the already-classified pitching role. Transaction, rehabilitation, and team
- * handling evidence is deliberately reported as unavailable until an explicit
- * source is connected; it is never converted into a neutral signal.
+ * The active Module 03 workload remains unchanged. This object independently
+ * freezes the candidate estimate and its source evidence so a prospective
+ * settlement can adjudicate it without changing a projection or decision.
  */
 
-import type { StarterOuting } from "./module04d_starterPrevOuting.js";
-import type {
-  PitcherGameLogAppearance,
-  PitcherWorkloadData,
-  WorkloadResult,
-} from "./module02_pitcherWorkload.js";
+import type { PitcherWorkloadData, WorkloadResult } from "./module02_pitcherWorkload.js";
+import {
+  estimatePitcherSpecificWorkload,
+  NUMERIC_WORKLOAD_VERSION,
+} from "./module03_numericWorkload.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 
 export type WorkloadStateStatus = "AVAILABLE" | "PARTIAL" | "UNAVAILABLE";
@@ -24,7 +18,10 @@ export type WorkloadConfidence = "HIGH" | "MEDIUM" | "LOW" | "UNAVAILABLE";
 
 export interface WorkloadState {
   workload_state_status: WorkloadStateStatus;
+  workload_candidate_version: string;
+  workload_candidate_status: string;
   projected_ip_shadow: number | null;
+  projected_pitches_shadow: number | null;
   projected_bf_shadow: number | null;
   workload_confidence: WorkloadConfidence;
   role_state: string;
@@ -32,6 +29,13 @@ export interface WorkloadState {
   recent_load_state: string;
   team_handling_state: "NOT_MODELED";
   workload_source_status: string;
+  workload_data_through_date: string;
+  workload_relevant_appearances: number | null;
+  workload_recent_ip: number | null;
+  workload_recent_pitches: number | null;
+  workload_ip_sd: number | null;
+  workload_pitch_sd: number | null;
+  workload_history_weight: number | null;
   workload_notes: string;
 }
 
@@ -40,9 +44,12 @@ export interface WorkloadGameState {
   home: WorkloadState;
 }
 
-const UNAVAILABLE = (roleState = "UNRESOLVED"): WorkloadState => ({
+const unavailable = (roleState = "UNRESOLVED", dataThroughDate = ""): WorkloadState => ({
   workload_state_status: "UNAVAILABLE",
+  workload_candidate_version: NUMERIC_WORKLOAD_VERSION,
+  workload_candidate_status: "ROLE_FALLBACK_NO_USABLE_HISTORY",
   projected_ip_shadow: null,
+  projected_pitches_shadow: null,
   projected_bf_shadow: null,
   workload_confidence: "UNAVAILABLE",
   role_state: roleState,
@@ -50,6 +57,13 @@ const UNAVAILABLE = (roleState = "UNRESOLVED"): WorkloadState => ({
   recent_load_state: "UNAVAILABLE",
   team_handling_state: "NOT_MODELED",
   workload_source_status: "WORKLOAD_EVIDENCE_UNAVAILABLE",
+  workload_data_through_date: dataThroughDate,
+  workload_relevant_appearances: null,
+  workload_recent_ip: null,
+  workload_recent_pitches: null,
+  workload_ip_sd: null,
+  workload_pitch_sd: null,
+  workload_history_weight: null,
   workload_notes: "No pregame-safe MLB game-log workload evidence for this expected pitcher.",
 });
 
@@ -57,130 +71,83 @@ function round(value: number, decimals = 2): number {
   return Number.parseFloat(value.toFixed(decimals));
 }
 
-function baselineIp(role: string, currentExpectedIp: number | null): number | null {
-  if (currentExpectedIp !== null && Number.isFinite(currentExpectedIp)) return currentExpectedIp;
-  if (role === "OPENER") return 1.2;
-  if (role === "BULK" || role === "PIGGYBACK_SECONDARY") return 3;
-  if (role === "CONVENTIONAL_STARTER") return 6;
-  return null;
+function recentLoadState(pitchCount: number | null): string {
+  if (pitchCount === null) return "RECENT_PITCH_COUNT_UNAVAILABLE";
+  if (pitchCount >= 105) return "HEAVY_RECENT_WORKLOAD";
+  if (pitchCount <= 55) return "LIGHT_RECENT_WORKLOAD";
+  return "NORMAL_RECENT_WORKLOAD";
 }
 
-function relevantAppearances(
-  role: string,
-  appearances: PitcherGameLogAppearance[],
-): PitcherGameLogAppearance[] {
-  const starts = appearances.filter((appearance) => appearance.games_started > 0);
-  // A scheduled conventional starter is evaluated against previous starts. A
-  // planned opener/bulk arm can legitimately be assessed from its appearances.
-  return role === "CONVENTIONAL_STARTER" && starts.length > 0 ? starts : appearances;
-}
-
-function weightedMean(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const weights = [0.5, 0.3, 0.2, 0.1, 0.05];
-  const used = values.slice(0, weights.length);
-  const denominator = used.reduce((sum, _, index) => sum + weights[index]!, 0);
-  return denominator === 0
-    ? null
-    : used.reduce((sum, value, index) => sum + value * weights[index]!, 0) / denominator;
-}
-
-function restState(daysRest: number | null): { state: string; adjustment: number } {
-  if (daysRest === null) return { state: "REST_UNAVAILABLE", adjustment: 0 };
-  if (daysRest <= 3) return { state: "SHORT_REST", adjustment: -0.5 };
-  if (daysRest >= 11) return { state: "RETURN_FROM_EXTENDED_REST", adjustment: -0.75 };
-  if (daysRest >= 7) return { state: "EXTRA_REST", adjustment: 0 };
-  return { state: "STANDARD_REST", adjustment: 0 };
-}
-
-function recentLoadState(appearance: PitcherGameLogAppearance | undefined): string {
-  if (!appearance) return "RECENT_LOAD_UNAVAILABLE";
-  if (appearance.pitch_count === null) return "RECENT_PITCH_COUNT_UNAVAILABLE";
-  if (appearance.pitch_count >= 105) return "HEAVY_PREVIOUS_OUTING";
-  if (appearance.pitch_count <= 55) return "LIGHT_PREVIOUS_OUTING";
-  return "NORMAL_PREVIOUS_OUTING";
-}
-
-function clampByRole(value: number, role: string): number {
-  if (role === "OPENER") return Math.max(0.7, Math.min(2.25, value));
-  if (role === "BULK" || role === "PIGGYBACK_SECONDARY") return Math.max(1.5, Math.min(5, value));
-  return Math.max(3, Math.min(7.5, value));
-}
-
-function daysBetween(lastDate: string | undefined, gameDate: string): number | null {
-  if (!lastDate) return null;
-  const last = Date.parse(`${lastDate}T12:00:00.000Z`);
-  const game = Date.parse(`${gameDate}T12:00:00.000Z`);
-  return Number.isFinite(last) && Number.isFinite(game)
-    ? Math.round((game - last) / 86_400_000)
-    : null;
-}
-
+/** Build one candidate without mutating or replacing active Expected_IP. */
 export function buildWorkloadState(
   role: string,
-  currentExpectedIp: number | null,
+  activeExpectedIp: number | null,
+  activeExpectedPitches: number | null,
   gameDate: string,
+  dataThroughDate: string,
   workload: PitcherWorkloadData | undefined,
-  previousOuting: StarterOuting | undefined,
 ): WorkloadState {
-  const baseline = baselineIp(role, currentExpectedIp);
-  if (!baseline || !workload || workload.status === "fetch_error") return UNAVAILABLE(role);
+  if (
+    activeExpectedIp === null
+    || activeExpectedPitches === null
+    || !Number.isFinite(activeExpectedIp)
+    || !Number.isFinite(activeExpectedPitches)
+  ) return unavailable(role, dataThroughDate);
 
-  // Defense in depth: the acquisition module already applies date-minus-one,
-  // but a reused or fixture workload object still cannot leak same-day or
-  // future appearances into a prospective packet.
-  const pregameAppearances = (workload.recent_appearances ?? []).filter(
-    (appearance) => appearance.date < gameDate,
+  const estimate = estimatePitcherSpecificWorkload(
+    role,
+    activeExpectedPitches,
+    activeExpectedIp,
+    gameDate,
+    dataThroughDate,
+    workload,
   );
-  const appearances = relevantAppearances(role, pregameAppearances).slice(0, 5);
-  if (appearances.length === 0) return {
-    ...UNAVAILABLE(role),
-    workload_source_status: `MLB_GAME_LOG_NO_ELIGIBLE_APPEARANCES_THROUGH_${workload.status}`,
-    workload_notes: "Expected pitcher has no role-relevant pregame-safe game-log appearances; no shadow workload is invented.",
-  };
+  if (estimate.status !== "PITCHER_SPECIFIC") {
+    return {
+      ...unavailable(role, dataThroughDate),
+      workload_candidate_status: estimate.status,
+      projected_ip_shadow: estimate.expected_innings,
+      projected_pitches_shadow: estimate.expected_pitches,
+      projected_bf_shadow: round(estimate.expected_innings * 4.25),
+      rest_state: estimate.rest_state,
+      workload_relevant_appearances: estimate.relevant_appearances,
+      workload_history_weight: estimate.history_weight,
+      workload_notes: estimate.notes,
+    };
+  }
 
-  const recentIp = weightedMean(appearances.map((appearance) => appearance.innings));
-  const latest = appearances[0];
-  const daysRest = previousOuting?.days_rest ?? daysBetween(latest?.date, gameDate);
-  const rest = restState(daysRest);
-  // Five relevant appearances earns full history weight. Smaller samples remain
-  // shrunk to the active role baseline rather than becoming a new talent claim.
-  const historyWeight = Math.min(appearances.length / 5, 1);
-  const rawShadowIp = baseline * (1 - historyWeight) + (recentIp ?? baseline) * historyWeight + rest.adjustment;
-  const projectedIp = round(clampByRole(rawShadowIp, role));
-  const confidence: WorkloadConfidence = appearances.length >= 5 && daysRest !== null
+  const confidence: WorkloadConfidence = estimate.relevant_appearances >= 5 && estimate.days_rest !== null
     ? "HIGH"
-    : appearances.length >= 3
+    : estimate.relevant_appearances >= 3
       ? "MEDIUM"
       : "LOW";
-  // We have official game-log evidence, but transaction/rehab, role-change,
-  // and team-handling sources are intentionally not connected yet. Do not
-  // label the composite state complete merely because one evidence family is.
-  const status: WorkloadStateStatus = "PARTIAL";
-  const latestPitchCount = latest?.pitch_count ?? null;
-  const sourceStatus = `MLB_STATS_API_GAME_LOG_THROUGH_${workload.status === "active" ? "PRIOR_DAY" : "WIDE_WINDOW"}_NO_TRANSACTION_OR_TEAM_HANDLING_SOURCE`;
   return {
-    workload_state_status: status,
-    projected_ip_shadow: projectedIp,
-    projected_bf_shadow: round(projectedIp * 4.25),
+    workload_state_status: "PARTIAL",
+    workload_candidate_version: NUMERIC_WORKLOAD_VERSION,
+    workload_candidate_status: estimate.status,
+    projected_ip_shadow: estimate.expected_innings,
+    projected_pitches_shadow: estimate.expected_pitches,
+    projected_bf_shadow: round(estimate.expected_innings * 4.25),
     workload_confidence: confidence,
     role_state: role,
-    rest_state: rest.state,
-    recent_load_state: recentLoadState(latest),
+    rest_state: estimate.rest_state,
+    recent_load_state: recentLoadState(estimate.recent_pitches),
     team_handling_state: "NOT_MODELED",
-    workload_source_status: sourceStatus,
-    workload_notes:
-      `baseline_ip=${baseline}; role_relevant_appearances=${appearances.length}; ` +
-      `weighted_recent_ip=${recentIp === null ? "UNAVAILABLE" : round(recentIp)}; ` +
-      `latest_pitch_count=${latestPitchCount ?? "UNAVAILABLE"}; days_rest=${daysRest ?? "UNAVAILABLE"}; ` +
-      "transaction_rehab_role_change=UNAVAILABLE; team_handling=NOT_MODELED",
+    workload_source_status: "MLB_STATS_API_GAME_LOG_D_MINUS_1_NO_TRANSACTION_OR_TEAM_HANDLING_SOURCE",
+    workload_data_through_date: dataThroughDate,
+    workload_relevant_appearances: estimate.relevant_appearances,
+    workload_recent_ip: estimate.recent_ip,
+    workload_recent_pitches: estimate.recent_pitches,
+    workload_ip_sd: estimate.ip_standard_deviation,
+    workload_pitch_sd: estimate.pitch_standard_deviation,
+    workload_history_weight: estimate.history_weight,
+    workload_notes: `${estimate.notes}; transaction_rehab_role_change=UNAVAILABLE; team_handling=NOT_MODELED`,
   };
 }
 
 export function buildWorkloadGameStates(
   games: NormalizedGame[],
   workload: WorkloadResult,
-  previousOutings: ReadonlyMap<number, StarterOuting> = new Map(),
 ): Map<string, WorkloadGameState> {
   const workloadByPitcher = new Map(workload.pitchers.map((pitcher) => [pitcher.playerId, pitcher]));
   const states = new Map<string, WorkloadGameState>();
@@ -191,16 +158,18 @@ export function buildWorkloadGameStates(
       away: buildWorkloadState(
         away.role,
         away.expected_innings,
+        away.expected_pitches,
         game.date,
+        workload.data_through_date,
         away.player_id === null ? undefined : workloadByPitcher.get(away.player_id),
-        away.player_id === null ? undefined : previousOutings.get(away.player_id),
       ),
       home: buildWorkloadState(
         home.role,
         home.expected_innings,
+        home.expected_pitches,
         game.date,
+        workload.data_through_date,
         home.player_id === null ? undefined : workloadByPitcher.get(home.player_id),
-        home.player_id === null ? undefined : previousOutings.get(home.player_id),
       ),
     });
   }

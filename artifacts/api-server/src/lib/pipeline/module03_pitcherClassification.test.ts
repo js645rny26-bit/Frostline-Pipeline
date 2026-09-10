@@ -54,7 +54,7 @@ const manifest: GameScheduleResult = {
   }],
 };
 
-test("Module 03 consumes pitcher-specific workload while preserving the missing-evidence fallback", () => {
+test("Module 03 preserves the active legacy workload while the candidate remains shadow-only", () => {
   const workload: WorkloadResult = {
     retrieval_timestamp_utc: "2026-09-09T12:00:00.000Z",
     retrieval_source: "mlb_stats_api",
@@ -68,10 +68,10 @@ test("Module 03 consumes pitcher-specific workload while preserving the missing-
 
   const result = classifyPitcherRoles(manifest, workload).games[0]!;
   assert.equal(result.away_pitcher.role, "CONVENTIONAL_STARTER");
-  assert.equal(result.away_pitcher.expected_innings, 4.15);
-  assert.equal(result.away_pitcher.expected_pitches, 63);
-  assert.match(result.away_pitcher.reasoning, /rest_state=SHORT_REST/);
-  assert.ok(result.away_pitcher.workload_flags.includes("PITCHER_SPECIFIC_WORKLOAD"));
+  assert.equal(result.away_pitcher.expected_innings, 6);
+  assert.equal(result.away_pitcher.expected_pitches, 92);
+  assert.doesNotMatch(result.away_pitcher.reasoning, /PITCHER_SPECIFIC/);
+  assert.ok(!result.away_pitcher.workload_flags.includes("PITCHER_SPECIFIC_WORKLOAD"));
   assert.equal(result.home_pitcher.expected_innings, 5.5);
   assert.equal(result.home_pitcher.expected_pitches, 85);
   assert.deepEqual(result.home_pitcher.workload_flags, ["NO_RECENT_DATA"]);

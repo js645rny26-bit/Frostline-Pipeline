@@ -1,6 +1,6 @@
 # September 9 Frostline postmortem — ordered engineering report
 
-Status: local test-copy candidate and audits only. The authoritative workbook and every frozen September 9 packet remain untouched. No global run correction, environment change, shadow promotion, authorization change, or deployment was made.
+Status: superseded for workload promotion by `STARTER_WORKLOAD_FINAL_COMMISSIONING_PASS.md`. The authoritative workbook and every frozen September 9 packet remain untouched. The pitcher-specific estimator remains shadow-only pending one legitimate live settlement. No global run correction, environment change, authorization change, or active workload deployment was made.
 
 Evidence scope:
 
@@ -31,9 +31,10 @@ Role is therefore still a label, prior, bound, and missing-data fallback. It is 
 Code changed:
 
 - `module03_numericWorkload.ts`: isolated deterministic estimator and audit values.
-- `module03_pitcherClassification.ts`: consumes the candidate at the old fixed-default boundary.
+- `module03_pitcherClassification.ts`: was restored to the commissioned legacy active workload so the candidate can be evaluated independently in shadow.
+- `module02g_workloadState.ts`: consumes the candidate and freezes it beside the unchanged active workload.
 - `module03_numericWorkload.test.ts`: cutoff, shrinkage, rest, non-degeneracy, and named September 9 cases.
-- `module03_pitcherClassification.test.ts`: proves Module 03 consumes the pitcher-specific result while retaining the explicit missing-evidence fallback.
+- `module03_pitcherClassification.test.ts`: proves Module 03 remains unchanged while the candidate is shadow-only.
 
 No Module 09 formula, environment input, BVH input, bullpen-quality formula, distribution, gate, vehicle, or authorization code changed.
 
@@ -90,7 +91,7 @@ The candidate repairs inning ownership while leaving the run environment essenti
 
 ### Promotion recommendation
 
-**YES, for scoped review and a single-change deployment after approval.** The bug is proven, the candidate is source-safe and non-degenerate, and the existing prospective shadow improves the full comparison while halving >=2-IP misses. The mixed rest subgroups must remain monitored with the legacy counterfactual frozen prospectively. No automatic deployment was made.
+**HOLD pending live shadow settlement.** The bug is proven, the candidate is source-safe and non-degenerate, and the preserved replay improves the full comparison while halving >=2-IP misses. The mixed rest subgroups remain visible. Promotion is not decided until the next legitimate pregame packet freezes the candidate independently and settlement grades both estimates.
 
 ## B. Recent starter condition audit
 

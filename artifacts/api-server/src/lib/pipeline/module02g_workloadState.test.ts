@@ -30,10 +30,14 @@ function pitcher(overrides: Partial<PitcherWorkloadData> = {}): PitcherWorkloadD
 }
 
 test("workload state is pregame-safe, shrunk, and explicitly reports unavailable sources", () => {
-  const state = buildWorkloadState("CONVENTIONAL_STARTER", 6, "2026-09-09", pitcher(), undefined);
+  const state = buildWorkloadState("CONVENTIONAL_STARTER", 6, 92, "2026-09-09", "2026-09-08", pitcher());
   assert.equal(state.workload_state_status, "PARTIAL");
   assert.equal(state.projected_ip_shadow, 5.65);
+  assert.equal(state.projected_pitches_shadow, 95);
   assert.equal(state.projected_bf_shadow, 24.01);
+  assert.equal(state.workload_candidate_status, "PITCHER_SPECIFIC");
+  assert.equal(state.workload_data_through_date, "2026-09-08");
+  assert.equal(state.workload_relevant_appearances, 5);
   assert.equal(state.rest_state, "STANDARD_REST");
   assert.equal(state.team_handling_state, "NOT_MODELED");
   assert.match(state.workload_source_status, /MLB_STATS_API_GAME_LOG/);
@@ -41,24 +45,24 @@ test("workload state is pregame-safe, shrunk, and explicitly reports unavailable
 });
 
 test("same-day or future game-log rows cannot enter the frozen workload state", () => {
-  const state = buildWorkloadState("CONVENTIONAL_STARTER", 6, "2026-09-09", pitcher({
+  const state = buildWorkloadState("CONVENTIONAL_STARTER", 6, 92, "2026-09-09", "2026-09-08", pitcher({
     recent_appearances: [
       { date: "2026-09-09", game_pk: 999, games_started: 1, innings: 9, pitch_count: 120, batters_faced: 27 },
       ...pitcher().recent_appearances,
     ],
-  }), undefined);
+  }));
   assert.equal(state.projected_ip_shadow, 5.65);
   assert.doesNotMatch(state.workload_notes, /latest_pitch_count=120/);
 });
 
 test("small samples and unresolved evidence do not manufacture a workload signal", () => {
-  const small = buildWorkloadState("BULK", 3, "2026-09-09", pitcher({
+  const small = buildWorkloadState("BULK", 3, 55, "2026-09-09", "2026-09-08", pitcher({
     recent_appearances: [{ date: "2026-09-05", game_pk: 1, games_started: 0, innings: 2, pitch_count: 39, batters_faced: 8 }],
-  }), undefined);
+  }));
   assert.equal(small.workload_state_status, "PARTIAL");
   assert.equal(small.workload_confidence, "LOW");
 
-  const unavailable = buildWorkloadState("UNRESOLVED", null, "2026-09-09", undefined, undefined);
+  const unavailable = buildWorkloadState("UNRESOLVED", null, null, "2026-09-09", "2026-09-08", undefined);
   assert.equal(unavailable.workload_state_status, "UNAVAILABLE");
   assert.equal(unavailable.projected_ip_shadow, null);
 });
@@ -73,8 +77,8 @@ test("game states preserve away/home identity without touching active Expected_I
   };
   const games = [{
     legacy_game_id: "20260909_AAA_HHH", date: "2026-09-09",
-    away_pitcher: { player_id: 10, role: "CONVENTIONAL_STARTER", expected_innings: 6 },
-    home_pitcher: { player_id: 20, role: "BULK", expected_innings: 3 },
+    away_pitcher: { player_id: 10, role: "CONVENTIONAL_STARTER", expected_innings: 6, expected_pitches: 92 },
+    home_pitcher: { player_id: 20, role: "BULK", expected_innings: 3, expected_pitches: 55 },
   }] as unknown as NormalizedGame[];
   const result = buildWorkloadGameStates(games, workload);
   assert.equal(result.get("20260909_AAA_HHH")?.away.projected_ip_shadow, 5.65);

@@ -988,7 +988,6 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   const workloadStatesByGame = buildWorkloadGameStates(
     slate.games,
     slate.workload,
-    starterOutings?.outings,
   );
   logger.info(
     { games: workloadStatesByGame.size, pitchers: slate.workload.pitchers.length },

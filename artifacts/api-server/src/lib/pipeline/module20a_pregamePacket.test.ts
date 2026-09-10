@@ -588,17 +588,27 @@ test("workload-state shadow is frozen beside active Expected_IP without changing
   }] as never;
   const workloadState: WorkloadGameState = {
     away: {
-      workload_state_status: "AVAILABLE", projected_ip_shadow: 5.25, projected_bf_shadow: 22.31,
+      workload_state_status: "AVAILABLE", workload_candidate_version: "PITCHER_SPECIFIC_WORKLOAD_CANDIDATE_V1",
+      workload_candidate_status: "PITCHER_SPECIFIC", projected_ip_shadow: 5.25,
+      projected_pitches_shadow: 81, projected_bf_shadow: 22.31,
       workload_confidence: "HIGH", role_state: "CONVENTIONAL_STARTER", rest_state: "STANDARD_REST",
       recent_load_state: "NORMAL_PREVIOUS_OUTING", team_handling_state: "NOT_MODELED",
       workload_source_status: "MLB_STATS_API_GAME_LOG_THROUGH_PRIOR_DAY_NO_TRANSACTION_OR_TEAM_HANDLING_SOURCE",
+      workload_data_through_date: "2026-09-06", workload_relevant_appearances: 5,
+      workload_recent_ip: 5.25, workload_recent_pitches: 81, workload_ip_sd: 0.7,
+      workload_pitch_sd: 9.2, workload_history_weight: 1,
       workload_notes: "fixture-away",
     },
     home: {
-      workload_state_status: "PARTIAL", projected_ip_shadow: 4.5, projected_bf_shadow: 19.13,
+      workload_state_status: "PARTIAL", workload_candidate_version: "PITCHER_SPECIFIC_WORKLOAD_CANDIDATE_V1",
+      workload_candidate_status: "PITCHER_SPECIFIC", projected_ip_shadow: 4.5,
+      projected_pitches_shadow: 72, projected_bf_shadow: 19.13,
       workload_confidence: "LOW", role_state: "CONVENTIONAL_STARTER", rest_state: "EXTRA_REST",
       recent_load_state: "LIGHT_PREVIOUS_OUTING", team_handling_state: "NOT_MODELED",
       workload_source_status: "MLB_STATS_API_GAME_LOG_THROUGH_PRIOR_DAY_NO_TRANSACTION_OR_TEAM_HANDLING_SOURCE",
+      workload_data_through_date: "2026-09-06", workload_relevant_appearances: 2,
+      workload_recent_ip: 4.5, workload_recent_pitches: 72, workload_ip_sd: 1.1,
+      workload_pitch_sd: 14.5, workload_history_weight: 0.4,
       workload_notes: "fixture-home",
     },
   };
@@ -623,6 +633,9 @@ test("workload-state shadow is frozen beside active Expected_IP without changing
   assert.equal(packet.values[index.Away_Expected_IP], 6);
   assert.equal(packet.values[index.Home_Expected_IP], 6);
   assert.equal(packet.values[index.Away_Projected_IP_Shadow], 5.25);
+  assert.equal(packet.values[index.Away_Projected_Pitches_Shadow], 81);
+  assert.equal(packet.values[index.Away_Workload_Data_Through_Date], "2026-09-06");
+  assert.equal(packet.values[index.Away_Workload_IP_SD], 0.7);
   assert.equal(packet.values[index.Home_Projected_IP_Shadow], 4.5);
   assert.equal(packet.values[index.Away_Workload_Confidence], "HIGH");
   assert.equal(packet.values[index.Home_Workload_State_Status], "PARTIAL");
@@ -706,6 +719,16 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Home_Starter_Quality_Source",
     "Away_Bullpen_Quality_Source",
     "Home_Bullpen_Quality_Source",
+    "Workload_Candidate_Version",
+    "Away_Workload_Candidate_Status",
+    "Away_Projected_Pitches_Shadow",
+    "Away_Workload_Data_Through_Date",
+    "Away_Workload_Relevant_Appearances",
+    "Away_Workload_Recent_IP",
+    "Away_Workload_Recent_Pitches",
+    "Away_Workload_IP_SD",
+    "Away_Workload_Pitch_SD",
+    "Away_Workload_History_Weight",
     "Away_Workload_State_Status",
     "Away_Projected_IP_Shadow",
     "Away_Projected_BF_Shadow",
@@ -716,6 +739,15 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Away_Team_Handling_State",
     "Away_Workload_Source_Status",
     "Away_Workload_Notes",
+    "Home_Workload_Candidate_Status",
+    "Home_Projected_Pitches_Shadow",
+    "Home_Workload_Data_Through_Date",
+    "Home_Workload_Relevant_Appearances",
+    "Home_Workload_Recent_IP",
+    "Home_Workload_Recent_Pitches",
+    "Home_Workload_IP_SD",
+    "Home_Workload_Pitch_SD",
+    "Home_Workload_History_Weight",
     "Home_Workload_State_Status",
     "Home_Projected_IP_Shadow",
     "Home_Projected_BF_Shadow",
@@ -761,6 +793,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 59);
-  assert.equal(pregamePacketHistoryRange(5000), "A1:HZ5000");
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 60);
+  assert.equal(pregamePacketHistoryRange(5000), "A1:IS5000");
 });
