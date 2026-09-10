@@ -5,7 +5,8 @@
 
 import { logger } from "../../lib/logger.js";
 import type { GameScheduleResult } from "./module01_mlbStatsApi.js";
-import type { WorkloadResult } from "./module02_pitcherWorkload.js";
+import type { PitcherWorkloadData, WorkloadResult } from "./module02_pitcherWorkload.js";
+import { estimatePitcherSpecificWorkload } from "./module03_numericWorkload.js";
 
 export interface PitcherClassificationData {
   player_id: number | null;
@@ -36,7 +37,9 @@ function classifySinglePitcher(
   pitcherId: number | null,
   pitcherName: string | null,
   hand: string | null,
-  workloadData: { status?: string; rolling_stats?: { l30?: { appearances?: number; avg_pitches_per_appearance?: number } }; recent_games_count?: number } | undefined,
+  gameDate: string,
+  dataThroughDate: string,
+  workloadData: PitcherWorkloadData | undefined,
 ): PitcherClassificationData {
   if (!pitcherId || !pitcherName) {
     return {
@@ -67,7 +70,7 @@ function classifySinglePitcher(
       workload_flags: [flag],
       expected_pitches: 85,
       expected_innings: 5.5,
-      reasoning: "No Statcast workload data; probable starter classified using seasonal baseline",
+      reasoning: "No recent workload-window evidence; probable starter retained on the declared missing-evidence prior",
     };
   }
 
@@ -76,8 +79,12 @@ function classifySinglePitcher(
     const l30 = workloadData.rolling_stats?.l30;
     const avgPitches = l30?.avg_pitches_per_appearance ?? 85;
     const appearances = l30?.appearances ?? 0;
-    const expectedPitches = avgPitches > 0 ? Math.min(avgPitches + 10, 100) : 85;
-    const expectedInnings = parseFloat((expectedPitches / 15).toFixed(1));
+    const legacyExpectedPitches = avgPitches > 0 ? Math.min(avgPitches + 10, 100) : 85;
+    const legacyExpectedInnings = parseFloat((legacyExpectedPitches / 15).toFixed(1));
+    const estimate = estimatePitcherSpecificWorkload(
+      "CONVENTIONAL_STARTER", legacyExpectedPitches, legacyExpectedInnings,
+      gameDate, dataThroughDate, workloadData,
+    );
     return {
       player_id: pitcherId,
       name: pitcherName,
@@ -85,9 +92,9 @@ function classifySinglePitcher(
       role: "CONVENTIONAL_STARTER",
       role_confidence: "medium",
       workload_flags: ["RETURNING_FROM_IL"],
-      expected_pitches: expectedPitches,
-      expected_innings: expectedInnings,
-      reasoning: `No pitches in last 30 days but active in 60-day window (${appearances} appearances); probable IL returnee`,
+      expected_pitches: estimate.expected_pitches,
+      expected_innings: estimate.expected_innings,
+      reasoning: `No pitches in last 30 days but active in 60-day window (${appearances} appearances); probable return state. ${estimate.notes}`,
     };
   }
 
@@ -125,8 +132,12 @@ function classifySinglePitcher(
     flags.push("RESTRICTED_WORKLOAD");
   }
 
-  const expectedPitches = role === "OPENER" ? 25 : role === "BULK" ? 55 : 92;
-  const expectedInnings = role === "OPENER" ? 1.2 : role === "BULK" ? 3.0 : 6.0;
+  const rolePriorPitches = role === "OPENER" ? 25 : role === "BULK" ? 55 : 92;
+  const rolePriorInnings = role === "OPENER" ? 1.2 : role === "BULK" ? 3.0 : 6.0;
+  const estimate = estimatePitcherSpecificWorkload(
+    role, rolePriorPitches, rolePriorInnings, gameDate, dataThroughDate, workloadData,
+  );
+  if (estimate.status === "PITCHER_SPECIFIC") flags.push("PITCHER_SPECIFIC_WORKLOAD");
 
   return {
     player_id: pitcherId,
@@ -135,9 +146,9 @@ function classifySinglePitcher(
     role,
     role_confidence: confidence,
     workload_flags: flags,
-    expected_pitches: expectedPitches,
-    expected_innings: expectedInnings,
-    reasoning,
+    expected_pitches: estimate.expected_pitches,
+    expected_innings: estimate.expected_innings,
+    reasoning: `${reasoning}. ${estimate.notes}`,
   };
 }
 
@@ -157,12 +168,16 @@ export function classifyPitcherRoles(
       game.awayProbablePitcher.id,
       game.awayProbablePitcher.fullName,
       game.awayProbablePitcher.hand,
+      game.officialDate ?? game.gameDateTime?.split("T")[0] ?? workload.data_through_date,
+      workload.data_through_date,
       game.awayProbablePitcher.id ? workloadById.get(game.awayProbablePitcher.id) : undefined,
     );
     const homePitcher = classifySinglePitcher(
       game.homeProbablePitcher.id,
       game.homeProbablePitcher.fullName,
       game.homeProbablePitcher.hand,
+      game.officialDate ?? game.gameDateTime?.split("T")[0] ?? workload.data_through_date,
+      workload.data_through_date,
       game.homeProbablePitcher.id ? workloadById.get(game.homeProbablePitcher.id) : undefined,
     );
 
