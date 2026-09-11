@@ -42,7 +42,8 @@ export type SWERoleCohort =
   | "CONVENTIONAL_STARTER"
   | "OPENER"
   | "BULK_FOLLOWER_TRANSITION"
-  | "UNRESOLVED_OTHER";
+  | "UNRESOLVED_OTHER"
+  | "ALL_ROLES_SECONDARY";
 
 export type SWECorrelationSampleStatus =
   | "INSUFFICIENT_N"
@@ -50,7 +51,8 @@ export type SWECorrelationSampleStatus =
   | "INSUFFICIENT_PREDICTED_VARIANCE"
   | "VARIANCE_FLOOR_NOT_FROZEN"
   | "INTERPRETABLE"
-  | "NOT_APPLICABLE_ATYPICAL_ROLE_COHORT";
+  | "NOT_APPLICABLE_ATYPICAL_ROLE_COHORT"
+  | "NOT_APPLICABLE_ALL_ROLE_SECONDARY";
 
 export const SWE_REPLAY_SUMMARY_HEADERS = [
   "SWE_Version", "Evaluation_Population", "Role_Cohort", "Eligible_Starter_N",
@@ -226,6 +228,25 @@ function wilcoxon(observations: readonly SWEDeviationRow[]): { n: number; wPlus:
   }
   if (ranked.length === 0) return { n: 0, wPlus: null, p: null };
   const wPlus = ranked.filter((row) => row.delta > 0).reduce((sum, row) => sum + row.rank, 0);
+  if (ranked.length <= 30) {
+    // Exact conditional signed-rank distribution. Midranks are multiplied by
+    // two so tied absolute differences remain integer-valued states.
+    const scaledRanks = ranked.map((row) => Math.round(row.rank * 2));
+    const totalScaled = scaledRanks.reduce((sum, rank) => sum + rank, 0);
+    const observedScaled = Math.round(wPlus * 2);
+    const tailBoundary = Math.min(observedScaled, totalScaled - observedScaled);
+    let counts = new Map<number, number>([[0, 1]]);
+    for (const rank of scaledRanks) {
+      const next = new Map(counts);
+      for (const [sum, count] of counts) next.set(sum + rank, (next.get(sum + rank) ?? 0) + count);
+      counts = next;
+    }
+    const tailCount = Array.from(counts.entries())
+      .filter(([sum]) => sum <= tailBoundary)
+      .reduce((sum, [, count]) => sum + count, 0);
+    const exactP = Math.min(1, 2 * tailCount / (2 ** ranked.length));
+    return { n: ranked.length, wPlus, p: exactP };
+  }
   const expected = ranked.length * (ranked.length + 1) / 4;
   const variance = ranked.length * (ranked.length + 1) * (2 * ranked.length + 1) / 24;
   const p = variance === 0 ? null : Math.min(1, 2 * (1 - normalCdf(Math.abs((wPlus - expected) / Math.sqrt(variance)))));
@@ -264,7 +285,8 @@ export function summarizeSWEReplay(
   observations: readonly SWEReplayObservation[],
   cohort: SWERoleCohort = "CONVENTIONAL_STARTER",
 ): SWEReplaySummary {
-  const rows = observations.map(withDerivedValues).filter((row) => row.role_cohort === cohort);
+  const allRolesSecondary = cohort === "ALL_ROLES_SECONDARY";
+  const rows = observations.map(withDerivedValues).filter((row) => allRolesSecondary || row.role_cohort === cohort);
   const eligible_n = rows.length;
   const sweErrors = rows.map((row) => row.swe_expected_ip - row.actual_ip);
   const baselineErrors = rows.map((row) => row.active_baseline_ip - row.actual_ip);
@@ -285,7 +307,8 @@ export function summarizeSWEReplay(
   const calibration = regression(predicted, actual);
 
   let correlationSampleStatus: SWECorrelationSampleStatus;
-  if (!conventional) correlationSampleStatus = "NOT_APPLICABLE_ATYPICAL_ROLE_COHORT";
+  if (allRolesSecondary) correlationSampleStatus = "NOT_APPLICABLE_ALL_ROLE_SECONDARY";
+  else if (!conventional) correlationSampleStatus = "NOT_APPLICABLE_ATYPICAL_ROLE_COHORT";
   else if (eligible_n < SWE_CORRELATION_MIN_N) correlationSampleStatus = "INSUFFICIENT_N";
   else if (predictedSd === null || predictedSd === 0) correlationSampleStatus = "INSUFFICIENT_PREDICTED_VARIANCE";
   else if (actualSd === null || actualSd === 0) correlationSampleStatus = "INSUFFICIENT_ACTUAL_VARIANCE";
@@ -295,13 +318,18 @@ export function summarizeSWEReplay(
 
   const correlationScoreStatus = correlationSampleStatus === "INTERPRETABLE"
     ? "INTERPRETABLE_REVIEW_REQUIRED"
-    : correlationSampleStatus === "NOT_APPLICABLE_ATYPICAL_ROLE_COHORT" ? "NOT_APPLICABLE" : "NOT_YET_INTERPRETABLE";
-  const interpretationStatus = conventional
+    : correlationSampleStatus === "NOT_APPLICABLE_ATYPICAL_ROLE_COHORT" || correlationSampleStatus === "NOT_APPLICABLE_ALL_ROLE_SECONDARY"
+      ? "NOT_APPLICABLE" : "NOT_YET_INTERPRETABLE";
+  const interpretationStatus = allRolesSecondary
+    ? "ALL_ROLE_AGGREGATE_SECONDARY_DIAGNOSTIC_ONLY"
+    : conventional
     ? correlationSampleStatus === "INTERPRETABLE"
       ? "CONVENTIONAL_DEVIATION_EVIDENCE_READY_FOR_COMMISSIONING_REVIEW"
       : "CONVENTIONAL_DEVIATION_EVIDENCE_DESCRIPTIVE_ONLY"
     : "ATYPICAL_ROLE_EVIDENCE_SEPARATE_HYPOTHESIS_DESCRIPTIVE_ONLY";
-  const decisionStatus = conventional
+  const decisionStatus = allRolesSecondary
+    ? "NO_DECISION_SECONDARY_ALL_ROLE_VIEW"
+    : conventional
     ? correlationSampleStatus === "INTERPRETABLE" ? "COMMISSIONING_REVIEW_REQUIRED" : "HOLD"
     : "HOLD_SEPARATE_ATYPICAL_ROLE_EVALUATION";
 
@@ -480,7 +508,10 @@ export async function runStarterWorkloadReplay(workbookId = WORKBOOK_ID): Promis
     const packetRows = packetResponse.values ?? [];
     const observations = parseSWEReplayObservations(source as unknown[][], packetRows as unknown[][]);
     const deviations = buildSWEDeviationRows(observations);
-    const cohorts: SWERoleCohort[] = ["CONVENTIONAL_STARTER", "OPENER", "BULK_FOLLOWER_TRANSITION", "UNRESOLVED_OTHER"];
+    const cohorts: SWERoleCohort[] = [
+      "CONVENTIONAL_STARTER", "OPENER", "BULK_FOLLOWER_TRANSITION", "UNRESOLVED_OTHER",
+      "ALL_ROLES_SECONDARY",
+    ];
     const summaries = cohorts.map((cohort) => summarizeSWEReplay(observations, cohort));
     const replayTs = new Date().toISOString();
 

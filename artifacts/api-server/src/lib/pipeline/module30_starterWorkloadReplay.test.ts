@@ -173,6 +173,23 @@ test("SWE keeps opener and bulk evidence out of the conventional personalization
   assert.equal(bulkSummary.eligible_n, 1);
 });
 
+test("SWE preserves the exact Sept. 10 all-role Wilcoxon result only as a secondary view", () => {
+  const observations = [
+    conventional(6.07, 6.33), conventional(4.46, 7), conventional(4.61, 6),
+    conventional(5.52, 7), conventional(5.68, 6), conventional(4.9, 7),
+    conventional(5.19, 5), conventional(5.07, 3.33), conventional(5.09, 7),
+    { role_state: "OPENER", swe_expected_ip: 2.25, active_baseline_ip: 1.2, actual_ip: 2 },
+  ];
+  const conventionalSummary = summarizeSWEReplay(observations, "CONVENTIONAL_STARTER");
+  const allRoles = summarizeSWEReplay(observations, "ALL_ROLES_SECONDARY");
+  assert.equal(conventionalSummary.eligible_n, 9);
+  assert.equal(conventionalSummary.wilcoxon_p, 0.203125);
+  assert.equal(allRoles.eligible_n, 10);
+  assert.equal(allRoles.wilcoxon_p, 0.322266);
+  assert.equal(allRoles.correlation_sample_status, "NOT_APPLICABLE_ALL_ROLE_SECONDARY");
+  assert.equal(allRoles.decision_status, "NO_DECISION_SECONDARY_ALL_ROLE_VIEW");
+});
+
 test("SWE per-starter output preserves baseline-removed values and rank direction", () => {
   const rows = buildSWEDeviationRows([
     conventional(5.5, 5),

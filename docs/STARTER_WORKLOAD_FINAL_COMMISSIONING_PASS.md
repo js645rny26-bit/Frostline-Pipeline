@@ -140,7 +140,13 @@ All five packet rows are currently `OPEN_PROSPECTIVE`, as expected before their 
 
 **HOLD.** The first prospective conventional-starter sample was N=9. Reported Pearson correlation between SWE and actual deviation from the ordinary 6.0-IP baseline was approximately `r=-0.034`, `p=0.93`: the first sample supplied no discrimination, but it is far too small for a steady-state conclusion.
 
-The ten-starter paired Wilcoxon result was `p=0.322`, and active workload had lower absolute error in 6 of 10. That is no statistically demonstrated winner, not a one-slate SWE defeat. Conventional actual innings averaged approximately 6.07, so the active 6.0 constant benefited from being near the cohort mean; aggregate MAE cannot determine whether personalization works.
+The exact ten-starter paired Wilcoxon result was `p=0.322266`, and active
+workload had lower absolute error in 6 of 10. It is retained as an explicitly
+secondary all-role diagnostic. The separately adjudicated nine-pitcher
+conventional cohort has exact `p=0.203125`; neither result demonstrates a
+winner. Conventional actual innings averaged approximately 6.07, so the active
+6.0 constant benefited from being near the cohort mean; aggregate MAE cannot
+determine whether personalization works.
 
 Hagen Smith remains a distinct atypical-role proof case: active 1.20 IP, SWE 2.25, actual 2.00. It demonstrates that the rigid opener bucket can be wrong, not that conventional SWE is superior.
 

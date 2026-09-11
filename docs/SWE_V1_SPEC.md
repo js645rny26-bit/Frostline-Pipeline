@@ -136,13 +136,24 @@ Deviation and rank fields are intentionally blank for atypical roles.
 - `BULK_FOLLOWER_TRANSITION`;
 - `UNRESOLVED_OTHER`.
 
+It also writes `ALL_ROLES_SECONDARY`, an explicitly non-decision aggregate
+that preserves whole-sample secondary score comparisons such as the original
+September 10 ten-starter Wilcoxon result. It cannot supply the conventional
+personalization verdict or pool Hagen Smith into that hypothesis.
+
 The conventional row contains the primary deviation diagnostics and all secondary scores. Atypical rows contain independent secondary workload grading and explicit not-applicable correlation status.
 
 ## 5. September 10 observation
 
 The first prospective conventional sample was N=9. Reported Pearson `r ≈ -0.034`, `p ≈ 0.93`; therefore it supplied no first-sample discrimination. It cannot establish steady-state failure.
 
-The paired comparison across the ten observed starters had Wilcoxon `p=0.322`, with active baseline lower absolute error in 6 of 10. There is no statistically demonstrated winner, and SWE did not “lose” the slate. The conventional actual mean of approximately 6.07 IP also explains why the 6.0 constant performed well as a location estimate.
+The exact paired comparison across all ten observed starters had Wilcoxon
+`p=0.322266`, with active baseline lower absolute error in 6 of 10. That value
+is retained only in the secondary all-role view. Once roles are separated, the
+nine conventional starters have their own exact signed-rank result
+(`p=0.203125`). Neither is a statistically demonstrated winner, and SWE did
+not “lose” the slate. The conventional actual mean of approximately 6.07 IP
+also explains why the 6.0 constant performed well as a location estimate.
 
 Current commissioning verdict: **HOLD**.
 
