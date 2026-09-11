@@ -162,9 +162,31 @@ The existing N=150 checkpoint remains. Formal correlation interpretation additio
 
 No workload estimator formula, active workload, bullpen allocation, or projection has changed. The evaluated candidate's current 2.25-IP opener ceiling is recorded as a next-version specification gap: role should become a weak prior rather than a hard ceiling in any separately commissioned atypical-role candidate.
 
+### Module 30 authoritative readback
+
+The Sept. 10 settlement replay on commit `41a4380` completed successfully and
+was inspected directly in the authoritative workbook:
+
+- conventional N=9, Pearson r=-0.033683, p=0.934219;
+- conventional exact Wilcoxon p=0.203125, active baseline better in 6/9;
+- correlation status `INSUFFICIENT_N`, score status
+  `NOT_YET_INTERPRETABLE`, decision `HOLD`;
+- opener N=1: Hagen Smith 2.25 candidate / 1.20 active / 2.00 actual;
+- all-role secondary N=10, exact Wilcoxon p=0.322266, decision status
+  `NO_DECISION_SECONDARY_ALL_ROLE_VIEW`;
+- candidate lineage is `PITCHER_SPECIFIC_WORKLOAD_CANDIDATE_V1`, status
+  `PITCHER_SPECIFIC`, through 2026-09-09 for every included starter.
+
+The first materialization exposed and the final replay repaired a source-binding
+defect: Module 30 had initially read the older Module 02i `SWE_Expected_IP`
+field, producing N=0. It now requires exact agreement between
+`STARTER_OUTCOME_DIAGNOSTICS.Projected_IP_Shadow` and the immutable side-specific
+candidate in `PREGAME_PACKET_HISTORY`. Missing or mismatched lineage fails
+closed.
+
 ## Verification before branch push
 
-- Complete API suite: 62 files, 492/492 tests pass.
+- Complete API suite: 62 files, 495/495 tests pass.
 - TypeScript: pass.
 - API build: pass.
 - Authoritative workbook and frozen packets: untouched by local validation.
