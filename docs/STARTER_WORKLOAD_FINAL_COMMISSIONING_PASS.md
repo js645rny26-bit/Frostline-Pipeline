@@ -144,14 +144,17 @@ The ten-starter paired Wilcoxon result was `p=0.322`, and active workload had lo
 
 Hagen Smith remains a distinct atypical-role proof case: active 1.20 IP, SWE 2.25, actual 2.00. It demonstrates that the rigid opener bucket can be wrong, not that conventional SWE is superior.
 
-Schema v62 therefore reframes Module 30 around separate hypotheses:
+Schema v62 therefore binds Module 30 explicitly to the frozen
+`PITCHER_SPECIFIC_WORKLOAD_CANDIDATE_V1` / `Projected_IP_Shadow` fields and
+reframes the evaluation around separate hypotheses. The older Module 02i
+`SWE_Expected_IP` field is not an eligible substitute:
 
 - conventional SWE must show that its predicted deviations correspond to actual deviations;
 - opener and bulk/follower/transition estimates are graded separately against their rigid role buckets.
 
 The existing N=150 checkpoint remains. Formal correlation interpretation additionally requires adequate predicted and actual deviation variance under a pre-cutoff, version-frozen variance rule. That numeric floor is intentionally not inferred from September 10 and remains pending source-only derivation. See `docs/SWE_V1_SPEC.md`.
 
-No workload estimator formula, active workload, bullpen allocation, or projection has changed. The current 2.5-IP opener ceiling remains frozen in SWE 1.0.0 but is now recorded as a next-version specification gap: role should become a weak prior rather than a hard ceiling in any separately commissioned atypical-role candidate.
+No workload estimator formula, active workload, bullpen allocation, or projection has changed. The evaluated candidate's current 2.25-IP opener ceiling is recorded as a next-version specification gap: role should become a weak prior rather than a hard ceiling in any separately commissioned atypical-role candidate.
 
 ## Verification before branch push
 

@@ -17,6 +17,12 @@ import {
   WORKBOOK_ID,
 } from "../sheets/client.js";
 import { STARTER_OUTCOME_HEADERS } from "./module24_postgameDiagnostics.js";
+import { NUMERIC_WORKLOAD_VERSION } from "./module03_numericWorkload.js";
+import {
+  PREGAME_PACKET_HISTORY_HEADERS,
+  PREGAME_PACKET_HISTORY_SHEET,
+  pregamePacketHistoryRange,
+} from "./module20a_pregamePacket.js";
 
 export const SWE_REPLAY_SUMMARY_SHEET = "SWE_WORKLOAD_REPLAY_SUMMARY_V1";
 export const SWE_DEVIATION_SHEET = "SWE_WORKLOAD_DEVIATION_V1";
@@ -343,27 +349,77 @@ export function buildSWEDeviationRows(observations: readonly SWEReplayObservatio
   return rows;
 }
 
-function parseEligibleObservations(rows: unknown[][]): SWEReplayObservation[] {
+interface FrozenWorkloadCandidateLineage {
+  version: string;
+  status: string;
+  expected_ip: number;
+  data_through_date: string;
+}
+
+function candidateKey(date: string, gameId: string, side: string): string {
+  return `${date}|${gameId}|${side.toUpperCase()}`;
+}
+
+function parseFrozenCandidateLineage(rows: unknown[][]): Map<string, FrozenWorkloadCandidateLineage> {
   const [header = [], ...data] = rows;
   const index = new Map((header as unknown[]).map((name, position) => [text(name), position]));
   const get = (row: unknown[], name: string) => row[index.get(name) ?? -1];
+  const output = new Map<string, FrozenWorkloadCandidateLineage>();
+  for (const row of data) {
+    if (text(get(row, "Packet_Status")) !== "FROZEN_PREGAME") continue;
+    const date = text(get(row, "Date"));
+    const gameId = text(get(row, "Game_ID"));
+    const version = text(get(row, "Workload_Candidate_Version"));
+    if (!date || !gameId || version !== NUMERIC_WORKLOAD_VERSION) continue;
+    for (const side of ["AWAY", "HOME"] as const) {
+      const status = text(get(row, `${side === "AWAY" ? "Away" : "Home"}_Workload_Candidate_Status`));
+      const expectedIp = numeric(get(row, `${side === "AWAY" ? "Away" : "Home"}_Projected_IP_Shadow`));
+      if (status !== "PITCHER_SPECIFIC" || expectedIp === null) continue;
+      output.set(candidateKey(date, gameId, side), {
+        version,
+        status,
+        expected_ip: expectedIp,
+        data_through_date: text(get(row, `${side === "AWAY" ? "Away" : "Home"}_Workload_Data_Through_Date`)),
+      });
+    }
+  }
+  return output;
+}
+
+/**
+ * Bind settlement grading to the commissioned Module 03 numeric workload
+ * shadow.  The older Module 02i SWE_* fields are a separate experiment and
+ * must never be substituted when the numeric candidate is absent.
+ */
+export function parseSWEReplayObservations(
+  rows: unknown[][],
+  packetRows: unknown[][],
+): SWEReplayObservation[] {
+  const [header = [], ...data] = rows;
+  const index = new Map((header as unknown[]).map((name, position) => [text(name), position]));
+  const get = (row: unknown[], name: string) => row[index.get(name) ?? -1];
+  const candidateLineage = parseFrozenCandidateLineage(packetRows);
   return data.flatMap((row) => {
-    if (text(get(row, "SWE_Snapshot_Primary")) !== "YES") return [];
-    const status = text(get(row, "SWE_Status"));
-    if (status === "INSUFFICIENT_HISTORY" || status === "OUTS_UNRESOLVED") return [];
-    const sweExpected = numeric(get(row, "SWE_Expected_IP"));
+    const date = text(get(row, "Date"));
+    const gameId = text(get(row, "Game_ID"));
+    const side = text(get(row, "Team_Side")).toUpperCase();
+    const lineage = candidateLineage.get(candidateKey(date, gameId, side));
+    if (!lineage) return [];
+    const diagnosticCandidate = numeric(get(row, "Projected_IP_Shadow"));
     const baseline = numeric(get(row, "Legacy_Expected_IP"));
     const actual = numeric(get(row, "Actual_IP")) ?? numeric(get(row, "SWE_Actual_IP"));
-    if (sweExpected === null || baseline === null || actual === null) return [];
+    if (diagnosticCandidate === null || baseline === null || actual === null) return [];
+    if (Math.abs(diagnosticCandidate - lineage.expected_ip) > 0.000001) return [];
+    const sweExpected = lineage.expected_ip;
     return [{
-      date: text(get(row, "Date")), game_id: text(get(row, "Game_ID")), team_side: text(get(row, "Team_Side")),
+      date, game_id: gameId, team_side: side,
       team: text(get(row, "Team")), starter: text(get(row, "Starter")), role_state: text(get(row, "Role_State")),
-      role_cohort: roleCohort(text(get(row, "Role_State"))), swe_version: text(get(row, "SWE_Version")),
-      swe_status: status, swe_snapshot_primary: "YES", swe_expected_ip: sweExpected,
+      role_cohort: roleCohort(text(get(row, "Role_State"))), swe_version: lineage.version,
+      swe_status: lineage.status, swe_snapshot_primary: "YES", swe_expected_ip: sweExpected,
       active_baseline_ip: baseline, actual_ip: actual,
-      swe_abs_error: numeric(get(row, "SWE_Abs_Error")) ?? Math.abs(sweExpected - actual),
+      swe_abs_error: numeric(get(row, "Shadow_IP_Abs_Error")) ?? Math.abs(sweExpected - actual),
       baseline_abs_error: numeric(get(row, "Legacy_Abs_Error")) ?? Math.abs(baseline - actual),
-      swe_data_through_date: text(get(row, "SWE_Data_Through_Date")), settlement_ts: text(get(row, "Settlement_TS")),
+      swe_data_through_date: lineage.data_through_date, settlement_ts: text(get(row, "Settlement_TS")),
     }];
   });
 }
@@ -376,7 +432,7 @@ async function ensureSheet(workbookId: string, name: string, columns: number): P
 
 function summaryValues(summary: SWEReplaySummary, replayTs: string): unknown[] {
   return [
-    "1.0.0", "FROZEN_PRIMARY_SETTLED_STARTERS_BY_ROLE", summary.role_cohort, summary.eligible_n,
+    NUMERIC_WORKLOAD_VERSION, "FROZEN_PRIMARY_SETTLED_STARTERS_BY_ROLE", summary.role_cohort, summary.eligible_n,
     summary.swe_mae ?? "", summary.legacy_mae ?? "", summary.mean_delta ?? "", summary.swe_better,
     summary.legacy_better, summary.ties, summary.wilcoxon_n, summary.wilcoxon_w_plus ?? "",
     summary.wilcoxon_p ?? "", summary.correlation_eligible_n, SWE_CONVENTIONAL_ROLE_BASELINE_IP,
@@ -393,7 +449,7 @@ function summaryValues(summary: SWEReplaySummary, replayTs: string): unknown[] {
 function deviationValues(row: SWEDeviationRow, replayTs: string): unknown[] {
   return [
     row.date ?? "", row.game_id ?? "", row.team_side ?? "", row.team ?? "", row.starter ?? "",
-    row.role_state ?? "", row.role_cohort, row.swe_version ?? "1.0.0", row.swe_status ?? "",
+    row.role_state ?? "", row.role_cohort, row.swe_version ?? NUMERIC_WORKLOAD_VERSION, row.swe_status ?? "",
     row.swe_snapshot_primary ?? "YES", round(row.swe_expected_ip), round(row.active_baseline_ip),
     row.role_cohort === "CONVENTIONAL_STARTER" ? SWE_CONVENTIONAL_ROLE_BASELINE_IP : "", round(row.actual_ip),
     row.predicted_deviation === null ? "" : round(row.predicted_deviation),
@@ -416,8 +472,13 @@ export async function runStarterWorkloadReplay(workbookId = WORKBOOK_ID): Promis
 }> {
   const empty = summarizeSWEReplay([], "CONVENTIONAL_STARTER");
   try {
-    const source = (await readRange(workbookId, "STARTER_OUTCOME_DIAGNOSTICS!A1:BU20000")).values ?? [];
-    const observations = parseEligibleObservations(source as unknown[][]);
+    const [sourceResponse, packetResponse] = await Promise.all([
+      readRange(workbookId, "STARTER_OUTCOME_DIAGNOSTICS!A1:BU20000"),
+      readRange(workbookId, `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}`),
+    ]);
+    const source = sourceResponse.values ?? [];
+    const packetRows = packetResponse.values ?? [];
+    const observations = parseSWEReplayObservations(source as unknown[][], packetRows as unknown[][]);
     const deviations = buildSWEDeviationRows(observations);
     const cohorts: SWERoleCohort[] = ["CONVENTIONAL_STARTER", "OPENER", "BULK_FOLLOWER_TRANSITION", "UNRESOLVED_OTHER"];
     const summaries = cohorts.map((cohort) => summarizeSWEReplay(observations, cohort));
@@ -442,8 +503,13 @@ export async function runStarterWorkloadReplay(workbookId = WORKBOOK_ID): Promis
 }
 
 export const SWE_REPLAY_REQUIRED_STARTER_HEADERS = [
-  "Date", "Game_ID", "Team_Side", "Team", "Starter", "Role_State", "SWE_Version",
-  "SWE_Snapshot_Primary", "SWE_Status", "SWE_Expected_IP", "Legacy_Expected_IP",
-  "Actual_IP", "SWE_Data_Through_Date", "Settlement_TS",
+  "Date", "Game_ID", "Team_Side", "Team", "Starter", "Role_State",
+  "Projected_IP_Shadow", "Shadow_IP_Abs_Error", "Legacy_Expected_IP", "Legacy_Abs_Error",
+  "Actual_IP", "Settlement_TS",
 ] as const;
 export const SWE_REPLAY_STARTER_HEADER_CONTRACT = SWE_REPLAY_REQUIRED_STARTER_HEADERS.every((name) => STARTER_OUTCOME_HEADERS.includes(name as never));
+export const SWE_REPLAY_PACKET_HEADER_CONTRACT = [
+  "Date", "Game_ID", "Packet_Status", "Workload_Candidate_Version",
+  "Away_Workload_Candidate_Status", "Away_Workload_Data_Through_Date", "Away_Projected_IP_Shadow",
+  "Home_Workload_Candidate_Status", "Home_Workload_Data_Through_Date", "Home_Projected_IP_Shadow",
+].every((name) => PREGAME_PACKET_HISTORY_HEADERS.includes(name as never));

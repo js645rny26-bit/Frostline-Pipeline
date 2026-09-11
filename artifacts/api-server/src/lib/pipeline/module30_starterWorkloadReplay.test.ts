@@ -5,11 +5,16 @@ import {
   SWE_ACTUAL_DEVIATION_SD_FLOOR,
   SWE_CORRELATION_MIN_N,
   SWE_DEVIATION_HEADERS,
+  SWE_REPLAY_PACKET_HEADER_CONTRACT,
   SWE_REPLAY_STARTER_HEADER_CONTRACT,
   SWE_REPLAY_SUMMARY_HEADERS,
+  parseSWEReplayObservations,
   summarizeSWEReplay,
   type SWEReplayObservation,
 } from "./module30_starterWorkloadReplay.js";
+import { STARTER_OUTCOME_HEADERS } from "./module24_postgameDiagnostics.js";
+import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
+import { NUMERIC_WORKLOAD_VERSION } from "./module03_numericWorkload.js";
 import { WORKBOOK_SCHEMA } from "../workbook/workbookSchema.js";
 
 function conventional(swe: number, actual: number, baseline = 6): SWEReplayObservation {
@@ -36,6 +41,73 @@ test("SWE conventional replay reports deviation diagnostics but cannot interpret
   assert.notEqual(summary.pearson_r, null);
   assert.notEqual(summary.spearman_rho, null);
   assert.equal(SWE_REPLAY_STARTER_HEADER_CONTRACT, true);
+  assert.equal(SWE_REPLAY_PACKET_HEADER_CONTRACT, true);
+});
+
+function rowFromHeaders(headers: readonly string[], fields: Record<string, unknown>): unknown[] {
+  return headers.map((name) => fields[name] ?? "");
+}
+
+test("SWE replay scores the commissioned numeric shadow and never the older empty SWE fields", () => {
+  const date = "2026-09-10";
+  const gameId = "20260910_CHW_PIT";
+  const starterRows = [
+    Array.from(STARTER_OUTCOME_HEADERS),
+    rowFromHeaders(STARTER_OUTCOME_HEADERS, {
+      Date: date,
+      Game_ID: gameId,
+      Team_Side: "HOME",
+      Team: "PIT",
+      Starter: "Jared Jones",
+      Role_State: "CONVENTIONAL_STARTER",
+      Projected_IP_Shadow: 5.09,
+      Shadow_IP_Abs_Error: 1.91,
+      Legacy_Expected_IP: 6,
+      Legacy_Abs_Error: 1,
+      Actual_IP: 7,
+      Settlement_TS: "2026-09-11T12:00:00.000Z",
+      SWE_Expected_IP: "",
+      SWE_Status: "INSUFFICIENT_HISTORY",
+    }),
+  ];
+  const packetRows = [
+    Array.from(PREGAME_PACKET_HISTORY_HEADERS),
+    rowFromHeaders(PREGAME_PACKET_HISTORY_HEADERS, {
+      Date: date,
+      Game_ID: gameId,
+      Packet_Status: "FROZEN_PREGAME",
+      Workload_Candidate_Version: NUMERIC_WORKLOAD_VERSION,
+      Home_Workload_Candidate_Status: "PITCHER_SPECIFIC",
+      Home_Workload_Data_Through_Date: "2026-09-09",
+      Home_Projected_IP_Shadow: 5.09,
+    }),
+  ];
+  const observations = parseSWEReplayObservations(starterRows, packetRows);
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0]!.swe_expected_ip, 5.09);
+  assert.equal(observations[0]!.swe_version, NUMERIC_WORKLOAD_VERSION);
+  assert.equal(observations[0]!.swe_status, "PITCHER_SPECIFIC");
+  assert.equal(observations[0]!.swe_data_through_date, "2026-09-09");
+});
+
+test("SWE replay fails closed when frozen candidate lineage is absent or does not reconcile", () => {
+  const starterRows = [
+    Array.from(STARTER_OUTCOME_HEADERS),
+    rowFromHeaders(STARTER_OUTCOME_HEADERS, {
+      Date: "2026-09-10", Game_ID: "G1", Team_Side: "AWAY", Role_State: "CONVENTIONAL_STARTER",
+      Projected_IP_Shadow: 5.5, Legacy_Expected_IP: 6, Actual_IP: 5,
+    }),
+  ];
+  assert.deepEqual(parseSWEReplayObservations(starterRows, [Array.from(PREGAME_PACKET_HISTORY_HEADERS)]), []);
+  const packetRows = [
+    Array.from(PREGAME_PACKET_HISTORY_HEADERS),
+    rowFromHeaders(PREGAME_PACKET_HISTORY_HEADERS, {
+      Date: "2026-09-10", Game_ID: "G1", Packet_Status: "FROZEN_PREGAME",
+      Workload_Candidate_Version: NUMERIC_WORKLOAD_VERSION,
+      Away_Workload_Candidate_Status: "PITCHER_SPECIFIC", Away_Projected_IP_Shadow: 5.6,
+    }),
+  ];
+  assert.deepEqual(parseSWEReplayObservations(starterRows, packetRows), []);
 });
 
 test("SWE N=149 remains below the formal correlation checkpoint", () => {

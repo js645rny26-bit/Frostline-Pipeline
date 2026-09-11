@@ -1,6 +1,6 @@
 # Starter Workload Estimator V1 research specification
 
-Version: `SWE 1.0.0`
+Evaluated candidate: `PITCHER_SPECIFIC_WORKLOAD_CANDIDATE_V1`
 
 Status: **SHADOW_ONLY — HOLD**
 
@@ -17,7 +17,7 @@ The primary question is whether pitcher-specific SWE deviations contain informat
 For eligible conventional starters:
 
 ```text
-Predicted_Deviation = SWE_Expected_IP - 6.0
+Predicted_Deviation = Projected_IP_Shadow - 6.0
 Actual_Deviation    = Actual_IP - 6.0
 ```
 
@@ -71,15 +71,28 @@ The exact statistic and numeric value require a separate source-only review. Unt
 
 ## 3. Estimator specification
 
-### 3.1 Current V1 formula
+### 3.1 Current evaluated candidate
 
-SWE 1.0.0 retains its already-frozen source-only estimator in this diagnostic patch:
+Module 30 evaluates the already-frozen `PITCHER_SPECIFIC_WORKLOAD_CANDIDATE_V1`
+written as `Projected_IP_Shadow`. It must not substitute the older Module 02i
+`SWE_Expected_IP` field when the numeric candidate is absent.
 
-- L3 / L5 / season windows with renormalized weights 0.50 / 0.30 / 0.20;
-- conventional shrinkage constant `k=4`;
-- source cutoff strictly before the slate and through D-1;
-- explicit `INSUFFICIENT_HISTORY` and `OUTS_UNRESOLVED` states;
-- no fallback to active `Expected_IP`.
+The evaluated candidate:
+
+- uses no more than five cutoff-safe MLB Stats API game-log appearances with
+  normalized recency weights 0.50 / 0.30 / 0.20 / 0.10 / 0.05;
+- uses previous starts for a conventional starter and role-relevant appearances
+  for opener/bulk/piggyback roles;
+- shrinks recent innings and pitches toward the role/return prior with
+  `history_weight = min(relevant appearances / 5, 1)`;
+- adjusts short rest by -0.50 IP and an extended-rest return by -0.75 IP;
+- rejects same-day/future appearances and requires evidence through D-1;
+- emits `ROLE_FALLBACK_NO_USABLE_HISTORY` rather than silently substituting the
+  active estimate when pitcher-specific history is unavailable.
+
+The older Module 02i source-only SWE object (L3/L5/season, k=4) remains a
+separate dormant experiment. Its fields are not the candidate under this
+prospective commissioning decision.
 
 No weight, prior, bound, or active consumer changes in schema v62.
 
@@ -87,7 +100,10 @@ No weight, prior, bound, or active consumer changes in schema v62.
 
 **Role is a weak prior, not a hard ceiling, for atypical workload roles.**
 
-The current SWE 1.0.0 opener branch still contains its frozen 2.5-IP hard ceiling. That rule is now a documented specification gap; it is not silently changed inside this diagnostic patch.
+The evaluated candidate currently bounds opener estimates to 0.70-2.25 IP and
+bulk/piggyback estimates to 1.50-5.00 IP. Those hard role ceilings are now a
+documented specification gap; they are not silently changed inside this
+diagnostic patch.
 
 A separately versioned estimator candidate must:
 
