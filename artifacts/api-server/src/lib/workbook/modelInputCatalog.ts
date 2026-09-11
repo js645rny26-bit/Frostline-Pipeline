@@ -322,9 +322,9 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     statisticalWindow: "All retained source starts through slate date minus one; L3, L5, and season", gameWindow: "STARTER_WINDOW -> BULLPEN_WINDOW (REPLAY ONLY)",
     primarySource: "SOURCE_SAVANT_PITCH_LEVEL", fallbackSource: "Explicit INSUFFICIENT_HISTORY / OUTS_UNRESOLVED; designed opener/bulk priors only",
     refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "PREGAME_PACKET_HISTORY SWE_* + SWE_APPEARANCE_HISTORY_V1",
-    workbookLocation: "PREGAME_PACKET_HISTORY SWE_*; STARTER_OUTCOME_DIAGNOSTICS SWE_*; SWE_WORKLOAD_REPLAY_SUMMARY_V1", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
+    workbookLocation: "PREGAME_PACKET_HISTORY SWE_*; STARTER_OUTCOME_DIAGNOSTICS SWE_*; SWE_WORKLOAD_DEVIATION_V1; SWE_WORKLOAD_REPLAY_SUMMARY_V1", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
     correlationFamily: "STARTER_WORKLOAD", missingBehavior: "No source history creates a named status; it never silently falls back to active Expected_IP.",
-    notes: "Pre-registered N=150 paired innings checkpoint. No projection/survival/collision/authorization consumer exists in V1.", freshnessKey: "SAVANT_PITCH_LEVEL",
+    notes: "Conventional personalization is tested as predicted versus actual deviation from the 6.0-IP role baseline, with N=150 plus a separately frozen outcome-variance gate. Opener/bulk evidence is a distinct hypothesis. No projection/survival/collision/authorization consumer exists in V1.", freshnessKey: "SAVANT_PITCH_LEVEL",
   },
   {
     recordType: "INPUT", id: "LINEUP_IDENTITY", label: "Exact lineup identity, order, hand, coverage",

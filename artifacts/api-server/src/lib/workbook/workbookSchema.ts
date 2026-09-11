@@ -199,8 +199,14 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      The coarse platoon path is active for new unfrozen packets; BVH retains
  *      its exact pregame counterfactual and cannot enter projection or decisions
  *      before the declared N=200 paired review. Frozen packets remain immutable.
+ *  v62 (2026-09-11): SWE V1 settlement research separates conventional
+ *      deviation discrimination from opener/bulk hypotheses. It records
+ *      Pearson/Spearman, calibration, variance, and paired secondary scores;
+ *      formal interpretation remains blocked below N=150 and until a
+ *      pre-cutoff actual-IP variance floor is separately frozen. Active
+ *      Expected_IP and every frozen packet remain unchanged.
  */
-export const WORKBOOK_SCHEMA_VERSION = 61;
+export const WORKBOOK_SCHEMA_VERSION = 62;
 
 export interface ColumnDef {
   name: string;
@@ -239,8 +245,9 @@ export interface ColumnDef {
     | "MODULE_26"
     | "MODULE_27"
     | "MODULE_28"
-      | "MODULE_29"
-      | "MODULE_31"
+    | "MODULE_29"
+    | "MODULE_30"
+    | "MODULE_31"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -13177,17 +13184,55 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "SWE_WORKLOAD_REPLAY_SUMMARY_V1",
     description:
-      "Paired, settlement-only innings grading for frozen SWE V1 versus active Expected_IP. It has a pre-registered N=150 checkpoint and cannot promote or modify a projection automatically.",
+      "Role-separated settlement research for frozen SWE V1 versus active Expected_IP. Conventional starters are evaluated on pitcher-specific deviations from the 6.0-IP role baseline; formal correlation interpretation requires N=150 and a separately frozen pre-cutoff variance floor.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(
       [
-        "SWE_Version", "Evaluation_Population", "Eligible_Starter_N", "SWE_MAE", "Legacy_MAE",
+        "SWE_Version", "Evaluation_Population", "Role_Cohort", "Eligible_Starter_N", "SWE_MAE", "Legacy_MAE",
         "Mean_Abs_Error_Delta_SWE_Minus_Legacy", "SWE_Better_Count", "Legacy_Better_Count", "Tie_Count",
-        "Wilcoxon_Non_Tied_N", "Wilcoxon_W_Plus", "Wilcoxon_Two_Sided_P", "Decision_Status", "Replay_TS",
+        "Wilcoxon_Non_Tied_N", "Wilcoxon_W_Plus", "Wilcoxon_Two_Sided_P", "Correlation_Eligible_N",
+        "Conventional_Role_Baseline_IP", "Pearson_R", "Pearson_P", "Spearman_Rho", "Spearman_P",
+        "Predicted_Deviation_SD", "Actual_Deviation_SD", "Deviation_Calibration_Slope",
+        "Deviation_Calibration_Intercept", "SWE_RMSE", "Baseline_RMSE", "SWE_Bias", "Baseline_Bias",
+        "SWE_2Plus_Miss_Count", "Baseline_2Plus_Miss_Count", "Correlation_Sample_Status",
+        "Correlation_Score_Status", "Variance_Floor_Status", "Actual_Deviation_SD_Floor",
+        "Interpretation_Status", "Decision_Status", "Replay_TS",
       ],
-      ["Eligible_Starter_N", "SWE_MAE", "Legacy_MAE", "Mean_Abs_Error_Delta_SWE_Minus_Legacy", "SWE_Better_Count", "Legacy_Better_Count", "Tie_Count", "Wilcoxon_Non_Tied_N", "Wilcoxon_W_Plus", "Wilcoxon_Two_Sided_P"],
-      "MODULE_29",
+      [
+        "Eligible_Starter_N", "SWE_MAE", "Legacy_MAE", "Mean_Abs_Error_Delta_SWE_Minus_Legacy",
+        "SWE_Better_Count", "Legacy_Better_Count", "Tie_Count", "Wilcoxon_Non_Tied_N",
+        "Wilcoxon_W_Plus", "Wilcoxon_Two_Sided_P", "Correlation_Eligible_N",
+        "Conventional_Role_Baseline_IP", "Pearson_R", "Pearson_P", "Spearman_Rho", "Spearman_P",
+        "Predicted_Deviation_SD", "Actual_Deviation_SD", "Deviation_Calibration_Slope",
+        "Deviation_Calibration_Intercept", "SWE_RMSE", "Baseline_RMSE", "SWE_Bias", "Baseline_Bias",
+        "SWE_2Plus_Miss_Count", "Baseline_2Plus_Miss_Count", "Actual_Deviation_SD_Floor",
+      ],
+      "MODULE_30",
+    ),
+  },
+
+  {
+    name: "SWE_WORKLOAD_DEVIATION_V1",
+    description:
+      "Per-starter settlement research preserving SWE, active baseline, actual innings, and conventional-only predicted/actual deviations and ranks. Atypical roles remain explicit separate hypotheses rather than contaminating the conventional correlation test.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Date", "Game_ID", "Team_Side", "Team", "Starter", "Frozen_Role_State", "Role_Cohort",
+        "SWE_Version", "SWE_Status", "SWE_Snapshot_Primary", "SWE_Expected_IP", "Active_Baseline_IP",
+        "Conventional_Role_Baseline_IP", "Actual_IP", "Predicted_Deviation_From_Baseline",
+        "Actual_Deviation_From_Baseline", "Deviation_Error", "Predicted_Deviation_Rank",
+        "Actual_Deviation_Rank", "Conventional_Cohort_Flag", "SWE_Abs_Error", "Baseline_Abs_Error",
+        "SWE_Better", "SWE_Data_Through_Date", "Settlement_TS", "Replay_TS", "Diagnostic_Status",
+      ],
+      [
+        "SWE_Expected_IP", "Active_Baseline_IP", "Conventional_Role_Baseline_IP", "Actual_IP",
+        "Predicted_Deviation_From_Baseline", "Actual_Deviation_From_Baseline", "Deviation_Error",
+        "Predicted_Deviation_Rank", "Actual_Deviation_Rank", "SWE_Abs_Error", "Baseline_Abs_Error",
+      ],
+      "MODULE_30",
     ),
   },
 

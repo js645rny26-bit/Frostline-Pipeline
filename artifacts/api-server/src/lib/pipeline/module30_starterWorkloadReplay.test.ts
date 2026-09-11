@@ -1,29 +1,124 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildSWEDeviationRows,
+  SWE_ACTUAL_DEVIATION_SD_FLOOR,
+  SWE_CORRELATION_MIN_N,
+  SWE_DEVIATION_HEADERS,
   SWE_REPLAY_STARTER_HEADER_CONTRACT,
+  SWE_REPLAY_SUMMARY_HEADERS,
   summarizeSWEReplay,
+  type SWEReplayObservation,
 } from "./module30_starterWorkloadReplay.js";
+import { WORKBOOK_SCHEMA } from "../workbook/workbookSchema.js";
 
-test("SWE paired replay stays descriptive until the declared N=150 checkpoint", () => {
-  const summary = summarizeSWEReplay(Array.from({ length: 149 }, () => ({ swe_abs_error: 1, legacy_abs_error: 2 })));
-  assert.equal(summary.eligible_n, 149);
-  assert.equal(summary.swe_mae, 1);
-  assert.equal(summary.legacy_mae, 2);
-  assert.equal(summary.decision_status, "PRE_CHECKPOINT_DESCRIPTIVE");
+function conventional(swe: number, actual: number, baseline = 6): SWEReplayObservation {
+  return {
+    role_state: "CONVENTIONAL_STARTER",
+    swe_expected_ip: swe,
+    active_baseline_ip: baseline,
+    actual_ip: actual,
+  };
+}
+
+test("SWE conventional replay reports deviation diagnostics but cannot interpret N=9", () => {
+  const observations = [
+    conventional(5.5, 6.2), conventional(5.7, 5.1), conventional(5.9, 6.8),
+    conventional(6.0, 5.4), conventional(6.1, 6.0), conventional(6.2, 6.4),
+    conventional(6.3, 5.7), conventional(6.4, 6.5), conventional(6.5, 6.1),
+  ];
+  const summary = summarizeSWEReplay(observations);
+  assert.equal(summary.eligible_n, 9);
+  assert.equal(summary.correlation_eligible_n, 9);
+  assert.equal(summary.correlation_sample_status, "INSUFFICIENT_N");
+  assert.equal(summary.correlation_score_status, "NOT_YET_INTERPRETABLE");
+  assert.equal(summary.decision_status, "HOLD");
+  assert.notEqual(summary.pearson_r, null);
+  assert.notEqual(summary.spearman_rho, null);
   assert.equal(SWE_REPLAY_STARTER_HEADER_CONTRACT, true);
 });
 
-test("SWE paired replay has a declared retirement outcome when legacy wins significantly", () => {
-  const summary = summarizeSWEReplay(Array.from({ length: 150 }, (_, index) => ({ swe_abs_error: 2 + index / 10_000, legacy_abs_error: 1 })));
-  assert.equal(summary.decision_status, "LEGACY_BETTER_RETIRE_SWE_V1");
-  assert.ok((summary.wilcoxon_p ?? 1) < 0.05);
+test("SWE N=149 remains below the formal correlation checkpoint", () => {
+  const observations = Array.from({ length: SWE_CORRELATION_MIN_N - 1 }, (_, index) =>
+    conventional(5.2 + (index % 9) / 10, 4.8 + (index % 13) / 10));
+  const summary = summarizeSWEReplay(observations);
+  assert.equal(summary.eligible_n, 149);
+  assert.equal(summary.correlation_sample_status, "INSUFFICIENT_N");
+  assert.equal(summary.decision_status, "HOLD");
 });
 
-test("SWE ambiguous N=300 result retires instead of inviting post-result tuning", () => {
-  const observations = Array.from({ length: 300 }, (_, index) => index % 2 === 0
-    ? { swe_abs_error: 1, legacy_abs_error: 2 }
-    : { swe_abs_error: 2, legacy_abs_error: 1 });
+test("SWE N=150 cannot receive a formal verdict until the historical variance floor is frozen", () => {
+  assert.equal(SWE_ACTUAL_DEVIATION_SD_FLOOR, null);
+  const observations = Array.from({ length: SWE_CORRELATION_MIN_N }, (_, index) =>
+    conventional(5.1 + (index % 17) / 10, 4.5 + (index % 19) / 10));
   const summary = summarizeSWEReplay(observations);
-  assert.equal(summary.decision_status, "AMBIGUOUS_AT_N300_RETIRE_SWE_V1");
+  assert.equal(summary.correlation_sample_status, "VARIANCE_FLOOR_NOT_FROZEN");
+  assert.equal(summary.correlation_score_status, "NOT_YET_INTERPRETABLE");
+  assert.equal(summary.decision_status, "HOLD");
+});
+
+test("SWE reports insufficient predicted variance explicitly instead of a zero correlation", () => {
+  const observations = Array.from({ length: SWE_CORRELATION_MIN_N }, (_, index) =>
+    conventional(6, 4.5 + (index % 19) / 10));
+  const summary = summarizeSWEReplay(observations);
+  assert.equal(summary.predicted_deviation_sd, 0);
+  assert.equal(summary.pearson_r, null);
+  assert.equal(summary.spearman_rho, null);
+  assert.equal(summary.correlation_sample_status, "INSUFFICIENT_PREDICTED_VARIANCE");
+});
+
+test("SWE reports insufficient actual variance explicitly instead of a zero correlation", () => {
+  const observations = Array.from({ length: SWE_CORRELATION_MIN_N }, (_, index) =>
+    conventional(5.1 + (index % 17) / 10, 6));
+  const summary = summarizeSWEReplay(observations);
+  assert.equal(summary.actual_deviation_sd, 0);
+  assert.equal(summary.pearson_r, null);
+  assert.equal(summary.spearman_rho, null);
+  assert.equal(summary.correlation_sample_status, "INSUFFICIENT_ACTUAL_VARIANCE");
+});
+
+test("SWE keeps opener and bulk evidence out of the conventional personalization test", () => {
+  const hagen: SWEReplayObservation = {
+    starter: "Hagen Smith",
+    role_state: "OPENER",
+    swe_expected_ip: 2.25,
+    active_baseline_ip: 1.2,
+    actual_ip: 2,
+  };
+  const bulk: SWEReplayObservation = {
+    role_state: "BULK",
+    swe_expected_ip: 4,
+    active_baseline_ip: 3,
+    actual_ip: 4.1,
+  };
+  const conventionalSummary = summarizeSWEReplay([hagen, bulk, conventional(5.8, 6.1)]);
+  const openerSummary = summarizeSWEReplay([hagen, bulk], "OPENER");
+  const bulkSummary = summarizeSWEReplay([hagen, bulk], "BULK_FOLLOWER_TRANSITION");
+  assert.equal(conventionalSummary.eligible_n, 1);
+  assert.equal(openerSummary.eligible_n, 1);
+  assert.equal(openerSummary.correlation_sample_status, "NOT_APPLICABLE_ATYPICAL_ROLE_COHORT");
+  assert.equal(openerSummary.decision_status, "HOLD_SEPARATE_ATYPICAL_ROLE_EVALUATION");
+  assert.equal(bulkSummary.eligible_n, 1);
+});
+
+test("SWE per-starter output preserves baseline-removed values and rank direction", () => {
+  const rows = buildSWEDeviationRows([
+    conventional(5.5, 5),
+    conventional(6.5, 7),
+    { role_state: "OPENER", swe_expected_ip: 2.25, active_baseline_ip: 1.2, actual_ip: 2 },
+  ]);
+  assert.equal(rows[0]!.predicted_deviation, -0.5);
+  assert.equal(rows[0]!.actual_deviation, -1);
+  assert.equal(rows[0]!.deviation_error, 0.5);
+  assert.equal(rows[0]!.predicted_rank, 1);
+  assert.equal(rows[1]!.predicted_rank, 2);
+  assert.equal(rows[2]!.predicted_deviation, null);
+  assert.equal(rows[2]!.actual_rank, null);
+});
+
+test("SWE v62 replay headers match both documented workbook surfaces exactly", () => {
+  const summary = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "SWE_WORKLOAD_REPLAY_SUMMARY_V1");
+  const deviations = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "SWE_WORKLOAD_DEVIATION_V1");
+  assert.deepEqual(summary?.columns.map((column) => column.name), Array.from(SWE_REPLAY_SUMMARY_HEADERS));
+  assert.deepEqual(deviations?.columns.map((column) => column.name), Array.from(SWE_DEVIATION_HEADERS));
 });

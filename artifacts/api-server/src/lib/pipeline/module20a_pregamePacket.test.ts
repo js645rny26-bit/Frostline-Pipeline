@@ -794,6 +794,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 61);
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 62);
   assert.equal(pregamePacketHistoryRange(5000), "A1:IS5000");
 });

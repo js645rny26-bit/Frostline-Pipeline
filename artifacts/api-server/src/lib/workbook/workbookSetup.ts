@@ -398,6 +398,7 @@ export async function repairWorkbookSchemaReference(
         "v59 (2026-09-09): BVH V1 is ACTIVE prospectively inside the existing starter-window handedness slot. Every new packet freezes MLBAM/raw/prior/weight/shrunk evidence and the former projection as a counterfactual control; pre-v59 packets remain untouched and NON_REPLAYABLE_FOR_BVH. " +
         "v60 (2026-09-10): pitcher-specific workload remains a commissioning shadow beside unchanged active Module 03 workload. New packets freeze candidate pitches, D-1 source horizon, sample, recent workload, dispersion, and history weight for prospective settlement adjudication.",
         "v61 (2026-09-10): BVH V1 returns to SHADOW_ONLY for new unfrozen packets after its prospective governance checkpoint was found to have been skipped. The coarse platoon path is active again; BVH counterfactual evidence continues accumulating toward the declared N=200 paired review. Frozen packets remain unchanged.",
+        "v62 (2026-09-11): SWE V1 settlement research separates conventional-starter deviation discrimination from opener/bulk hypotheses. Module 30 preserves per-starter baseline-removed values, ranks, Pearson/Spearman, calibration, and secondary error scores; interpretation remains blocked below N=150 and until a pre-cutoff outcome-variance floor is separately frozen. Active Expected_IP and frozen packets remain unchanged.",
     ],
     [
       "Workbook_Purpose",

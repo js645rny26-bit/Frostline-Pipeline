@@ -2,7 +2,7 @@
 
 Candidate base: `0bde8e3`
 
-Commissioning state: **HOLD — LIVE SHADOW PREGAME MATERIALIZED; SETTLEMENT PENDING**
+Commissioning state: **HOLD — FIRST LIVE SHADOW SETTLED; CONVENTIONAL DISCRIMINATION NOT YET INTERPRETABLE**
 
 Active projection state: **UNCHANGED LEGACY MODULE 03 WORKLOAD**
 
@@ -136,23 +136,29 @@ GitHub Actions commissioning run [#162](https://github.com/js645rny26-bit/Frostl
 
 All five packet rows are currently `OPEN_PROSPECTIVE`, as expected before their games start. The normal lifecycle must freeze these exact pre-first-pitch snapshots before settlement; no post-start rebuild is permitted.
 
-## 6. Current verdict
+## 6. September 10 settlement and current verdict
 
-**HOLD**, pending September 10 live-shadow settlement. The replay and real pregame materialization justify promotion consideration but do not satisfy the final gate by themselves.
+**HOLD.** The first prospective conventional-starter sample was N=9. Reported Pearson correlation between SWE and actual deviation from the ordinary 6.0-IP baseline was approximately `r=-0.034`, `p=0.93`: the first sample supplied no discrimination, but it is far too small for a steady-state conclusion.
 
-After settlement:
+The ten-starter paired Wilcoxon result was `p=0.322`, and active workload had lower absolute error in 6 of 10. That is no statistically demonstrated winner, not a one-slate SWE defeat. Conventional actual innings averaged approximately 6.07, so the active 6.0 constant benefited from being near the cohort mean; aggregate MAE cannot determine whether personalization works.
 
-- `PROMOTE` only if the live shadow preserves cutoff/provenance integrity, remains non-degenerate, produces no dependency defect, and behaves reasonably beside the replay evidence;
-- `HOLD` if the live evidence is incomplete or exposes an unresolved subgroup/dependency concern;
-- `REJECT` if the active legacy estimate clearly wins for a demonstrated structural reason or the candidate violates source/dependency integrity.
+Hagen Smith remains a distinct atypical-role proof case: active 1.20 IP, SWE 2.25, actual 2.00. It demonstrates that the rigid opener bucket can be wrong, not that conventional SWE is superior.
 
-If promoted, STARTER_WORKLOAD will be deployed as one isolated change. Recent condition, SSAT/failure cost, distribution, bullpen state, and source-observability changes remain separate.
+Schema v62 therefore reframes Module 30 around separate hypotheses:
+
+- conventional SWE must show that its predicted deviations correspond to actual deviations;
+- opener and bulk/follower/transition estimates are graded separately against their rigid role buckets.
+
+The existing N=150 checkpoint remains. Formal correlation interpretation additionally requires adequate predicted and actual deviation variance under a pre-cutoff, version-frozen variance rule. That numeric floor is intentionally not inferred from September 10 and remains pending source-only derivation. See `docs/SWE_V1_SPEC.md`.
+
+No workload estimator formula, active workload, bullpen allocation, or projection has changed. The current 2.5-IP opener ceiling remains frozen in SWE 1.0.0 but is now recorded as a next-version specification gap: role should become a weak prior rather than a hard ceiling in any separately commissioned atypical-role candidate.
 
 ## Verification before branch push
 
-- Complete API suite: 62 files, 485/485 tests pass.
+- Complete API suite: 62 files, 492/492 tests pass.
 - TypeScript: pass.
 - API build: pass.
 - Authoritative workbook and frozen packets: untouched by local validation.
 - Active Module 03 projection workload: unchanged.
 - Live commissioning run #162: PASS; v60 shadow evidence materialized for 10/10 pitchers.
+- September 10 settlement verdict: HOLD; conventional N=9 is descriptive only, and atypical roles are now separate.

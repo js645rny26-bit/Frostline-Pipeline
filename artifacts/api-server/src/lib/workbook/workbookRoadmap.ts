@@ -188,11 +188,22 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "REPLAY",
     timing: "Every settlement after starter diagnostics (Module 30)",
     purpose:
-      "Pre-registered paired innings-error comparison of frozen SWE V1 against active Expected_IP, including the N=150 Wilcoxon checkpoint and declared retirement branch.",
+      "Role-separated workload research. Conventional starters test predicted versus actual deviation from the 6.0-IP role baseline; MAE, RMSE, bias, and Wilcoxon remain secondary diagnostics.",
     boardRelationship:
       "No board input. A positive result can only propose a separate promotion review; it cannot change today’s innings or decision output.",
     readNote:
-      "Treat results below 150 eligible frozen starters as PRE_CHECKPOINT_DESCRIPTIVE. At N=300 ambiguity retires V1 rather than inviting retuning.",
+      "Do not interpret correlation below 150 conventional starters or before the pre-cutoff actual-IP variance floor is frozen. Opener and bulk rows answer separate hypotheses.",
+  },
+  {
+    sheet: "SWE_WORKLOAD_DEVIATION_V1",
+    stage: "REPLAY",
+    timing: "Every settlement after starter diagnostics (Module 30)",
+    purpose:
+      "Per-starter audit of SWE, active baseline, actual innings, and conventional-only predicted/actual deviations and ranks.",
+    boardRelationship:
+      "Research only. It cannot feed Expected_IP, bullpen exposure, projection, vehicle, or authorization paths.",
+    readNote:
+      "Use CONVENTIONAL_STARTER rows for personalization discrimination. Atypical roles intentionally leave deviation/rank fields blank and remain separately graded.",
   },
 
   {
