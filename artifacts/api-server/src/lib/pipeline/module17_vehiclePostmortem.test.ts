@@ -105,6 +105,40 @@ test("coded postmortem cannot substitute a reference when Hard Rock is unavailab
   });
 });
 
+test("post-policy postmortem cannot revive a stale reference-only COL-DET PUSH", () => {
+  assert.deepEqual(gradePostmortemTicket("OVER", 8, canonicalMarket({
+    executable_market_line: null,
+    executable_market_source: "",
+    primary_market_line: 8,
+    primary_market_source: "MLB_STARTING_NINE_CARD",
+    primary_market_status: "LITERAL_REFERENCE",
+    primary_directional_result: "PUSH",
+    primary_market_provenance: "LITERAL_REFERENCE",
+  }), "2026-09-11"), {
+    market_line: null,
+    market_status: "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE",
+    thesis_correct: null,
+    ticket_result: "NO_BET",
+  });
+});
+
+test("pre-policy historical whole-number postmortem retains legitimate PUSH semantics", () => {
+  assert.deepEqual(gradePostmortemTicket("OVER", 8, canonicalMarket({
+    executable_market_line: null,
+    executable_market_source: "",
+    primary_market_line: 8,
+    primary_market_source: "HISTORICAL_REFERENCE_BOOK",
+    primary_market_status: "LITERAL_REFERENCE",
+    primary_directional_result: "PUSH",
+    primary_market_provenance: "LITERAL_REFERENCE",
+  }), "2026-09-05"), {
+    market_line: 8,
+    market_status: "LEGACY_OR_NON_HARD_ROCK_MARKET",
+    thesis_correct: "PUSH",
+    ticket_result: "PUSH",
+  });
+});
+
 test("coded postmortem treats impossible stored Hard Rock 8.0 as integrity failure, not PUSH", () => {
   assert.deepEqual(gradePostmortemTicket("OVER", 7.5, canonicalMarket({
     executable_market_line: 8,

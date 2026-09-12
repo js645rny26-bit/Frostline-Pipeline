@@ -470,17 +470,17 @@ test("frozen packet keeps executable Hard Rock market distinct from reference gr
   assert.equal(fallback.executable_market_line, null);
 });
 
-test("v54 literal whole-number reference fallback preserves below, above, and push outcomes", () => {
+test("pre-policy v54 literal whole-number reference fallback preserves below, above, and push outcomes", () => {
   const index = Object.fromEntries(
     PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]),
   ) as Record<(typeof PREGAME_PACKET_HISTORY_HEADERS)[number], number>;
   const packet = Array(PREGAME_PACKET_HISTORY_HEADERS.length).fill("");
-  packet[index.Date] = "2026-09-06";
-  packet[index.Game_ID] = "20260906_AAA_BBB";
-  packet[index.Scheduled_First_Pitch] = "2026-09-06T23:10:00.000Z";
+  packet[index.Date] = "2026-09-05";
+  packet[index.Game_ID] = "20260905_AAA_BBB";
+  packet[index.Scheduled_First_Pitch] = "2026-09-05T23:10:00.000Z";
   packet[index.Packet_Status] = "FROZEN_PREGAME";
-  packet[index.Packet_Snapshot_TS] = "2026-09-06T22:45:00.000Z";
-  packet[index.Freeze_TS] = "2026-09-06T23:11:00.000Z";
+  packet[index.Packet_Snapshot_TS] = "2026-09-05T22:45:00.000Z";
+  packet[index.Freeze_TS] = "2026-09-05T23:11:00.000Z";
   packet[index.Market_Line] = 7.5;
   packet[index.Reference_Market_Line] = 8;
   packet[index.Reference_Market_Convention] = "WHOLE_NUMBER";
@@ -490,7 +490,7 @@ test("v54 literal whole-number reference fallback preserves below, above, and pu
   packet[index.Primary_Grade_Market_Source] = "MLB_STARTING_NINE_CARD";
   packet[index.Primary_Grade_Market_Status] = "LITERAL_REFERENCE";
 
-  const snapshot = parseFrozenPacketMarketSnapshots([packet], "2026-09-06").get("20260906_AAA_BBB");
+  const snapshot = parseFrozenPacketMarketSnapshots([packet], "2026-09-05").get("20260905_AAA_BBB");
   assert.equal(snapshot?.reference_market_line, 8);
   assert.equal(snapshot?.synthetic_normalized_reference_line, 7.5);
   assert.equal(snapshot?.primary_grade_market_line, 8);
@@ -501,6 +501,38 @@ test("v54 literal whole-number reference fallback preserves below, above, and pu
   assert.equal(push.primary_directional_result, "PUSH");
   assert.equal(push.primary_market_provenance, "LITERAL_REFERENCE");
   assert.equal(push.market_grade_notes, "WHOLE_NUMBER_REFERENCE_PUSH_PRESERVED");
+});
+
+test("post-policy stale reference-only packet is ungradeable rather than replaying a PUSH", () => {
+  const index = Object.fromEntries(
+    PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]),
+  ) as Record<(typeof PREGAME_PACKET_HISTORY_HEADERS)[number], number>;
+  const packet = Array(PREGAME_PACKET_HISTORY_HEADERS.length).fill("");
+  packet[index.Date] = "2026-09-11";
+  packet[index.Game_ID] = "20260911_COL_DET";
+  packet[index.Scheduled_First_Pitch] = "2026-09-11T22:40:00.000Z";
+  packet[index.Packet_Status] = "FROZEN_PREGAME";
+  packet[index.Packet_Snapshot_TS] = "2026-09-11T22:26:00.000Z";
+  packet[index.Freeze_TS] = "2026-09-11T22:41:00.000Z";
+  packet[index.Direction] = "OVER";
+  packet[index.Reference_Market_Line] = 8;
+  packet[index.Reference_Market_Source] = "MLB_STARTING_NINE_CARD";
+  packet[index.Reference_Market_Convention] = "WHOLE_NUMBER";
+  packet[index.Reference_Market_Representation_Status] = "LITERAL_REFERENCE";
+  packet[index.Synthetic_Normalized_Reference_Line] = 7.5;
+  packet[index.Primary_Grade_Market_Line] = 8;
+  packet[index.Primary_Grade_Market_Source] = "MLB_STARTING_NINE_CARD";
+  packet[index.Primary_Grade_Market_Status] = "LITERAL_REFERENCE";
+
+  const snapshot = parseFrozenPacketMarketSnapshots([packet], "2026-09-11")
+    .get("20260911_COL_DET");
+  assert.equal(snapshot?.hard_rock_required, true);
+  const grade = resolveSettlementMarketGrade(9.66, 8, snapshot, undefined);
+  assert.equal(grade.primary_grade_market_line, null);
+  assert.equal(grade.primary_market_grade_status, "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
+  assert.equal(grade.primary_market_provenance, "HARD_ROCK_EXECUTABLE_UNAVAILABLE");
+  assert.equal(grade.primary_directional_result, "NO_BET");
+  assert.equal(grade.reference_directional_result, "PUSH");
 });
 
 test("settlement grades the frozen direction instead of re-originating it from a different market representation", () => {
@@ -520,16 +552,19 @@ test("settlement grades the frozen direction instead of re-originating it from a
   packet[index.Reference_Market_Convention] = "WHOLE_NUMBER";
   packet[index.Reference_Market_Representation_Status] = "LITERAL_REFERENCE";
   packet[index.Synthetic_Normalized_Reference_Line] = 7.5;
-  packet[index.Primary_Grade_Market_Line] = 8;
-  packet[index.Primary_Grade_Market_Source] = "MLB_STARTING_NINE_CARD";
-  packet[index.Primary_Grade_Market_Status] = "LITERAL_REFERENCE";
+  packet[index.Executable_Market_Line] = 8.5;
+  packet[index.Executable_Market_Source] = "HARD_ROCK_FLORIDA";
+  packet[index.Executable_Market_TS] = "2026-09-08T23:04:00.000Z";
+  packet[index.Primary_Grade_Market_Line] = 8.5;
+  packet[index.Primary_Grade_Market_Source] = "HARD_ROCK_FLORIDA";
+  packet[index.Primary_Grade_Market_Status] = "LITERAL_EXECUTABLE";
 
   const snapshot = parseFrozenPacketMarketSnapshots([packet], "2026-09-08")
     .get("20260908_CIN_LAD");
   assert.equal(snapshot?.frozen_direction, "OVER");
 
-  // The frozen projection is below the restored literal 8, but the actual
-  // pregame decision was OVER 7.5. Settlement must not silently turn it UNDER.
+  // The frozen projection is below the literal executable 8.5, but the actual
+  // pregame decision was OVER. Settlement must not silently turn it UNDER.
   const grade = resolveSettlementMarketGrade(7.95, 5, snapshot, undefined);
   assert.equal(grade.primary_directional_result, "LOSS");
   assert.equal(grade.reference_directional_result, "LOSS");
@@ -556,10 +591,10 @@ test("v54 synthetic normalized reference is never executable or a fallback gradi
   const priorOutcome = Array(OUTCOMES_HEADER.length).fill("");
   priorOutcome[OUTCOMES_HEADER.indexOf("Primary_Grade_Market_Source")] = "STALE_SYNTHETIC_SOURCE";
   const grade = resolveSettlementMarketGrade(8.75, 8, snapshot, priorOutcome);
-  assert.equal(grade.primary_market_provenance, "SYNTHETIC_NORMALIZED_REFERENCE");
+  assert.equal(grade.primary_market_provenance, "HARD_ROCK_EXECUTABLE_UNAVAILABLE");
   assert.equal(grade.primary_directional_result, "NO_BET");
   assert.equal(grade.executable_market_line, null);
-  assert.equal(grade.primary_grade_market_source, "");
+  assert.equal(grade.primary_grade_market_source, "HARD_ROCK_FLORIDA_REQUIRED");
 });
 
 test("a literal half-number market cannot produce a push", () => {

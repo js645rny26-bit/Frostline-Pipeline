@@ -15,6 +15,18 @@
 
 const HALF_NUMBER_EPSILON = 1e-8;
 
+/**
+ * The Florida Hard Rock full-game-total execution rule became authoritative
+ * for Frostline on 2026-09-06. Frozen packets at or after this boundary cannot
+ * recover an executable grade from a stale reference-only status.
+ */
+export const HARD_ROCK_FLORIDA_MLB_FGT_POLICY_START_DATE = "2026-09-06";
+
+export function requiresHardRockFloridaMlbFullGameTotal(date: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(date)
+    && date >= HARD_ROCK_FLORIDA_MLB_FGT_POLICY_START_DATE;
+}
+
 export type FullGameTotalNormalizationStatus =
   | "ALREADY_HALF_NUMBER"
   | "INTEGER_TO_LOWER_HALF"

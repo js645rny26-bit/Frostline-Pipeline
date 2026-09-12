@@ -6,6 +6,7 @@ import {
   describeFullGameTotalNormalization,
   isHalfNumberFullGameTotal,
   normalizeFullGameTotalLine,
+  requiresHardRockFloridaMlbFullGameTotal,
 } from "./marketLineNormalization.js";
 
 test("synthetic display normalization maps whole-number totals to a lower half number", () => {
@@ -51,4 +52,11 @@ test("unsupported fractional totals fail closed instead of inventing a Hard Rock
   assert.equal(normalizeFullGameTotalLine("not a total"), null);
   assert.equal(isHalfNumberFullGameTotal(9.5), true);
   assert.equal(isHalfNumberFullGameTotal(10), false);
+});
+
+test("the Hard Rock Florida full-game-total policy has an explicit historical boundary", () => {
+  assert.equal(requiresHardRockFloridaMlbFullGameTotal("2026-09-05"), false);
+  assert.equal(requiresHardRockFloridaMlbFullGameTotal("2026-09-06"), true);
+  assert.equal(requiresHardRockFloridaMlbFullGameTotal("2026-09-11"), true);
+  assert.equal(requiresHardRockFloridaMlbFullGameTotal("not-a-date"), false);
 });

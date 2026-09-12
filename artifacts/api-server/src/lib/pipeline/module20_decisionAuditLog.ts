@@ -29,6 +29,7 @@ import type { NormalizedGame } from "./module06_normalization.js";
 import type { StatcastPreviewResult } from "./module02e_statcastPreview.js";
 import type { SettlementRow } from "./module14_shadowSettlement.js";
 import { gradeHardRockMlbFullGameTotal } from "./module14_settlementGrading.js";
+import { requiresHardRockFloridaMlbFullGameTotal } from "./marketLineNormalization.js";
 import { isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
 import {
   classifyPostmortemMechanism,
@@ -349,6 +350,7 @@ function decisionAuditMarketContext(
   frozenLine: number | null,
   outcome: SettlementRow,
   vehicle: unknown,
+  date: string,
 ): DecisionAuditMarketContext {
   const normalizedVehicle = String(vehicle ?? "").trim().toUpperCase();
   const isFullGameTotal = normalizedVehicle === "GAME_TOTAL" || normalizedVehicle.includes("FULL_GAME");
@@ -359,8 +361,11 @@ function decisionAuditMarketContext(
   const primarySource = String(outcome.primary_grade_market_source ?? "").trim();
   const executableSource = String(outcome.executable_market_source ?? "").trim();
   const primaryProvenance = String(outcome.primary_market_provenance ?? "").trim();
-  const hardRockRequiredButUnavailable = primaryStatus === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE";
-  const hardRockClaim = hardRockRequiredButUnavailable
+  const hardRockRequiredByPolicy = requiresHardRockFloridaMlbFullGameTotal(date);
+  const hardRockRequiredButUnavailable = primaryStatus === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
+    || (hardRockRequiredByPolicy && outcome.executable_market_line === null);
+  const hardRockClaim = hardRockRequiredByPolicy
+    || hardRockRequiredButUnavailable
     || primaryStatus === "LITERAL_EXECUTABLE"
     || primaryStatus === "EXECUTABLE_OPERATOR_CAPTURED"
     || primaryStatus === "MARKET_LINE_INTEGRITY_FAILURE"
@@ -371,7 +376,9 @@ function decisionAuditMarketContext(
   if (!hardRockClaim) {
     return { line: frozenLine, hard_rock: false, settlement_status: "SETTLED", gap_reason: "" };
   }
-  const line = outcome.primary_grade_market_line ?? outcome.executable_market_line ?? null;
+  const line = hardRockRequiredByPolicy
+    ? outcome.executable_market_line ?? null
+    : outcome.primary_grade_market_line ?? outcome.executable_market_line ?? null;
   const integrity = gradeHardRockMlbFullGameTotal("OVER", line, outcome.actual_total).integrity_status;
   if (hardRockRequiredButUnavailable || integrity === "MISSING_LITERAL_EXECUTABLE_LINE") {
     return {
@@ -674,6 +681,7 @@ export function settleDecisionAuditRows(
       numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_LINE]),
       outcome,
       current[DECISION_AUDIT_INDEX.FROZEN_VEHICLE],
+      String(current[DECISION_AUDIT_INDEX.DATE] ?? outcome.date ?? ""),
     );
 
     const modelTruth = isAuditGap ? "NOT_GRADABLE" : gradeAuditMarketTruth(

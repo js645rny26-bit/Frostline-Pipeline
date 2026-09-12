@@ -30,6 +30,7 @@ import {
   gradeDirectionalOutcome,
   gradeHardRockMlbFullGameTotal,
 } from "./module14_settlementGrading.js";
+import { requiresHardRockFloridaMlbFullGameTotal } from "./marketLineNormalization.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
 
 const VEHICLE_LOG_SHEET  = "VEHICLE_LOG";
@@ -221,15 +222,19 @@ export function gradePostmortemTicket(
   direction: string,
   legacyVehicleLine: number | null,
   outcome: CanonicalOutcomeMarketGrade,
+  date = "",
 ): {
   market_line: number | null;
   market_status: string;
   thesis_correct: boolean | "PUSH" | null;
   ticket_result: "COVERED" | "MISSED" | "PUSH" | "NO_BET";
 } {
+  const hardRockRequiredByPolicy = requiresHardRockFloridaMlbFullGameTotal(date);
   const hardRockRequiredButUnavailable = outcome.primary_market_status
-    === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE";
-  const hardRockClaim = outcome.primary_market_provenance === "LITERAL_EXECUTABLE"
+    === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
+    || (hardRockRequiredByPolicy && outcome.executable_market_line === null);
+  const hardRockClaim = hardRockRequiredByPolicy
+    || outcome.primary_market_provenance === "LITERAL_EXECUTABLE"
     || outcome.primary_market_status === "LITERAL_EXECUTABLE"
     || outcome.primary_market_status === "EXECUTABLE_OPERATOR_CAPTURED"
     || /HARD[_ ]?ROCK/i.test(`${outcome.executable_market_source} ${outcome.primary_market_source}`);
@@ -243,14 +248,17 @@ export function gradePostmortemTicket(
     };
   }
   if (hardRockClaim) {
+    const hardRockLine = hardRockRequiredByPolicy
+      ? outcome.executable_market_line
+      : outcome.primary_market_line ?? outcome.executable_market_line;
     const grade = gradeHardRockMlbFullGameTotal(
       direction,
-      outcome.primary_market_line ?? outcome.executable_market_line,
+      hardRockLine,
       outcome.actual_total,
     );
     if (grade.integrity_status !== "VALID_LITERAL_HALF_NUMBER") {
       return {
-        market_line: outcome.primary_market_line ?? outcome.executable_market_line,
+        market_line: hardRockLine,
         market_status: grade.integrity_status === "MISSING_LITERAL_EXECUTABLE_LINE"
           ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
           : grade.integrity_status,
@@ -259,7 +267,7 @@ export function gradePostmortemTicket(
       };
     }
     return {
-      market_line: outcome.primary_market_line ?? outcome.executable_market_line,
+      market_line: hardRockLine,
       market_status: grade.integrity_status,
       thesis_correct: grade.outcome === "WIN",
       ticket_result: grade.outcome === "WIN" ? "COVERED" : "MISSED",
@@ -634,7 +642,7 @@ export async function runPostmortem(
     const isFullGameTotal = vehicleType === "GAME_TOTAL" || vehicleType.includes("FULL_GAME");
     const isOtherTotal = !isFullGameTotal && vehicleType.includes("TOTAL");
     const canonicalGrade = isFullGameTotal
-      ? gradePostmortemTicket(direction, legacyMarketLine, outcome)
+      ? gradePostmortemTicket(direction, legacyMarketLine, outcome, String(r[L_DATE] ?? ""))
       : isOtherTotal
         ? {
             market_line: legacyMarketLine,
