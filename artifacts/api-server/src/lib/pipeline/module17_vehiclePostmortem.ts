@@ -26,7 +26,10 @@
 
 import { readRange, writeRange, expandSheetColumns, WORKBOOK_ID } from "../sheets/client.js";
 import { logger } from "../../lib/logger.js";
-import { gradeDirectionalOutcome } from "./module14_settlementGrading.js";
+import {
+  gradeDirectionalOutcome,
+  gradeHardRockMlbFullGameTotal,
+} from "./module14_settlementGrading.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
 
 const VEHICLE_LOG_SHEET  = "VEHICLE_LOG";
@@ -81,9 +84,13 @@ export const L_RECORD_INTEGRITY_STATUS = 16;
 // ─── SHADOW_OUTCOMES column indices (0-based) ─────────────────────────────────
 const O_GAME_ID  = 1;
 const O_ACTUAL   = 5;
-const O_ERROR    = 6;
-const O_AWAY_SRC = 9;
-const O_HOME_SRC = 10;
+const O_EXECUTABLE_MARKET_LINE = 36;
+const O_EXECUTABLE_MARKET_SOURCE = 37;
+const O_PRIMARY_MARKET_LINE = 39;
+const O_PRIMARY_MARKET_SOURCE = 40;
+const O_PRIMARY_MARKET_STATUS = 41;
+const O_PRIMARY_DIRECTIONAL_RESULT = 42;
+const O_PRIMARY_MARKET_PROVENANCE = 47;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -192,6 +199,78 @@ export function postmortemRowToValues(row: PostmortemRow): unknown[] {
 function gameIdDateMatchesDate(gameId: string, date: string): boolean {
   const expectedPrefix = date.replace(/-/g, ""); // "20260725"
   return gameId.slice(0, 8) === expectedPrefix;
+}
+
+export interface CanonicalOutcomeMarketGrade {
+  actual_total: number;
+  executable_market_line: number | null;
+  executable_market_source: string;
+  primary_market_line: number | null;
+  primary_market_source: string;
+  primary_market_status: string;
+  primary_directional_result: string;
+  primary_market_provenance: string;
+}
+
+/**
+ * Select the market object used by the coded ticket/postmortem report.
+ * Current Hard Rock packets must use the canonical literal executable pair;
+ * reference-only historical rows retain their pre-existing generic semantics.
+ */
+export function gradePostmortemTicket(
+  direction: string,
+  legacyVehicleLine: number | null,
+  outcome: CanonicalOutcomeMarketGrade,
+): {
+  market_line: number | null;
+  market_status: string;
+  thesis_correct: boolean | "PUSH" | null;
+  ticket_result: "COVERED" | "MISSED" | "PUSH" | "NO_BET";
+} {
+  const hardRockRequiredButUnavailable = outcome.primary_market_status
+    === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE";
+  const hardRockClaim = outcome.primary_market_provenance === "LITERAL_EXECUTABLE"
+    || outcome.primary_market_status === "LITERAL_EXECUTABLE"
+    || outcome.primary_market_status === "EXECUTABLE_OPERATOR_CAPTURED"
+    || /HARD[_ ]?ROCK/i.test(`${outcome.executable_market_source} ${outcome.primary_market_source}`);
+
+  if (hardRockRequiredButUnavailable) {
+    return {
+      market_line: null,
+      market_status: "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE",
+      thesis_correct: null,
+      ticket_result: "NO_BET",
+    };
+  }
+  if (hardRockClaim) {
+    const grade = gradeHardRockMlbFullGameTotal(
+      direction,
+      outcome.primary_market_line ?? outcome.executable_market_line,
+      outcome.actual_total,
+    );
+    if (grade.integrity_status !== "VALID_LITERAL_HALF_NUMBER") {
+      return {
+        market_line: outcome.primary_market_line ?? outcome.executable_market_line,
+        market_status: grade.integrity_status === "MISSING_LITERAL_EXECUTABLE_LINE"
+          ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
+          : grade.integrity_status,
+        thesis_correct: null,
+        ticket_result: "NO_BET",
+      };
+    }
+    return {
+      market_line: outcome.primary_market_line ?? outcome.executable_market_line,
+      market_status: grade.integrity_status,
+      thesis_correct: grade.outcome === "WIN",
+      ticket_result: grade.outcome === "WIN" ? "COVERED" : "MISSED",
+    };
+  }
+
+  return {
+    market_line: legacyVehicleLine,
+    market_status: "LEGACY_OR_NON_HARD_ROCK_MARKET",
+    ...gradeTicket(direction, legacyVehicleLine, outcome.actual_total),
+  };
 }
 
 export function vehicleSnapshotKey(date: string, gameId: string, packetSnapshotTs: string): string {
@@ -489,16 +568,27 @@ export async function runPostmortem(
   }
 
   // ── Read SHADOW_OUTCOMES ──
-  type OutcomeData = { actual_total: number };
+  type OutcomeData = CanonicalOutcomeMarketGrade;
   const outcomesMap = new Map<string, OutcomeData>();
   try {
-    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:K5000`);
+    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:AW5000`);
     const all  = (resp.values ?? []) as string[][];
     for (const r of all.slice(1)) {
       const gid = r[O_GAME_ID] ?? "";
       if (!gid) continue;
       outcomesMap.set(gid, {
         actual_total: parseFloat(r[O_ACTUAL]  ?? "0") || 0,
+        executable_market_line: r[O_EXECUTABLE_MARKET_LINE]
+          ? parseFloat(r[O_EXECUTABLE_MARKET_LINE]!)
+          : null,
+        executable_market_source: r[O_EXECUTABLE_MARKET_SOURCE] ?? "",
+        primary_market_line: r[O_PRIMARY_MARKET_LINE]
+          ? parseFloat(r[O_PRIMARY_MARKET_LINE]!)
+          : null,
+        primary_market_source: r[O_PRIMARY_MARKET_SOURCE] ?? "",
+        primary_market_status: r[O_PRIMARY_MARKET_STATUS] ?? "",
+        primary_directional_result: r[O_PRIMARY_DIRECTIONAL_RESULT] ?? "",
+        primary_market_provenance: r[O_PRIMARY_MARKET_PROVENANCE] ?? "",
       });
     }
     logger.info({ outcomes: outcomesMap.size }, "MODULE_17: SHADOW_OUTCOMES loaded");
@@ -533,16 +623,31 @@ export async function runPostmortem(
     if (!outcome) { noOutcome++; continue; }
 
     // Idempotency — skip already-graded rows
-    const marketLine    = r[L_MARKET_LINE] ? parseFloat(r[L_MARKET_LINE]) : null;
+    const legacyMarketLine = r[L_MARKET_LINE] ? parseFloat(r[L_MARKET_LINE]) : null;
     const direction     = (r[L_DIRECTION]     ?? "NONE") as "OVER" | "UNDER" | "NONE";
     const finalDecision = r[L_FINAL_DECISION] ?? "PENDING";
     const vehicleType   = r[L_VEHICLE_TYPE]   ?? "";
 
-    // Only grade thesis/ticket for total-line vehicles (GAME_TOTAL, TEAM_TOTAL_*)
-    const isGradeable = vehicleType.includes("TOTAL");
-    const { thesis_correct, ticket_result } = isGradeable
-      ? gradeTicket(direction, marketLine, outcome.actual_total)
-      : { thesis_correct: null, ticket_result: "NO_BET" as const };
+    // The literal-Hard-Rock assertion is scoped to the MLB full-game total.
+    // Other total products keep their existing grading behavior and must not
+    // accidentally consume the packet's full-game executable line.
+    const isFullGameTotal = vehicleType === "GAME_TOTAL" || vehicleType.includes("FULL_GAME");
+    const isOtherTotal = !isFullGameTotal && vehicleType.includes("TOTAL");
+    const canonicalGrade = isFullGameTotal
+      ? gradePostmortemTicket(direction, legacyMarketLine, outcome)
+      : isOtherTotal
+        ? {
+            market_line: legacyMarketLine,
+            market_status: "LEGACY_OR_NON_HARD_ROCK_MARKET",
+            ...gradeTicket(direction, legacyMarketLine, outcome.actual_total),
+          }
+        : {
+        market_line: null,
+        market_status: "NON_TOTAL_VEHICLE",
+        thesis_correct: null,
+        ticket_result: "NO_BET" as const,
+          };
+    const { market_line: marketLine, market_status: marketStatus, thesis_correct, ticket_result } = canonicalGrade;
 
     const projected = parseFloat(r[L_PROJ_TOTAL] ?? "0") || 0;
     const signedError = parseFloat((projected - outcome.actual_total).toFixed(2));
@@ -571,7 +676,11 @@ export async function runPostmortem(
       signed_error:     signedError,
       abs_error:        parseFloat(Math.abs(signedError).toFixed(2)),
       game_truth_grade: truthGrade,
-      vehicle_capture_grade: decision === "BET" ? "AUTHORIZED_VEHICLE" : "NO_AUTHORIZED_VEHICLE",
+      vehicle_capture_grade: marketStatus === "MARKET_LINE_INTEGRITY_FAILURE"
+        ? "MARKET_LINE_INTEGRITY_FAILURE"
+        : marketStatus === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
+          ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
+          : decision === "BET" ? "AUTHORIZED_VEHICLE" : "NO_AUTHORIZED_VEHICLE",
       ticket_result: decision === "BET" ? ticket_result : "NO_WAGER_SHADOW",
       blocker_grade: decision === "BET"
         ? (ticket_result === "COVERED" ? "EXECUTION_CONFIRMED" : "EXECUTION_FAILED")

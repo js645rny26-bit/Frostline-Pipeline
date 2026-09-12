@@ -23,6 +23,7 @@ import {
   PREGAME_PACKET_HISTORY_HEADERS,
 } from "./module20a_pregamePacket.js";
 import { assignUniqueGameIds } from "./module01_mlbStatsApi.js";
+import { gradeHardRockMlbFullGameTotal } from "./module14_settlementGrading.js";
 import type { PostmortemEventEvidence } from "./module21_postmortemMechanism.js";
 
 const MLB_API = "https://statsapi.mlb.com/api/v1";
@@ -395,10 +396,14 @@ export function parseFrozenPacketMarketSnapshots(
     const referenceMarketLine = numberOrNull(row[PACKET_INDEX.Reference_Market_Line])
       ?? (isV54MarketPacket ? null : numberOrNull(row[PACKET_INDEX.Market_Line]));
     const executableMarketLine = numberOrNull(row[PACKET_INDEX.Executable_Market_Line]);
+    const primaryMarketStatus = starterName(row[PACKET_INDEX.Primary_Grade_Market_Status]);
+    const hardRockRequiredButUnavailable = primaryMarketStatus === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE";
     const primaryMarketLine = numberOrNull(row[PACKET_INDEX.Primary_Grade_Market_Line])
-      ?? (isV54MarketPacket
-        ? executableMarketLine ?? (representationStatus === "LITERAL_REFERENCE" ? referenceMarketLine : null)
-        : executableMarketLine ?? referenceMarketLine);
+      ?? (hardRockRequiredButUnavailable
+        ? null
+        : isV54MarketPacket
+          ? executableMarketLine ?? (representationStatus === "LITERAL_REFERENCE" ? referenceMarketLine : null)
+          : executableMarketLine ?? referenceMarketLine);
     const hasExecutable = executableMarketLine !== null;
     snapshots.set(gameId, {
       frozen_direction: starterName(row[PACKET_INDEX.Direction]),
@@ -424,8 +429,8 @@ export function parseFrozenPacketMarketSnapshots(
         : starterName(row[PACKET_INDEX.Primary_Grade_Market_Source])
           || (hasExecutable ? "MANUAL_OPERATOR_HARD_ROCK" : "LEGACY_PACKET_REFERENCE_MARKET"),
       primary_grade_market_status: isV54MarketPacket
-        ? starterName(row[PACKET_INDEX.Primary_Grade_Market_Status])
-        : starterName(row[PACKET_INDEX.Primary_Grade_Market_Status])
+        ? primaryMarketStatus
+        : primaryMarketStatus
           || (hasExecutable ? "EXECUTABLE_OPERATOR_CAPTURED" : "REFERENCE_ONLY_FALLBACK"),
       packet_snapshot_ts: packetSnapshotTs,
       freeze_ts: starterName(row[P_FREEZE_TS]),
@@ -840,8 +845,9 @@ export interface SettlementMarketGrade {
 
 /**
  * Keep automated/reference and operator/executable market observations apart.
- * The primary line is the operator Hard Rock line only when it was captured in
- * the frozen packet; otherwise the reference line remains an explicit fallback.
+ * Current packets grade only a captured literal Hard Rock line. Explicit old
+ * packet/reference statuses retain their historical behavior without turning
+ * a new missing Hard Rock line into a fallback.
  */
 export function resolveSettlementMarketGrade(
   frozenProjection: number | null,
@@ -909,20 +915,41 @@ export function resolveSettlementMarketGrade(
     ?? directionForProjection(frozenProjection, primaryMarketLine);
   const referenceDirection = preservedDirection
     ?? directionForProjection(frozenProjection, referenceMarketLine);
-  const primaryMarketProvenance = executableMarketLine !== null
-    && primaryMarketLine === executableMarketLine
-    ? "LITERAL_EXECUTABLE"
-    : referenceMarketRepresentationStatus === "LITERAL_REFERENCE"
-      && primaryMarketLine === referenceMarketLine
-      ? "LITERAL_REFERENCE"
-      : primaryMarketLine === null && referenceMarketRepresentationStatus === "SYNTHETIC_NORMALIZED_REFERENCE"
-        ? "SYNTHETIC_NORMALIZED_REFERENCE"
-        : "LEGACY_OR_UNRESOLVED";
-  const marketGradeNotes = primaryMarketProvenance === "SYNTHETIC_NORMALIZED_REFERENCE"
-    ? "SYNTHETIC_NORMALIZED_REFERENCE_NOT_GRADEABLE"
-    : referenceMarketConvention === "WHOLE_NUMBER"
-      ? "WHOLE_NUMBER_REFERENCE_PUSH_PRESERVED"
-      : "";
+  const hardRockSourceClaim = [executableMarketSource, primaryMarketSource]
+    .some((value) => /HARD[_ ]?ROCK/i.test(value));
+  const hardRockExecutionClaim = hardRockSourceClaim
+    || primaryMarketStatus === "LITERAL_EXECUTABLE"
+    || primaryMarketStatus === "EXECUTABLE_OPERATOR_CAPTURED";
+  const hardRockRequiredButUnavailable = primaryMarketStatus === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE";
+  const hardRockGrade = hardRockExecutionClaim
+    ? gradeHardRockMlbFullGameTotal(primaryDirection, primaryMarketLine, actualTotal)
+    : null;
+  const hardRockIntegrityFailure = hardRockGrade?.integrity_status === "MARKET_LINE_INTEGRITY_FAILURE";
+  const resolvedPrimaryStatus = hardRockIntegrityFailure
+    ? "MARKET_LINE_INTEGRITY_FAILURE"
+    : primaryMarketStatus;
+  const primaryMarketProvenance = hardRockIntegrityFailure
+    ? "DATA_LINEAGE_FAILURE"
+    : hardRockRequiredButUnavailable
+      ? "HARD_ROCK_EXECUTABLE_UNAVAILABLE"
+      : executableMarketLine !== null
+        && primaryMarketLine === executableMarketLine
+        ? "LITERAL_EXECUTABLE"
+        : referenceMarketRepresentationStatus === "LITERAL_REFERENCE"
+          && primaryMarketLine === referenceMarketLine
+          ? "LITERAL_REFERENCE"
+          : primaryMarketLine === null && referenceMarketRepresentationStatus === "SYNTHETIC_NORMALIZED_REFERENCE"
+            ? "SYNTHETIC_NORMALIZED_REFERENCE"
+            : "LEGACY_OR_UNRESOLVED";
+  const marketGradeNotes = hardRockIntegrityFailure
+    ? "HARD_ROCK_MLB_FULL_GAME_TOTAL_REQUIRES_LITERAL_HALF_NUMBER"
+    : hardRockRequiredButUnavailable
+      ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE; REFERENCE_NOT_SUBSTITUTED"
+      : primaryMarketProvenance === "SYNTHETIC_NORMALIZED_REFERENCE"
+        ? "SYNTHETIC_NORMALIZED_REFERENCE_NOT_GRADEABLE"
+        : referenceMarketConvention === "WHOLE_NUMBER"
+          ? "WHOLE_NUMBER_REFERENCE_PUSH_PRESERVED"
+          : "";
   return {
     reference_market_line: referenceMarketLine,
     reference_market_source: referenceMarketSource,
@@ -935,10 +962,14 @@ export function resolveSettlementMarketGrade(
     executable_market_ts: executableMarketTs,
     primary_grade_market_line: primaryMarketLine,
     primary_grade_market_source: primaryMarketSource,
-    primary_market_grade_status: primaryMarketStatus,
+    primary_market_grade_status: resolvedPrimaryStatus,
     primary_market_provenance: primaryMarketProvenance,
     market_grade_notes: marketGradeNotes,
-    primary_directional_result: gradeDirection(primaryDirection, primaryMarketLine, actualTotal),
+    primary_directional_result: hardRockRequiredButUnavailable
+      ? "NO_BET"
+      : hardRockGrade === null
+        ? gradeDirection(primaryDirection, primaryMarketLine, actualTotal)
+        : hardRockGrade.outcome === "NOT_EVALUABLE" ? "NO_BET" : hardRockGrade.outcome,
     reference_directional_result: gradeDirection(referenceDirection, referenceMarketLine, actualTotal),
   };
 }
@@ -1715,6 +1746,11 @@ export async function runShadowSettlement(
       existing?.values,
       prospectiveProjection?.direction,
     );
+    if (marketGrade.primary_market_grade_status === "MARKET_LINE_INTEGRITY_FAILURE") {
+      errors.push(
+        `MARKET_LINE_INTEGRITY_FAILURE: ${gameId} active Hard Rock MLB full-game total is not a literal half-number market`,
+      );
+    }
     const row: SettlementRow = {
       date: String(existing?.values[0] || history[H_DATE] || date),
       game_id: gameId,

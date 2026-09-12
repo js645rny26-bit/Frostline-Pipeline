@@ -28,6 +28,7 @@ import type { SlateBoardEntry } from "./module11_outputExtraction.js";
 import type { NormalizedGame } from "./module06_normalization.js";
 import type { StatcastPreviewResult } from "./module02e_statcastPreview.js";
 import type { SettlementRow } from "./module14_shadowSettlement.js";
+import { gradeHardRockMlbFullGameTotal } from "./module14_settlementGrading.js";
 import { isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
 import {
   classifyPostmortemMechanism,
@@ -337,10 +338,84 @@ function chooseAllocationWinner(
   return modelError < manualError ? "MODEL" : "MANUAL";
 }
 
-function ticketResult(row: unknown[], actualTotal: number): AuditTicketResult {
+interface DecisionAuditMarketContext {
+  line: number | null;
+  hard_rock: boolean;
+  settlement_status: "SETTLED" | "MARKET_LINEAGE_FAILURE";
+  gap_reason: string;
+}
+
+function decisionAuditMarketContext(
+  frozenLine: number | null,
+  outcome: SettlementRow,
+  vehicle: unknown,
+): DecisionAuditMarketContext {
+  const normalizedVehicle = String(vehicle ?? "").trim().toUpperCase();
+  const isFullGameTotal = normalizedVehicle === "GAME_TOTAL" || normalizedVehicle.includes("FULL_GAME");
+  if (!isFullGameTotal) {
+    return { line: frozenLine, hard_rock: false, settlement_status: "SETTLED", gap_reason: "" };
+  }
+  const primaryStatus = String(outcome.primary_market_grade_status ?? "").trim();
+  const primarySource = String(outcome.primary_grade_market_source ?? "").trim();
+  const executableSource = String(outcome.executable_market_source ?? "").trim();
+  const primaryProvenance = String(outcome.primary_market_provenance ?? "").trim();
+  const hardRockRequiredButUnavailable = primaryStatus === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE";
+  const hardRockClaim = hardRockRequiredButUnavailable
+    || primaryStatus === "LITERAL_EXECUTABLE"
+    || primaryStatus === "EXECUTABLE_OPERATOR_CAPTURED"
+    || primaryStatus === "MARKET_LINE_INTEGRITY_FAILURE"
+    || primaryProvenance === "LITERAL_EXECUTABLE"
+    || primaryProvenance === "DATA_LINEAGE_FAILURE"
+    || /HARD[_ ]?ROCK/i.test(`${primarySource} ${executableSource}`);
+
+  if (!hardRockClaim) {
+    return { line: frozenLine, hard_rock: false, settlement_status: "SETTLED", gap_reason: "" };
+  }
+  const line = outcome.primary_grade_market_line ?? outcome.executable_market_line ?? null;
+  const integrity = gradeHardRockMlbFullGameTotal("OVER", line, outcome.actual_total).integrity_status;
+  if (hardRockRequiredButUnavailable || integrity === "MISSING_LITERAL_EXECUTABLE_LINE") {
+    return {
+      line: null,
+      hard_rock: true,
+      settlement_status: "MARKET_LINEAGE_FAILURE",
+      gap_reason: "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE",
+    };
+  }
+  if (primaryStatus === "MARKET_LINE_INTEGRITY_FAILURE" || integrity === "MARKET_LINE_INTEGRITY_FAILURE") {
+    return {
+      line,
+      hard_rock: true,
+      settlement_status: "MARKET_LINEAGE_FAILURE",
+      gap_reason: "HARD_ROCK_MLB_FULL_GAME_TOTAL_LINE_INTEGRITY_FAILURE",
+    };
+  }
+  return { line, hard_rock: true, settlement_status: "SETTLED", gap_reason: "" };
+}
+
+function gradeAuditMarketTruth(
+  direction: unknown,
+  market: DecisionAuditMarketContext,
+  actualTotal: number,
+): TruthGrade {
+  if (!market.hard_rock) return gradeAuditTruth(direction, market.line, actualTotal);
+  const grade = gradeHardRockMlbFullGameTotal(
+    String(direction ?? "").toUpperCase(),
+    market.line,
+    actualTotal,
+  );
+  if (grade.integrity_status !== "VALID_LITERAL_HALF_NUMBER" || grade.outcome === "NOT_EVALUABLE") {
+    return "NOT_GRADABLE";
+  }
+  return grade.outcome === "WIN" ? "CORRECT" : "INCORRECT";
+}
+
+function ticketResult(
+  row: unknown[],
+  actualTotal: number,
+  market: DecisionAuditMarketContext,
+): AuditTicketResult {
   const decision = controlledValue(row[DECISION_AUDIT_INDEX.FINAL_DECISION], FINAL_AUDIT_DECISIONS, "NO CORE");
   if (decision !== "CORE") return "NO_WAGER";
-  const line = numberOrNull(row[DECISION_AUDIT_INDEX.FROZEN_LINE]);
   const source = controlledValue(
     row[DECISION_AUDIT_INDEX.FINAL_REASONING_SOURCE],
     FINAL_REASONING_SOURCES,
@@ -351,7 +426,7 @@ function ticketResult(row: unknown[], actualTotal: number): AuditTicketResult {
     : source === "SPLIT_DECISION" || source === "UNRESOLVED"
       ? "NONE"
       : row[DECISION_AUDIT_INDEX.FROZEN_DIRECTION];
-  const truth = gradeAuditTruth(direction, line, actualTotal);
+  const truth = gradeAuditMarketTruth(direction, market, actualTotal);
   if (truth === "PUSH") return "PUSH";
   if (truth === "CORRECT") return "WIN";
   if (truth === "INCORRECT") return "LOSS";
@@ -595,15 +670,20 @@ export function settleDecisionAuditRows(
 
     const isAuditGap = current[DECISION_AUDIT_INDEX.AUDIT_STATUS] === "AUDIT_GAP";
     if (isAuditGap) auditGaps++;
-
-    const modelTruth = isAuditGap ? "NOT_GRADABLE" : gradeAuditTruth(
-      current[DECISION_AUDIT_INDEX.FROZEN_DIRECTION],
+    const marketContext = decisionAuditMarketContext(
       numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_LINE]),
+      outcome,
+      current[DECISION_AUDIT_INDEX.FROZEN_VEHICLE],
+    );
+
+    const modelTruth = isAuditGap ? "NOT_GRADABLE" : gradeAuditMarketTruth(
+      current[DECISION_AUDIT_INDEX.FROZEN_DIRECTION],
+      marketContext,
       outcome.actual_total,
     );
-    const manualTruth = isAuditGap ? "NOT_GRADABLE" : gradeAuditTruth(
+    const manualTruth = isAuditGap ? "NOT_GRADABLE" : gradeAuditMarketTruth(
       manualDirection(current[DECISION_AUDIT_INDEX.MANUAL_TRUTH]),
-      numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_LINE]),
+      marketContext,
       outcome.actual_total,
     );
     const modelAllocationError = isAuditGap ? null : allocationError(
@@ -618,7 +698,7 @@ export function settleDecisionAuditRows(
       outcome.actual_away_runs,
       outcome.actual_home_runs,
     );
-    const result = isAuditGap ? "NO_WAGER" : ticketResult(current, outcome.actual_total);
+    const result = isAuditGap ? "NO_WAGER" : ticketResult(current, outcome.actual_total, marketContext);
     const finalDecision = controlledValue(
       current[DECISION_AUDIT_INDEX.FINAL_DECISION],
       FINAL_AUDIT_DECISIONS,
@@ -657,10 +737,10 @@ export function settleDecisionAuditRows(
     current[DECISION_AUDIT_INDEX.GRADED_TS] = ts;
     current[DECISION_AUDIT_INDEX.SETTLEMENT_STATUS] = isAuditGap
       ? "NOT_GRADABLE_PREGAME_AUDIT_GAP"
-      : "SETTLED";
+      : marketContext.settlement_status;
     current[DECISION_AUDIT_INDEX.SETTLEMENT_GAP_REASON] = isAuditGap
       ? "PREGAME_FREEZE_MISSING"
-      : "";
+      : marketContext.gap_reason;
     const modelAway = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_AWAY]);
     const modelHome = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_HOME]);
     const modelTotal = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_TOTAL]);

@@ -6,7 +6,8 @@
  * total may be represented as the immediately lower half number (10 -> 9.5,
  * 7 -> 6.5) only where a caller explicitly needs that synthetic convention.
  * The literal source total remains the authoritative reference market for
- * provenance and grading: whole numbers retain push mass.
+ * provenance and reference/historical grading: whole numbers retain push
+ * mass. It is never an active Hard Rock executable grading substitute.
  *
  * This is market representation only. It must not be imported by or affect
  * price-blind projection math.
@@ -93,37 +94,4 @@ export function isHalfNumberFullGameTotal(value: unknown): boolean {
   return parsed !== null
     && parsed > 0
     && Math.abs((parsed % 1) - 0.5) <= HALF_NUMBER_EPSILON;
-}
-
-function formatLine(line: number): string {
-  return line.toFixed(1);
-}
-
-/**
- * Normalizes a user-entered Hard Rock total ladder without changing its
- * delimiters or directional labels. Unsupported fractional values remain
- * visible and will be rejected by the existing half-number settlement parser.
- */
-export function normalizeHardRockTotalLineList(value: unknown): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  return raw.split(/([;,|])/).map((part) => {
-    if (/^[;,|]$/.test(part)) return part;
-    const match = part.match(/\d+(?:\.\d+)?/);
-    if (!match) return part;
-    const normalized = normalizeFullGameTotalLine(match[0]);
-    return normalized === null
-      ? part
-      : part.replace(match[0], formatLine(normalized));
-  }).join("");
-}
-
-/** Normalizes the numeric threshold inside a manual total vehicle label. */
-export function normalizeFullGameTotalVehicle(value: unknown): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  const match = raw.match(/\d+(?:\.\d+)?/);
-  if (!match) return raw;
-  const normalized = normalizeFullGameTotalLine(match[0]);
-  return normalized === null ? raw : raw.replace(match[0], formatLine(normalized));
 }

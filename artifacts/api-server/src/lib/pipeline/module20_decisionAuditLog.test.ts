@@ -449,6 +449,93 @@ test("pushes remain neutral in truth, ticket, and authorization grading", () => 
   assert.equal(row[C.OUTCOME_TAG], "PUSH");
 });
 
+test("decision audit settles COL-DET from literal Hard Rock 8.5 rather than reference 8.0", () => {
+  const pre = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-09-11",
+    game_id: "20260911_COL_DET",
+    scheduled_first_pitch: "2026-09-11T22:40:00.000Z",
+    lock_status: "LOCKED_IN",
+    projected_total: 9.66,
+    market_line: 8,
+    direction: "OVER",
+  })], "2026-09-11T22:28:00.000Z");
+  const settled = settleDecisionAuditRows(pre.rows, [outcome({
+    date: "2026-09-11",
+    game_id: "20260911_COL_DET",
+    actual_away_runs: 0,
+    actual_home_runs: 8,
+    actual_total: 8,
+    executable_market_line: 8.5,
+    executable_market_source: "HARD_ROCK_FLORIDA",
+    primary_grade_market_line: 8.5,
+    primary_grade_market_source: "LITERAL_EXECUTABLE_HARD_ROCK",
+    primary_market_grade_status: "LITERAL_EXECUTABLE",
+    primary_market_provenance: "LITERAL_EXECUTABLE",
+    primary_directional_result: "LOSS",
+  })], "2026-09-12T05:30:00.000Z");
+  const row = settled.rows[0]!;
+  assert.equal(row[C.MODEL_TRUTH_GRADE], "INCORRECT");
+  assert.equal(row[C.TICKET_RESULT], "LOSS");
+  assert.notEqual(row[C.TICKET_RESULT], "PUSH");
+  assert.equal(row[C.SETTLEMENT_STATUS], "SETTLED");
+  assert.equal(row[C.SETTLEMENT_GAP_REASON], "");
+});
+
+test("decision audit cannot settle from reference when literal Hard Rock line is missing", () => {
+  const pre = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-09-12",
+    game_id: "20260912_AAA_BBB",
+    scheduled_first_pitch: "2026-09-12T22:40:00.000Z",
+    lock_status: "LOCKED_IN",
+    market_line: 8,
+    direction: "OVER",
+  })], "2026-09-12T20:00:00.000Z");
+  const settled = settleDecisionAuditRows(pre.rows, [outcome({
+    date: "2026-09-12",
+    game_id: "20260912_AAA_BBB",
+    actual_total: 8,
+    primary_grade_market_line: null,
+    primary_grade_market_source: "HARD_ROCK_FLORIDA_REQUIRED",
+    primary_market_grade_status: "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE",
+    primary_market_provenance: "HARD_ROCK_EXECUTABLE_UNAVAILABLE",
+    primary_directional_result: "NO_BET",
+  })], "2026-09-13T05:30:00.000Z");
+  const row = settled.rows[0]!;
+  assert.equal(row[C.MODEL_TRUTH_GRADE], "NOT_GRADABLE");
+  assert.equal(row[C.TICKET_RESULT], "PENDING");
+  assert.equal(row[C.SETTLEMENT_STATUS], "MARKET_LINEAGE_FAILURE");
+  assert.equal(row[C.SETTLEMENT_GAP_REASON], "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
+});
+
+test("decision audit treats impossible stored Hard Rock 8.0 as integrity failure, not PUSH", () => {
+  const pre = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-09-12",
+    game_id: "20260912_AAA_BBB",
+    scheduled_first_pitch: "2026-09-12T22:40:00.000Z",
+    lock_status: "LOCKED_IN",
+    market_line: 7.5,
+    direction: "OVER",
+  })], "2026-09-12T20:00:00.000Z");
+  const settled = settleDecisionAuditRows(pre.rows, [outcome({
+    date: "2026-09-12",
+    game_id: "20260912_AAA_BBB",
+    actual_total: 8,
+    executable_market_line: 8,
+    executable_market_source: "HARD_ROCK_FLORIDA",
+    primary_grade_market_line: 8,
+    primary_grade_market_source: "LITERAL_EXECUTABLE_HARD_ROCK",
+    primary_market_grade_status: "MARKET_LINE_INTEGRITY_FAILURE",
+    primary_market_provenance: "DATA_LINEAGE_FAILURE",
+    primary_directional_result: "NO_BET",
+  })], "2026-09-13T05:30:00.000Z");
+  const row = settled.rows[0]!;
+  assert.equal(row[C.MODEL_TRUTH_GRADE], "NOT_GRADABLE");
+  assert.equal(row[C.TICKET_RESULT], "PENDING");
+  assert.notEqual(row[C.TICKET_RESULT], "PUSH");
+  assert.equal(row[C.SETTLEMENT_STATUS], "MARKET_LINEAGE_FAILURE");
+  assert.equal(row[C.SETTLEMENT_GAP_REASON], "HARD_ROCK_MLB_FULL_GAME_TOTAL_LINE_INTEGRITY_FAILURE");
+});
+
 test("confidence is clamped to independent 1-10 fields and truth grading is monotone", () => {
   const low = upsertDecisionAuditPregameRows([], [pregame({ model_confidence: 0 })], TS1).rows[0]!;
   const high = upsertDecisionAuditPregameRows([], [pregame({ model_confidence: 99 })], TS1).rows[0]!;

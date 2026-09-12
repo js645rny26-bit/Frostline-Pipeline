@@ -90,7 +90,8 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Reference_Market_Quote_Count",
   "Reference_Market_Normalization_Status",
   "Reference_Market_Capture_Alignment_Status",
-  // The literal reference market is authoritative for fallback settlement.
+  // Literal reference evidence remains authoritative for reference/historical
+  // analysis only. It cannot replace the active Hard Rock executable line.
   // Any lower-half representation remains separately visible and synthetic.
   "Reference_Market_Over_Price",
   "Reference_Market_Under_Price",
@@ -555,6 +556,10 @@ export function buildPregamePacketInputs(
     const sweState = sweStatesByGame.get(summary.game_id);
     const operator = operatorEvidenceByGame.get(summary.game_id);
     const referenceEvidence = referenceMarketEvidenceByGame.get(summary.game_id);
+    const suppliedOperatorMarketLineValue = operatorValue(
+      operator,
+      "CURRENT_HARD_ROCK_LINE",
+    );
     const suppliedOperatorMarketLine = operatorNumber(
       operator,
       "CURRENT_HARD_ROCK_LINE",
@@ -567,8 +572,14 @@ export function buildPregamePacketInputs(
       && isHalfNumberFullGameTotal(suppliedOperatorMarketLine)
       ? suppliedOperatorMarketLine
       : undefined;
-    const invalidExecutableHardRockTotal = suppliedOperatorMarketLine !== undefined
-      && !isHalfNumberFullGameTotal(suppliedOperatorMarketLine);
+    const invalidExecutableHardRockTotal = suppliedOperatorMarketLineValue !== undefined
+      && (suppliedOperatorMarketLine === undefined
+        || !isHalfNumberFullGameTotal(suppliedOperatorMarketLine));
+    if (invalidExecutableHardRockTotal) {
+      throw new Error(
+        `HARD_ROCK_FULL_GAME_TOTAL_LINE_INTEGRITY_FAILURE: ${summary.game_id} supplied literal executable line ${suppliedOperatorMarketLineValue}; Florida Hard Rock MLB full-game totals must be positive half numbers`,
+      );
+    }
     // Preserve the source market exactly for settlement provenance. The board
     // may still expose an older lower-half representation for operational
     // compatibility, but that representation is synthetic and cannot become a
@@ -633,20 +644,14 @@ export function buildPregamePacketInputs(
       : operatorFieldTimestamp(operator, executableEvidenceField);
     const executableMarketStatus = operatorMarketLine !== undefined
       ? "LITERAL_EXECUTABLE_HARD_ROCK_CAPTURED"
-      : invalidExecutableHardRockTotal
-        ? "INVALID_LITERAL_EXECUTABLE_HARD_ROCK_FULL_GAME_TOTAL"
       : executableEvidenceField === undefined
         ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
         : "PARTIAL_LITERAL_EXECUTABLE_HARD_ROCK_EVIDENCE_NO_LINE";
     const primaryMarketSource = operatorMarketLine === undefined
-      ? referenceMarketLine === null ? "" : referenceMarketSource
+      ? "HARD_ROCK_FLORIDA_REQUIRED"
       : "LITERAL_EXECUTABLE_HARD_ROCK";
     const primaryMarketStatus = operatorMarketLine === undefined
-      ? referenceMarketLine === null
-        ? referenceRepresentationStatus === "SYNTHETIC_NORMALIZED_REFERENCE"
-          ? "SYNTHETIC_NORMALIZED_REFERENCE"
-          : "MISSING_MARKET"
-        : "LITERAL_REFERENCE"
+      ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
       : "LITERAL_EXECUTABLE";
     const awayLineupOverride = operatorValue(operator, "AWAY_LINEUP");
     const homeLineupOverride = operatorValue(operator, "HOME_LINEUP");
@@ -744,7 +749,7 @@ export function buildPregamePacketInputs(
       executableMarketTs,
       executableMarketQuotedTs,
       executableMarketStatus,
-      blank(operatorMarketLine ?? referenceMarketLine),
+      blank(operatorMarketLine),
       primaryMarketSource,
       primaryMarketStatus,
       boardRow.direction,

@@ -240,10 +240,11 @@ test("an executable market overlay changes only market provenance, never price-b
   assert.equal(partial[0]?.values[index.Executable_Market_Quoted_TS], "2026-08-24T22:40:00.000Z");
   assert.equal(partial[0]?.values[index.Executable_Market_Status], "PARTIAL_LITERAL_EXECUTABLE_HARD_ROCK_EVIDENCE_NO_LINE");
   assert.equal(partial[0]?.values[index.Primary_Grade_Market_Line], "");
-  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Status], "SYNTHETIC_NORMALIZED_REFERENCE");
+  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Source], "HARD_ROCK_FLORIDA_REQUIRED");
+  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Status], "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
 });
 
-test("a whole-number Florida Hard Rock full-game total is rejected, not normalized", () => {
+test("a whole-number Florida Hard Rock full-game total fails packet materialization closed", () => {
   const summary = [{
     date: "2026-08-24", game_id: "20260824_AAA_BBB", away_team: "AAA", home_team: "BBB",
     projected_away_runs: 4, projected_home_runs: 4.5, projected_total_runs: 8.5,
@@ -254,14 +255,11 @@ test("a whole-number Florida Hard Rock full-game total is rejected, not normaliz
     confidence: 50, variance: 0,
   }] as never;
   const games = [{ legacy_game_id: "20260824_AAA_BBB", scheduled_utc_time: firstPitch }] as never;
-  const packets = buildPregamePacketInputs(
-    summary,
-    board,
-    games,
-    [], [], [],
+  const build = (line: string) => buildPregamePacketInputs(
+    summary, board, games, [], [], [],
     new Map([["20260824_AAA_BBB", {
       fields: new Map([
-        ["CURRENT_HARD_ROCK_LINE", "10"],
+        ["CURRENT_HARD_ROCK_LINE", line],
         ["CURRENT_HARD_ROCK_PRICE", "-110"],
         ["CURRENT_HARD_ROCK_SOURCE", "HARD_ROCK_FL"],
       ]),
@@ -273,13 +271,41 @@ test("a whole-number Florida Hard Rock full-game total is rejected, not normaliz
       reauthorization_status: "REAUTHORIZATION_REQUIRED",
     }]]),
   );
+  assert.throws(() => build("8.0"), /HARD_ROCK_FULL_GAME_TOTAL_LINE_INTEGRITY_FAILURE/);
+  assert.throws(() => build("7.0"), /HARD_ROCK_FULL_GAME_TOTAL_LINE_INTEGRITY_FAILURE/);
+  assert.throws(() => build("not-a-number"), /HARD_ROCK_FULL_GAME_TOTAL_LINE_INTEGRITY_FAILURE/);
+});
+
+test("a literal reference remains preserved but cannot replace a missing Hard Rock executable line", () => {
+  const summary = [{
+    date: "2026-09-12", game_id: "20260912_AAA_BBB", away_team: "AAA", home_team: "BBB",
+    projected_away_runs: 4, projected_home_runs: 4.5, projected_total_runs: 8.5,
+  }] as never;
+  const board = [{
+    legacy_game_id: "20260912_AAA_BBB", market_line: 7.5, run_id: "run", model_version: "test",
+    direction: "OVER", vehicle_type: "GAME_TOTAL", final_decision: "PASS", core_blocker: "",
+    confidence: 50, variance: 0,
+  }] as never;
+  const referenceEvidence = new Map([["20260912_AAA_BBB", {
+    total: 7.5,
+    source_total: 8,
+    source_provider: "MLB_STARTING_NINE_CARD",
+    source_observed_ts: "2026-09-12T15:00:00.000Z",
+  }]]) as never;
+  const packet = buildPregamePacketInputs(
+    summary,
+    board,
+    [{ legacy_game_id: "20260912_AAA_BBB", scheduled_utc_time: "2026-09-12T17:10:00.000Z" }] as never,
+    [], [], [], new Map(), referenceEvidence,
+  )[0]!;
   const index = Object.fromEntries(PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]));
-  assert.equal(packets[0]?.values[index.Executable_Market_Line], "");
-  assert.equal(packets[0]?.values[index.Primary_Grade_Market_Line], "");
-  assert.equal(
-    packets[0]?.values[index.Executable_Market_Status],
-    "INVALID_LITERAL_EXECUTABLE_HARD_ROCK_FULL_GAME_TOTAL",
-  );
+  assert.equal(packet.values[index.Reference_Market_Line], 8);
+  assert.equal(packet.values[index.Reference_Market_Source], "MLB_STARTING_NINE_CARD");
+  assert.equal(packet.values[index.Synthetic_Normalized_Reference_Line], 7.5);
+  assert.equal(packet.values[index.Executable_Market_Line], "");
+  assert.equal(packet.values[index.Primary_Grade_Market_Line], "");
+  assert.equal(packet.values[index.Primary_Grade_Market_Source], "HARD_ROCK_FLORIDA_REQUIRED");
+  assert.equal(packet.values[index.Primary_Grade_Market_Status], "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
 });
 
 test("a packet freezes automated-reference capture metadata beside literal executable evidence", () => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   groupContiguousVehicleLogUpdates,
+  gradePostmortemTicket,
   gradeTicket,
   isFinalizedVehiclePublication,
   postmortemRowToValues,
@@ -64,6 +65,56 @@ test("published vehicle rows remain byte-for-byte immutable on later refresh", (
   assert.deepEqual(published, snapshot);
   assert.equal(result.protectedRows, 1);
   assert.deepEqual(result.newRows, []);
+});
+
+const canonicalMarket = (overrides: Partial<Parameters<typeof gradePostmortemTicket>[2]> = {}) => ({
+  actual_total: 8,
+  executable_market_line: 8.5,
+  executable_market_source: "HARD_ROCK_FLORIDA",
+  primary_market_line: 8.5,
+  primary_market_source: "LITERAL_EXECUTABLE_HARD_ROCK",
+  primary_market_status: "LITERAL_EXECUTABLE",
+  primary_directional_result: "LOSS",
+  primary_market_provenance: "LITERAL_EXECUTABLE",
+  ...overrides,
+});
+
+test("coded postmortem reproduces COL-DET from literal Hard Rock 8.5, not vehicle reference 7.5", () => {
+  assert.deepEqual(gradePostmortemTicket("OVER", 7.5, canonicalMarket()), {
+    market_line: 8.5,
+    market_status: "VALID_LITERAL_HALF_NUMBER",
+    thesis_correct: false,
+    ticket_result: "MISSED",
+  });
+});
+
+test("coded postmortem cannot substitute a reference when Hard Rock is unavailable", () => {
+  assert.deepEqual(gradePostmortemTicket("OVER", 8, canonicalMarket({
+    executable_market_line: null,
+    executable_market_source: "",
+    primary_market_line: null,
+    primary_market_source: "HARD_ROCK_FLORIDA_REQUIRED",
+    primary_market_status: "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE",
+    primary_directional_result: "NO_BET",
+    primary_market_provenance: "HARD_ROCK_EXECUTABLE_UNAVAILABLE",
+  })), {
+    market_line: null,
+    market_status: "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE",
+    thesis_correct: null,
+    ticket_result: "NO_BET",
+  });
+});
+
+test("coded postmortem treats impossible stored Hard Rock 8.0 as integrity failure, not PUSH", () => {
+  assert.deepEqual(gradePostmortemTicket("OVER", 7.5, canonicalMarket({
+    executable_market_line: 8,
+    primary_market_line: 8,
+  })), {
+    market_line: 8,
+    market_status: "MARKET_LINE_INTEGRITY_FAILURE",
+    thesis_correct: null,
+    ticket_result: "NO_BET",
+  });
 });
 
 test("a same-timestamp divergent legacy vehicle collision is rejected rather than silently selected", () => {

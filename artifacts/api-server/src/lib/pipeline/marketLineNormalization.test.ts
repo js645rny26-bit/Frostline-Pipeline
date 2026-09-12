@@ -6,8 +6,6 @@ import {
   describeFullGameTotalNormalization,
   isHalfNumberFullGameTotal,
   normalizeFullGameTotalLine,
-  normalizeFullGameTotalVehicle,
-  normalizeHardRockTotalLineList,
 } from "./marketLineNormalization.js";
 
 test("synthetic display normalization maps whole-number totals to a lower half number", () => {
@@ -53,13 +51,4 @@ test("unsupported fractional totals fail closed instead of inventing a Hard Rock
   assert.equal(normalizeFullGameTotalLine("not a total"), null);
   assert.equal(isHalfNumberFullGameTotal(9.5), true);
   assert.equal(isHalfNumberFullGameTotal(10), false);
-});
-
-test("manual ladder and vehicle entries keep only executable half-number thresholds", () => {
-  assert.equal(
-    normalizeHardRockTotalLineList("7, 7.5 | 10"),
-    "6.5, 7.5 | 9.5",
-  );
-  assert.equal(normalizeFullGameTotalVehicle("OVER 10"), "OVER 9.5");
-  assert.equal(normalizeFullGameTotalVehicle("UNDER 7.5"), "UNDER 7.5");
 });

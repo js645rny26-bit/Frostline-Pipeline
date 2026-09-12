@@ -583,6 +583,90 @@ test("a literal half-number market cannot produce a push", () => {
   assert.equal(resolveSettlementMarketGrade(8.75, 8, packet, undefined).primary_directional_result, "WIN");
 });
 
+test("current Hard Rock workflow never substitutes a literal whole reference when executable evidence is missing", () => {
+  const index = Object.fromEntries(
+    PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]),
+  ) as Record<(typeof PREGAME_PACKET_HISTORY_HEADERS)[number], number>;
+  const packet = Array(PREGAME_PACKET_HISTORY_HEADERS.length).fill("");
+  packet[index.Date] = "2026-09-12";
+  packet[index.Game_ID] = "20260912_AAA_BBB";
+  packet[index.Scheduled_First_Pitch] = "2026-09-12T23:10:00.000Z";
+  packet[index.Packet_Status] = "FROZEN_PREGAME";
+  packet[index.Packet_Snapshot_TS] = "2026-09-12T22:45:00.000Z";
+  packet[index.Freeze_TS] = "2026-09-12T23:11:00.000Z";
+  packet[index.Direction] = "OVER";
+  packet[index.Market_Line] = 8;
+  packet[index.Reference_Market_Line] = 8;
+  packet[index.Reference_Market_Source] = "MLB_STARTING_NINE_CARD";
+  packet[index.Reference_Market_Convention] = "WHOLE_NUMBER";
+  packet[index.Reference_Market_Representation_Status] = "LITERAL_REFERENCE";
+  packet[index.Synthetic_Normalized_Reference_Line] = 7.5;
+  packet[index.Primary_Grade_Market_Source] = "HARD_ROCK_FLORIDA_REQUIRED";
+  packet[index.Primary_Grade_Market_Status] = "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE";
+
+  const snapshot = parseFrozenPacketMarketSnapshots([packet], "2026-09-12")
+    .get("20260912_AAA_BBB");
+  assert.equal(snapshot?.reference_market_line, 8);
+  assert.equal(snapshot?.primary_grade_market_line, null);
+  const grade = resolveSettlementMarketGrade(9.1, 8, snapshot, undefined);
+  assert.equal(grade.primary_grade_market_line, null);
+  assert.equal(grade.primary_market_grade_status, "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
+  assert.equal(grade.primary_market_provenance, "HARD_ROCK_EXECUTABLE_UNAVAILABLE");
+  assert.equal(grade.primary_directional_result, "NO_BET");
+  assert.equal(grade.reference_directional_result, "PUSH");
+  assert.match(grade.market_grade_notes, /REFERENCE_NOT_SUBSTITUTED/);
+});
+
+test("impossible stored Hard Rock whole number is a lineage failure, never PUSH", () => {
+  const packet: FrozenPacketMarketSnapshot = {
+    frozen_direction: "OVER",
+    reference_market_line: 8,
+    reference_market_source: "MLB_STARTING_NINE_CARD",
+    reference_market_ts: "2026-09-11T22:26:00.000Z",
+    reference_market_convention: "WHOLE_NUMBER",
+    reference_market_representation_status: "LITERAL_REFERENCE",
+    synthetic_normalized_reference_line: 7.5,
+    executable_market_line: 8,
+    executable_market_source: "HARD_ROCK_FLORIDA",
+    executable_market_ts: "2026-09-11T22:28:00.000Z",
+    primary_grade_market_line: 8,
+    primary_grade_market_source: "LITERAL_EXECUTABLE_HARD_ROCK",
+    primary_grade_market_status: "LITERAL_EXECUTABLE",
+    packet_snapshot_ts: "2026-09-11T22:28:00.000Z",
+    freeze_ts: "2026-09-11T22:41:00.000Z",
+  };
+  const grade = resolveSettlementMarketGrade(9.66, 8, packet, undefined);
+  assert.equal(grade.primary_market_grade_status, "MARKET_LINE_INTEGRITY_FAILURE");
+  assert.equal(grade.primary_market_provenance, "DATA_LINEAGE_FAILURE");
+  assert.equal(grade.primary_directional_result, "NO_BET");
+  assert.notEqual(grade.primary_directional_result, "PUSH");
+});
+
+test("COL-DET literal Hard Rock Over 8.5 settles LOSS at final total 8", () => {
+  const packet: FrozenPacketMarketSnapshot = {
+    frozen_direction: "OVER",
+    reference_market_line: 8,
+    reference_market_source: "MLB_STARTING_NINE_CARD",
+    reference_market_ts: "2026-09-11T22:26:00.000Z",
+    reference_market_convention: "WHOLE_NUMBER",
+    reference_market_representation_status: "LITERAL_REFERENCE",
+    synthetic_normalized_reference_line: 7.5,
+    executable_market_line: 8.5,
+    executable_market_source: "HARD_ROCK_FLORIDA",
+    executable_market_ts: "2026-09-11T22:28:00.000Z",
+    primary_grade_market_line: 8.5,
+    primary_grade_market_source: "LITERAL_EXECUTABLE_HARD_ROCK",
+    primary_grade_market_status: "LITERAL_EXECUTABLE",
+    packet_snapshot_ts: "2026-09-11T22:28:00.000Z",
+    freeze_ts: "2026-09-11T22:41:00.000Z",
+  };
+  const grade = resolveSettlementMarketGrade(9.66, 8, packet, undefined);
+  assert.equal(grade.primary_grade_market_line, 8.5);
+  assert.equal(grade.primary_market_provenance, "LITERAL_EXECUTABLE");
+  assert.equal(grade.primary_directional_result, "LOSS");
+  assert.equal(grade.reference_directional_result, "PUSH");
+});
+
 test("vehicle log wins while validated audit evidence can repair an unresolved outcome", () => {
   const frozenVehicle = {
     market_line: 8.5,
