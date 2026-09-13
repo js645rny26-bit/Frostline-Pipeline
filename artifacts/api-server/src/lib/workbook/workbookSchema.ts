@@ -205,8 +205,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      formal interpretation remains blocked below N=150 and until a
  *      pre-cutoff actual-IP variance floor is separately frozen. Active
  *      Expected_IP and every frozen packet remain unchanged.
+ *  v63 (2026-09-13): bullpen-phase research adds a mandatory coverage gate,
+ *      exact play-by-play on-mound run reconstruction, leave-one-slate-out
+ *      scoring-environment standardization, and governed workload-by-environment
+ *      interaction cells. It is settlement research only and promotes no feature.
  */
-export const WORKBOOK_SCHEMA_VERSION = 62;
+export const WORKBOOK_SCHEMA_VERSION = 63;
 
 export interface ColumnDef {
   name: string;
@@ -248,6 +252,7 @@ export interface ColumnDef {
     | "MODULE_29"
     | "MODULE_30"
     | "MODULE_31"
+    | "MODULE_32"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -7603,7 +7608,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "BULLPEN_TIMING_DIAGNOSTICS",
     description:
-      "One legitimate settled game row with starter-exit, starter-window, bullpen, early/middle/late, extra-inning scoring, and actual bullpen-chain shape. A named pregame bridge remains explicitly not evaluable unless frozen. Raw timing evidence only; it does not create bullpen-quality coefficients.",
+      "One legitimate settled game row with starter-exit, pitcher-charged starter R, residual team runs, early/middle/late, extra-inning scoring, and actual bullpen-chain shape. The legacy *_Starter_Window_Runs_Allowed fields are pitcher-charged R and are not exact on-mound phase runs when inherited runners score; Module 32 is canonical for exact phase inference.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(
@@ -7675,7 +7680,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "GAME_TRUTH_REPLAY_V1",
     description:
-      "One strictly frozen-packet postgame replay row per legitimate settled game. Joins total/allocation error, starter dimensions, bullpen timing, conversion outcomes, and observed allocation mechanism without producing a replacement projection or decision score.",
+      "One strictly frozen-packet postgame replay row per legitimate settled game. Its legacy phase fields inherit pitcher-charged R from Module 24 and are descriptive only, not exact on-mound phase inference; Module 32 is canonical for exact starter/post-starter phase analysis.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(
@@ -13233,6 +13238,107 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Predicted_Deviation_Rank", "Actual_Deviation_Rank", "SWE_Abs_Error", "Baseline_Abs_Error",
       ],
       "MODULE_30",
+    ),
+  },
+
+  {
+    name: "BULLPEN_PHASE_COVERAGE_V1",
+    description:
+      "Mandatory pre-analysis coverage ledger for exact starter-versus-post-starter phase runs. Pitcher R/ER is rejected; valid rows use MLB play-by-play and assign scoring to the pitcher actually on the mound.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Date", "Game_ID", "Allocation_Eligible", "Starter_Role_Away", "Starter_Role_Home",
+        "Actual_Starter_Window_Runs_Status", "Actual_Starter_Window_Runs_Source",
+        "Actual_Post_Starter_Runs_Status", "Actual_Post_Starter_Runs_Source",
+        "Actual_Away_IP_Status", "Actual_Home_IP_Status", "Frozen_Expected_IP_Status",
+        "Reconstruction_Required", "Reconstruction_Method", "Inherited_Runner_Ambiguity_Status",
+        "Phase_Row_Usable", "Exclusion_Reason", "Game_PK", "Frozen_Packet_Snapshot_TS",
+        "Starter_Identity_Status", "Actual_Starter_Window_Runs", "Actual_Post_Starter_Runs",
+        "Actual_Total_Runs", "Actual_Away_Starter_IP", "Actual_Home_Starter_IP",
+        "Frozen_Away_Expected_IP", "Frozen_Home_Expected_IP", "Frozen_Starter_Attack_Runs",
+        "Frozen_Bullpen_Continuation_Runs", "Away_Starter_Shortfall_IP", "Home_Starter_Shortfall_IP",
+        "Max_Starter_Shortfall_IP", "Workload_State", "Instrumentation_Version", "Coverage_TS",
+      ],
+      [
+        "Game_PK", "Actual_Starter_Window_Runs", "Actual_Post_Starter_Runs", "Actual_Total_Runs",
+        "Actual_Away_Starter_IP", "Actual_Home_Starter_IP", "Frozen_Away_Expected_IP",
+        "Frozen_Home_Expected_IP", "Frozen_Starter_Attack_Runs", "Frozen_Bullpen_Continuation_Runs",
+        "Away_Starter_Shortfall_IP", "Home_Starter_Shortfall_IP", "Max_Starter_Shortfall_IP",
+      ],
+      "MODULE_32",
+    ),
+  },
+
+  {
+    name: "BULLPEN_PHASE_COVERAGE_SUMMARY_V1",
+    description:
+      "Compact bullpen-phase instrumentation gate. Inferential output is prohibited unless at least 100 allocation-eligible games are usable and coverage is at least 50 percent.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      ["Metric", "Value", "Status", "Source", "Notes", "Coverage_TS"],
+      [],
+      "MODULE_32",
+    ),
+  },
+
+  {
+    name: "BULLPEN_PHASE_REPLAY_V1",
+    description:
+      "Research-only exact phase replay using matched frozen packets, official finals, on-mound play-by-play run attribution, frozen-versus-actual workload shortfall, and leave-one-slate-out environment labels.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Date", "Game_ID", "Frozen_Packet_Snapshot_TS", "Actual_Total_Runs",
+        "Frozen_Starter_Attack_Runs", "Actual_Starter_Window_Runs", "Starter_Phase_Error",
+        "Starter_Phase_Abs_Error", "Frozen_Bullpen_Continuation_Runs", "Actual_Post_Starter_Runs",
+        "Bullpen_Phase_Error", "Bullpen_Phase_Abs_Error", "Paired_Bullpen_MAE_Minus_Starter_MAE",
+        "Actual_Away_Starter_IP", "Actual_Home_Starter_IP", "Frozen_Away_Expected_IP",
+        "Frozen_Home_Expected_IP", "Away_Starter_Shortfall_IP", "Home_Starter_Shortfall_IP",
+        "Max_Starter_Shortfall_IP", "Workload_State", "Slate_Runs_Per_Game",
+        "LOSO_Corpus_N_Slates", "LOSO_Mean_Runs_Per_Game", "LOSO_SD_Runs_Per_Game",
+        "Slate_Z_LOSO", "Slate_Environment_Bucket", "Inherited_Runner_Ambiguity_Status",
+        "Actual_Phase_Source", "Replay_Status", "Replay_TS",
+      ],
+      [
+        "Actual_Total_Runs", "Frozen_Starter_Attack_Runs", "Actual_Starter_Window_Runs",
+        "Starter_Phase_Error", "Starter_Phase_Abs_Error", "Frozen_Bullpen_Continuation_Runs",
+        "Actual_Post_Starter_Runs", "Bullpen_Phase_Error", "Bullpen_Phase_Abs_Error",
+        "Paired_Bullpen_MAE_Minus_Starter_MAE", "Actual_Away_Starter_IP", "Actual_Home_Starter_IP",
+        "Frozen_Away_Expected_IP", "Frozen_Home_Expected_IP", "Away_Starter_Shortfall_IP",
+        "Home_Starter_Shortfall_IP", "Max_Starter_Shortfall_IP", "Slate_Runs_Per_Game",
+        "LOSO_Corpus_N_Slates", "LOSO_Mean_Runs_Per_Game", "LOSO_SD_Runs_Per_Game", "Slate_Z_LOSO",
+      ],
+      "MODULE_32",
+    ),
+  },
+
+  {
+    name: "BULLPEN_PHASE_ANALYSIS_V1",
+    description:
+      "Governed phase-error summary with overall, environment, workload, and environment-by-workload cells. N<15 interaction cells are descriptive only; uncertainty resamples complete slate-date blocks.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Row_Type", "Slate_Environment_Bucket", "Workload_State", "Eligible_N",
+        "Eligible_N_Slates", "Starter_Phase_Signed_Bias", "Starter_Phase_MAE",
+        "Starter_Phase_RMSE", "Bullpen_Phase_Signed_Bias", "Bullpen_Phase_MAE",
+        "Bullpen_Phase_RMSE", "Paired_Bullpen_MAE_Minus_Starter_MAE",
+        "Paired_Difference_CI_Lower", "Paired_Difference_CI_Upper", "Uncertainty_Method",
+        "Cell_Status", "Main_Effect_Status", "Interaction_Status", "Primary_Verdict",
+        "Commissioning_Consequence", "Notes", "Analysis_TS",
+      ],
+      [
+        "Eligible_N", "Eligible_N_Slates", "Starter_Phase_Signed_Bias", "Starter_Phase_MAE",
+        "Starter_Phase_RMSE", "Bullpen_Phase_Signed_Bias", "Bullpen_Phase_MAE",
+        "Bullpen_Phase_RMSE", "Paired_Bullpen_MAE_Minus_Starter_MAE",
+        "Paired_Difference_CI_Lower", "Paired_Difference_CI_Upper",
+      ],
+      "MODULE_32",
     ),
   },
 

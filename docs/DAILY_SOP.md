@@ -9,7 +9,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
 
-**Schema v39 - updated 2026-08-28 - board authorization finalizes 30 minutes before first pitch; the independent pregame packet stays refreshable through legitimate pre-first-pitch runs and freezes only at first pitch. Active offensive center uses lineup quality plus bounded recent form; daily bullpen availability and five-day pitch workload use MLB Starting Nine. Exact fields live in SCHEMA_REFERENCE.**
+**Schema v63 - updated 2026-09-13 - board authorization finalizes 30 minutes before first pitch; the independent pregame packet stays refreshable through legitimate pre-first-pitch runs and freezes only at first pitch. Settlement-only bullpen-phase research now runs behind an exact play-by-play coverage gate and has no production consumer. Exact fields live in SCHEMA_REFERENCE.**
 
 ## Daily sequence (all times ET)
 
@@ -50,6 +50,9 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
   date. It reads frozen packets only and adds allocation, starter-dimension,
   traffic/damage/conversion, bullpen-timing, game-truth replay, and ladder
   diagnostics; it must never rerun mutable pregame calculation for that date.
+  Module 32 first writes `BULLPEN_PHASE_COVERAGE_V1`, rejects pitcher R/ER as
+  an exact on-mound phase substitute, and permits phase inference only when
+  valid exact/reconstructed phase coverage is at least 100 games and 50%.
 - **Warning:** the Notes columns in DAILY_MATCHUPS (col Y) and BULLPEN_USAGE_DAILY (col I) are **cleared on every publish**. Durable notes belong in SLATE_INPUT.
 
 ## Source authority (when feeds disagree or fail)

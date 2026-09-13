@@ -78,6 +78,7 @@ import { runDistributionBenchmark, type DistributionBenchmarkResult } from "./mo
 import { runGameTruthDistributionResearch, type GameTruthDistributionResearchResult } from "./module29_gameTruthDistributionResearch.js";
 import { runBVHProjectionReplay, type BVHReplayResult } from "./module31_bvhReplay.js";
 import { runStarterWorkloadReplay } from "./module30_starterWorkloadReplay.js";
+import { runBullpenPhaseAnalysis, type BullpenPhaseAnalysisResult } from "./module32_bullpenPhaseAnalysis.js";
 import {
   runFailureClassificationReplay,
   syncFailureClassificationShadow,
@@ -1255,6 +1256,7 @@ export interface DailySettlementResult {
   distribution_benchmark_status: DistributionBenchmarkResult["status"];
   game_truth_distribution_research_status: GameTruthDistributionResearchResult["status"];
   bvh_projection_replay_status: BVHReplayResult["status"];
+  bullpen_phase_analysis_status: BullpenPhaseAnalysisResult["status"];
   packet_finalization_status: PregamePacketFinalizationResult["status"];
   full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
@@ -1275,6 +1277,7 @@ export interface DailySettlementResult {
   distribution_benchmark: DistributionBenchmarkResult;
   game_truth_distribution_research: GameTruthDistributionResearchResult;
   bvh_projection_replay: BVHReplayResult;
+  bullpen_phase_analysis: BullpenPhaseAnalysisResult;
   packet_finalization: PregamePacketFinalizationResult;
   full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
@@ -1315,7 +1318,9 @@ export function dailySettlementHttpStatus(
  *   7. Module 22 aggregates only preserved collision candidates for replay.
  *   8. Module 23 records a shadow-only edge-magnitude calibration and replay.
  *   9. Module 24 writes frozen-packet game-truth diagnostics.
- *  10. Module 25 replays frozen uncertainty evidence against realized error
+ *  10. Module 32 first gates exact on-mound phase instrumentation, then runs
+ *      the research-only bullpen-phase corpus analysis when coverage passes.
+ *  11. Module 25 replays frozen uncertainty evidence against realized error
  *      width. It remains research-only and never produces a live adjustment.
  *
  * The gate hit-rate (correct_blocks / (correct_blocks + collateral_blocks))
@@ -1440,6 +1445,29 @@ export async function runDailySettlement(
       };
     },
   );
+
+  // Module 32 is the mandatory pre-analysis control for bullpen-phase work.
+  // It rejects pitcher R/ER as an on-mound phase substitute, reconstructs exact
+  // phases from official play-by-play, and stops before inference when either
+  // the N=100 or 50% instrumentation floor fails. It has no active consumer.
+  const bullpen_phase_analysis = await runBullpenPhaseAnalysis({ workbookId }).catch(
+    (err: unknown): BullpenPhaseAnalysisResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        status: "failure", analysis_timestamp_utc: new Date().toISOString(),
+        allocation_eligible_games: 0, direct_phase_games: 0,
+        reconstructed_phase_games: 0, usable_phase_games: 0, coverage_pct: 0,
+        instrumentation_verdict: "INSUFFICIENT_PHASE_INSTRUMENTATION",
+        primary_verdict: "INSUFFICIENT_PHASE_INSTRUMENTATION",
+        interaction_status: "ANALYSIS_STOPPED", coverage_rows_written: 0,
+        replay_rows_written: 0, analysis_rows_written: 0, warnings: [], errors: [msg],
+      };
+    },
+  );
+  warnings.push(...bullpen_phase_analysis.warnings.map((message) => `bullpen_phase_analysis: ${message}`));
+  if (bullpen_phase_analysis.status === "failure") {
+    warnings.push(...bullpen_phase_analysis.errors.map((message) => `bullpen_phase_analysis: ${message}`));
+  }
 
   // Module 31 grades only a prospectively frozen BVH test-copy candidate.
   // Absence or failure is research visibility, never a settlement or model
@@ -1659,6 +1687,7 @@ export async function runDailySettlement(
     // rows or turn an otherwise valid settlement request into HTTP 500.
     { module: "MODULE_29_GAME_TRUTH_DISTRIBUTION_RESEARCH", status: game_truth_distribution_research.status === "failure" ? "warning" : "success" },
     { module: "MODULE_31_BVH_PROJECTION_REPLAY", status: bvh_projection_replay.status === "failure" ? "warning" : "success" },
+    { module: "MODULE_32_BULLPEN_PHASE_ANALYSIS", status: bullpen_phase_analysis.status === "failure" ? "warning" : "success" },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
@@ -1709,6 +1738,7 @@ export async function runDailySettlement(
       distribution_benchmark_status: distribution_benchmark.status,
       game_truth_distribution_research_status: game_truth_distribution_research.status,
       bvh_projection_replay_status: bvh_projection_replay.status,
+      bullpen_phase_analysis_status: bullpen_phase_analysis.status,
       packet_finalization_status: packet_finalization.status,
       full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
@@ -1745,6 +1775,7 @@ export async function runDailySettlement(
     distribution_benchmark_status: distribution_benchmark.status,
     game_truth_distribution_research_status: game_truth_distribution_research.status,
     bvh_projection_replay_status: bvh_projection_replay.status,
+    bullpen_phase_analysis_status: bullpen_phase_analysis.status,
     packet_finalization_status: packet_finalization.status,
     full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
@@ -1764,6 +1795,7 @@ export async function runDailySettlement(
     distribution_benchmark,
     game_truth_distribution_research,
     bvh_projection_replay,
+    bullpen_phase_analysis,
     packet_finalization,
     full_ladder_sync,
     schema_documentation,

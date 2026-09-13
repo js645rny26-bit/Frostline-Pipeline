@@ -205,6 +205,50 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     readNote:
       "Use CONVENTIONAL_STARTER rows for personalization discrimination. Atypical roles intentionally leave deviation/rank fields blank and remain separately graded.",
   },
+  {
+    sheet: "BULLPEN_PHASE_COVERAGE_V1",
+    stage: "SETTLEMENT",
+    timing: "Every settlement after Module 24 (Module 32)",
+    purpose:
+      "Mandatory row-level instrumentation audit for exact on-mound starter-window and post-starter runs, actual/frozen workload, roles, and starter identity.",
+    boardRelationship:
+      "Research only. It cannot change a projection, bullpen allocation, vehicle, market, or authorization.",
+    readNote:
+      "Pitcher R/ER is not a phase substitute. Require RECONSTRUCTED_VALIDATED plus matched starter identities before using a row.",
+  },
+  {
+    sheet: "BULLPEN_PHASE_COVERAGE_SUMMARY_V1",
+    stage: "SETTLEMENT",
+    timing: "Every settlement before phase inference (Module 32)",
+    purpose:
+      "Reports direct, reconstructable, usable, and excluded phase counts before the corpus analysis is allowed to run.",
+    boardRelationship:
+      "Research governance only. A failed gate stops phase inference rather than changing production behavior.",
+    readNote:
+      "The gate requires at least 100 usable games and at least 50% coverage; inspect excluded reasons and inherited-runner counts.",
+  },
+  {
+    sheet: "BULLPEN_PHASE_REPLAY_V1",
+    stage: "REPLAY",
+    timing: "After the phase coverage gate passes (Module 32)",
+    purpose:
+      "Compares frozen starter and bullpen phase expectations with exact play-by-play phases and classifies workload using frozen expected versus actual starter innings.",
+    boardRelationship:
+      "No active consumer. It is an immutable-evidence research replay only.",
+    readNote:
+      "Use Slate_Z_LOSO and the phase source; the evaluated slate never contributes to its own scoring-environment benchmark.",
+  },
+  {
+    sheet: "BULLPEN_PHASE_ANALYSIS_V1",
+    stage: "REPLAY",
+    timing: "After exact phase replay (Module 32)",
+    purpose:
+      "Summarizes overall, workload, environment, and workload-by-environment phase errors with slate-block uncertainty and one governed A/B/C/D/E verdict.",
+    boardRelationship:
+      "Research-priority evidence only. Even a supported hypothesis does not promote a bullpen feature.",
+    readNote:
+      "Cells below N=15 are descriptive only. Distinguish MAIN_EFFECT_EVIDENCE_AVAILABLE from INTERACTION_UNDERPOWERED.",
+  },
 
   {
     sheet: "GAME_INTEGRATION",
