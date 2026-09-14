@@ -79,6 +79,7 @@ import { runGameTruthDistributionResearch, type GameTruthDistributionResearchRes
 import { runBVHProjectionReplay, type BVHReplayResult } from "./module31_bvhReplay.js";
 import { runStarterWorkloadReplay } from "./module30_starterWorkloadReplay.js";
 import { runBullpenPhaseAnalysis, type BullpenPhaseAnalysisResult } from "./module32_bullpenPhaseAnalysis.js";
+import { runAllocationBridgeV1, type AllocationBridgeResult } from "./module33_allocationBridge.js";
 import {
   runFailureClassificationReplay,
   syncFailureClassificationShadow,
@@ -1257,6 +1258,7 @@ export interface DailySettlementResult {
   game_truth_distribution_research_status: GameTruthDistributionResearchResult["status"];
   bvh_projection_replay_status: BVHReplayResult["status"];
   bullpen_phase_analysis_status: BullpenPhaseAnalysisResult["status"];
+  allocation_bridge_status: AllocationBridgeResult["status"];
   packet_finalization_status: PregamePacketFinalizationResult["status"];
   full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
@@ -1278,6 +1280,7 @@ export interface DailySettlementResult {
   game_truth_distribution_research: GameTruthDistributionResearchResult;
   bvh_projection_replay: BVHReplayResult;
   bullpen_phase_analysis: BullpenPhaseAnalysisResult;
+  allocation_bridge: AllocationBridgeResult;
   packet_finalization: PregamePacketFinalizationResult;
   full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
@@ -1467,6 +1470,26 @@ export async function runDailySettlement(
   warnings.push(...bullpen_phase_analysis.warnings.map((message) => `bullpen_phase_analysis: ${message}`));
   if (bullpen_phase_analysis.status === "failure") {
     warnings.push(...bullpen_phase_analysis.errors.map((message) => `bullpen_phase_analysis: ${message}`));
+  }
+
+  // Module 33 is a fixed-total allocation challenger. It reads only immutable
+  // frozen packets and settled team scores, writes research sheets only, and
+  // can neither change the frozen total nor reach any active consumer.
+  const allocation_bridge = await runAllocationBridgeV1({ workbookId }).catch(
+    (err: unknown): AllocationBridgeResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        status: "failure", replay_timestamp_utc: new Date().toISOString(),
+        allocation_rows_seen: 0, frozen_packets_seen: 0, eligible_games: 0,
+        excluded_games: 0, bridge_rows_written: 0, replay_rows_written: 0,
+        summary_rows_written: 0, diagnostic_rows_written: 0,
+        invariant_failures: 0, verdict: "FAIL", warnings: [], errors: [msg],
+      };
+    },
+  );
+  warnings.push(...allocation_bridge.warnings.map((message) => `allocation_bridge: ${message}`));
+  if (allocation_bridge.status === "failure") {
+    warnings.push(...allocation_bridge.errors.map((message) => `allocation_bridge: ${message}`));
   }
 
   // Module 31 grades only a prospectively frozen BVH test-copy candidate.
@@ -1688,6 +1711,7 @@ export async function runDailySettlement(
     { module: "MODULE_29_GAME_TRUTH_DISTRIBUTION_RESEARCH", status: game_truth_distribution_research.status === "failure" ? "warning" : "success" },
     { module: "MODULE_31_BVH_PROJECTION_REPLAY", status: bvh_projection_replay.status === "failure" ? "warning" : "success" },
     { module: "MODULE_32_BULLPEN_PHASE_ANALYSIS", status: bullpen_phase_analysis.status === "failure" ? "warning" : "success" },
+    { module: "MODULE_33_ALLOCATION_BRIDGE_V1", status: allocation_bridge.status === "failure" ? "warning" : "success" },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
@@ -1739,6 +1763,7 @@ export async function runDailySettlement(
       game_truth_distribution_research_status: game_truth_distribution_research.status,
       bvh_projection_replay_status: bvh_projection_replay.status,
       bullpen_phase_analysis_status: bullpen_phase_analysis.status,
+      allocation_bridge_status: allocation_bridge.status,
       packet_finalization_status: packet_finalization.status,
       full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
@@ -1776,6 +1801,7 @@ export async function runDailySettlement(
     game_truth_distribution_research_status: game_truth_distribution_research.status,
     bvh_projection_replay_status: bvh_projection_replay.status,
     bullpen_phase_analysis_status: bullpen_phase_analysis.status,
+    allocation_bridge_status: allocation_bridge.status,
     packet_finalization_status: packet_finalization.status,
     full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
@@ -1796,6 +1822,7 @@ export async function runDailySettlement(
     game_truth_distribution_research,
     bvh_projection_replay,
     bullpen_phase_analysis,
+    allocation_bridge,
     packet_finalization,
     full_ladder_sync,
     schema_documentation,

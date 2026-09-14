@@ -400,6 +400,7 @@ export async function repairWorkbookSchemaReference(
         "v61 (2026-09-10): BVH V1 returns to SHADOW_ONLY for new unfrozen packets after its prospective governance checkpoint was found to have been skipped. The coarse platoon path is active again; BVH counterfactual evidence continues accumulating toward the declared N=200 paired review. Frozen packets remain unchanged.",
         "v62 (2026-09-11): SWE V1 settlement research separates conventional-starter deviation discrimination from opener/bulk hypotheses. Module 30 preserves per-starter baseline-removed values, ranks, Pearson/Spearman, calibration, and secondary error scores; interpretation remains blocked below N=150 and until a pre-cutoff outcome-variance floor is separately frozen. Active Expected_IP and frozen packets remain unchanged.",
         "v63 (2026-09-13): Module 32 adds the mandatory bullpen-phase instrumentation gate, exact MLB play-by-play on-mound run reconstruction, leave-one-slate-out environment standardization, N=15 interaction-cell governance, and a research-only A/B/C/D/E verdict. No production feature is promoted.",
+        "v64 (2026-09-14): Module 33 adds Allocation Bridge V1, a settlement-only challenger that reallocates each immutable frozen total between away and home using frozen price-blind evidence. It writes research, replay, summary, and diagnostic surfaces only and cannot alter GAME_SUMMARY, SLATE_BOARD, packets, markets, decisions, or tickets.",
     ],
     [
       "Workbook_Purpose",

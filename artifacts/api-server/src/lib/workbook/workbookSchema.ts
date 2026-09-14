@@ -209,8 +209,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      exact play-by-play on-mound run reconstruction, leave-one-slate-out
  *      scoring-environment standardization, and governed workload-by-environment
  *      interaction cells. It is settlement research only and promotes no feature.
+ *  v64 (2026-09-14): Allocation Bridge V1 adds a settlement-only, fixed-total
+ *      away/home allocation challenger, replay, subgroup summary, and failure
+ *      diagnostics. The bridge has no active consumer and cannot alter frozen
+ *      packets, game totals, board decisions, markets, or ticket history.
  */
-export const WORKBOOK_SCHEMA_VERSION = 63;
+export const WORKBOOK_SCHEMA_VERSION = 64;
 
 export interface ColumnDef {
   name: string;
@@ -253,6 +257,7 @@ export interface ColumnDef {
     | "MODULE_30"
     | "MODULE_31"
     | "MODULE_32"
+    | "MODULE_33"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -13339,6 +13344,143 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Paired_Difference_CI_Lower", "Paired_Difference_CI_Upper",
       ],
       "MODULE_32",
+    ),
+  },
+
+  {
+    name: "ALLOCATION_BRIDGE_V1",
+    description:
+      "Research-only fixed-total away/home allocation challenger. It preserves the immutable frozen total, combines offense identity with half-strength opponent-system evidence, and retains explicit component, lineage, missingness, and settled scoring diagnostics.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Date", "Game_ID", "Frozen_Packet_Snapshot_TS", "Bridge_Version",
+        "Research_Status", "Exclusion_Reason", "Frozen_Total",
+        "Legacy_Away_Projection", "Legacy_Home_Projection", "Legacy_Run_Diff",
+        "Bridge_Away_Share", "Bridge_Home_Share", "Bridge_Away_Projection",
+        "Bridge_Home_Projection", "Bridge_Run_Diff", "Away_Allocation_Support",
+        "Home_Allocation_Support", "Away_Offense_Component", "Home_Offense_Component",
+        "Away_Traffic_Component", "Home_Traffic_Component", "Away_Damage_Component",
+        "Home_Damage_Component", "Away_Conversion_Component", "Home_Conversion_Component",
+        "Away_Starter_Component", "Home_Starter_Component", "Away_Bullpen_Component",
+        "Home_Bullpen_Component", "Away_System_Factor", "Home_System_Factor",
+        "Allocation_Data_Confidence", "Allocation_Missingness_Flag",
+        "Allocation_Limitation_Flag", "Allocation_Dominant_Driver", "Allocation_Notes",
+        "Away_Lineup_Coverage", "Home_Lineup_Coverage", "Away_Lineup_Status",
+        "Home_Lineup_Status", "Away_Starter_Role", "Home_Starter_Role",
+        "Bullpen_Data_Status", "Away_Bullpen_Quality_Source", "Home_Bullpen_Quality_Source",
+        "Actual_Away_Runs", "Actual_Home_Runs", "Actual_Run_Diff",
+        "Legacy_Higher_Scoring_Side_Correct", "Bridge_Higher_Scoring_Side_Correct",
+        "Legacy_Allocation_Sign_Error", "Bridge_Allocation_Sign_Error",
+        "Legacy_Away_Abs_Error", "Legacy_Home_Abs_Error", "Bridge_Away_Abs_Error",
+        "Bridge_Home_Abs_Error", "Legacy_Combined_Team_MAE", "Bridge_Combined_Team_MAE",
+        "Legacy_Run_Diff_Abs_Error", "Bridge_Run_Diff_Abs_Error",
+        "Frozen_Total_Abs_Error", "Total_Good_Allocation_Bad_Flag",
+        "Fixed_Total_Invariant_Delta", "Fixed_Total_Invariant_Status",
+        "Snapshot_Lineage_Status", "Failure_Classification", "Failure_Evidence_Status",
+        "Replay_TS",
+      ],
+      [
+        "Frozen_Total", "Legacy_Away_Projection", "Legacy_Home_Projection", "Legacy_Run_Diff",
+        "Bridge_Away_Share", "Bridge_Home_Share", "Bridge_Away_Projection", "Bridge_Home_Projection",
+        "Bridge_Run_Diff", "Away_Allocation_Support", "Home_Allocation_Support",
+        "Away_Offense_Component", "Home_Offense_Component", "Away_Traffic_Component",
+        "Home_Traffic_Component", "Away_Damage_Component", "Home_Damage_Component",
+        "Away_Conversion_Component", "Home_Conversion_Component", "Away_Starter_Component",
+        "Home_Starter_Component", "Away_Bullpen_Component", "Home_Bullpen_Component",
+        "Away_System_Factor", "Home_System_Factor", "Away_Lineup_Coverage", "Home_Lineup_Coverage",
+        "Actual_Away_Runs", "Actual_Home_Runs", "Actual_Run_Diff", "Legacy_Away_Abs_Error",
+        "Legacy_Home_Abs_Error", "Bridge_Away_Abs_Error", "Bridge_Home_Abs_Error",
+        "Legacy_Combined_Team_MAE", "Bridge_Combined_Team_MAE", "Legacy_Run_Diff_Abs_Error",
+        "Bridge_Run_Diff_Abs_Error", "Frozen_Total_Abs_Error", "Fixed_Total_Invariant_Delta",
+      ],
+      "MODULE_33",
+    ),
+  },
+
+  {
+    name: "ALLOCATION_BRIDGE_REPLAY_V1",
+    description:
+      "Date-ordered no-leakage replay of Allocation Bridge V1 against canonical team scores. Every candidate keeps the original frozen game total exactly.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Date", "Game_ID", "Frozen_Packet_Snapshot_TS", "Frozen_Total",
+        "Legacy_Away_Projection", "Legacy_Home_Projection", "Bridge_Away_Projection",
+        "Bridge_Home_Projection", "Actual_Away_Runs", "Actual_Home_Runs",
+        "Legacy_Run_Diff", "Bridge_Run_Diff", "Actual_Run_Diff",
+        "Legacy_Higher_Scoring_Side_Correct", "Bridge_Higher_Scoring_Side_Correct",
+        "Legacy_Allocation_Sign_Error", "Bridge_Allocation_Sign_Error",
+        "Legacy_Away_Abs_Error", "Legacy_Home_Abs_Error", "Bridge_Away_Abs_Error",
+        "Bridge_Home_Abs_Error", "Legacy_Combined_Team_MAE", "Bridge_Combined_Team_MAE",
+        "Legacy_Run_Diff_Abs_Error", "Bridge_Run_Diff_Abs_Error",
+        "Frozen_Total_Abs_Error", "Allocation_Strength_Bucket", "Lineup_Completeness_Cohort",
+        "Starter_Role_Cohort", "Bullpen_Data_Cohort", "Total_Error_Bucket",
+        "Total_Good_Allocation_Bad_Flag", "Allocation_Data_Confidence",
+        "Fixed_Total_Invariant_Status", "Replay_Status", "Replay_TS",
+      ],
+      [
+        "Frozen_Total", "Legacy_Away_Projection", "Legacy_Home_Projection",
+        "Bridge_Away_Projection", "Bridge_Home_Projection", "Actual_Away_Runs",
+        "Actual_Home_Runs", "Legacy_Run_Diff", "Bridge_Run_Diff", "Actual_Run_Diff",
+        "Legacy_Away_Abs_Error", "Legacy_Home_Abs_Error", "Bridge_Away_Abs_Error",
+        "Bridge_Home_Abs_Error", "Legacy_Combined_Team_MAE", "Bridge_Combined_Team_MAE",
+        "Legacy_Run_Diff_Abs_Error", "Bridge_Run_Diff_Abs_Error", "Frozen_Total_Abs_Error",
+      ],
+      "MODULE_33",
+    ),
+  },
+
+  {
+    name: "ALLOCATION_BRIDGE_SUMMARY_V1",
+    description:
+      "Overall and declared-cohort comparison of legacy versus fixed-total bridge allocation accuracy, sign reversals, team MAE, and run-differential MAE with one non-operational research verdict.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Summary_Dimension", "Cohort", "Eligible_N", "Comparable_N",
+        "Legacy_Higher_Scoring_Side_Accuracy", "Bridge_Higher_Scoring_Side_Accuracy",
+        "Bridge_Minus_Legacy_Accuracy", "Legacy_Allocation_Sign_Reversals",
+        "Bridge_Allocation_Sign_Reversals", "Legacy_Away_MAE", "Bridge_Away_MAE",
+        "Legacy_Home_MAE", "Bridge_Home_MAE", "Legacy_Combined_Team_MAE",
+        "Bridge_Combined_Team_MAE", "Legacy_Run_Diff_MAE", "Bridge_Run_Diff_MAE",
+        "Frozen_Total_MAE", "Mean_Abs_Bridge_Away_Delta", "Mean_Abs_Bridge_Home_Delta",
+        "Max_Fixed_Total_Invariant_Delta", "High_Confidence_N", "Research_Verdict",
+        "Summary_Notes", "Replay_TS",
+      ],
+      [
+        "Eligible_N", "Comparable_N", "Legacy_Higher_Scoring_Side_Accuracy",
+        "Bridge_Higher_Scoring_Side_Accuracy", "Bridge_Minus_Legacy_Accuracy",
+        "Legacy_Allocation_Sign_Reversals", "Bridge_Allocation_Sign_Reversals",
+        "Legacy_Away_MAE", "Bridge_Away_MAE", "Legacy_Home_MAE", "Bridge_Home_MAE",
+        "Legacy_Combined_Team_MAE", "Bridge_Combined_Team_MAE", "Legacy_Run_Diff_MAE",
+        "Bridge_Run_Diff_MAE", "Frozen_Total_MAE", "Mean_Abs_Bridge_Away_Delta",
+        "Mean_Abs_Bridge_Home_Delta", "Max_Fixed_Total_Invariant_Delta", "High_Confidence_N",
+      ],
+      "MODULE_33",
+    ),
+  },
+
+  {
+    name: "ALLOCATION_BRIDGE_DIAG_V1",
+    description:
+      "Per-game allocation miss taxonomy and declared cohort context for Allocation Bridge V1. Labels are postgame diagnostics only and never become projection inputs.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Date", "Game_ID", "Legacy_Sign_Error", "Bridge_Sign_Error",
+        "Failure_Classification", "Failure_Evidence_Status", "Allocation_Dominant_Driver",
+        "Total_Good_Allocation_Bad_Flag", "Allocation_Strength_Bucket",
+        "Lineup_Completeness_Cohort", "Starter_Role_Cohort", "Bullpen_Data_Cohort",
+        "Total_Error_Bucket", "Legacy_Run_Diff", "Bridge_Run_Diff", "Actual_Run_Diff",
+        "Candidate_Changed_Sign", "Sept13_Case_Study", "Diagnostic_Notes", "Report_TS",
+      ],
+      ["Legacy_Run_Diff", "Bridge_Run_Diff", "Actual_Run_Diff"],
+      "MODULE_33",
     ),
   },
 

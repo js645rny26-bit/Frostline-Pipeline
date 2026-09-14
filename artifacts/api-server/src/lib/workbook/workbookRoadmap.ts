@@ -249,6 +249,50 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     readNote:
       "Cells below N=15 are descriptive only. Distinguish MAIN_EFFECT_EVIDENCE_AVAILABLE from INTERACTION_UNDERPOWERED.",
   },
+  {
+    sheet: "ALLOCATION_BRIDGE_V1",
+    stage: "SETTLEMENT",
+    timing: "Every settlement after Module 24 and Module 32 (Module 33)",
+    purpose:
+      "Builds one fixed-total away/home allocation challenger from immutable offense identity and the already-frozen opponent run-prevention system, with explicit component and missingness lineage.",
+    boardRelationship:
+      "Research only; it cannot write GAME_SUMMARY, SLATE_BOARD, a frozen packet, market evidence, or a ticket result.",
+    readNote:
+      "Verify Fixed_Total_Invariant_Status=PASS. Conversion remains zero and the bullpen component is an inferred frozen-system residual, not a new independent signal.",
+  },
+  {
+    sheet: "ALLOCATION_BRIDGE_REPLAY_V1",
+    stage: "REPLAY",
+    timing: "Every settlement after Allocation Bridge construction (Module 33)",
+    purpose:
+      "Scores legacy and bridge away/home allocations against canonical team runs without changing the frozen game total.",
+    boardRelationship:
+      "No active consumer; this is historical frozen-evidence research only.",
+    readNote:
+      "Compare sign accuracy, team MAE, and run-differential MAE. Frozen total error is identical by construction.",
+  },
+  {
+    sheet: "ALLOCATION_BRIDGE_SUMMARY_V1",
+    stage: "REPLAY",
+    timing: "Every settlement after Allocation Bridge replay (Module 33)",
+    purpose:
+      "Summarizes overall and declared allocation-strength, lineup, role, bullpen-completeness, and total-error cohorts.",
+    boardRelationship:
+      "Research verdict only; even CANDIDATE_FOR_COMMISSIONING cannot activate the bridge.",
+    readNote:
+      "Read OVERALL first, then TOTAL_GOOD_ALLOCATION_BAD and subgroup rows. Mixed metrics require CONTINUE_SHADOW rather than a production recommendation.",
+  },
+  {
+    sheet: "ALLOCATION_BRIDGE_DIAG_V1",
+    stage: "REPLAY",
+    timing: "Every settlement after Allocation Bridge replay (Module 33)",
+    purpose:
+      "Preserves per-game allocation failure taxonomy, evidence strength, declared cohorts, and the named Sept. 13 diagnostic cases.",
+    boardRelationship:
+      "Postgame diagnosis only; labels cannot feed projection or authorization.",
+    readNote:
+      "INSUFFICIENT_EVIDENCE_TO_CLASSIFY is preferred to a forced mechanism. Sept. 13 rows are diagnostics, not training truth.",
+  },
 
   {
     sheet: "GAME_INTEGRATION",

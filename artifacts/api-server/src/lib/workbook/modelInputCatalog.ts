@@ -493,6 +493,17 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     notes: "Components reconcile the active forecast; they do not vote independently.", freshnessKey: "ACTIVE_PROJECTION",
   },
   {
+    recordType: "PROJECTION", id: "ALLOCATION_BRIDGE_V1", label: "Fixed-total away/home allocation bridge V1",
+    layer: "SETTLEMENT", outputClass: "SHADOW_CHALLENGER", operationalStatus: "SHADOW_ONLY",
+    definition: "Divides each immutable frozen total using full-strength active offense identity and half-log-strength frozen opponent-system evidence, then normalizes the two independently built supports back to the same total.",
+    statisticalWindow: "Largest component-complete frozen-packet settlement corpus; no fitted weights", gameWindow: "TEAM_ALLOCATION_ONLY",
+    primarySource: "PREGAME_PACKET_HISTORY + ALLOCATION_SETTLEMENT_DIAGNOSTICS", fallbackSource: "Explicit FROZEN_BRIDGE_COMPONENTS_MISSING exclusion",
+    refreshCadence: "EVERY_SETTLEMENT", freshnessEvidence: "ALLOCATION_BRIDGE_V1 Frozen_Packet_Snapshot_TS/Research_Status/Fixed_Total_Invariant_Status",
+    workbookLocation: "ALLOCATION_BRIDGE_V1; ALLOCATION_BRIDGE_REPLAY_V1; ALLOCATION_BRIDGE_SUMMARY_V1; ALLOCATION_BRIDGE_DIAG_V1", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
+    correlationFamily: "ACTIVE_OFFENSE + OPPONENT_RUN_PREVENTION", missingBehavior: "Pre-component frozen packets remain excluded; missing evidence is never neutralized or reconstructed from current data.",
+    notes: "Research only. It cannot change the frozen total, GAME_SUMMARY, SLATE_BOARD, markets, vehicles, or ticket history. Collision, SSAT, SWE, and market data are not inputs.", freshnessKey: "PREGAME_PACKET",
+  },
+  {
     recordType: "PROJECTION", id: "FROZEN_ACTIVE_FORECAST", label: "Frozen active forecast at publication",
     layer: "BASEBALL_MODEL", outputClass: "FROZEN_SNAPSHOT", operationalStatus: "FROZEN_HISTORY",
     definition: "Immutable capture of the active forecast and dependent packet that legitimately existed before first pitch.",
