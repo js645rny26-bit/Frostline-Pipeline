@@ -103,6 +103,16 @@ test("summary uses game-weighted MAE and labels sparse cells descriptive", () =>
   assert.equal(selectSlateSizeVerdict(parsed), "CONTINUE_SHADOW");
 });
 
+test("date-like slate bucket labels are escaped for literal Google Sheets text", () => {
+  const parsed = parseSlateDiagnostics([
+    Array.from(GAME_TRUTH_SLATE_DIAGNOSTICS_HEADERS),
+    slate("2026-09-01", 11, 3),
+  ]);
+  const summary = buildSlateSizeSummaryRows(parsed, "2026-09-15T12:00:00.000Z");
+  const elevenToTwelve = summary.find((value) => value[1] === "'11-12");
+  assert.ok(elevenToTwelve);
+});
+
 test("September 14 human audit preserves 3-6-1 truth and 1-4 bet record", () => {
   assert.equal(SEPT14_HUMAN_AUDIT.length, 10);
   const rows = humanAuditRows("2026-09-15T12:00:00.000Z");

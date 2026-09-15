@@ -470,6 +470,13 @@ function weightedMae(rows: SlateDiagnostic[]): number | null {
   return games ? rows.reduce((sum, row) => sum + row.mae * row.frozen_games, 0) / games : null;
 }
 
+// Sheets USER_ENTERED writes interpret a bare value such as `11-12` as a
+// calendar date. The leading apostrophe is the native Sheets escape for a
+// literal text cell and is not displayed in the workbook/readback value.
+function sheetsLiteralText(value: string): string {
+  return /^\d{1,2}-\d{1,2}$/.test(value) ? `'${value}` : value;
+}
+
 function summaryRow(
   dimension: string,
   cohort: string,
@@ -485,7 +492,7 @@ function summaryRow(
   const allocationEligible = rows.reduce((sum, row) => sum + row.allocation_eligible, 0);
   const cellStatus = rows.length < 5 ? "SMALL_SAMPLE_DESCRIPTIVE" : "DESCRIPTIVE";
   return [
-    dimension, cohort, rows.length, games, cellStatus,
+    dimension, sheetsLiteralText(cohort), rows.length, games, cellStatus,
     rows.length ? Math.min(...rows.map((row) => row.frozen_games)) : "",
     rows.length ? Math.max(...rows.map((row) => row.frozen_games)) : "",
     blank(weightedMae(rows)), blank(ciLower), blank(ciUpper), blank(mean(rows.map((row) => row.mae))),
@@ -530,7 +537,7 @@ export function slateDiagnosticRow(row: SlateDiagnostic, timestamp: string): unk
   const allocationAccuracy = row.allocation_eligible ? row.higher_side_correct / row.allocation_eligible : null;
   return [
     row.date, SLATE_SIZE_DIAGNOSTIC_VERSION, "RESEARCH_ONLY", row.frozen_games,
-    slateSizeBucket(row.frozen_games), row.projected_sum, row.actual_sum, row.signed_error,
+    sheetsLiteralText(slateSizeBucket(row.frozen_games)), row.projected_sum, row.actual_sum, row.signed_error,
     row.mae, row.rmse, row.median_ae, row.misses_ge_3, row.misses_ge_4, row.misses_ge_5,
     blank(row.spearman), blank(allocationAccuracy), row.allocation_reversals,
     blank(row.full_scope_rate), blank(row.partial_scope_rate), blank(row.confirmed_lineup_rate),
