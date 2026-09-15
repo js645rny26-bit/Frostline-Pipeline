@@ -782,6 +782,39 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Compare aggregate error with per-game MAE/RMSE and rank association. A close slate total does not establish useful game-level tail placement.",
   },
   {
+    sheet: "SLATE_SIZE_DIAGNOSTIC_V1",
+    stage: "REPLAY",
+    timing: "Daily settlement after GAME_TRUTH_SLATE_DIAG_V2 refresh (Module 34)",
+    purpose:
+      "Per-slate research-only audit of performance versus fixed slate-size buckets and observable frozen composition/coverage conditions.",
+    boardRelationship:
+      "No operational relationship. Slate size cannot alter a forecast, truth, ranking, market, vehicle, BET/PASS state, or authorization.",
+    readNote:
+      "Treat missing historical confounders as unavailable. Small bucket cells are descriptive; no slate-size coefficient is commissioned.",
+  },
+  {
+    sheet: "SLATE_SIZE_SUMMARY_V1",
+    stage: "REPLAY",
+    timing: "Rebuilt with Slate-Size Diagnostic V1 during daily settlement (Module 34)",
+    purpose:
+      "Fixed-bucket and continuous slate-size summaries, deterministic slate-bootstrap MAE intervals, and a limited complete-case composition adjustment.",
+    boardRelationship:
+      "Research-only. Its verdict is not an active model-selection or projection input.",
+    readNote:
+      "Read Slates_N and Adjustment_Status first. The current 11-12 and 17+ cells are sparse and cannot support significance claims.",
+  },
+  {
+    sheet: "HUMAN_GAME_TRUTH_AUDIT_V1",
+    stage: "SETTLEMENT",
+    timing: "Append-only for explicitly supplied operator postmortem records (Module 34)",
+    purpose:
+      "Preserves literal operator execution numbers, human truth, BET/PASS, settlement, and case-only diagnoses separately from frozen automated evidence.",
+    boardRelationship:
+      "No board input. Manual execution numbers are field-scoped audit evidence and never rewrite frozen packets or pipeline market history.",
+    readNote:
+      "Human truth, execution, and settlement are separate fields. Operator_Market_TS remains unavailable when no exact supply timestamp was provided.",
+  },
+  {
     sheet: "FAILURE_CLASSIFICATION_SHADOW_V1",
     stage: "REPLAY",
     timing:

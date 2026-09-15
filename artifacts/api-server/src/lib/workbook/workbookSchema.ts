@@ -213,8 +213,11 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      away/home allocation challenger, replay, subgroup summary, and failure
  *      diagnostics. The bridge has no active consumer and cannot alter frozen
  *      packets, game totals, board decisions, markets, or ticket history.
+ *  v65 (2026-09-15): Slate-size diagnostics reproduce frozen per-slate results,
+ *      preserve observable composition gaps, and store the September 14 human
+ *      truth/execution postmortem in a separate append-only operator audit.
  */
-export const WORKBOOK_SCHEMA_VERSION = 64;
+export const WORKBOOK_SCHEMA_VERSION = 65;
 
 export interface ColumnDef {
   name: string;
@@ -258,6 +261,7 @@ export interface ColumnDef {
     | "MODULE_31"
     | "MODULE_32"
     | "MODULE_33"
+    | "MODULE_34"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -1122,6 +1126,35 @@ const GAME_TRUTH_SLATE_DIAG_V2_COLUMN_NAMES = [
   "Misses_GE_4", "Misses_GE_5", "Projected_Actual_Spearman_Rho", "Actual_Loudest_Game_Identified",
   "Actual_Quietest_Game_Identified", "Total_Good_Allocation_Bad_Games", "Allocation_Eligible_Games",
   "Higher_Scoring_Side_Correct", "Allocation_Sign_Reversals", "Research_Status", "Replay_TS",
+] as const;
+const SLATE_SIZE_DIAGNOSTIC_V1_COLUMN_NAMES = [
+  "Date", "Diagnostic_Version", "Research_Status", "Frozen_Games", "Slate_Size_Bucket",
+  "Frozen_Projected_Run_Sum", "Actual_Run_Sum", "Signed_Error", "Per_Game_MAE",
+  "Per_Game_RMSE", "Median_Absolute_Error", "Misses_GE_3", "Misses_GE_4", "Misses_GE_5",
+  "Projected_Actual_Spearman_Rho", "Higher_Scoring_Side_Correct_Rate",
+  "Allocation_Sign_Reversals", "Full_Pregame_Scope_Rate", "Partial_Pregame_Scope_Rate",
+  "Confirmed_Lineup_Rate", "Partial_Lineup_Rate", "Unresolved_Starter_Rate",
+  "Opener_Bulk_Rate", "Day_Game_Share", "Day_Game_Share_Status",
+  "Doubleheader_Game_Count", "Doubleheader_Status", "Weather_Freeze_Count",
+  "Starter_Role_Uncertainty_Count", "Bullpen_Data_Available_Rate",
+  "Statcast_Preview_Coverage", "Projection_Writable_Game_Count", "Protected_Game_Count",
+  "Frozen_Packet_Game_Count", "Composition_Data_Status", "Diagnostic_Notes", "Replay_TS",
+] as const;
+const SLATE_SIZE_SUMMARY_V1_COLUMN_NAMES = [
+  "Summary_Dimension", "Cohort", "Slates_N", "Games_N", "Cell_Status",
+  "Slate_Size_Min", "Slate_Size_Max", "Weighted_Game_MAE", "Weighted_MAE_CI_Lower",
+  "Weighted_MAE_CI_Upper", "Mean_Slate_MAE", "Median_Slate_MAE", "Pooled_RMSE",
+  "Per_Game_Signed_Bias", "Large_Miss_Rate_GE_3", "Mean_Spearman_Rho",
+  "Allocation_Side_Accuracy", "Slate_Size_MAE_Pearson_R", "Adjusted_Complete_Case_N",
+  "Adjusted_Slate_Size_Std_Coefficient", "Adjusted_Model_R2", "Adjustment_Status",
+  "Observable_Adjustment_Features", "Research_Verdict", "Summary_Notes", "Replay_TS",
+] as const;
+const HUMAN_GAME_TRUTH_AUDIT_V1_COLUMN_NAMES = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Frozen_Projection", "Actual_Total",
+  "Projection_Error", "Frozen_Pipeline_Market_Line", "Operator_Execution_Market_Line",
+  "Operator_Market_Source", "Operator_Market_TS", "Operator_Market_TS_Status",
+  "Human_Truth", "Human_Execution", "Human_Settlement", "Case_Level_Diagnosis",
+  "Structural_Finding_Status", "Market_Provenance", "Notes", "Record_Status", "Recorded_TS",
 ] as const;
 const FAILURE_CLASSIFICATION_SHADOW_V1_COLUMN_NAMES = [
   "Date",
@@ -13481,6 +13514,65 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       ],
       ["Legacy_Run_Diff", "Bridge_Run_Diff", "Actual_Run_Diff"],
       "MODULE_33",
+    ),
+  },
+
+  {
+    name: "SLATE_SIZE_DIAGNOSTIC_V1",
+    description:
+      "Per-slate research-only performance and observable composition audit. Slate size is measured but never consumed by an active forecast, truth, ranking, market, or BET/PASS path.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      SLATE_SIZE_DIAGNOSTIC_V1_COLUMN_NAMES,
+      [
+        "Frozen_Games", "Frozen_Projected_Run_Sum", "Actual_Run_Sum", "Signed_Error",
+        "Per_Game_MAE", "Per_Game_RMSE", "Median_Absolute_Error", "Misses_GE_3",
+        "Misses_GE_4", "Misses_GE_5", "Projected_Actual_Spearman_Rho",
+        "Higher_Scoring_Side_Correct_Rate", "Allocation_Sign_Reversals",
+        "Full_Pregame_Scope_Rate", "Partial_Pregame_Scope_Rate", "Confirmed_Lineup_Rate",
+        "Partial_Lineup_Rate", "Unresolved_Starter_Rate", "Opener_Bulk_Rate",
+        "Weather_Freeze_Count", "Starter_Role_Uncertainty_Count",
+        "Bullpen_Data_Available_Rate", "Statcast_Preview_Coverage",
+        "Projection_Writable_Game_Count", "Protected_Game_Count", "Frozen_Packet_Game_Count",
+      ],
+      "MODULE_34",
+    ),
+  },
+
+  {
+    name: "SLATE_SIZE_SUMMARY_V1",
+    description:
+      "Fixed-bucket and continuous slate-size research summary with deterministic slate-bootstrap MAE intervals and an explicitly underpowered composition-adjusted diagnostic.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      SLATE_SIZE_SUMMARY_V1_COLUMN_NAMES,
+      [
+        "Slates_N", "Games_N", "Slate_Size_Min", "Slate_Size_Max", "Weighted_Game_MAE",
+        "Weighted_MAE_CI_Lower", "Weighted_MAE_CI_Upper", "Mean_Slate_MAE",
+        "Median_Slate_MAE", "Pooled_RMSE", "Per_Game_Signed_Bias",
+        "Large_Miss_Rate_GE_3", "Mean_Spearman_Rho", "Allocation_Side_Accuracy",
+        "Slate_Size_MAE_Pearson_R", "Adjusted_Complete_Case_N",
+        "Adjusted_Slate_Size_Std_Coefficient", "Adjusted_Model_R2",
+      ],
+      "MODULE_34",
+    ),
+  },
+
+  {
+    name: "HUMAN_GAME_TRUTH_AUDIT_V1",
+    description:
+      "Append-only operator postmortem ledger that keeps manual literal execution numbers, truth, execution, settlement, and case-only diagnoses separate from immutable frozen pipeline market evidence.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      HUMAN_GAME_TRUTH_AUDIT_V1_COLUMN_NAMES,
+      [
+        "Frozen_Projection", "Actual_Total", "Projection_Error",
+        "Frozen_Pipeline_Market_Line", "Operator_Execution_Market_Line",
+      ],
+      "MODULE_34",
     ),
   },
 

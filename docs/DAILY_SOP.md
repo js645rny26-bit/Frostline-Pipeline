@@ -9,7 +9,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
 
-**Schema v64 - updated 2026-09-14 - board authorization finalizes 30 minutes before first pitch; the independent pregame packet stays refreshable through legitimate pre-first-pitch runs and freezes only at first pitch. Settlement-only Allocation Bridge V1 now compares away/home allocation while holding every frozen total fixed; it has no production consumer. Exact fields live in SCHEMA_REFERENCE.**
+**Schema v65 - updated 2026-09-15 - board authorization finalizes 30 minutes before first pitch; the independent pregame packet stays refreshable through legitimate pre-first-pitch runs and freezes only at first pitch. Settlement-only slate-size and operator postmortem audits are research-only and have no production consumer. Exact fields live in SCHEMA_REFERENCE.**
 
 ## Daily sequence (all times ET)
 

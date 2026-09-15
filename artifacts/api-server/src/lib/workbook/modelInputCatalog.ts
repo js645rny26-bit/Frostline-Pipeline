@@ -504,6 +504,17 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     notes: "Research only. It cannot change the frozen total, GAME_SUMMARY, SLATE_BOARD, markets, vehicles, or ticket history. Collision, SSAT, SWE, and market data are not inputs.", freshnessKey: "PREGAME_PACKET",
   },
   {
+    recordType: "PROJECTION", id: "SLATE_SIZE_DIAGNOSTIC_V1", label: "Slate-size performance and composition audit",
+    layer: "SETTLEMENT", outputClass: "DIAGNOSTIC", operationalStatus: "SHADOW_ONLY",
+    definition: "Describes frozen per-slate total error, rank discrimination, allocation performance, and available composition/coverage covariates using fixed slate-size buckets and continuous slate count.",
+    statisticalWindow: "All settled frozen slates; slate-date bootstrap resampling", gameWindow: "SLATE_AGGREGATE_ONLY",
+    primarySource: "GAME_TRUTH_SLATE_DIAG_V2 + PREGAME_PACKET_HISTORY + RUN_LOG", fallbackSource: "Explicit unavailable historical confounder status",
+    refreshCadence: "EVERY_SETTLEMENT", freshnessEvidence: "SLATE_SIZE_DIAGNOSTIC_V1 Replay_TS/Composition_Data_Status",
+    workbookLocation: "SLATE_SIZE_DIAGNOSTIC_V1; SLATE_SIZE_SUMMARY_V1", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
+    correlationFamily: "SETTLEMENT_PERFORMANCE_DIAGNOSTIC", missingBehavior: "Unavailable historical composition remains blank with status; never neutralized or backfilled from current data.",
+    notes: "Research only. Slate count does not alter any game forecast, truth, ranking, market, vehicle, or BET/PASS state. Sparse buckets are descriptive.", freshnessKey: "PREGAME_PACKET",
+  },
+  {
     recordType: "PROJECTION", id: "FROZEN_ACTIVE_FORECAST", label: "Frozen active forecast at publication",
     layer: "BASEBALL_MODEL", outputClass: "FROZEN_SNAPSHOT", operationalStatus: "FROZEN_HISTORY",
     definition: "Immutable capture of the active forecast and dependent packet that legitimately existed before first pitch.",

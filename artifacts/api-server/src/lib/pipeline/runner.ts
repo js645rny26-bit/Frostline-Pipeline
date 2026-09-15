@@ -80,6 +80,7 @@ import { runBVHProjectionReplay, type BVHReplayResult } from "./module31_bvhRepl
 import { runStarterWorkloadReplay } from "./module30_starterWorkloadReplay.js";
 import { runBullpenPhaseAnalysis, type BullpenPhaseAnalysisResult } from "./module32_bullpenPhaseAnalysis.js";
 import { runAllocationBridgeV1, type AllocationBridgeResult } from "./module33_allocationBridge.js";
+import { runSlateSizeDiagnosticV1, type SlateSizeDiagnosticResult } from "./module34_slateSizeDiagnostic.js";
 import {
   runFailureClassificationReplay,
   syncFailureClassificationShadow,
@@ -1259,6 +1260,7 @@ export interface DailySettlementResult {
   bvh_projection_replay_status: BVHReplayResult["status"];
   bullpen_phase_analysis_status: BullpenPhaseAnalysisResult["status"];
   allocation_bridge_status: AllocationBridgeResult["status"];
+  slate_size_diagnostic_status: SlateSizeDiagnosticResult["status"];
   packet_finalization_status: PregamePacketFinalizationResult["status"];
   full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
@@ -1281,6 +1283,7 @@ export interface DailySettlementResult {
   bvh_projection_replay: BVHReplayResult;
   bullpen_phase_analysis: BullpenPhaseAnalysisResult;
   allocation_bridge: AllocationBridgeResult;
+  slate_size_diagnostic: SlateSizeDiagnosticResult;
   packet_finalization: PregamePacketFinalizationResult;
   full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
@@ -1593,6 +1596,22 @@ export async function runDailySettlement(
     },
   );
 
+  // Module 34 consumes the rebuilt Module 29 per-slate corpus and immutable
+  // packet/run observability only. It also appends the explicitly supplied
+  // September 14 operator postmortem without touching frozen pipeline rows.
+  // Slate size is never an active model, truth, ranking, market, or decision input.
+  const slate_size_diagnostic = await runSlateSizeDiagnosticV1({ workbookId }).catch(
+    (err: unknown): SlateSizeDiagnosticResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        status: "failure", replay_timestamp_utc: new Date().toISOString(),
+        slate_rows_seen: 0, diagnostic_rows_written: 0, summary_rows_written: 0,
+        human_rows_appended: 0, human_rows_preserved: 0, verdict: "FAIL",
+        warnings: [], errors: [msg],
+      };
+    },
+  );
+
   // Steps 2-4 consume the outcome snapshot and write their audit sheets.
   const regression = await runRegressionReport({ workbookId, writeSheets: true }).catch(
     (err: unknown): RegressionReportResult => {
@@ -1712,6 +1731,7 @@ export async function runDailySettlement(
     { module: "MODULE_31_BVH_PROJECTION_REPLAY", status: bvh_projection_replay.status === "failure" ? "warning" : "success" },
     { module: "MODULE_32_BULLPEN_PHASE_ANALYSIS", status: bullpen_phase_analysis.status === "failure" ? "warning" : "success" },
     { module: "MODULE_33_ALLOCATION_BRIDGE_V1", status: allocation_bridge.status === "failure" ? "warning" : "success" },
+    { module: "MODULE_34_SLATE_SIZE_DIAGNOSTIC_V1", status: slate_size_diagnostic.status === "failure" ? "warning" : "success" },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
@@ -1733,6 +1753,8 @@ export async function runDailySettlement(
   errors.push(...distribution_benchmark.errors.map((message) => `distribution_benchmark: ${message}`));
   warnings.push(...game_truth_distribution_research.warnings.map((message) => `game_truth_distribution_research: ${message}`));
   warnings.push(...game_truth_distribution_research.errors.map((message) => `game_truth_distribution_research: ${message}`));
+  warnings.push(...slate_size_diagnostic.warnings.map((message) => `slate_size_diagnostic: ${message}`));
+  warnings.push(...slate_size_diagnostic.errors.map((message) => `slate_size_diagnostic: ${message}`));
   warnings.push(...bvh_projection_replay.warnings.map((message) => `bvh_projection_replay: ${message}`));
 
   const failedCount = module_statuses.filter((module) => module.status === "failure").length;
@@ -1764,6 +1786,7 @@ export async function runDailySettlement(
       bvh_projection_replay_status: bvh_projection_replay.status,
       bullpen_phase_analysis_status: bullpen_phase_analysis.status,
       allocation_bridge_status: allocation_bridge.status,
+      slate_size_diagnostic_status: slate_size_diagnostic.status,
       packet_finalization_status: packet_finalization.status,
       full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
@@ -1802,6 +1825,7 @@ export async function runDailySettlement(
     bvh_projection_replay_status: bvh_projection_replay.status,
     bullpen_phase_analysis_status: bullpen_phase_analysis.status,
     allocation_bridge_status: allocation_bridge.status,
+    slate_size_diagnostic_status: slate_size_diagnostic.status,
     packet_finalization_status: packet_finalization.status,
     full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
@@ -1823,6 +1847,7 @@ export async function runDailySettlement(
     bvh_projection_replay,
     bullpen_phase_analysis,
     allocation_bridge,
+    slate_size_diagnostic,
     packet_finalization,
     full_ladder_sync,
     schema_documentation,
