@@ -216,8 +216,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *  v65 (2026-09-15): Slate-size diagnostics reproduce frozen per-slate results,
  *      preserve observable composition gaps, and store the September 14 human
  *      truth/execution postmortem in a separate append-only operator audit.
+ *  v66 (2026-09-17): Shadow Truth Direction V1 prospectively freezes the
+ *      existing price-blind projection-versus-line direction independently of
+ *      BET/PASS/NO_CALL and grades only a literal frozen line. It is research
+ *      only and has no projection, vehicle, stake, or authorization consumer.
  */
-export const WORKBOOK_SCHEMA_VERSION = 65;
+export const WORKBOOK_SCHEMA_VERSION = 66;
 
 export interface ColumnDef {
   name: string;
@@ -262,6 +266,7 @@ export interface ColumnDef {
     | "MODULE_32"
     | "MODULE_33"
     | "MODULE_34"
+    | "MODULE_35"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -1155,6 +1160,24 @@ const HUMAN_GAME_TRUTH_AUDIT_V1_COLUMN_NAMES = [
   "Operator_Market_Source", "Operator_Market_TS", "Operator_Market_TS_Status",
   "Human_Truth", "Human_Execution", "Human_Settlement", "Case_Level_Diagnosis",
   "Structural_Finding_Status", "Market_Provenance", "Notes", "Record_Status", "Recorded_TS",
+] as const;
+const SHADOW_TRUTH_DIRECTION_V1_COLUMN_NAMES = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
+  "Packet_Snapshot_TS", "Packet_Freeze_TS", "Confirmation_Ready",
+  "Operational_Decision", "Operational_Final_Decision", "Operational_Blocker",
+  "Shadow_Truth_Direction", "Shadow_Truth_Source", "Shadow_Truth_Confidence",
+  "Shadow_Truth_Line", "Shadow_Truth_Line_Source", "Shadow_Truth_Line_Status",
+  "Shadow_Truth_Frozen_TS", "Shadow_Truth_Record_Status", "Shadow_Truth_Notes",
+  "Frozen_Price_Blind_Total", "Frozen_Variance", "Starter_Bullpen_Reliance_State",
+  "Distribution_Structure_Status", "Distribution_Risk_Tags", "Actual_Total",
+  "Shadow_Truth_Result", "Settlement_TS", "Research_Status",
+  "Record_Integrity_Status", "Version",
+] as const;
+const SHADOW_TRUTH_SUMMARY_V1_COLUMN_NAMES = [
+  "Date", "Summary_Dimension", "Cohort", "Confirmation_Ready_Games",
+  "Shadow_Directions_Frozen", "Correct", "Incorrect", "Push", "Ungradable",
+  "Directional_Eligible_N", "Directional_Accuracy", "Research_Status",
+  "Summary_Notes", "Replay_TS",
 ] as const;
 const FAILURE_CLASSIFICATION_SHADOW_V1_COLUMN_NAMES = [
   "Date",
@@ -13573,6 +13596,38 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Frozen_Pipeline_Market_Line", "Operator_Execution_Market_Line",
       ],
       "MODULE_34",
+    ),
+  },
+
+  {
+    name: "SHADOW_TRUTH_DIRECTION_V1",
+    description:
+      "Prospective research-only frozen OVER/UNDER opinion copied from the existing projection-versus-line rule and graded independently of BET/PASS/NO_CALL. Missing literal lines and exact ties remain explicitly ungradable.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      SHADOW_TRUTH_DIRECTION_V1_COLUMN_NAMES,
+      [
+        "Shadow_Truth_Confidence", "Shadow_Truth_Line", "Frozen_Price_Blind_Total",
+        "Frozen_Variance", "Actual_Total",
+      ],
+      "MODULE_35",
+    ),
+  },
+
+  {
+    name: "SHADOW_TRUTH_SUMMARY_V1",
+    description:
+      "Per-slate research-only directional calibration overall and by operational decision and existing frozen structural cohorts. PUSH and UNGRADABLE are excluded from directional accuracy.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      SHADOW_TRUTH_SUMMARY_V1_COLUMN_NAMES,
+      [
+        "Confirmation_Ready_Games", "Shadow_Directions_Frozen", "Correct", "Incorrect",
+        "Push", "Ungradable", "Directional_Eligible_N", "Directional_Accuracy",
+      ],
+      "MODULE_35",
     ),
   },
 

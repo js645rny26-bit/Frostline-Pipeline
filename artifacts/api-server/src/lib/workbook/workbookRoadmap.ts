@@ -815,6 +815,28 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Human truth, execution, and settlement are separate fields. Operator_Market_TS remains unavailable when no exact supply timestamp was provided.",
   },
   {
+    sheet: "SHADOW_TRUTH_DIRECTION_V1",
+    stage: "AUDIT",
+    timing: "Every legitimate pre-first-pitch publish and daily settlement (Module 35)",
+    purpose:
+      "Freezes the existing projection-versus-literal-line OVER/UNDER research opinion independently of authorization, then grades that frozen opinion after settlement.",
+    boardRelationship:
+      "No board input. It cannot change price-blind projections, BET/PASS/NO_CALL, a vehicle, stake, blocker, confidence, or authorization.",
+    readNote:
+      "Read line status first. Reference/proxy lines never replace missing literal executable Hard Rock evidence. Exact ties and missing executable lines are UNGRADABLE.",
+  },
+  {
+    sheet: "SHADOW_TRUTH_SUMMARY_V1",
+    stage: "SETTLEMENT",
+    timing: "Rebuilt from prospectively frozen Module 35 rows after settlement",
+    purpose:
+      "Reports shadow directional calibration overall and by BET, PASS, NO_CALL, and existing frozen structural cohorts.",
+    boardRelationship:
+      "Research-only summary. It cannot promote a wager or weaken abstention.",
+    readNote:
+      "PUSH and UNGRADABLE are excluded from directional accuracy. A zero-count NO_CALL cohort means no pregame operator NO_CALL state was frozen, not perfect abstention.",
+  },
+  {
     sheet: "FAILURE_CLASSIFICATION_SHADOW_V1",
     stage: "REPLAY",
     timing:

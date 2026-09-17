@@ -402,6 +402,7 @@ export async function repairWorkbookSchemaReference(
         "v63 (2026-09-13): Module 32 adds the mandatory bullpen-phase instrumentation gate, exact MLB play-by-play on-mound run reconstruction, leave-one-slate-out environment standardization, N=15 interaction-cell governance, and a research-only A/B/C/D/E verdict. No production feature is promoted.",
         "v64 (2026-09-14): Module 33 adds Allocation Bridge V1, a settlement-only challenger that reallocates each immutable frozen total between away and home using frozen price-blind evidence. It writes research, replay, summary, and diagnostic surfaces only and cannot alter GAME_SUMMARY, SLATE_BOARD, packets, markets, decisions, or tickets.",
         "v65 (2026-09-15): Module 34 adds research-only slate-size and composition diagnostics plus a separate append-only human truth/execution postmortem audit. Slate size has no active consumer, and manual execution lines never overwrite frozen pipeline market evidence.",
+        "v66 (2026-09-17): SHADOW_TRUTH_DIRECTION_V1 freezes the existing projection-versus-literal-line direction independently of operational BET/PASS/NO_CALL; SHADOW_TRUTH_SUMMARY_V1 grades only prospective frozen research rows. Missing literal lines and exact ties remain UNGRADABLE, and no active decision consumer exists.",
     ],
     [
       "Workbook_Purpose",

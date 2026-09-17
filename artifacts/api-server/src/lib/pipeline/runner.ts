@@ -82,6 +82,11 @@ import { runBullpenPhaseAnalysis, type BullpenPhaseAnalysisResult } from "./modu
 import { runAllocationBridgeV1, type AllocationBridgeResult } from "./module33_allocationBridge.js";
 import { runSlateSizeDiagnosticV1, type SlateSizeDiagnosticResult } from "./module34_slateSizeDiagnostic.js";
 import {
+  settleShadowTruthDirection,
+  syncShadowTruthDirectionPregame,
+  type ShadowTruthDirectionResult,
+} from "./module35_shadowTruthDirection.js";
+import {
   runFailureClassificationReplay,
   syncFailureClassificationShadow,
   type FailureClassificationReplayResult,
@@ -310,6 +315,8 @@ export interface PublishResult {
   module_26_failure_classification: FailureClassificationShadowResult;
   /** Module 20b: durable manual/operator evidence and full-total-ladder ledger. */
   module_20b_full_ladder_audit: FullLadderAuditResult;
+  /** Module 35: research-only frozen direction; no projection or authorization consumer. */
+  module_35_shadow_truth_direction: ShadowTruthDirectionResult;
   /** Schema/reference documentation refreshed from the runtime workbook schema. */
   module_schema_documentation: RepairSchemaResult;
   workbook_url: string;
@@ -693,6 +700,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_20a_pregame_packet: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_skipped_after_first_pitch: 0, packet_snapshot_ts_by_game: {}, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_26_failure_classification: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen_preserved: 0, packets_ineligible: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_20b_full_ladder_audit: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
+      module_35_shadow_truth_direction: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, rows_preserved: 0, audit_gaps: 0, summary_rows_written: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_schema_documentation: {
         workbook_id: workbookId,
         schema_reference_rows: 0,
@@ -1090,6 +1098,22 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     });
   }
 
+  // Module 35 reuses the already-frozen Module 11 projection-versus-line
+  // direction as a research-only learning record. It runs only after the
+  // packet and operator ladder exist, and it has no consumer in projection,
+  // authorization, vehicle, stake, or active decision code.
+  const mod35: ShadowTruthDirectionResult = mod20a.status === "success" && mod20b.status === "success"
+    ? await syncShadowTruthDirectionPregame(date, { workbookId })
+    : {
+      status: "failure", phase: "pregame", date,
+      rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
+      rows_preserved: 0, audit_gaps: 0, summary_rows_written: 0,
+      warnings: [], errors: ["Shadow truth direction blocked: pregame packet or full ladder did not complete"],
+    };
+  if (mod35.status !== "success") {
+    logger.warn({ errors: mod35.errors }, "Full pipeline: Module 35 shadow truth direction did not complete");
+  }
+
   // Keep the in-workbook road map and column reference synchronized with the
   // runtime schema during ordinary pregame publication as well as settlement.
   // This metadata write is idempotent and never touches game-state tabs.
@@ -1186,6 +1210,11 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   retainModuleIssues("20a_pregame_packet", mod20a);
   retainModuleIssues("20b_full_ladder", mod20b);
   retainModuleIssues("26_failure_classification", mod26);
+  // Research-only: retain visibility without downgrading the active pregame
+  // pipeline or changing any operational output.
+  for (const error of mod35.errors) {
+    logger.warn({ error }, "Full pipeline: Module 35 shadow truth warning");
+  }
 
   // Module 12: Append run log row to RUN_LOG sheet (non-blocking — failure is advisory)
   const mod12 = await archiveRunBundle(
@@ -1230,6 +1259,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_20a_pregame_packet: mod20a,
     module_26_failure_classification: mod26,
     module_20b_full_ladder_audit: mod20b,
+    module_35_shadow_truth_direction: mod35,
     module_schema_documentation: schemaDocumentation,
     workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
     errors: allErrors,
@@ -1261,6 +1291,7 @@ export interface DailySettlementResult {
   bullpen_phase_analysis_status: BullpenPhaseAnalysisResult["status"];
   allocation_bridge_status: AllocationBridgeResult["status"];
   slate_size_diagnostic_status: SlateSizeDiagnosticResult["status"];
+  shadow_truth_direction_status: ShadowTruthDirectionResult["status"];
   packet_finalization_status: PregamePacketFinalizationResult["status"];
   full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
@@ -1284,6 +1315,7 @@ export interface DailySettlementResult {
   bullpen_phase_analysis: BullpenPhaseAnalysisResult;
   allocation_bridge: AllocationBridgeResult;
   slate_size_diagnostic: SlateSizeDiagnosticResult;
+  shadow_truth_direction: ShadowTruthDirectionResult;
   packet_finalization: PregamePacketFinalizationResult;
   full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
@@ -1407,6 +1439,23 @@ export async function runDailySettlement(
       "Daily settlement: Module 14 complete",
     );
   }
+
+  // Module 35 grades only prospectively stored shadow-direction rows against
+  // the exact line already frozen in that row. Missing rows are audit gaps;
+  // settlement never reconstructs a direction after results are known.
+  const shadow_truth_direction = await settleShadowTruthDirection(
+    date,
+    settlement.rows,
+    { workbookId },
+  ).catch((err: unknown): ShadowTruthDirectionResult => {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      status: "failure", phase: "settlement", date,
+      rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0,
+      rows_preserved: 0, audit_gaps: 0, summary_rows_written: 0,
+      warnings: [], errors: [msg],
+    };
+  });
 
   // Module 22 reads the collision settlement report written by Module 14.
   // It is a shadow-only aggregate and cannot alter any pregame artifact.
@@ -1732,6 +1781,7 @@ export async function runDailySettlement(
     { module: "MODULE_32_BULLPEN_PHASE_ANALYSIS", status: bullpen_phase_analysis.status === "failure" ? "warning" : "success" },
     { module: "MODULE_33_ALLOCATION_BRIDGE_V1", status: allocation_bridge.status === "failure" ? "warning" : "success" },
     { module: "MODULE_34_SLATE_SIZE_DIAGNOSTIC_V1", status: slate_size_diagnostic.status === "failure" ? "warning" : "success" },
+    { module: "MODULE_35_SHADOW_TRUTH_DIRECTION_V1", status: shadow_truth_direction.status === "failure" ? "warning" : "success" },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
@@ -1755,6 +1805,8 @@ export async function runDailySettlement(
   warnings.push(...game_truth_distribution_research.errors.map((message) => `game_truth_distribution_research: ${message}`));
   warnings.push(...slate_size_diagnostic.warnings.map((message) => `slate_size_diagnostic: ${message}`));
   warnings.push(...slate_size_diagnostic.errors.map((message) => `slate_size_diagnostic: ${message}`));
+  warnings.push(...shadow_truth_direction.warnings.map((message) => `shadow_truth_direction: ${message}`));
+  warnings.push(...shadow_truth_direction.errors.map((message) => `shadow_truth_direction: ${message}`));
   warnings.push(...bvh_projection_replay.warnings.map((message) => `bvh_projection_replay: ${message}`));
 
   const failedCount = module_statuses.filter((module) => module.status === "failure").length;
@@ -1787,6 +1839,7 @@ export async function runDailySettlement(
       bullpen_phase_analysis_status: bullpen_phase_analysis.status,
       allocation_bridge_status: allocation_bridge.status,
       slate_size_diagnostic_status: slate_size_diagnostic.status,
+      shadow_truth_direction_status: shadow_truth_direction.status,
       packet_finalization_status: packet_finalization.status,
       full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
@@ -1826,6 +1879,7 @@ export async function runDailySettlement(
     bullpen_phase_analysis_status: bullpen_phase_analysis.status,
     allocation_bridge_status: allocation_bridge.status,
     slate_size_diagnostic_status: slate_size_diagnostic.status,
+    shadow_truth_direction_status: shadow_truth_direction.status,
     packet_finalization_status: packet_finalization.status,
     full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
@@ -1848,6 +1902,7 @@ export async function runDailySettlement(
     bullpen_phase_analysis,
     allocation_bridge,
     slate_size_diagnostic,
+    shadow_truth_direction,
     packet_finalization,
     full_ladder_sync,
     schema_documentation,

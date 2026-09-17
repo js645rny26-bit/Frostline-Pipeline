@@ -536,6 +536,16 @@ export interface GameEligibilityContext {
   bullpenAvailable: boolean;
 }
 
+/** Existing authoritative projection-versus-line direction rule. */
+export function directionFromProjectionAndLine(
+  projectedTotal: number | null,
+  marketLine: number | null,
+): "OVER" | "UNDER" | "NONE" {
+  if (projectedTotal === null || marketLine === null) return "NONE";
+  const variance = projectedTotal - marketLine;
+  return variance > 0 ? "OVER" : variance < 0 ? "UNDER" : "NONE";
+}
+
 export function computeDecision(
   projectedTotal: number,
   marketLine: number | null,
@@ -556,8 +566,7 @@ export function computeDecision(
 
   const variance  = projectedTotal - marketLine;
   const absVar    = Math.abs(variance);
-  const direction: "OVER" | "UNDER" | "NONE" =
-    variance > 0 ? "OVER" : variance < 0 ? "UNDER" : "NONE";
+  const direction = directionFromProjectionAndLine(projectedTotal, marketLine);
 
   // Edge-strength metadata (magnitude only — not an authorization label)
   const edgeStrength =
