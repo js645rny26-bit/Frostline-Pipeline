@@ -478,7 +478,7 @@ export async function repairWorkbookSchemaReference(
     ],
     [
       "Active_Projection_Core",
-      "GAME_SUMMARY Traffic_Conversion_Runs and HR_XBH_Damage_Runs are active, signed exact-lineup × starter conversion components. Read them with each team's matchup factors, effective starter IP, and bullpen exposure; NEUTRAL means the exact matchup evidence was unavailable.",
+      "GAME_SUMMARY Traffic_Conversion_Runs is the active signed exact-lineup × starter conversion component. HR_XBH_Damage_Runs is fail-closed at zero behind the Patch B commissioning gate because the expected-statistics source does not expose its required hard-hit field; STATCAST_SHADOW_AUDIT damage remains research-only.",
     ],
     ...buildWorkbookRoadmapReadmeRows(),
     ["Last_Repair_TS", new Date().toISOString()],

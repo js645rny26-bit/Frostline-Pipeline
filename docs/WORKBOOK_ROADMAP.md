@@ -60,13 +60,15 @@ This range must be considered whenever the Statcast estimate is available:
 - `PARTIAL`, `UNAVAILABLE`, or capped estimates reduce confidence in the range.
 - The range should trigger the vehicle tournament: a narrower structural event may capture more common scripts than the full-game total.
 
-`GAME_SUMMARY.Traffic_Conversion_Runs` and `HR_XBH_Damage_Runs` are active,
-signed components of the same team-run calculation. They are not additive
-Statcast-tail bonuses: positive traffic first affects workload and bullpen
-exposure, then earns a direct run effect only when damage/conversion evidence
-co-signs it. Damage can retain a smaller independent effect. Read them beside
-`Away/Home_Traffic_Matchup_Factor`, `Away/Home_Damage_Matchup_Factor`,
-`Away/Home_Pitcher_Effective_IP`, and `Away/Home_Bullpen_Exposure_IP`.
+`GAME_SUMMARY.Traffic_Conversion_Runs` is an active signed component of the
+team-run calculation. `HR_XBH_Damage_Runs` is currently fail-closed at zero
+behind the Patch B commissioning gate: the Savant expected-statistics payload
+still supplies xwOBA but does not expose the hard-hit field the active damage
+interaction requires. Non-zero damage estimates in `STATCAST_SHADOW_AUDIT` and
+the collision history remain research-only and must not be described as an
+active run bonus. Read the active traffic component beside
+`Away/Home_Traffic_Matchup_Factor`, `Away/Home_Pitcher_Effective_IP`, and
+`Away/Home_Bullpen_Exposure_IP`.
 
 `NEUTRAL` matchup-profile status means the required exact pregame lineup **and matching starter** data was unavailable, so the existing rate/quality model was preserved for that team. `PARTIAL` means a projected or incomplete lineup attenuated the effect. Neither state should be interpreted as a baseball conclusion.
 

@@ -102,6 +102,17 @@ test("BVH V1 is cataloged as shadow-only until its prospective promotion review"
   assert.match(entry?.notes ?? "", /N=200.*paired review/i);
 });
 
+test("Patch B damage interaction is cataloged as fail-closed research, not an active input", () => {
+  const entry = getModelInputCatalogEntries().find(
+    (candidate) => candidate.id === "STARTER_DAMAGE",
+  );
+  assert.equal(entry?.outputClass, "SHADOW_CHALLENGER");
+  assert.equal(entry?.operationalStatus, "BUILD_TEST_COPY");
+  assert.equal(entry?.feedsActiveProjection, "NO");
+  assert.equal(entry?.feedsDecisionBoard, "NO");
+  assert.match(entry?.missingBehavior ?? "", /fail closed/i);
+});
+
 test("catalog sheet existence is determined from workbook metadata", async () => {
   let addCalls = 0;
   await ensureModelInputCatalogSheet("workbook", {

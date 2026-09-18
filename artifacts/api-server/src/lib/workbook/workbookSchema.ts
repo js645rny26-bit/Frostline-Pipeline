@@ -3925,8 +3925,8 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         filledBy: "MODULE_09",
         description:
-          "Signed active component from the exact lineup × opposing starter damage matchup. It is moderated by traffic capacity and may be negative in a suppressive matchup.",
-        exampleValue: "0.08",
+          "Reserved signed component from the exact lineup × opposing starter damage matchup. Patch B currently holds the active consumer fail-closed at 0.00 while cutoff-safe hard-hit evidence and shadow validation are commissioned.",
+        exampleValue: "0.00",
       },
       {
         name: "Baseball_Only_Projection",

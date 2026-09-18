@@ -18,8 +18,9 @@
  *
  * Lineup / matchup:
  *   A batting-order-weighted OPS/xwOBA factor defines each team's latent
- *   lineup center. The active v36 trunk uses BB/K for traffic, hard-hit for
- *   damage, and keeps direct traffic scoring conditional on conversion evidence.
+ *   lineup center. The active trunk uses BB/K for traffic. The hard-hit damage
+ *   interaction remains fail-closed behind the Patch B commissioning gate
+ *   until its source contract and prospective shadow validation are complete.
  */
 
 import {
@@ -94,6 +95,16 @@ import {
 
 /** 2026 MLB league-average ERA / FIP used to normalise pitcher quality. */
 const LEAGUE_AVG_ERA = 4.2;
+
+/**
+ * Patch B commissioning gate.
+ *
+ * The expected-statistics source currently materializes xwOBA but not the
+ * hard-hit field required by the damage interaction. Keep the caller
+ * fail-closed until a cutoff-safe replacement source and its shadow candidate
+ * complete commissioning. The pure math remains testable independently.
+ */
+export const ACTIVE_DAMAGE_MATCHUP_ENABLED = false;
 
 /**
  * Maximum run addition that park × weather factors are allowed to contribute
@@ -617,7 +628,9 @@ function activeLineupProfile(
     weighted_bb_pct: lineup.weighted_bb_pct,
     weighted_k_pct: lineup.weighted_k_pct,
     weighted_xwoba: lineup.weighted_xwoba,
-    weighted_hard_hit_pct: lineup.weighted_hard_hit_pct,
+    weighted_hard_hit_pct: ACTIVE_DAMAGE_MATCHUP_ENABLED
+      ? lineup.weighted_hard_hit_pct
+      : null,
   };
 }
 

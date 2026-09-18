@@ -532,6 +532,22 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     }),
   ]);
 
+  if (
+    statcastBatterStats
+    && statcastBatterStats.damage_metric_status !== "AVAILABLE"
+  ) {
+    logger.warn(
+      {
+        status: statcastBatterStats.status,
+        damage_metric_status: statcastBatterStats.damage_metric_status,
+        hard_hit_fetched: statcastBatterStats.hard_hit_fetched,
+        fetched: statcastBatterStats.fetched,
+        observed_columns: statcastBatterStats.observed_columns,
+      },
+      "Full pipeline: Savant batter xwOBA retained; active damage input remains fail-closed because hard-hit did not materialize",
+    );
+  }
+
   // Raw response retention is part of source validity. If the exact Savant
   // response cannot be preserved before feature engineering, do not allow the
   // new source to fill a traditional-data gap as if it were durable evidence.
