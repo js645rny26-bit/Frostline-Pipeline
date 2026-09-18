@@ -13129,7 +13129,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "DAMAGE_LINEUP_SHADOW_V1",
     description:
-      "Prospective exact-lineup aggregation of cutoff-safe batter damage evidence. Active_Input is always NO and Collision_Ledger_Status remains unmapped until separate commissioning.",
+      "Prospective exact-lineup aggregation of cutoff-safe batter damage evidence. Active_Input=NO and Collision_Ledger_Status=NOT_MAPPED_PENDING_COMMISSIONING are fail-closed commissioning sentinels verified by published readback.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(
@@ -13163,7 +13163,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "BATTER_DAMAGE_MATURITY_V1",
     description:
-      "Current-slate Patch B source-maturity summary. Reports exact lineup state, identity/sample coverage, and research-only governance; never feeds projection or authorization.",
+      "Current-slate Patch B source-maturity summary. Reports exact lineup state, identity/sample coverage, and fail-closed hold-state sentinels; never feeds projection or authorization.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(

@@ -816,8 +816,10 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       const maturity = await writeBatterDamageMaturity(damageLineupRecords, workbookId);
       logger.info({ maturity }, "Full pipeline: Patch B source-maturity report materialized");
     } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("PATCH_B_HOLD_SENTINEL_FAILURE")) throw err;
       logger.warn(
-        { err: err instanceof Error ? err.message : String(err) },
+        { err: message },
         "Full pipeline: Patch B exact-lineup damage shadow failed to materialize; active projection unchanged",
       );
     }

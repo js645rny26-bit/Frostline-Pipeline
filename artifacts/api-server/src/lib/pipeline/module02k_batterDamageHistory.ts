@@ -24,6 +24,11 @@ export const BATTER_DAMAGE_PROFILES_SHEET = "BATTER_DAMAGE_PROFILES_V1";
 export const DAMAGE_LINEUP_SHADOW_SHEET = "DAMAGE_LINEUP_SHADOW_V1";
 export const BATTER_DAMAGE_MATURITY_SHEET = "BATTER_DAMAGE_MATURITY_V1";
 
+/** Commissioning hold-state sentinels. Any change is a hard evidence failure. */
+export const PATCH_B_ACTIVE_INPUT_SENTINEL = "NO";
+export const PATCH_B_MAPPING_SENTINEL = "NOT_MAPPED_PENDING_COMMISSIONING";
+export const PATCH_B_HOLD_SENTINEL_ERROR = "PATCH_B_HOLD_SENTINEL_FAILURE";
+
 export const BATTER_DAMAGE_DAILY_HEADERS = [
   "Game_Date", "Batter_MLBAM_ID", "BBE", "Hard_Hits", "Barrels", "Barrel_Known_BBE",
   "XBH", "Home_Runs", "Exit_Velocity_Sum", "Source_Snapshot_ID", "Source_Fetch_TS",
@@ -76,6 +81,33 @@ export interface DamageLineupShadowRecord {
   away: DamageLineupProfile;
   home: DamageLineupProfile;
   dataset: BatterDamageDataset;
+}
+
+export function assertPatchBHoldSentinels(activeInput: unknown, mappingStatus: unknown): void {
+  const active = String(activeInput ?? "").trim();
+  const mapping = String(mappingStatus ?? "").trim();
+  if (active !== PATCH_B_ACTIVE_INPUT_SENTINEL || mapping !== PATCH_B_MAPPING_SENTINEL) {
+    throw new Error(
+      `${PATCH_B_HOLD_SENTINEL_ERROR}: Active_Input=${active || "MISSING"}; Mapping=${mapping || "MISSING"}`,
+    );
+  }
+}
+
+/** Verify the published workbook, not merely the in-memory row constructor. */
+export function assertPatchBHoldStateReadback(rows: readonly unknown[][]): number {
+  const [header = [], ...data] = rows;
+  const names = (header as readonly unknown[]).map((value) => String(value ?? "").trim());
+  const activeIndex = names.indexOf("Active_Input");
+  const mappingIndex = names.indexOf("Collision_Ledger_Status");
+  if (activeIndex < 0 || mappingIndex < 0) {
+    throw new Error(`${PATCH_B_HOLD_SENTINEL_ERROR}: sentinel columns missing from published sheet`);
+  }
+  const populated = data.filter((row) => row.some((value) => String(value ?? "").trim() !== ""));
+  if (populated.length === 0) {
+    throw new Error(`${PATCH_B_HOLD_SENTINEL_ERROR}: no published evidence rows available for sentinel readback`);
+  }
+  for (const row of populated) assertPatchBHoldSentinels(row[activeIndex], row[mappingIndex]);
+  return populated.length;
 }
 
 function cell(value: unknown): string { return String(value ?? "").trim(); }
@@ -212,8 +244,9 @@ export async function writeBatterDamageProfiles(dataset: BatterDamageDataset, wo
 }
 
 function lineupRow(record: DamageLineupShadowRecord): (string | number)[] {
+  assertPatchBHoldSentinels(PATCH_B_ACTIVE_INPUT_SENTINEL, PATCH_B_MAPPING_SENTINEL);
   return [
-    record.date, record.game_id, record.snapshot_ts, record.dataset.version, "NO", record.lineup_state,
+    record.date, record.game_id, record.snapshot_ts, record.dataset.version, PATCH_B_ACTIVE_INPUT_SENTINEL, record.lineup_state,
     record.away.weighted_hard_hit_pct ?? "", record.home.weighted_hard_hit_pct ?? "",
     record.away.total_bbe, record.home.total_bbe, record.away.matched_mlbam_hitters, record.home.matched_mlbam_hitters,
     record.away.observed_hitters, record.home.observed_hitters, record.away.identity_coverage, record.home.identity_coverage,
@@ -228,7 +261,7 @@ function lineupRow(record: DamageLineupShadowRecord): (string | number)[] {
     record.away.driver_trace, record.home.driver_trace, record.dataset.requested_through_date,
     record.dataset.actual_data_through_date ?? "", record.dataset.freshness_status,
     record.dataset.league_hard_hit_pct ?? "", record.dataset.deterministic_hash,
-    "NOT_MAPPED_PENDING_COMMISSIONING",
+    PATCH_B_MAPPING_SENTINEL,
   ];
 }
 
@@ -250,6 +283,9 @@ export async function writeDamageLineupShadow(
     : incoming;
   await clearRange(workbookId, `${DAMAGE_LINEUP_SHADOW_SHEET}!A2:AN10000`);
   await writeRange(workbookId, `${DAMAGE_LINEUP_SHADOW_SHEET}!A1`, [Array.from(DAMAGE_LINEUP_SHADOW_HEADERS), ...rows]);
+  assertPatchBHoldStateReadback(
+    ((await readRange(workbookId, `${DAMAGE_LINEUP_SHADOW_SHEET}!A1:AN10000`)).values ?? []) as unknown[][],
+  );
   return rows.length;
 }
 
@@ -336,12 +372,16 @@ export async function writeBatterDamageMaturity(
     summary.weighted_usable_coverage, summary.identity_misses, summary.projected_games,
     summary.confirmed_games, summary.partial_games, summary.unknown_games, summary.teams_zero_usable,
     summary.teams_full_usable, summary.requested_through_date, summary.actual_data_through_date ?? "",
-    summary.freshness_status, summary.deterministic_hash, "NO", "NOT_MAPPED_PENDING_COMMISSIONING",
+    summary.freshness_status, summary.deterministic_hash,
+    PATCH_B_ACTIVE_INPUT_SENTINEL, PATCH_B_MAPPING_SENTINEL,
   ];
   await clearRange(workbookId, `${BATTER_DAMAGE_MATURITY_SHEET}!A2:X1000`);
   await writeRange(workbookId, `${BATTER_DAMAGE_MATURITY_SHEET}!A1`, [
     Array.from(BATTER_DAMAGE_MATURITY_HEADERS),
     row,
   ]);
+  assertPatchBHoldStateReadback(
+    ((await readRange(workbookId, `${BATTER_DAMAGE_MATURITY_SHEET}!A1:X1000`)).values ?? []) as unknown[][],
+  );
   return summary;
 }

@@ -6,6 +6,10 @@ import {
   BATTER_DAMAGE_MATURITY_HEADERS,
   BATTER_DAMAGE_PROFILE_HEADERS,
   DAMAGE_LINEUP_SHADOW_HEADERS,
+  PATCH_B_ACTIVE_INPUT_SENTINEL,
+  PATCH_B_MAPPING_SENTINEL,
+  assertPatchBHoldSentinels,
+  assertPatchBHoldStateReadback,
   existingBatterDamageSnapshotState,
   parseBatterDamageDailyHistory,
   selectCanonicalBatterDamageHistory,
@@ -46,6 +50,25 @@ test("lineup shadow contract remains research-only and explicit", () => {
   assert.ok(DAMAGE_LINEUP_SHADOW_HEADERS.includes("Collision_Ledger_Status"));
   assert.ok(BATTER_DAMAGE_PROFILE_HEADERS.includes("Sample_Status"));
   assert.ok(BATTER_DAMAGE_MATURITY_HEADERS.includes("Usable_Sample_Hitters"));
+});
+
+test("Patch B hold-state sentinels fail closed and require published readback", () => {
+  assert.equal(PATCH_B_ACTIVE_INPUT_SENTINEL, "NO");
+  assert.equal(PATCH_B_MAPPING_SENTINEL, "NOT_MAPPED_PENDING_COMMISSIONING");
+  assert.doesNotThrow(() => assertPatchBHoldSentinels("NO", "NOT_MAPPED_PENDING_COMMISSIONING"));
+  assert.throws(() => assertPatchBHoldSentinels("YES", "NOT_MAPPED_PENDING_COMMISSIONING"), /PATCH_B_HOLD_SENTINEL_FAILURE/);
+  assert.throws(() => assertPatchBHoldSentinels("NO", "MAPPED"), /PATCH_B_HOLD_SENTINEL_FAILURE/);
+  assert.equal(assertPatchBHoldStateReadback([
+    ["Date", "Active_Input", "Collision_Ledger_Status"],
+    ["2026-09-18", "NO", "NOT_MAPPED_PENDING_COMMISSIONING"],
+  ]), 1);
+  assert.throws(() => assertPatchBHoldStateReadback([
+    ["Date", "Active_Input", "Collision_Ledger_Status"],
+    ["2026-09-18", "NO", "ACTIVE"],
+  ]), /PATCH_B_HOLD_SENTINEL_FAILURE/);
+  assert.throws(() => assertPatchBHoldStateReadback([
+    ["Date", "Active_Input", "Collision_Ledger_Status"],
+  ]), /PATCH_B_HOLD_SENTINEL_FAILURE/);
 });
 
 test("maturity summary separates observed, low, usable, no-sample, and lineup state", () => {

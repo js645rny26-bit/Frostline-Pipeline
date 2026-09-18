@@ -146,9 +146,9 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     purpose:
       "Batting-order-weighted exact-lineup hard-hit evidence with identity/sample coverage and complete hitter-level trace.",
     boardRelationship:
-      "Active_Input is NO. The row is not mapped into the existing collision candidate until a separate commissioning decision.",
+      "Active_Input=NO and NOT_MAPPED_PENDING_COMMISSIONING are readback-verified commissioning sentinels. The row is not mapped into the existing collision candidate.",
     readNote:
-      "Inspect source horizon, observed coverage, lineup status, and Collision_Ledger_Status before comparing it with the existing preview shadow.",
+      "A maturity read is invalid unless both hold-state sentinels pass; then inspect source horizon, observed coverage, lineup status, and sample adequacy.",
   },
   {
     sheet: "BATTER_DAMAGE_MATURITY_V1",
@@ -157,7 +157,7 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     purpose:
       "Current-slate identity, lineup-state, sample-adequacy, and weighted-coverage maturity report for the commissioned factual damage source.",
     boardRelationship:
-      "Research governance only. Active_Input remains NO and the summary has no projection, board, market, or authorization consumer.",
+      "Research governance only. Both hold-state sentinels are verified after publication; the summary has no projection, board, market, or authorization consumer.",
     readNote:
       "Read LOW_SAMPLE and USABLE_SAMPLE separately; a zero usable count is an evidence-maturity result, not neutral batter talent.",
   },

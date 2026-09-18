@@ -83,6 +83,24 @@ confirmed. League hard-hit substitution remains display-only and traceable as
 usable, and no-sample counts plus weighted observed/usable coverage. It is
 research governance only and cannot feed Module 09 or authorization.
 
+### Hold-state commissioning sentinels
+
+`Active_Input = NO` and
+`Collision_Ledger_Status = NOT_MAPPED_PENDING_COMMISSIONING` are executable
+commissioning sentinels, not informational labels. Every lineup-shadow and
+maturity publication is read back from the workbook and checked against both.
+Missing rows, missing sentinel columns, or any unexpected value throws
+`PATCH_B_HOLD_SENTINEL_FAILURE`; the run cannot be treated as valid Patch B
+evidence.
+
+### Outcome-tuning freeze
+
+Patch B may not be tuned against September 17, September 18, any individual
+slate, or any short favorable/unfavorable result sequence. Mapping decisions
+must rest on source reliability, causal placement, frozen sample governance,
+legitimate replay, and prospective shadow evidence. Recent outcome improvement
+is not a commissioning argument.
+
 ## Prepared shadow-mapping contract (not implemented)
 
 The only permitted future recipient is the existing collision/damage ledger.
@@ -115,6 +133,17 @@ another downstream vote.
 
 This contract is prepared for later review only. No code path currently maps
 these facts into collision, center, distribution, or authorization outputs.
+
+### Active Pitching Inventory interface boundary
+
+Patch B owns factual contact/damage evidence. Active Pitching Inventory is a
+separate research object for role, sequence, workload, bridge, and pitcher-
+chain state. If pitcher-side contact/damage evidence is later shared, it must
+cross one documented evidence interface retaining D-1 cutoff, source
+provenance, MLBAM identity, sample status, and deterministic lineage. The
+integration requires a single-consumer/no-double-counting review. Active
+Pitching Inventory may not duplicate Patch B derivations, manufacture a second
+damage adjustment, or silently become another Statcast consumer.
 
 Before the active gate may change, Patch B still requires:
 
