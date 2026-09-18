@@ -83,6 +83,39 @@ confirmed. League hard-hit substitution remains display-only and traceable as
 usable, and no-sample counts plus weighted observed/usable coverage. It is
 research governance only and cannot feed Module 09 or authorization.
 
+## Prepared shadow-mapping contract (not implemented)
+
+The only permitted future recipient is the existing collision/damage ledger.
+Patch B must not create a parallel damage score, a second run adjustment, or
+another downstream vote.
+
+- Observational inputs: raw BBE, hard-hit count/rate, barrel count/rate, XBH,
+  home runs, average exit velocity, lineup state, batting-order weights,
+  identity coverage, freshness, and sample status remain independently
+  recoverable.
+- Center interaction: only `USABLE_SAMPLE` hard-hit evidence may be evaluated
+  as a replacement/refinement for the collision ledger's existing lineup
+  hard-contact input. It may not be added on top of the existing interaction.
+- Tail/width research: barrel, XBH, home-run, and exit-velocity evidence may
+  initially inform only the ledger's research distribution-width or failure-
+  tail branch. They must not directly move the active center in V1.
+- Traffic boundary: none of the Patch B fields may alter traffic, walk,
+  strikeout, baserunner, or workload objects.
+- Missingness: `NO_SAMPLE`, unresolved identity, stale/absent source evidence,
+  and any `MISSING:LEAGUE` display imputation create no research signal and
+  cannot satisfy a mapping gate. `LOW_SAMPLE` remains descriptive only.
+- Confidence: a future shadow confidence state must be a transparent function
+  of cutoff freshness, deterministic identity coverage, weighted usable
+  coverage, lineup state, and per-hitter sample adequacy. It may not infer
+  confidence from game outcomes.
+- Consumption: the collision ledger is the single consumer. Starter attack,
+  baseline offense, conversion, active center, board authorization, and market
+  logic may see Patch B only through a separately commissioned collision-ledger
+  interface.
+
+This contract is prepared for later review only. No code path currently maps
+these facts into collision, center, distribution, or authorization outputs.
+
 Before the active gate may change, Patch B still requires:
 
 1. dependency and double-count audits against collision and traffic paths;
