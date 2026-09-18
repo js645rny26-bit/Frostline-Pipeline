@@ -121,7 +121,22 @@ test("missing and no-sample identities stay explicit and never count as observed
   assert.equal(profile.weighted_observed_coverage, 0);
   assert.equal(profile.weighted_usable_coverage, 0);
   assert.match(profile.driver_trace, /SAMPLE_STATUS=NO_SAMPLE:IMPUTED=LEAGUE/);
-  assert.match(profile.driver_trace, /UNRESOLVED:MISSING:LEAGUE/);
+  assert.match(profile.driver_trace, /UNRESOLVED:MISSING_IDENTITY:IMPUTED=LEAGUE/);
+});
+
+test("resolved identity without a retained profile is no-sample, not an identity miss", () => {
+  const dataset = buildBatterDamageDataset([
+    { game_date: "2026-09-16", batter_mlbam_id: 999, bbe: 4, hard_hits: 1, barrels: 0, barrel_known_bbe: 4, xbh: 0, home_runs: 0, exit_velocity_sum: 340 },
+  ], "2026-09-17");
+  const profile = buildDamageLineupProfile([
+    { batting_order: 1, name: "Dansby Swanson", handedness: "R", position: "SS" },
+  ], new Map(), dataset);
+  assert.equal(profile.status, "AVAILABLE");
+  assert.equal(profile.matched_mlbam_hitters, 1);
+  assert.equal(profile.identity_coverage, 1);
+  assert.equal(profile.no_sample_hitters, 1);
+  assert.deepEqual(profile.missing_hitters, []);
+  assert.match(profile.driver_trace, /621020:BBE=0:.*STATUS=NO_SOURCE_PROFILE:SAMPLE_STATUS=NO_SAMPLE:IMPUTED=LEAGUE/);
 });
 
 test("Patch B exact identity registry resolves only verified aliases", () => {

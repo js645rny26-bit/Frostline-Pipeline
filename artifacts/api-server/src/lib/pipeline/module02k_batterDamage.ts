@@ -366,13 +366,19 @@ export function buildDamageLineupProfile(
     weightTotal += weight;
     const id = resolvePatchBDamageIdentity(player.name, nameToIdMap);
     const profile = id ? dataset.profiles.get(id) : null;
-    if (!id || !profile) {
+    if (!id) {
       missing.push(player.name);
       hardHitSum += dataset.league_hard_hit_pct * weight;
-      drivers.push(`${slot + 1}:${id ?? "UNRESOLVED"}:MISSING:LEAGUE=${dataset.league_hard_hit_pct}`);
+      drivers.push(`${slot + 1}:UNRESOLVED:MISSING_IDENTITY:IMPUTED=LEAGUE=${dataset.league_hard_hit_pct}`);
       continue;
     }
     matched++;
+    if (!profile) {
+      noSample++;
+      hardHitSum += dataset.league_hard_hit_pct * weight;
+      drivers.push(`${slot + 1}:${id}:BBE=0:HH=0:HH_PCT=MISSING:STATUS=NO_SOURCE_PROFILE:SAMPLE_STATUS=NO_SAMPLE:IMPUTED=LEAGUE=${dataset.league_hard_hit_pct}`);
+      continue;
+    }
     totalBbe += profile.bbe;
     if (profile.hard_hit_pct !== null) {
       observed++;
