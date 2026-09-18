@@ -64,7 +64,7 @@ test("allocation bridge schema exposes the four research surfaces", () => {
   assert.ok(ALLOCATION_BRIDGE_REPLAY_HEADERS.includes("Bridge_Combined_Team_MAE"));
   assert.ok(ALLOCATION_BRIDGE_SUMMARY_HEADERS.includes("Research_Verdict"));
   assert.ok(ALLOCATION_BRIDGE_DIAG_HEADERS.includes("Failure_Classification"));
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 66);
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 67);
   for (const [sheet, headers] of [
     ["ALLOCATION_BRIDGE_V1", ALLOCATION_BRIDGE_HEADERS],
     ["ALLOCATION_BRIDGE_REPLAY_V1", ALLOCATION_BRIDGE_REPLAY_HEADERS],

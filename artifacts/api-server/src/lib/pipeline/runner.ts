@@ -44,6 +44,20 @@ import {
   selectCanonicalBVHDailyHistory,
   writeBVHBatterSplits,
 } from "./module02j_batterVsHandHistory.js";
+import {
+  buildBatterDamageDataset,
+  buildDamageLineupProfile,
+  deriveBatterDamageDailyAggregates,
+  type BatterDamageDataset,
+  type BatterDamageIntegrity,
+} from "./module02k_batterDamage.js";
+import {
+  loadBatterDamageDailyHistory,
+  persistBatterDamageDailyHistory,
+  selectCanonicalBatterDamageHistory,
+  writeBatterDamageProfiles,
+  writeDamageLineupShadow,
+} from "./module02k_batterDamageHistory.js";
 import { persistSourceSnapshot } from "./module02_sourceSnapshots.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { trackLineMovement } from "./module05d_oddsHistory.js";
@@ -588,6 +602,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   let currentSWEAppearances: SWEAppearance[] = [];
   let bvhDataset: BVHDataset | null = null;
   let bvhIntegrity: BVHPAIntegrity | undefined;
+  let batterDamageDataset: BatterDamageDataset | null = null;
+  let batterDamageIntegrity: BatterDamageIntegrity | undefined;
   if (savantPitchLevel?.source_snapshot) {
     const snapshotWrite = await persistSourceSnapshot(
       savantPitchLevel.source_snapshot,
@@ -617,6 +633,21 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
           "Full pipeline: BVH daily derived history failed to persist",
         );
       }
+      const damageDaily = deriveBatterDamageDailyAggregates(savantPitchLevel.events);
+      batterDamageIntegrity = damageDaily.integrity;
+      const damageHistoryWrite = await persistBatterDamageDailyHistory(
+        damageDaily.aggregates,
+        snapshotWrite.snapshot_id,
+        savantPitchLevel.source_snapshot.fetch_timestamp_utc,
+        statcastDataThroughDate,
+        workbookId,
+      );
+      if (damageHistoryWrite.errors.length > 0) {
+        logger.warn(
+          { errors: damageHistoryWrite.errors, data_through_date: statcastDataThroughDate },
+          "Full pipeline: Patch B batter-damage daily history failed to persist",
+        );
+      }
       currentSWEAppearances = deriveSWEAppearances(
         savantPitchLevel.events,
         statcastDataThroughDate,
@@ -633,8 +664,15 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
         );
       }
       logger.info(
-        { events: savantPitchLevel.events.length, appearances: currentSWEAppearances.length, bvh_rows: bvhDaily.aggregates.length, data_through_date: statcastDataThroughDate },
-        "Full pipeline: Savant pitch-level source retained; SWE and BVH derived ledgers prepared",
+        {
+          events: savantPitchLevel.events.length,
+          appearances: currentSWEAppearances.length,
+          bvh_rows: bvhDaily.aggregates.length,
+          damage_rows: damageDaily.aggregates.length,
+          damage_bbe: damageDaily.integrity.batted_ball_events,
+          data_through_date: statcastDataThroughDate,
+        },
+        "Full pipeline: Savant pitch-level source retained; SWE, BVH, and Patch B damage ledgers prepared",
       );
     }
   } else if (savantPitchLevel) {
@@ -654,6 +692,26 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     const message = err instanceof Error ? err.message : String(err);
     bvhDataset = null;
     logger.warn({ err: message }, "Full pipeline: BVH dataset unavailable; split evidence remains explicit gap");
+  }
+
+  // Patch B builds only factual D-1 batter and lineup evidence. It cannot feed
+  // Module 09 until a separate replay/prospective promotion decision changes
+  // ACTIVE_DAMAGE_MATCHUP_ENABLED.
+  try {
+    const damageHistory = selectCanonicalBatterDamageHistory(
+      await loadBatterDamageDailyHistory(workbookId),
+    );
+    batterDamageDataset = buildBatterDamageDataset(
+      damageHistory,
+      date,
+      batterDamageIntegrity,
+      [...batterIdSet],
+    );
+    await writeBatterDamageProfiles(batterDamageDataset, workbookId);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    batterDamageDataset = null;
+    logger.warn({ err: message }, "Full pipeline: Patch B batter-damage dataset unavailable; shadow evidence remains explicit gap");
   }
 
   // Sources can take long enough for an initially mutable game to enter the
@@ -728,6 +786,35 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
       errors: [...mod08.errors],
     };
+  }
+
+  if (batterDamageDataset) {
+    try {
+      const lineupMap = startingNineResult
+        ? buildStartingNineMap(startingNineResult, feedGames.map((game) => game.legacy_game_id))
+        : new Map();
+      const snapshotTs = new Date().toISOString();
+      await writeDamageLineupShadow(
+        feedGames.map((game) => {
+          const card = lineupMap.get(game.legacy_game_id);
+          return {
+            date,
+            game_id: game.legacy_game_id,
+            snapshot_ts: snapshotTs,
+            away: buildDamageLineupProfile(card?.away_lineup ?? [], rosterNameMap ?? new Map(), batterDamageDataset),
+            home: buildDamageLineupProfile(card?.home_lineup ?? [], rosterNameMap ?? new Map(), batterDamageDataset),
+            dataset: batterDamageDataset,
+          };
+        }),
+        workbookId,
+        publicationProtectionNow(),
+      );
+    } catch (err: unknown) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        "Full pipeline: Patch B exact-lineup damage shadow failed to materialize; active projection unchanged",
+      );
+    }
   }
 
   // Module 08b: Write STATCAST_GAME_PREVIEW sheet — fail-open, runs before module 09

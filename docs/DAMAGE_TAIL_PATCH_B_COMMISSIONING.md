@@ -45,15 +45,28 @@ and the intended exact-lineup active source contract is currently incomplete.
 
 ## Promotion boundary
 
+The second tranche now completes the factual source boundary:
+
+- retained D-1 pitch events are reduced to one batted ball per plate appearance;
+- hard-hit uses the fixed Statcast 95 mph definition;
+- daily batter counts retain the raw snapshot ID and fetch/data-through lineage;
+- current batter profiles and batting-order-weighted exact-lineup profiles are
+  deterministic and expose identity/sample coverage;
+- `DAMAGE_LINEUP_SHADOW_V1.Active_Input` is always `NO`; its
+  `Collision_Ledger_Status` is explicitly `NOT_MAPPED_PENDING_COMMISSIONING`.
+
+The retained corpus begins when this daily evidence was first accumulated.
+Short history must remain visible as low observed coverage; it cannot be
+backfilled from current leaderboards or interpreted as neutral talent.
+
 Before the active gate may change, Patch B still requires:
 
-1. a cutoff-safe source that actually materializes the required batter damage
-   evidence with player identity and provenance;
-2. exact-lineup aggregation and missingness coverage checks;
-3. dependency and double-count audits against collision and traffic paths;
-4. frozen historical replay where legitimate;
-5. prospective shadow validation and manual review of materially moved games;
-6. a separate promotion decision.
+1. dependency and double-count audits against collision and traffic paths;
+2. a pre-registered mapping from the factual lineup profile into the existing
+   collision ledger rather than a second damage vote;
+3. frozen historical replay where legitimate;
+4. prospective shadow validation and manual review of materially moved games;
+5. a separate promotion decision.
 
 No frozen packet, historical projection, active decision, or market record is
 modified by this tranche.

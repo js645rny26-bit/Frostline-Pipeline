@@ -50,8 +50,8 @@ function runLog(date: string): unknown[] {
   });
 }
 
-test("Module 34 exposes research-only workbook surfaces at schema v66", () => {
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 66);
+test("Module 34 exposes research-only workbook surfaces through schema v67", () => {
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 67);
   for (const [sheet, headers] of [
     ["SLATE_SIZE_DIAGNOSTIC_V1", SLATE_SIZE_DIAGNOSTIC_HEADERS],
     ["SLATE_SIZE_SUMMARY_V1", SLATE_SIZE_SUMMARY_HEADERS],

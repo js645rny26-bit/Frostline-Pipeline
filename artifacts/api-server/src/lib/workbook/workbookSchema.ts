@@ -220,8 +220,11 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      existing price-blind projection-versus-line direction independently of
  *      BET/PASS/NO_CALL and grades only a literal frozen line. It is research
  *      only and has no projection, vehicle, stake, or authorization consumer.
+ *  v67 (2026-09-17): Patch B derives cutoff-safe batter batted-ball damage
+ *      evidence from retained D-1 Savant pitch events and materializes exact-
+ *      lineup research profiles. Active HR/XBH damage remains gated off.
  */
-export const WORKBOOK_SCHEMA_VERSION = 66;
+export const WORKBOOK_SCHEMA_VERSION = 67;
 
 export interface ColumnDef {
   name: string;
@@ -13086,6 +13089,67 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       { name: "Chunk_Count", index: 2, type: "number", width: 110, filledBy: "SYSTEM", readOnly: true },
       { name: "Raw_Response_Chunk", index: 3, type: "string", width: 500, filledBy: "SYSTEM", readOnly: true, description: "Untouched source payload chunk; concatenate by Snapshot_ID and Chunk_Index." },
     ],
+  },
+
+  {
+    name: "BATTER_DAMAGE_DAILY_V1",
+    description:
+      "Append-only D-1 batter batted-ball counts derived from retained Savant pitch-level snapshots. One canonical source snapshot is selected per game date; no row is a projection input.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Game_Date", "Batter_MLBAM_ID", "BBE", "Hard_Hits", "Barrels", "Barrel_Known_BBE",
+        "XBH", "Home_Runs", "Exit_Velocity_Sum", "Source_Snapshot_ID", "Source_Fetch_TS",
+        "Data_Through_Date", "Damage_Version",
+      ],
+      ["Batter_MLBAM_ID", "BBE", "Hard_Hits", "Barrels", "Barrel_Known_BBE", "XBH", "Home_Runs", "Exit_Velocity_Sum"],
+      "SYSTEM",
+    ),
+  },
+
+  {
+    name: "BATTER_DAMAGE_PROFILES_V1",
+    description:
+      "Current cutoff-safe batter hard-hit, barrel, XBH, HR, and exit-velocity profiles rebuilt from canonical daily Patch B evidence. Factual research only; no run coefficient.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Damage_Version", "Batter_MLBAM_ID", "BBE", "Hard_Hits", "Hard_Hit_Pct", "Barrels",
+        "Barrel_Known_BBE", "Barrel_Pct", "XBH", "XBH_Pct", "Home_Runs", "HR_Pct",
+        "Avg_Exit_Velocity", "Profile_Status", "Requested_Through_Date", "Actual_Data_Through_Date",
+        "Freshness_Lag_Days", "Freshness_Status", "League_Hard_Hit_Pct", "Deterministic_Hash",
+      ],
+      ["Batter_MLBAM_ID", "BBE", "Hard_Hits", "Hard_Hit_Pct", "Barrels", "Barrel_Known_BBE", "Barrel_Pct", "XBH", "XBH_Pct", "Home_Runs", "HR_Pct", "Avg_Exit_Velocity", "Freshness_Lag_Days", "League_Hard_Hit_Pct"],
+      "SYSTEM",
+    ),
+  },
+
+  {
+    name: "DAMAGE_LINEUP_SHADOW_V1",
+    description:
+      "Prospective exact-lineup aggregation of cutoff-safe batter damage evidence. Active_Input is always NO and Collision_Ledger_Status remains unmapped until separate commissioning.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Date", "Game_ID", "Snapshot_TS", "Damage_Version", "Active_Input",
+        "Away_Weighted_Hard_Hit_Pct", "Home_Weighted_Hard_Hit_Pct", "Away_Total_BBE", "Home_Total_BBE",
+        "Away_Matched_Hitters", "Home_Matched_Hitters", "Away_Observed_Hitters", "Home_Observed_Hitters",
+        "Away_Identity_Coverage", "Home_Identity_Coverage", "Away_Observed_Coverage", "Home_Observed_Coverage",
+        "Away_Profile_Status", "Home_Profile_Status", "Away_Missing_Hitters", "Home_Missing_Hitters",
+        "Away_Driver_Trace", "Home_Driver_Trace", "Requested_Through_Date", "Actual_Data_Through_Date",
+        "Freshness_Status", "League_Hard_Hit_Pct", "Deterministic_Hash", "Collision_Ledger_Status",
+      ],
+      [
+        "Away_Weighted_Hard_Hit_Pct", "Home_Weighted_Hard_Hit_Pct", "Away_Total_BBE", "Home_Total_BBE",
+        "Away_Matched_Hitters", "Home_Matched_Hitters", "Away_Observed_Hitters", "Home_Observed_Hitters",
+        "Away_Identity_Coverage", "Home_Identity_Coverage", "Away_Observed_Coverage", "Home_Observed_Coverage",
+        "League_Hard_Hit_Pct",
+      ],
+      "SYSTEM",
+    ),
   },
 
   {

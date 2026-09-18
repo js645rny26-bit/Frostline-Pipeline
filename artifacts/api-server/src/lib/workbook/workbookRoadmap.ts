@@ -118,6 +118,39 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Concatenate chunks by Snapshot_ID and Chunk_Index only when auditing an exact retained source response.",
   },
   {
+    sheet: "BATTER_DAMAGE_DAILY_V1",
+    stage: "AUDIT",
+    timing: "Append after each retained D-1 Savant pitch-level response (Module 02k)",
+    purpose:
+      "PA-deduplicated batter BBE, hard-hit, barrel, XBH, HR, and exit-velocity counts with immutable source snapshot lineage.",
+    boardRelationship:
+      "No board or projection input. It is the factual Patch B evidence ledger and cannot create a run adjustment.",
+    readNote:
+      "Verify source snapshot identity, D-1 cutoff, BBE counts, and missing exit-velocity integrity before interpreting a rate.",
+  },
+  {
+    sheet: "BATTER_DAMAGE_PROFILES_V1",
+    stage: "AUDIT",
+    timing: "Rebuild every pregame run from canonical Patch B daily history",
+    purpose:
+      "Current batter hard-hit, barrel, XBH, HR, and average-EV profiles with freshness and deterministic-build lineage.",
+    boardRelationship:
+      "Research only. Profiles do not feed GAME_SUMMARY, SLATE_BOARD, packets, markets, or authorization.",
+    readNote:
+      "Read BBE and Profile_Status beside every rate; a short retained history is an evidence limitation, not neutral talent.",
+  },
+  {
+    sheet: "DAMAGE_LINEUP_SHADOW_V1",
+    stage: "AUDIT",
+    timing: "Every legitimate pre-first-pitch publish after Patch B profiles rebuild",
+    purpose:
+      "Batting-order-weighted exact-lineup hard-hit evidence with identity/sample coverage and complete hitter-level trace.",
+    boardRelationship:
+      "Active_Input is NO. The row is not mapped into the existing collision candidate until a separate commissioning decision.",
+    readNote:
+      "Inspect source horizon, observed coverage, lineup status, and Collision_Ledger_Status before comparing it with the existing preview shadow.",
+  },
+  {
     sheet: "BVH_DAILY_HISTORY_V1",
     stage: "AUDIT",
     timing: "Append after each retained Savant pitch-level daily response (Module 02j)",
