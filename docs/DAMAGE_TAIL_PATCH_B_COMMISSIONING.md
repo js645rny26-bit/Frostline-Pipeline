@@ -59,6 +59,30 @@ The retained corpus begins when this daily evidence was first accumulated.
 Short history must remain visible as low observed coverage; it cannot be
 backfilled from current leaderboards or interpreted as neutral talent.
 
+## Source-maturity governance
+
+Patch B version 1.1.0 separates factual observation from sample adequacy:
+
+- `NO_SAMPLE`: 0 retained BBE;
+- `LOW_SAMPLE`: 1-24 retained BBE;
+- `USABLE_SAMPLE`: at least 25 retained BBE.
+
+The 25-BBE threshold is fixed ex ante from a binomial-rate precision rule. At
+the worst-case proportion p=0.5, `ceil(1.96^2 * 0.5 * 0.5 / 0.20^2) = 25`
+keeps the approximate 95% margin of error within 20 percentage points. It was
+not selected from projection or game outcomes. Raw counts and rates remain
+visible in every status.
+
+`DAMAGE_LINEUP_SHADOW_V1.Lineup_State` freezes the exact pregame source state:
+`PROJECTED`, `CONFIRMED`, `PARTIAL`, or `UNKNOWN`. Per-side Starting Nine state
+is retained so a mixed projected/official card is `PARTIAL`, not falsely
+confirmed. League hard-hit substitution remains display-only and traceable as
+`MISSING:LEAGUE`; it never counts toward observed or usable coverage.
+
+`BATTER_DAMAGE_MATURITY_V1` reports current-slate identity, observed, low,
+usable, and no-sample counts plus weighted observed/usable coverage. It is
+research governance only and cannot feed Module 09 or authorization.
+
 Before the active gate may change, Patch B still requires:
 
 1. dependency and double-count audits against collision and traffic paths;

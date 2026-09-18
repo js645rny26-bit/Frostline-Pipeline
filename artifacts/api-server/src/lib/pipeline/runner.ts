@@ -48,6 +48,7 @@ import {
   buildBatterDamageDataset,
   buildDamageLineupProfile,
   deriveBatterDamageDailyAggregates,
+  resolveDamageLineupState,
   type BatterDamageDataset,
   type BatterDamageIntegrity,
 } from "./module02k_batterDamage.js";
@@ -56,6 +57,7 @@ import {
   persistBatterDamageDailyHistory,
   selectCanonicalBatterDamageHistory,
   writeBatterDamageProfiles,
+  writeBatterDamageMaturity,
   writeDamageLineupShadow,
 } from "./module02k_batterDamageHistory.js";
 import { persistSourceSnapshot } from "./module02_sourceSnapshots.js";
@@ -794,21 +796,25 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
         ? buildStartingNineMap(startingNineResult, feedGames.map((game) => game.legacy_game_id))
         : new Map();
       const snapshotTs = new Date().toISOString();
-      await writeDamageLineupShadow(
-        feedGames.map((game) => {
+      const damageLineupRecords = feedGames.map((game) => {
           const card = lineupMap.get(game.legacy_game_id);
           return {
             date,
             game_id: game.legacy_game_id,
             snapshot_ts: snapshotTs,
+            lineup_state: resolveDamageLineupState(card),
             away: buildDamageLineupProfile(card?.away_lineup ?? [], rosterNameMap ?? new Map(), batterDamageDataset),
             home: buildDamageLineupProfile(card?.home_lineup ?? [], rosterNameMap ?? new Map(), batterDamageDataset),
             dataset: batterDamageDataset,
           };
-        }),
+        });
+      await writeDamageLineupShadow(
+        damageLineupRecords,
         workbookId,
         publicationProtectionNow(),
       );
+      const maturity = await writeBatterDamageMaturity(damageLineupRecords, workbookId);
+      logger.info({ maturity }, "Full pipeline: Patch B source-maturity report materialized");
     } catch (err: unknown) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err) },

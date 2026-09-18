@@ -151,6 +151,17 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Inspect source horizon, observed coverage, lineup status, and Collision_Ledger_Status before comparing it with the existing preview shadow.",
   },
   {
+    sheet: "BATTER_DAMAGE_MATURITY_V1",
+    stage: "AUDIT",
+    timing: "Every legitimate pre-first-pitch publish after the Patch B lineup shadow materializes",
+    purpose:
+      "Current-slate identity, lineup-state, sample-adequacy, and weighted-coverage maturity report for the commissioned factual damage source.",
+    boardRelationship:
+      "Research governance only. Active_Input remains NO and the summary has no projection, board, market, or authorization consumer.",
+    readNote:
+      "Read LOW_SAMPLE and USABLE_SAMPLE separately; a zero usable count is an evidence-maturity result, not neutral batter talent.",
+  },
+  {
     sheet: "BVH_DAILY_HISTORY_V1",
     stage: "AUDIT",
     timing: "Append after each retained Savant pitch-level daily response (Module 02j)",

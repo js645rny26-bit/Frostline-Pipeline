@@ -410,7 +410,7 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     statisticalWindow: "Season to date", gameWindow: "STARTER_WINDOW -> BULLPEN_WINDOW",
     primarySource: "SOURCE_SAVANT_PITCH_LEVEL + SOURCE_MLB_PITCHER_SEASON", fallbackSource: "NEUTRAL active component; existing preview collision remains a separate shadow",
     refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "BATTER_DAMAGE_DAILY_V1 source lineage + DAMAGE_LINEUP_SHADOW_V1 cutoff/coverage",
-    workbookLocation: "BATTER_DAMAGE_DAILY_V1; BATTER_DAMAGE_PROFILES_V1; DAMAGE_LINEUP_SHADOW_V1; STATCAST_SHADOW_AUDIT; GAME_SUMMARY reserved damage fields", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
+    workbookLocation: "BATTER_DAMAGE_DAILY_V1; BATTER_DAMAGE_PROFILES_V1; DAMAGE_LINEUP_SHADOW_V1; BATTER_DAMAGE_MATURITY_V1; STATCAST_SHADOW_AUDIT; GAME_SUMMARY reserved damage fields", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
     correlationFamily: "STARTER_DAMAGE", missingBehavior: "Fail closed at 0.00 in the active projection when cutoff-safe hard-hit evidence is unavailable; preserve the reason in source health rather than treating zero as observed neutrality.",
     notes: "Patch B now materializes D-1 exact-lineup factual evidence but does not map it to a run estimate. Existing non-zero preview damage remains research-only. Promotion still requires dependency audit, legitimate replay, regression review, and prospective shadow validation.", freshnessKey: "SAVANT_PITCH_LEVEL",
   },

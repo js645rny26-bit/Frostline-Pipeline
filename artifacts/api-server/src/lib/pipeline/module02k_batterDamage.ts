@@ -7,12 +7,41 @@
  */
 
 import { createHash } from "node:crypto";
-import type { LineupPlayer } from "./module04c_startingNine.js";
+import type { LineupPlayer, StartingNineGame } from "./module04c_startingNine.js";
 import type { SavantPitchLevelEvent } from "./module02h_savantPitchLevel.js";
 import { FROSTLINE_BATTING_ORDER_WEIGHTS, previousIsoDate } from "./module02j_batterVsHand.js";
 
-export const BATTER_DAMAGE_VERSION = "1.0.0";
+export const BATTER_DAMAGE_VERSION = "1.1.0";
 export const HARD_HIT_EXIT_VELOCITY_MPH = 95;
+
+/**
+ * Minimum batted-ball sample that can be called usable in Patch B research.
+ *
+ * This is an outcome-independent precision rule, not a fitted baseball
+ * coefficient.  For a binomial rate, the worst-case normal-approximation
+ * 95% margin of error occurs at p=0.5.  Requiring that margin to be no wider
+ * than 20 percentage points gives:
+ *
+ *   ceil(1.96^2 * 0.5 * 0.5 / 0.20^2) = 25 BBE.
+ *
+ * Raw counts and rates remain visible below this threshold, but those rows
+ * are LOW_SAMPLE and cannot satisfy a future mapping gate.
+ */
+export const BATTER_DAMAGE_USABLE_BBE_MIN = 25;
+
+export type BatterDamageSampleStatus = "NO_SAMPLE" | "LOW_SAMPLE" | "USABLE_SAMPLE";
+export type DamageLineupState = "PROJECTED" | "CONFIRMED" | "PARTIAL" | "UNKNOWN";
+
+/**
+ * Exact, MLBAM-verified identities for names that the projected-lineup source
+ * emits differently from (or outside) the active-roster name map.  This is an
+ * exact alias registry, never fuzzy matching.
+ */
+export const PATCH_B_VERIFIED_MLBAM_IDENTITIES = new Map<string, number>([
+  ["dansby swanson", 621020],
+  ["kike hernandez", 571771],
+  ["enrique hernandez", 571771],
+]);
 
 export interface BatterDamageDailyAggregate {
   game_date: string;
@@ -48,6 +77,7 @@ export interface BatterDamageProfile {
   hr_pct: number | null;
   avg_exit_velocity: number | null;
   status: "OBSERVED" | "NO_BATTED_BALL_SAMPLE";
+  sample_status: BatterDamageSampleStatus;
 }
 
 export interface BatterDamageDataset {
@@ -65,10 +95,17 @@ export interface BatterDamageDataset {
 export interface DamageLineupProfile {
   weighted_hard_hit_pct: number | null;
   total_bbe: number;
+  lineup_hitters: number;
+  lineup_weight_total: number;
   matched_mlbam_hitters: number;
   observed_hitters: number;
+  low_sample_hitters: number;
+  usable_sample_hitters: number;
+  no_sample_hitters: number;
   identity_coverage: number;
   observed_coverage: number;
+  weighted_observed_coverage: number;
+  weighted_usable_coverage: number;
   missing_hitters: string[];
   driver_trace: string;
   status: "AVAILABLE" | "PARTIAL_IDENTITY" | "NO_SOURCE_DATA" | "NO_LINEUP";
@@ -95,6 +132,31 @@ function round(value: number, digits = 6): number {
 
 function normalizeName(name: string): string {
   return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+}
+
+export function resolvePatchBDamageIdentity(
+  name: string,
+  nameToIdMap: ReadonlyMap<string, number>,
+): number | undefined {
+  const normalized = normalizeName(name);
+  return nameToIdMap.get(normalized) ?? PATCH_B_VERIFIED_MLBAM_IDENTITIES.get(normalized);
+}
+
+export function classifyBatterDamageSample(bbe: number): BatterDamageSampleStatus {
+  if (bbe <= 0) return "NO_SAMPLE";
+  return bbe < BATTER_DAMAGE_USABLE_BBE_MIN ? "LOW_SAMPLE" : "USABLE_SAMPLE";
+}
+
+/** Preserve the exact pregame lineup state available when the row is built. */
+export function resolveDamageLineupState(card: StartingNineGame | undefined): DamageLineupState {
+  if (!card) return "UNKNOWN";
+  const awayCount = card.away_lineup.slice(0, 9).length;
+  const homeCount = card.home_lineup.slice(0, 9).length;
+  if (awayCount === 0 && homeCount === 0) return "UNKNOWN";
+  const awayStatus = card.away_lineup_status ?? card.lineup_status;
+  const homeStatus = card.home_lineup_status ?? card.lineup_status;
+  if (awayCount < 9 || homeCount < 9 || awayStatus !== homeStatus) return "PARTIAL";
+  return awayStatus === "official" ? "CONFIRMED" : "PROJECTED";
 }
 
 function emptyIntegrity(): BatterDamageIntegrity {
@@ -230,6 +292,7 @@ export function buildBatterDamageDataset(
       hr_pct: bbe > 0 ? round(100 * (row?.home_runs ?? 0) / bbe) : null,
       avg_exit_velocity: bbe > 0 ? round((row?.exit_velocity_sum ?? 0) / bbe) : null,
       status: bbe > 0 ? "OBSERVED" : "NO_BATTED_BALL_SAMPLE",
+      sample_status: classifyBatterDamageSample(bbe),
     });
   }
   const lag = actual === null
@@ -266,10 +329,17 @@ export function buildDamageLineupProfile(
   const empty = (status: DamageLineupProfile["status"]): DamageLineupProfile => ({
     weighted_hard_hit_pct: null,
     total_bbe: 0,
+    lineup_hitters: lineup.slice(0, 9).length,
+    lineup_weight_total: 0,
     matched_mlbam_hitters: 0,
     observed_hitters: 0,
+    low_sample_hitters: 0,
+    usable_sample_hitters: 0,
+    no_sample_hitters: 0,
     identity_coverage: 0,
     observed_coverage: 0,
+    weighted_observed_coverage: 0,
+    weighted_usable_coverage: 0,
     missing_hitters: lineup.map((player) => player.name),
     driver_trace: "",
     status,
@@ -281,6 +351,11 @@ export function buildDamageLineupProfile(
   let totalBbe = 0;
   let matched = 0;
   let observed = 0;
+  let lowSample = 0;
+  let usableSample = 0;
+  let noSample = 0;
+  let observedWeight = 0;
+  let usableWeight = 0;
   const missing: string[] = [];
   const drivers: string[] = [];
   const slots = lineup.slice(0, 9);
@@ -289,7 +364,7 @@ export function buildDamageLineupProfile(
     const slot = Math.max(0, Math.min(8, (player.batting_order || index + 1) - 1));
     const weight = FROSTLINE_BATTING_ORDER_WEIGHTS[slot] ?? 1;
     weightTotal += weight;
-    const id = nameToIdMap.get(normalizeName(player.name));
+    const id = resolvePatchBDamageIdentity(player.name, nameToIdMap);
     const profile = id ? dataset.profiles.get(id) : null;
     if (!id || !profile) {
       missing.push(player.name);
@@ -299,18 +374,36 @@ export function buildDamageLineupProfile(
     }
     matched++;
     totalBbe += profile.bbe;
-    if (profile.hard_hit_pct !== null) observed++;
+    if (profile.hard_hit_pct !== null) {
+      observed++;
+      observedWeight += weight;
+    }
+    if (profile.sample_status === "USABLE_SAMPLE") {
+      usableSample++;
+      usableWeight += weight;
+    } else if (profile.sample_status === "LOW_SAMPLE") {
+      lowSample++;
+    } else {
+      noSample++;
+    }
     const hardHitPct = profile.hard_hit_pct ?? dataset.league_hard_hit_pct;
     hardHitSum += hardHitPct * weight;
-    drivers.push(`${slot + 1}:${id}:BBE=${profile.bbe}:HH=${profile.hard_hits}:HH_PCT=${profile.hard_hit_pct ?? "MISSING"}:STATUS=${profile.status}`);
+    drivers.push(`${slot + 1}:${id}:BBE=${profile.bbe}:HH=${profile.hard_hits}:HH_PCT=${profile.hard_hit_pct ?? "MISSING"}:STATUS=${profile.status}:SAMPLE_STATUS=${profile.sample_status}${profile.hard_hit_pct === null ? `:IMPUTED=LEAGUE=${dataset.league_hard_hit_pct}` : ""}`);
   }
   return {
     weighted_hard_hit_pct: weightTotal > 0 ? round(hardHitSum / weightTotal) : null,
     total_bbe: totalBbe,
+    lineup_hitters: slots.length,
+    lineup_weight_total: weightTotal,
     matched_mlbam_hitters: matched,
     observed_hitters: observed,
+    low_sample_hitters: lowSample,
+    usable_sample_hitters: usableSample,
+    no_sample_hitters: noSample,
     identity_coverage: slots.length > 0 ? round(matched / slots.length) : 0,
     observed_coverage: slots.length > 0 ? round(observed / slots.length) : 0,
+    weighted_observed_coverage: weightTotal > 0 ? round(observedWeight / weightTotal) : 0,
+    weighted_usable_coverage: weightTotal > 0 ? round(usableWeight / weightTotal) : 0,
     missing_hitters: missing,
     driver_trace: drivers.join(" | "),
     status: matched === slots.length ? "AVAILABLE" : "PARTIAL_IDENTITY",

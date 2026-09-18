@@ -43,6 +43,9 @@ export interface StartingNineGame {
   home_abbr: string | null;
   venue: string;
   lineup_status: "official" | "projected";
+  /** Per-side source state retained for research provenance. */
+  away_lineup_status?: "official" | "projected";
+  home_lineup_status?: "official" | "projected";
   park_factors: ParkFactors;
   away_lineup: LineupPlayer[];
   home_lineup: LineupPlayer[];
@@ -288,6 +291,8 @@ export async function fetchStartingNine(date: string): Promise<StartingNineResul
       home_abbr:      homeAbbr,
       venue:          ev.venue,
       lineup_status:  lineupStatus,
+      away_lineup_status: ev.awayOfficial ? "official" : "projected",
+      home_lineup_status: ev.homeOfficial ? "official" : "projected",
       park_factors:   pf,
       away_lineup:    resolveLineup(ev.awayPlayers),
       home_lineup:    resolveLineup(ev.homePlayers),

@@ -224,7 +224,7 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      evidence from retained D-1 Savant pitch events and materializes exact-
  *      lineup research profiles. Active HR/XBH damage remains gated off.
  */
-export const WORKBOOK_SCHEMA_VERSION = 67;
+export const WORKBOOK_SCHEMA_VERSION = 68;
 
 export interface ColumnDef {
   name: string;
@@ -13118,7 +13118,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       [
         "Damage_Version", "Batter_MLBAM_ID", "BBE", "Hard_Hits", "Hard_Hit_Pct", "Barrels",
         "Barrel_Known_BBE", "Barrel_Pct", "XBH", "XBH_Pct", "Home_Runs", "HR_Pct",
-        "Avg_Exit_Velocity", "Profile_Status", "Requested_Through_Date", "Actual_Data_Through_Date",
+        "Avg_Exit_Velocity", "Profile_Status", "Sample_Status", "Requested_Through_Date", "Actual_Data_Through_Date",
         "Freshness_Lag_Days", "Freshness_Status", "League_Hard_Hit_Pct", "Deterministic_Hash",
       ],
       ["Batter_MLBAM_ID", "BBE", "Hard_Hits", "Hard_Hit_Pct", "Barrels", "Barrel_Known_BBE", "Barrel_Pct", "XBH", "XBH_Pct", "Home_Runs", "HR_Pct", "Avg_Exit_Velocity", "Freshness_Lag_Days", "League_Hard_Hit_Pct"],
@@ -13134,10 +13134,14 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
     frozenRows: 1,
     columns: diagnosticColumns(
       [
-        "Date", "Game_ID", "Snapshot_TS", "Damage_Version", "Active_Input",
+        "Date", "Game_ID", "Snapshot_TS", "Damage_Version", "Active_Input", "Lineup_State",
         "Away_Weighted_Hard_Hit_Pct", "Home_Weighted_Hard_Hit_Pct", "Away_Total_BBE", "Home_Total_BBE",
         "Away_Matched_Hitters", "Home_Matched_Hitters", "Away_Observed_Hitters", "Home_Observed_Hitters",
         "Away_Identity_Coverage", "Home_Identity_Coverage", "Away_Observed_Coverage", "Home_Observed_Coverage",
+        "Away_Low_Sample_Hitters", "Home_Low_Sample_Hitters", "Away_Usable_Sample_Hitters", "Home_Usable_Sample_Hitters",
+        "Away_No_Sample_Hitters", "Home_No_Sample_Hitters",
+        "Away_Weighted_Observed_Coverage", "Home_Weighted_Observed_Coverage",
+        "Away_Weighted_Usable_Coverage", "Home_Weighted_Usable_Coverage",
         "Away_Profile_Status", "Home_Profile_Status", "Away_Missing_Hitters", "Home_Missing_Hitters",
         "Away_Driver_Trace", "Home_Driver_Trace", "Requested_Through_Date", "Actual_Data_Through_Date",
         "Freshness_Status", "League_Hard_Hit_Pct", "Deterministic_Hash", "Collision_Ledger_Status",
@@ -13146,7 +13150,36 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Away_Weighted_Hard_Hit_Pct", "Home_Weighted_Hard_Hit_Pct", "Away_Total_BBE", "Home_Total_BBE",
         "Away_Matched_Hitters", "Home_Matched_Hitters", "Away_Observed_Hitters", "Home_Observed_Hitters",
         "Away_Identity_Coverage", "Home_Identity_Coverage", "Away_Observed_Coverage", "Home_Observed_Coverage",
+        "Away_Low_Sample_Hitters", "Home_Low_Sample_Hitters", "Away_Usable_Sample_Hitters", "Home_Usable_Sample_Hitters",
+        "Away_No_Sample_Hitters", "Home_No_Sample_Hitters",
+        "Away_Weighted_Observed_Coverage", "Home_Weighted_Observed_Coverage",
+        "Away_Weighted_Usable_Coverage", "Home_Weighted_Usable_Coverage",
         "League_Hard_Hit_Pct",
+      ],
+      "SYSTEM",
+    ),
+  },
+
+  {
+    name: "BATTER_DAMAGE_MATURITY_V1",
+    description:
+      "Current-slate Patch B source-maturity summary. Reports exact lineup state, identity/sample coverage, and research-only governance; never feeds projection or authorization.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      [
+        "Date", "Snapshot_TS", "Damage_Version", "Total_Lineup_Hitters", "Matched_Lineup_Hitters",
+        "Observed_Hitters", "Low_Sample_Hitters", "Usable_Sample_Hitters", "No_Sample_Hitters",
+        "Weighted_Observed_Coverage", "Weighted_Usable_Coverage", "Identity_Misses",
+        "Projected_Games", "Confirmed_Games", "Partial_Games", "Unknown_Games",
+        "Teams_Zero_Usable", "Teams_Full_Usable", "Requested_Through_Date", "Actual_Data_Through_Date",
+        "Freshness_Status", "Deterministic_Hash", "Active_Input", "Collision_Ledger_Status",
+      ],
+      [
+        "Total_Lineup_Hitters", "Matched_Lineup_Hitters", "Observed_Hitters", "Low_Sample_Hitters",
+        "Usable_Sample_Hitters", "No_Sample_Hitters", "Weighted_Observed_Coverage",
+        "Weighted_Usable_Coverage", "Identity_Misses", "Projected_Games", "Confirmed_Games",
+        "Partial_Games", "Unknown_Games", "Teams_Zero_Usable", "Teams_Full_Usable",
       ],
       "SYSTEM",
     ),
