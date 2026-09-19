@@ -458,6 +458,20 @@ async function ensureSheets(workbookId: string, names: readonly string[]): Promi
   }
 }
 
+export function selectInventoryRowsForAppend(
+  existing: readonly unknown[][],
+  rows: readonly ActivePitchingInventoryRow[],
+  protectedGameIds: ReadonlySet<string> = new Set(),
+): ActivePitchingInventoryRow[] {
+  const existingKeys = new Set(existing.map((row) => [0, 1, 2, 6]
+    .map((index) => String(row[index] ?? ""))
+    .join("|")));
+  return rows.filter((row) =>
+    !protectedGameIds.has(row.game_id)
+    && !existingKeys.has(`${row.date}|${row.game_id}|${row.team_side}|${row.snapshot_ts}`),
+  );
+}
+
 export async function writeActivePitchingInventory(
   date: string,
   rows: readonly ActivePitchingInventoryRow[],
@@ -473,9 +487,13 @@ export async function writeActivePitchingInventory(
     await writeRange(workbookId, `${ACTIVE_PITCHING_INVENTORY_SHEET}!A1:BA1`, [[...ACTIVE_PITCHING_INVENTORY_HEADERS]]);
     await writeRange(workbookId, `${ACTIVE_PITCHING_INVENTORY_SUMMARY_SHEET}!A1:R1`, [[...ACTIVE_PITCHING_INVENTORY_SUMMARY_HEADERS]]);
     const existing = (await readRange(workbookId, `${ACTIVE_PITCHING_INVENTORY_SHEET}!A2:BA5000`).catch(() => ({ values: [] }))).values ?? [];
-    const existingKeys = new Set(existing.map((row) => `${String(row[0] ?? "")}|${String(row[1] ?? "")}|${String(row[2] ?? "")}`));
-    const writable = rows.filter((row) => !options.protection?.protected_game_ids.has(row.game_id));
-    const appended = writable.filter((row) => !existingKeys.has(`${row.date}|${row.game_id}|${row.team_side}`));
+    // Module 36 is a prospective snapshot ledger, not a one-row-per-game
+    // materialization. A later mutable pregame run may learn that the named
+    // starter is actually an opener or that a credible bulk arm is available.
+    // Preserve the earlier observation and append the later observation. The
+    // snapshot timestamp is part of the identity so an idempotent retry of the
+    // same payload cannot duplicate it.
+    const appended = selectInventoryRowsForAppend(existing, rows, options.protection?.protected_game_ids);
     if (appended.length > 0) {
       const start = existing.length + 2;
       await writeRange(workbookId, `${ACTIVE_PITCHING_INVENTORY_SHEET}!A${start}:BA${start + appended.length - 1}`, appended.map(rowValues));
@@ -487,7 +505,7 @@ export async function writeActivePitchingInventory(
       await writeRange(workbookId, `${ACTIVE_PITCHING_INVENTORY_SUMMARY_SHEET}!A${start}:R${start + summaries.length - 1}`, summaries);
     }
     const preserved = rows.length - appended.length;
-    if (preserved > 0) warnings.push(`${preserved} inventory rows were protected or already prospectively recorded.`);
+    if (preserved > 0) warnings.push(`${preserved} inventory rows were protected or were exact snapshot retries.`);
     return { status: warnings.length ? "partial" : "success", date, rows_written: appended.length, summary_rows_written: summaries.length, rows_preserved: preserved, rows: [...rows], warnings, errors };
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
@@ -525,6 +543,23 @@ function tableObjects(values: unknown[][]): Array<Record<string, unknown>> {
   const [header = [], ...rows] = values;
   const names = header.map((value) => String(value ?? "").trim());
   return rows.map((row) => Object.fromEntries(names.map((name, index) => [name, row[index]])));
+}
+
+export function selectLatestCompleteInventorySnapshot(
+  rows: Array<Record<string, unknown>>,
+): { snapshot_ts: string; away: Record<string, unknown>; home: Record<string, unknown> } | null {
+  const bySnapshot = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of rows) {
+    const snapshot = String(row.Snapshot_TS ?? "");
+    if (!snapshot) continue;
+    bySnapshot.set(snapshot, [...(bySnapshot.get(snapshot) ?? []), row]);
+  }
+  for (const [snapshot, snapshotRows] of [...bySnapshot.entries()].sort(([left], [right]) => right.localeCompare(left))) {
+    const away = snapshotRows.find((row) => String(row.Team_Side) === "AWAY");
+    const home = snapshotRows.find((row) => String(row.Team_Side) === "HOME");
+    if (away && home) return { snapshot_ts: snapshot, away, home };
+  }
+  return null;
 }
 
 function chainInnings(chain: string, pitcherName: string): number | null {
@@ -621,8 +656,11 @@ export async function runActivePitchingInventoryReplay(
     }
     const replayObjects: Array<Record<string, unknown>> = [];
     for (const [key, rows] of byGame) {
-      const away = rows.find((row) => String(row.Team_Side) === "AWAY");
-      const home = rows.find((row) => String(row.Team_Side) === "HOME");
+      // Select the latest complete prospectively captured snapshot. Never mix
+      // the away side from one refresh with the home side from another.
+      const selected = selectLatestCompleteInventorySnapshot(rows);
+      const away = selected?.away;
+      const home = selected?.home;
       const actual = allocation.get(key);
       if (!away || !home || !actual) continue;
       const actualAway = numeric(actual.Actual_Away_Runs);

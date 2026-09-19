@@ -10,6 +10,8 @@ import {
   ACTIVE_PITCHING_INVENTORY_SUMMARY_HEADERS,
   auditHistoricalAPIReplayAvailability,
   buildActivePitchingInventory,
+  selectInventoryRowsForAppend,
+  selectLatestCompleteInventorySnapshot,
 } from "./module36_activePitchingInventory.js";
 import { WORKBOOK_SCHEMA, WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
 import type { NormalizedGame } from "./module06_normalization.js";
@@ -140,4 +142,38 @@ test("canonical proof cases remain not observable rather than postgame-backfille
   assert.equal(ACTIVE_PITCHING_INVENTORY_PROOF_CASES.length, 3);
   assert.ok(ACTIVE_PITCHING_INVENTORY_PROOF_CASES.every((row) => row[2] === "NOT_OBSERVABLE_PREGAME"));
   assert.equal(auditHistoricalAPIReplayAvailability([]).status, "INSUFFICIENT_PROSPECTIVE_API_HISTORY");
+});
+
+test("replay uses the latest complete refresh and never mixes snapshot sides", () => {
+  const earlyAway = { Snapshot_TS: "2026-09-19T17:43:46.098Z", Team_Side: "AWAY", Pitching_Plan_Type: "CONVENTIONAL_STARTER" };
+  const earlyHome = { Snapshot_TS: "2026-09-19T17:43:46.098Z", Team_Side: "HOME", Pitching_Plan_Type: "CONVENTIONAL_STARTER" };
+  const lateAway = { Snapshot_TS: "2026-09-19T21:51:00.000Z", Team_Side: "AWAY", Pitching_Plan_Type: "OPENER_PLUS_CREDIBLE_BULK" };
+  const lateHome = { Snapshot_TS: "2026-09-19T21:51:00.000Z", Team_Side: "HOME", Pitching_Plan_Type: "CONVENTIONAL_STARTER" };
+  const incompleteNewer = { Snapshot_TS: "2026-09-19T21:55:00.000Z", Team_Side: "AWAY", Pitching_Plan_Type: "ROLE_UNRESOLVED" };
+
+  const selected = selectLatestCompleteInventorySnapshot([
+    earlyAway, earlyHome, lateAway, lateHome, incompleteNewer,
+  ]);
+  assert.equal(selected?.snapshot_ts, "2026-09-19T21:51:00.000Z");
+  assert.equal(selected?.away.Pitching_Plan_Type, "OPENER_PLUS_CREDIBLE_BULK");
+  assert.equal(selected?.home.Pitching_Plan_Type, "CONVENTIONAL_STARTER");
+});
+
+test("mutable refreshes append while protected games and exact retries remain immutable", () => {
+  const built = buildActivePitchingInventory(
+    [game], [summary], bullpen, [...appearances(21), ...appearances(22), ...appearances(11)],
+    new Map([[game.legacy_game_id, sweState(6)]]), new Map(), new Map(),
+    "2026-09-18", "2026-09-19T17:43:46.098Z",
+  );
+  const away = built.find((row) => row.team_side === "AWAY")!;
+  const existing = [[away.date, away.game_id, away.team_side, "", "", "", away.snapshot_ts]];
+  const retry = { ...away };
+  const late = { ...away, snapshot_ts: "2026-09-19T21:51:00.000Z" };
+  const protectedLate = { ...late, game_id: "20260919_LOCKED_GAME" };
+
+  assert.deepEqual(selectInventoryRowsForAppend(existing, [retry, late]), [late]);
+  assert.deepEqual(
+    selectInventoryRowsForAppend(existing, [retry, late, protectedLate], new Set([protectedLate.game_id])),
+    [late],
+  );
 });

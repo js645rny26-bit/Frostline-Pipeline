@@ -6,6 +6,19 @@ Active projection impact: none. `Active_Input=NO` and
 `Projection_Mapping_Status=SHADOW_ONLY_NOT_COMMISSIONED` are commissioning
 sentinels.
 
+## Prospective snapshot lifecycle
+
+`ACTIVE_PITCHING_INVENTORY_V1` is an immutable snapshot ledger. Each mutable
+pregame refresh appends a new `(Date, Game_ID, Team_Side, Snapshot_TS)` row;
+it does not overwrite the earlier observation. Protected or started games do
+not receive another snapshot. Exact retries with the same snapshot timestamp
+are idempotent.
+
+Settlement/replay selects the latest *complete* away/home snapshot captured
+before protection. It never combines sides from different refreshes. This is
+required so a late opener, bulk, or availability change can enter prospective
+evidence without rewriting what the earlier run knew.
+
 ## Current architecture
 
 The active path is two-phase:
