@@ -881,6 +881,50 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "PUSH and UNGRADABLE are excluded from directional accuracy. A zero-count NO_CALL cohort means no pregame operator NO_CALL state was frozen, not perfect abstention.",
   },
   {
+    sheet: "ACTIVE_PITCHING_INVENTORY_V1",
+    stage: "AUDIT",
+    timing: "Every legitimate pre-first-pitch publish after Module 09 and SWE preparation (Module 36)",
+    purpose:
+      "Prospectively preserves the named starter, source-supported inferred bulk/swing options, explicit availability gaps, and starter/bulk/true-bullpen innings allocation.",
+    boardRelationship:
+      "Research-only. Active_Input=NO; no Module 09, GAME_SUMMARY, SLATE_BOARD, market, truth, confidence, or authorization consumer exists.",
+    readNote:
+      "Read Bulk_Observability and Pitcher_Chain_Status before the estimate. PROBABLE_INFERRED is not an announced follower, and NOT_OBSERVABLE_PREGAME must not be reconstructed from postgame pitcher order.",
+  },
+  {
+    sheet: "ACTIVE_PITCHING_INVENTORY_SUMMARY_V1",
+    stage: "AUDIT",
+    timing: "Appended with each legitimate Module 36 pregame inventory snapshot",
+    purpose:
+      "Keeps the untouched production team/total projection beside the pitching-chain shadow projection and identifies whether a chain delta was legitimately estimable.",
+    boardRelationship:
+      "Research-only comparison. It does not overwrite GAME_SUMMARY or any frozen packet.",
+    readNote:
+      "Replay_Eligibility must be PROSPECTIVE_SHADOW_ELIGIBLE before interpreting a delta. Historical cases without retained pregame chain state remain excluded.",
+  },
+  {
+    sheet: "ACTIVE_PITCHING_INVENTORY_REPLAY_V1",
+    stage: "REPLAY",
+    timing: "Daily settlement after official outcomes and phase diagnostics (Module 36)",
+    purpose:
+      "Grades only prospectively frozen Module 36 rows against team scores and actual pitching phases; the canonical Sept. 17-18 proof cases remain explicit non-observable audit rows.",
+    boardRelationship:
+      "Settlement research only. It cannot reconstruct a candidate, rewrite a packet, or change an active projection.",
+    readNote:
+      "Only PROSPECTIVE_SHADOW_SETTLED rows enter metrics. NOT_OBSERVABLE proof cases document the historical retention boundary and are excluded.",
+  },
+  {
+    sheet: "ACTIVE_PITCHING_INVENTORY_REPLAY_SUMMARY_V1",
+    stage: "REPLAY",
+    timing: "Rebuilt with Module 36 during daily settlement",
+    purpose:
+      "Compares production and API total/allocation error overall and by pitching-plan type, with separate starter, bulk, and true-bullpen phase diagnostics.",
+    boardRelationship:
+      "Research verdict only; there is no automatic promotion path.",
+    readNote:
+      "INSUFFICIENT_PROSPECTIVE_API_HISTORY is the correct initial state. Do not infer improvement from the proof cases or an empty replay.",
+  },
+  {
     sheet: "FAILURE_CLASSIFICATION_SHADOW_V1",
     stage: "REPLAY",
     timing:

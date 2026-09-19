@@ -404,6 +404,8 @@ export async function repairWorkbookSchemaReference(
         "v65 (2026-09-15): Module 34 adds research-only slate-size and composition diagnostics plus a separate append-only human truth/execution postmortem audit. Slate size has no active consumer, and manual execution lines never overwrite frozen pipeline market evidence.",
         "v66 (2026-09-17): SHADOW_TRUTH_DIRECTION_V1 freezes the existing projection-versus-literal-line direction independently of operational BET/PASS/NO_CALL; SHADOW_TRUTH_SUMMARY_V1 grades only prospective frozen research rows. Missing literal lines and exact ties remain UNGRADABLE, and no active decision consumer exists.",
         "v67 (2026-09-17): Patch B derives D-1 batter batted-ball damage evidence from retained Savant pitch-level snapshots and materializes exact-lineup research profiles. Active HR/XBH damage remains fail-closed and no projection, board, packet, market, or authorization consumer is added.",
+        "v68 (2026-09-18): Patch B adds lineup-state provenance, sample-adequacy governance, deterministic identity hygiene, cumulative-history reconciliation, and hold-state sentinels while all damage mapping remains uncommissioned.",
+        "v69 (2026-09-19): Module 36 adds the prospective research-only Active Pitching Inventory, separating named starter/opener, source-supported inferred bulk/swing options, and true generic bullpen exposure. Historical chains cannot be reconstructed from postgame order; active projections remain unchanged.",
     ],
     [
       "Workbook_Purpose",

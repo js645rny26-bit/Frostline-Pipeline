@@ -103,6 +103,13 @@ import {
   type ShadowTruthDirectionResult,
 } from "./module35_shadowTruthDirection.js";
 import {
+  buildActivePitchingInventory,
+  runActivePitchingInventoryReplay,
+  writeActivePitchingInventory,
+  type ActivePitchingInventoryResult,
+  type ActivePitchingInventoryReplayResult,
+} from "./module36_activePitchingInventory.js";
+import {
   runFailureClassificationReplay,
   syncFailureClassificationShadow,
   type FailureClassificationReplayResult,
@@ -333,6 +340,8 @@ export interface PublishResult {
   module_20b_full_ladder_audit: FullLadderAuditResult;
   /** Module 35: research-only frozen direction; no projection or authorization consumer. */
   module_35_shadow_truth_direction: ShadowTruthDirectionResult;
+  /** Module 36: research-only pregame pitching-chain inventory and challenger. */
+  module_36_active_pitching_inventory: ActivePitchingInventoryResult;
   /** Schema/reference documentation refreshed from the runtime workbook schema. */
   module_schema_documentation: RepairSchemaResult;
   workbook_url: string;
@@ -777,6 +786,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_26_failure_classification: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen_preserved: 0, packets_ineligible: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_20b_full_ladder_audit: { status: "failure", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_35_shadow_truth_direction: { status: "failure", phase: "pregame", date, rows_written: 0, rows_updated: 0, rows_frozen: 0, rows_settled: 0, rows_preserved: 0, audit_gaps: 0, summary_rows_written: 0, warnings: [], errors: ["Skipped: Module 08 failed"] },
+      module_36_active_pitching_inventory: { status: "failure", date, rows_written: 0, summary_rows_written: 0, rows_preserved: 0, rows: [], warnings: [], errors: ["Skipped: Module 08 failed"] },
       module_schema_documentation: {
         workbook_id: workbookId,
         schema_reference_rows: 0,
@@ -1127,9 +1137,10 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   for (const appearance of [...historicalSWEAppearances, ...currentSWEAppearances]) {
     appearanceByKey.set(`${appearance.game_date}|${appearance.game_pk}|${appearance.pitcher_id}`, appearance);
   }
+  const allSWEAppearances = [...appearanceByKey.values()];
   const swe = buildStarterWorkloadEstimatorStates(
     slate.games,
-    [...appearanceByKey.values()],
+    allSWEAppearances,
     date,
     statcastDataThroughDate,
   );
@@ -1143,6 +1154,31 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     { games: swe.states.size, conventional_role_prior: swe.conventional_role_prior, distinct_expected_ip: swe.distinct_expected_ip },
     "Full pipeline: Starter Workload Estimator V1 shadow prepared",
   );
+
+  // Module 36 resolves identity/sequence before generic bullpen remainder.
+  // It is deliberately downstream of the active projection calculation and
+  // writes only its own research sheets. No active consumer imports it.
+  const apiRows = buildActivePitchingInventory(
+    recalculationGames,
+    mod09.game_summary_rows,
+    bullpenResult,
+    allSWEAppearances,
+    swe.states,
+    pitcherSeasonStats?.stats ?? new Map(),
+    statcastPitcherExpectedMap,
+    statcastDataThroughDate,
+  );
+  const mod36 = await writeActivePitchingInventory(date, apiRows, {
+    workbookId,
+    protection: publicationProtectionNow(),
+  }).catch((err: unknown): ActivePitchingInventoryResult => ({
+    status: "failure", date, rows_written: 0, summary_rows_written: 0,
+    rows_preserved: 0, rows: apiRows, warnings: [],
+    errors: [err instanceof Error ? err.message : String(err)],
+  }));
+  if (mod36.status === "failure") {
+    logger.warn({ errors: mod36.errors }, "Full pipeline: Module 36 active pitching inventory shadow failed");
+  }
 
   const mod20a: PregamePacketResult = await writePregamePacketHistory(
     date,
@@ -1326,6 +1362,9 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   for (const error of mod35.errors) {
     logger.warn({ error }, "Full pipeline: Module 35 shadow truth warning");
   }
+  for (const error of mod36.errors) {
+    logger.warn({ error }, "Full pipeline: Module 36 active pitching inventory warning");
+  }
 
   // Module 12: Append run log row to RUN_LOG sheet (non-blocking — failure is advisory)
   const mod12 = await archiveRunBundle(
@@ -1371,6 +1410,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_26_failure_classification: mod26,
     module_20b_full_ladder_audit: mod20b,
     module_35_shadow_truth_direction: mod35,
+    module_36_active_pitching_inventory: mod36,
     module_schema_documentation: schemaDocumentation,
     workbook_url: `https://docs.google.com/spreadsheets/d/${workbookId}`,
     errors: allErrors,
@@ -1403,6 +1443,7 @@ export interface DailySettlementResult {
   allocation_bridge_status: AllocationBridgeResult["status"];
   slate_size_diagnostic_status: SlateSizeDiagnosticResult["status"];
   shadow_truth_direction_status: ShadowTruthDirectionResult["status"];
+  active_pitching_inventory_replay_status: ActivePitchingInventoryReplayResult["status"];
   packet_finalization_status: PregamePacketFinalizationResult["status"];
   full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
@@ -1427,6 +1468,7 @@ export interface DailySettlementResult {
   allocation_bridge: AllocationBridgeResult;
   slate_size_diagnostic: SlateSizeDiagnosticResult;
   shadow_truth_direction: ShadowTruthDirectionResult;
+  active_pitching_inventory_replay: ActivePitchingInventoryReplayResult;
   packet_finalization: PregamePacketFinalizationResult;
   full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
@@ -1653,6 +1695,25 @@ export async function runDailySettlement(
   warnings.push(...allocation_bridge.warnings.map((message) => `allocation_bridge: ${message}`));
   if (allocation_bridge.status === "failure") {
     warnings.push(...allocation_bridge.errors.map((message) => `allocation_bridge: ${message}`));
+  }
+
+  // Module 36 grades only inventory rows that were actually preserved before
+  // first pitch. The pre-Module-36 proof cases remain NOT_OBSERVABLE and are
+  // never reconstructed from the final pitching order.
+  const active_pitching_inventory_replay = await runActivePitchingInventoryReplay({ workbookId }).catch(
+    (err: unknown): ActivePitchingInventoryReplayResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        status: "failure", prospective_inventory_rows: 0, eligible_games: 0,
+        replay_rows_written: 0, summary_rows_written: 0,
+        replay_status: "INSUFFICIENT_PROSPECTIVE_API_HISTORY",
+        warnings: [], errors: [msg],
+      };
+    },
+  );
+  warnings.push(...active_pitching_inventory_replay.warnings.map((message) => `active_pitching_inventory_replay: ${message}`));
+  if (active_pitching_inventory_replay.status === "failure") {
+    warnings.push(...active_pitching_inventory_replay.errors.map((message) => `active_pitching_inventory_replay: ${message}`));
   }
 
   // Module 31 grades only a prospectively frozen BVH test-copy candidate.
@@ -1893,6 +1954,7 @@ export async function runDailySettlement(
     { module: "MODULE_33_ALLOCATION_BRIDGE_V1", status: allocation_bridge.status === "failure" ? "warning" : "success" },
     { module: "MODULE_34_SLATE_SIZE_DIAGNOSTIC_V1", status: slate_size_diagnostic.status === "failure" ? "warning" : "success" },
     { module: "MODULE_35_SHADOW_TRUTH_DIRECTION_V1", status: shadow_truth_direction.status === "failure" ? "warning" : "success" },
+    { module: "MODULE_36_ACTIVE_PITCHING_INVENTORY_REPLAY", status: active_pitching_inventory_replay.status === "failure" ? "warning" : "success" },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
@@ -1951,6 +2013,7 @@ export async function runDailySettlement(
       allocation_bridge_status: allocation_bridge.status,
       slate_size_diagnostic_status: slate_size_diagnostic.status,
       shadow_truth_direction_status: shadow_truth_direction.status,
+      active_pitching_inventory_replay_status: active_pitching_inventory_replay.status,
       packet_finalization_status: packet_finalization.status,
       full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
@@ -1991,6 +2054,7 @@ export async function runDailySettlement(
     allocation_bridge_status: allocation_bridge.status,
     slate_size_diagnostic_status: slate_size_diagnostic.status,
     shadow_truth_direction_status: shadow_truth_direction.status,
+    active_pitching_inventory_replay_status: active_pitching_inventory_replay.status,
     packet_finalization_status: packet_finalization.status,
     full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
@@ -2014,6 +2078,7 @@ export async function runDailySettlement(
     allocation_bridge,
     slate_size_diagnostic,
     shadow_truth_direction,
+    active_pitching_inventory_replay,
     packet_finalization,
     full_ladder_sync,
     schema_documentation,

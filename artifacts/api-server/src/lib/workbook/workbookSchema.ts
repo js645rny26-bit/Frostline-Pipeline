@@ -224,7 +224,7 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      evidence from retained D-1 Savant pitch events and materializes exact-
  *      lineup research profiles. Active HR/XBH damage remains gated off.
  */
-export const WORKBOOK_SCHEMA_VERSION = 68;
+export const WORKBOOK_SCHEMA_VERSION = 69;
 
 export interface ColumnDef {
   name: string;
@@ -270,6 +270,7 @@ export interface ColumnDef {
     | "MODULE_33"
     | "MODULE_34"
     | "MODULE_35"
+    | "MODULE_36"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -1181,6 +1182,63 @@ const SHADOW_TRUTH_SUMMARY_V1_COLUMN_NAMES = [
   "Shadow_Directions_Frozen", "Correct", "Incorrect", "Push", "Ungradable",
   "Directional_Eligible_N", "Directional_Accuracy", "Research_Status",
   "Summary_Notes", "Replay_TS",
+] as const;
+const ACTIVE_PITCHING_INVENTORY_V1_COLUMN_NAMES = [
+  "Date", "Game_ID", "Team_Side", "Pitching_Team", "Opposing_Offense",
+  "Scheduled_First_Pitch", "Snapshot_TS", "Data_Through_Date",
+  "Named_Starter_ID", "Named_Starter", "Named_Starter_Role",
+  "Starter_Expected_IP", "Starter_Expected_Pitches", "Starter_Role_Confidence",
+  "Production_Expected_IP", "SWE_Expected_IP", "SWE_Status",
+  "Expected_Bulk_Pitcher_ID", "Expected_Bulk_Pitcher", "Expected_Bulk_IP",
+  "Expected_Bulk_Pitches", "Bulk_Role_Confidence", "Bulk_Observability",
+  "Bulk_SWE_Status", "Secondary_Bulk_or_Swing", "Secondary_Bulk_Expected_IP",
+  "Secondary_Bulk_Confidence", "Expected_Leverage_Bridge", "Long_Relief_Options",
+  "Unavailable_Pitchers", "Limited_Pitchers", "Expected_Pitching_Sequence",
+  "Expected_Starter_Phase_IP", "Expected_Bulk_Phase_IP",
+  "Expected_Bullpen_Phase_IP", "True_Bullpen_Exposure_IP",
+  "Pitching_Plan_Type", "Pitcher_Chain_Confidence", "Pitcher_Chain_Status",
+  "Source_Provenance", "Freshness", "Missing_Data_Flags",
+  "Baseline_Opposing_Offense_Runs", "API_Shadow_Opposing_Offense_Runs",
+  "API_Shadow_Run_Delta", "Expected_Bulk_Quality_Factor",
+  "Generic_Bullpen_Quality_Factor", "Projection_Effect_Status",
+  "Active_Input", "Projection_Mapping_Status", "Record_Status",
+  "Deterministic_Hash", "Version",
+] as const;
+const ACTIVE_PITCHING_INVENTORY_SUMMARY_V1_COLUMN_NAMES = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Baseline_Away_Runs",
+  "Baseline_Home_Runs", "Baseline_Total", "API_Shadow_Away_Runs",
+  "API_Shadow_Home_Runs", "API_Shadow_Total", "API_Shadow_Total_Delta",
+  "Away_Pitching_Plan", "Home_Pitching_Plan", "Away_Chain_Status",
+  "Home_Chain_Status", "Replay_Eligibility", "Research_Status", "Snapshot_TS",
+] as const;
+const ACTIVE_PITCHING_INVENTORY_REPLAY_V1_COLUMN_NAMES = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Away_Pitching_Plan",
+  "Home_Pitching_Plan", "Baseline_Away_Runs", "Baseline_Home_Runs",
+  "Baseline_Total", "API_Shadow_Away_Runs", "API_Shadow_Home_Runs",
+  "API_Shadow_Total", "Actual_Away_Runs", "Actual_Home_Runs", "Actual_Total",
+  "Baseline_Total_Error", "Baseline_Total_Abs_Error", "API_Total_Error",
+  "API_Total_Abs_Error", "Baseline_Away_Abs_Error", "Baseline_Home_Abs_Error",
+  "API_Away_Abs_Error", "API_Home_Abs_Error", "Baseline_Higher_Side_Correct",
+  "API_Higher_Side_Correct", "Baseline_Allocation_Sign_Reversal",
+  "API_Allocation_Sign_Reversal", "Production_Away_Starter_IP",
+  "SWE_Away_Starter_IP", "API_Away_Starter_Phase_IP", "API_Away_Bulk_Phase_IP",
+  "API_Away_True_Bullpen_IP", "Actual_Away_Starter_IP", "Actual_Away_Bulk_IP",
+  "Actual_Away_True_Bullpen_IP", "Production_Home_Starter_IP",
+  "SWE_Home_Starter_IP", "API_Home_Starter_Phase_IP", "API_Home_Bulk_Phase_IP",
+  "API_Home_True_Bullpen_IP", "Actual_Home_Starter_IP", "Actual_Home_Bulk_IP",
+  "Actual_Home_True_Bullpen_IP", "Away_Phase_Allocation_Abs_Error",
+  "Home_Phase_Allocation_Abs_Error", "Replay_Status", "Settlement_TS",
+] as const;
+const ACTIVE_PITCHING_INVENTORY_REPLAY_SUMMARY_V1_COLUMN_NAMES = [
+  "Segment", "Eligible_N", "Baseline_Total_MAE", "API_Total_MAE",
+  "Baseline_Total_RMSE", "API_Total_RMSE", "Baseline_Signed_Bias",
+  "API_Signed_Bias", "Baseline_Away_MAE", "API_Away_MAE",
+  "Baseline_Home_MAE", "API_Home_MAE", "Baseline_Higher_Side_Accuracy",
+  "API_Higher_Side_Accuracy", "Baseline_Sign_Reversals", "API_Sign_Reversals",
+  "API_Starter_Phase_MAE", "API_Bulk_Phase_MAE", "API_True_Bullpen_Phase_MAE",
+  "Baseline_Misses_GE_3", "API_Misses_GE_3", "Baseline_Misses_GE_4",
+  "API_Misses_GE_4", "Baseline_Misses_GE_5", "API_Misses_GE_5",
+  "Replay_Status", "Replay_TS",
 ] as const;
 const FAILURE_CLASSIFICATION_SHADOW_V1_COLUMN_NAMES = [
   "Date",
@@ -13725,6 +13783,75 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Push", "Ungradable", "Directional_Eligible_N", "Directional_Accuracy",
       ],
       "MODULE_35",
+    ),
+  },
+
+  {
+    name: "ACTIVE_PITCHING_INVENTORY_V1",
+    description:
+      "Prospective price-blind research inventory of the named starter, source-supported inferred bulk/swing options, availability state, and starter/bulk/true-bullpen innings allocation. Active_Input=NO and Projection_Mapping_Status=SHADOW_ONLY_NOT_COMMISSIONED are fail-closed commissioning sentinels.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      ACTIVE_PITCHING_INVENTORY_V1_COLUMN_NAMES,
+      [
+        "Named_Starter_ID", "Starter_Expected_IP", "Starter_Expected_Pitches",
+        "Production_Expected_IP", "SWE_Expected_IP", "Expected_Bulk_Pitcher_ID",
+        "Expected_Bulk_IP", "Expected_Bulk_Pitches", "Secondary_Bulk_Expected_IP",
+        "Expected_Starter_Phase_IP", "Expected_Bulk_Phase_IP",
+        "Expected_Bullpen_Phase_IP", "True_Bullpen_Exposure_IP",
+        "Baseline_Opposing_Offense_Runs", "API_Shadow_Opposing_Offense_Runs",
+        "API_Shadow_Run_Delta", "Expected_Bulk_Quality_Factor",
+        "Generic_Bullpen_Quality_Factor",
+      ],
+      "MODULE_36",
+    ),
+  },
+
+  {
+    name: "ACTIVE_PITCHING_INVENTORY_SUMMARY_V1",
+    description:
+      "One-row-per-game Module 36 shadow comparison. It keeps the current production projection beside the API chain challenger without feeding GAME_SUMMARY, SLATE_BOARD, market, truth, or authorization.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      ACTIVE_PITCHING_INVENTORY_SUMMARY_V1_COLUMN_NAMES,
+      [
+        "Baseline_Away_Runs", "Baseline_Home_Runs", "Baseline_Total",
+        "API_Shadow_Away_Runs", "API_Shadow_Home_Runs", "API_Shadow_Total",
+        "API_Shadow_Total_Delta",
+      ],
+      "MODULE_36",
+    ),
+  },
+
+  {
+    name: "ACTIVE_PITCHING_INVENTORY_REPLAY_V1",
+    description:
+      "Settlement-only comparison of the untouched production projection and prospectively frozen Module 36 chain shadow, including team allocation and starter/bulk/true-bullpen phase evidence. Missing historical pregame inventories remain NOT_OBSERVABLE rather than reconstructed.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      ACTIVE_PITCHING_INVENTORY_REPLAY_V1_COLUMN_NAMES,
+      ACTIVE_PITCHING_INVENTORY_REPLAY_V1_COLUMN_NAMES.filter((name) =>
+        /Runs|Total|Error|IP/.test(name),
+      ),
+      "MODULE_36",
+    ),
+  },
+
+  {
+    name: "ACTIVE_PITCHING_INVENTORY_REPLAY_SUMMARY_V1",
+    description:
+      "Overall and pitching-plan segmented Module 36 replay metrics. It remains explicitly insufficient until settled prospectively frozen inventory rows exist.",
+    section: "ANALYSIS",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      ACTIVE_PITCHING_INVENTORY_REPLAY_SUMMARY_V1_COLUMN_NAMES,
+      ACTIVE_PITCHING_INVENTORY_REPLAY_SUMMARY_V1_COLUMN_NAMES.filter((name) =>
+        name !== "Segment" && name !== "Replay_Status" && name !== "Replay_TS",
+      ),
+      "MODULE_36",
     ),
   },
 
