@@ -114,7 +114,10 @@ interaction that cleanly separates underestimated detonations from inverse
 quiet controls. A later shadow projection challenger is not yet justified.
 
 The next legitimate research step is instrumentation, not tuning: prospectively
-freeze a starter-side failure probability and conditional failure-severity
-object, plus the source-safe K/BB/whiff and commissioned damage evidence needed
-to test the declared interactions. Active projections, confidence, market,
-vehicle, and decisions remain unchanged.
+freeze the existing SSAT v2 workload-failure probability and whole-game
+failure-cost evidence with exact definitions, then compare those forward-only
+proxies with Module 32's exact on-mound outcomes. These proxies must not be
+renamed or interpreted as calibrated starter-scoring probability/severity.
+Historical packets are not backfilled. Source-safe K/BB/whiff and commissioned
+damage evidence remain separate future instrumentation needs. Active
+projections, confidence, market, vehicle, and decisions remain unchanged.

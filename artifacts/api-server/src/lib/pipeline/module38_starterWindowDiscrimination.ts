@@ -42,6 +42,9 @@ export const STARTER_WINDOW_ERROR_HEADERS = [
   "Quality_Bucket", "Traffic_Bucket", "Damage_Bucket", "Offense_Bucket",
   "Expected_Workload_Bucket", "Actual_Workload_Bucket", "Pressure_Shape",
   "Traffic_Damage_CoSign", "Lineup_Status", "Matchup_Profile_Status",
+  "Frozen_Workload_Failure_Probability_Proxy", "Frozen_Whole_Game_Failure_Run_Cost_Proxy",
+  "Frozen_Failure_Proxy_Cohort", "Frozen_Failure_Proxy_Observations",
+  "Frozen_Failure_Proxy_Failures", "Frozen_Failure_Proxy_Status",
   "Frozen_Probability_Status", "Feature_Lineage_Status", "Actual_Lineage_Status",
   "Research_Status", "Active_Input", "Replay_TS",
 ] as const;
@@ -94,7 +97,10 @@ export const STARTER_WINDOW_REPLAY_HEADERS = [
   "Workload_Outcome_State",
   "Actual_Starter_IP", "Frozen_Expected_IP", "Workload_Shortfall_IP", "Quality_Bucket",
   "Traffic_Bucket", "Damage_Bucket", "Offense_Bucket", "Expected_Workload_Bucket",
-  "Pressure_Shape", "Replay_Status", "Active_Input", "Replay_TS",
+  "Pressure_Shape", "Frozen_Workload_Failure_Probability_Proxy",
+  "Frozen_Whole_Game_Failure_Run_Cost_Proxy", "Frozen_Failure_Proxy_Cohort",
+  "Frozen_Failure_Proxy_Observations", "Frozen_Failure_Proxy_Failures",
+  "Frozen_Failure_Proxy_Status", "Replay_Status", "Active_Input", "Replay_TS",
 ] as const;
 
 type Side = "AWAY" | "HOME";
@@ -114,6 +120,9 @@ export interface StarterWindowObservation {
   matchup_status: string; quality_bucket: Bucket; traffic_bucket: Bucket;
   damage_bucket: Bucket; offense_bucket: Bucket; expected_workload_bucket: Bucket;
   actual_workload_bucket: Bucket; pressure_shape: string; cosign: string;
+  failure_probability_proxy: number | null; failure_run_cost_proxy: number | null;
+  failure_proxy_cohort: string; failure_proxy_observations: number | null;
+  failure_proxy_failures: number | null; failure_proxy_status: string;
 }
 
 type Cutpoints = { low: number; high: number };
@@ -156,6 +165,12 @@ function sideRaw(row: readonly unknown[], i: ReadonlyMap<string, number>, side: 
     run_multiplier: num(val(row,i,"Run_Multiplier")),
     lineup_status: text(val(row,i,`${side === "AWAY" ? "Away" : "Home"}_Lineup_Status`)),
     matchup_status: text(val(row,i,`${side === "AWAY" ? "Away" : "Home"}_Matchup_Profile_Status`)),
+    failure_probability_proxy: num(val(row,i,`SSAT_V2_${opposing}_Workload_Failure_Probability`)),
+    failure_run_cost_proxy: num(val(row,i,`SSAT_V2_${opposing}_Whole_Game_Failure_Run_Cost`)),
+    failure_proxy_cohort: text(val(row,i,`SSAT_V2_${opposing}_Calibration_Cohort`)),
+    failure_proxy_observations: num(val(row,i,`SSAT_V2_${opposing}_Cohort_Observations`)),
+    failure_proxy_failures: num(val(row,i,`SSAT_V2_${opposing}_Cohort_Failures`)),
+    failure_proxy_status: text(val(row,i,"SSAT_V2_Starter_Window_Use_Status")),
   };
 }
 
@@ -254,12 +269,15 @@ function groupRows(rows: readonly StarterWindowObservation[]): Array<[string,str
 }
 
 function summaryRows(rows: readonly StarterWindowObservation[], ts:string): unknown[][] {
+  const proxyStatus=rows.some(r=>r.failure_probability_proxy!==null)
+    ? "WORKLOAD_PROXY_FROZEN_NOT_STARTER_SCORING_CALIBRATED"
+    : "UNAVAILABLE_NO_FROZEN_FAILURE_PROXY";
   return groupRows(rows).map(([dimension,cohort,group,instrument])=>{const m=metrics(group);const interpretable=group.length>=STARTER_WINDOW_MIN_INTERPRETABLE_N&&!instrument.startsWith("INSTRUMENTATION_");
-    return [dimension,cohort,m.n,m.slates,m.bias===null?"":round(m.bias),m.mae===null?"":round(m.mae),m.med===null?"":round(m.med),round(m.rmse),m.rawBias===null?"":round(m.rawBias),m.rawMae===null?"":round(m.rawMae),round(m.detonation),round(m.workloadFailure),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),round(m.quietFp),round(m.detFn),m.lo??"",m.hi??"",m.lo===null?"CI_UNAVAILABLE":"SLATE_DATE_BLOCK_BOOTSTRAP_5000_BONFERRONI_99.1667",interpretable?"INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,"UNAVAILABLE_NO_FROZEN_STARTER_PROBABILITIES",STARTER_WINDOW_COMMISSIONING_STATUS,instrument==="INSTRUMENTATION_DEAD"?"A zero contribution is not evidence that damage is unimportant; the active channel is inert.":instrument==="INSTRUMENTATION_DEGENERATE"?"Frozen workload values do not support stable tertiles; no workload discrimination claim.":"Headline error is workload-normalized; allocation-inclusive error is retained separately.",ts];});
+    return [dimension,cohort,m.n,m.slates,m.bias===null?"":round(m.bias),m.mae===null?"":round(m.mae),m.med===null?"":round(m.med),round(m.rmse),m.rawBias===null?"":round(m.rawBias),m.rawMae===null?"":round(m.rawMae),round(m.detonation),round(m.workloadFailure),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),round(m.quietFp),round(m.detFn),m.lo??"",m.hi??"",m.lo===null?"CI_UNAVAILABLE":"SLATE_DATE_BLOCK_BOOTSTRAP_5000_BONFERRONI_99.1667",interpretable?"INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,proxyStatus,STARTER_WINDOW_COMMISSIONING_STATUS,instrument==="INSTRUMENTATION_DEAD"?"A zero contribution is not evidence that damage is unimportant; the active channel is inert.":instrument==="INSTRUMENTATION_DEGENERATE"?"Frozen workload values do not support stable tertiles; no workload discrimination claim.":"Headline error is workload-normalized; allocation-inclusive error is retained separately. Frozen SSAT v2 fields are workload/whole-game proxies only.",ts];});
 }
 
 function failureRows(rows: readonly StarterWindowObservation[], ts:string): unknown[][] {
-  return groupRows(rows).filter(([d])=>!["ACTUAL_WORKLOAD_POSTGAME","OUTCOME_STATE"].includes(d)).map(([feature,b,group,instrument])=>{const m=metrics(group);const survival=group.filter(r=>r.outcome==="SURVIVAL").length/Math.max(group.length,1);const detonationN=group.filter(r=>r.run_outcome==="DETONATION").length;const workloadFailureN=group.filter(r=>r.workload_outcome==="MATERIALLY_SHORT").length;return [feature,b,m.n,detonationN,round(m.detonation),workloadFailureN,round(m.workloadFailure),round(mean(group.map(r=>r.expected_runs))??0),round(mean(group.map(r=>r.normalized_expected_runs))??0),round(mean(group.map(r=>r.actual_runs))??0),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),"",round(survival),"",round(m.detonation),"UNAVAILABLE_NO_FROZEN_STARTER_PROBABILITIES",group.length>=STARTER_WINDOW_MIN_INTERPRETABLE_N&&!instrument.startsWith("INSTRUMENTATION_")?"DESCRIPTIVE_DISCRIMINATION_INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,feature==="OVERALL"?"N/A":`PREDICTOR_TERTILES_DERIVED_THROUGH_${STARTER_WINDOW_BUCKET_DERIVATION_THROUGH_DATE}`,instrument==="INSTRUMENTATION_DEAD"?"Cannot attribute a null effect to a frozen-neutral channel.":"Run detonation (4+ runs) is separated from workload failure (>=2 IP shortfall).",ts];});
+  return groupRows(rows).filter(([d])=>!["ACTUAL_WORKLOAD_POSTGAME","OUTCOME_STATE"].includes(d)).map(([feature,b,group,instrument])=>{const m=metrics(group);const survival=group.filter(r=>r.outcome==="SURVIVAL").length/Math.max(group.length,1);const detonationN=group.filter(r=>r.run_outcome==="DETONATION").length;const workloadFailureN=group.filter(r=>r.workload_outcome==="MATERIALLY_SHORT").length;const proxy=group.some(r=>r.failure_probability_proxy!==null);return [feature,b,m.n,detonationN,round(m.detonation),workloadFailureN,round(m.workloadFailure),round(mean(group.map(r=>r.expected_runs))??0),round(mean(group.map(r=>r.normalized_expected_runs))??0),round(mean(group.map(r=>r.actual_runs))??0),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),"",round(survival),"",round(m.detonation),proxy?"WORKLOAD_PROXY_FROZEN_NOT_STARTER_SCORING_CALIBRATED":"UNAVAILABLE_NO_FROZEN_FAILURE_PROXY",group.length>=STARTER_WINDOW_MIN_INTERPRETABLE_N&&!instrument.startsWith("INSTRUMENTATION_")?"DESCRIPTIVE_DISCRIMINATION_INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,feature==="OVERALL"?"N/A":`PREDICTOR_TERTILES_DERIVED_THROUGH_${STARTER_WINDOW_BUCKET_DERIVATION_THROUGH_DATE}`,instrument==="INSTRUMENTATION_DEAD"?"Cannot attribute a null effect to a frozen-neutral channel.":"Run detonation (4+ runs) is separated from workload failure (>=2 IP shortfall); SSAT v2 fields are proxy evidence only.",ts];});
 }
 
 const CASES: Record<string,{type:string;source:string;mechanism:string;grade:string;interpretation:string}> = {
@@ -273,8 +291,8 @@ const CASES: Record<string,{type:string;source:string;mechanism:string;grade:str
   "20260919_ATL_HOU":{type:"CANCELLATION_CONTROL",source:"NO_VERIFIABLE_PREDECLARED_MECHANISM",mechanism:"",grade:"POSTHOC_ONLY",interpretation:"Accurate total hid opposing phase errors; no causal credit assigned."},
 };
 
-function observationRow(r:StarterWindowObservation,ts:string):unknown[]{return [r.date,r.game_id,r.side,r.batting_team,r.opposing_team,r.opposing_starter,r.opposing_role,r.snapshot_ts,r.expected_ip,r.effective_ip,r.quality,r.quality_source,r.offense_center,r.traffic_factor,r.damage_factor,r.run_multiplier,r.projected_base,r.projected_traffic,r.projected_damage,r.expected_runs,r.actual_ip,r.actual_runs,r.error,r.abs_error,r.normalized_expected_runs,r.normalized_error,r.normalized_abs_error,r.workload_shortfall,r.outcome,r.run_outcome,r.workload_outcome,r.actual_runs>=4?"TRUE":"FALSE",r.actual_runs>=5?"TRUE":"FALSE",r.actual_runs>=6?"TRUE":"FALSE",r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.actual_workload_bucket,r.pressure_shape,r.cosign,r.lineup_status,r.matchup_status,"UNAVAILABLE_NO_FROZEN_STARTER_PROBABILITIES","FROZEN_PREGAME_PACKET_ONLY","MLB_STATSAPI_PBP_CURRENT_PITCHER_EXACT",STARTER_WINDOW_COMMISSIONING_STATUS,STARTER_WINDOW_ACTIVE_INPUT,ts];}
-function replayRow(r:StarterWindowObservation,ts:string):unknown[]{return [r.date,r.game_id,r.side,r.snapshot_ts,r.opposing_starter,r.opposing_role,r.expected_runs,r.actual_runs,r.error,r.normalized_expected_runs,r.normalized_error,r.normalized_abs_error,r.outcome,r.run_outcome,r.workload_outcome,r.actual_ip,r.expected_ip,r.workload_shortfall,r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.pressure_shape,"EXACT_FROZEN_LINEAGE_RESEARCH_ONLY",STARTER_WINDOW_ACTIVE_INPUT,ts];}
+function observationRow(r:StarterWindowObservation,ts:string):unknown[]{const probabilityStatus=r.failure_probability_proxy===null?"UNAVAILABLE_NO_FROZEN_FAILURE_PROXY":"WORKLOAD_PROXY_FROZEN_NOT_STARTER_SCORING_CALIBRATED";return [r.date,r.game_id,r.side,r.batting_team,r.opposing_team,r.opposing_starter,r.opposing_role,r.snapshot_ts,r.expected_ip,r.effective_ip,r.quality,r.quality_source,r.offense_center,r.traffic_factor,r.damage_factor,r.run_multiplier,r.projected_base,r.projected_traffic,r.projected_damage,r.expected_runs,r.actual_ip,r.actual_runs,r.error,r.abs_error,r.normalized_expected_runs,r.normalized_error,r.normalized_abs_error,r.workload_shortfall,r.outcome,r.run_outcome,r.workload_outcome,r.actual_runs>=4?"TRUE":"FALSE",r.actual_runs>=5?"TRUE":"FALSE",r.actual_runs>=6?"TRUE":"FALSE",r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.actual_workload_bucket,r.pressure_shape,r.cosign,r.lineup_status,r.matchup_status,r.failure_probability_proxy??"",r.failure_run_cost_proxy??"",r.failure_proxy_cohort,r.failure_proxy_observations??"",r.failure_proxy_failures??"",r.failure_proxy_status,probabilityStatus,"FROZEN_PREGAME_PACKET_ONLY","MLB_STATSAPI_PBP_CURRENT_PITCHER_EXACT",STARTER_WINDOW_COMMISSIONING_STATUS,STARTER_WINDOW_ACTIVE_INPUT,ts];}
+function replayRow(r:StarterWindowObservation,ts:string):unknown[]{return [r.date,r.game_id,r.side,r.snapshot_ts,r.opposing_starter,r.opposing_role,r.expected_runs,r.actual_runs,r.error,r.normalized_expected_runs,r.normalized_error,r.normalized_abs_error,r.outcome,r.run_outcome,r.workload_outcome,r.actual_ip,r.expected_ip,r.workload_shortfall,r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.pressure_shape,r.failure_probability_proxy??"",r.failure_run_cost_proxy??"",r.failure_proxy_cohort,r.failure_proxy_observations??"",r.failure_proxy_failures??"",r.failure_proxy_status,"EXACT_FROZEN_LINEAGE_RESEARCH_ONLY",STARTER_WINDOW_ACTIVE_INPUT,ts];}
 function pairRows(rows:readonly StarterWindowObservation[],ts:string):unknown[][]{return rows.filter(r=>CASES[r.game_id]).map(r=>{const c=CASES[r.game_id]!;return[r.date,r.game_id,c.type,r.side,r.opposing_starter,r.expected_runs,r.actual_runs,r.error,r.normalized_expected_runs,r.normalized_error,r.expected_ip,r.actual_ip,r.outcome,r.run_outcome,r.workload_outcome,c.source,c.mechanism,c.grade,c.interpretation,"NO_COEFFICIENT_TUNING_CASE_NOT_USED_AS_TARGET",ts];});}
 
 function featureGovRows(rows:readonly StarterWindowObservation[],ts:string):unknown[][] {
@@ -286,9 +304,10 @@ function featureGovRows(rows:readonly StarterWindowObservation[],ts:string):unkn
     common("TRAFFIC_EXPECTATION","PREGAME_PACKET_HISTORY Traffic_Matchup_Factor","KNOWN_PREGAME","YES","ELIGIBLE","LIVE_ACTIVE_VARYING","NEUTRAL_IF_PROFILE_UNAVAILABLE","Factor is an active signed component."),
     common("DAMAGE_EXPECTATION","PREGAME_PACKET_HISTORY Damage_Matchup_Factor + HR_XBH_Damage_Runs","KNOWN_PREGAME","FROZEN_ZERO_PENDING_PATCH_B","NOT_INTERPRETABLE",damageDead?"INSTRUMENTATION_DEAD":"LIVE_ACTIVE_VARYING","FAIL_CLOSED_NEUTRAL","Zero cannot be interpreted as evidence against damage."),
     common("CONVERSION_EXPECTATION","Derived frozen Traffic_Conversion_Runs side component","KNOWN_PREGAME","YES","PARTIAL_ONLY","INSTRUMENTATION_PARTIAL","NEUTRAL_WITHOUT_COSIGN","Raw conversion probability is not frozen; only signed run component is recoverable."),
-    common("SURVIVAL_PROBABILITY","None at starter-side level","NOT_PERSISTED","NO","INELIGIBLE","MISSING","NO_SUBSTITUTION","SSAT is game-level family evidence and is not a starter-side calibrated probability here."),
-    common("FAILURE_PROBABILITY","None at starter-side level","NOT_PERSISTED","NO","INELIGIBLE","MISSING","NO_SUBSTITUTION","No probability calibration metrics manufactured."),
-    common("FAILURE_SEVERITY_TAIL","Exact PBP outcome label only","POSTGAME_LABEL_ONLY","NO","ELIGIBLE_AS_OUTCOME_ONLY","LIVE_OUTCOME_LABEL","NO_PREGAME_SUBSTITUTION","Observed 4+/5+/6+ rates diagnose tail compression; not a predictor."),
+    common("WORKLOAD_FAILURE_PROBABILITY_PROXY","PREGAME_PACKET_HISTORY SSAT_V2_*_Workload_Failure_Probability","KNOWN_PREGAME_FORWARD_ONLY","NO_SHADOW_ONLY","ELIGIBLE_AS_PROXY_ONLY",rows.some(r=>r.failure_probability_proxy!==null)?"LIVE_PROXY_NOT_SCORING_CALIBRATED":"AWAITING_FIRST_PROSPECTIVE_PACKET","NO_SUBSTITUTION","P(actual IP < frozen Expected_IP) from strictly earlier settled history; not starter-scoring detonation probability."),
+    common("WHOLE_GAME_FAILURE_RUN_COST_PROXY","PREGAME_PACKET_HISTORY SSAT_V2_*_Whole_Game_Failure_Run_Cost","KNOWN_PREGAME_FORWARD_ONLY","NO_SHADOW_ONLY","ELIGIBLE_AS_PROXY_ONLY",rows.some(r=>r.failure_run_cost_proxy!==null)?"LIVE_PROXY_NOT_STARTER_SEVERITY":"AWAITING_FIRST_PROSPECTIVE_PACKET","NO_SUBSTITUTION","Mean excess whole-game total conditional on workload failure; not exact on-mound starter runs conditional on detonation."),
+    common("STARTER_SCORING_FAILURE_PROBABILITY","No commissioned pregame estimator","NOT_IMPLEMENTED","NO","INELIGIBLE","MISSING","NO_SUBSTITUTION","Existing workload proxy must first accumulate prospectively and be tested against exact starter-window outcomes."),
+    common("FAILURE_SEVERITY_TAIL","Exact PBP outcome label only","POSTGAME_LABEL_ONLY","NO","ELIGIBLE_AS_OUTCOME_ONLY","LIVE_OUTCOME_LABEL","NO_PREGAME_SUBSTITUTION","Observed 4+/5+/6+ rates diagnose tail compression; no pregame starter-severity estimate is manufactured."),
     common("OPPONENT_OFFENSIVE_SHAPE","PREGAME_PACKET_HISTORY Active_Offense_Center + pair pressure shape","KNOWN_PREGAME","YES_BASELINE","ELIGIBLE","LIVE_ACTIVE_VARYING","NEUTRAL_IF_MISSING","One-sided/two-sided shape uses only frozen expected starter windows."),
     common("K_WHIFF_BUCKET","No frozen starter-side K/whiff field in packet","NOT_PERSISTED","INDIRECT_ONLY","INELIGIBLE","MISSING","NO_BACKFILL","Cannot test low-K/high-whiff interactions without a frozen field."),
     common("BB_RAW_BUCKET","No frozen starter-side BB field in packet","NOT_PERSISTED","INDIRECT_TRAFFIC_FACTOR_ONLY","INELIGIBLE","MISSING","NO_BACKFILL","Traffic factor may vary but cannot be decomposed into raw BB causes."),

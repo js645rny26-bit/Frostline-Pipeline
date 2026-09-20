@@ -225,10 +225,15 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      lineup research profiles. Active HR/XBH damage remains gated off.
  *  v68-v69 (2026-09-18/19): Patch B source-maturity governance and Module 36
  *      Active Pitching Inventory remain research-only with no active consumer.
- *  v70 (2026-09-20): Module 38 adds exact team-side starter-window outcome
- *      attribution and governed calibration/discrimination replay surfaces.
+ *  v70-v71 (2026-09-20): Module 38 adds exact team-side starter-window
+ *      outcome attribution and governed calibration/discrimination replay
+ *      surfaces, then separates rate error from workload allocation.
+ *  v72 (2026-09-20): freezes the already-existing SSAT v2 workload-failure
+ *      probability and whole-game failure-cost proxies in the canonical
+ *      packet for prospective starter-window calibration. They remain
+ *      explicitly non-equivalent to starter-scoring probability/severity.
  */
-export const WORKBOOK_SCHEMA_VERSION = 71;
+export const WORKBOOK_SCHEMA_VERSION = 72;
 
 export interface ColumnDef {
   name: string;
@@ -385,6 +390,19 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "SSAT_V1_Total",
   "SSAT_V2_Status",
   "SSAT_V2_Total",
+  "SSAT_V2_Away_Workload_Failure_Probability",
+  "SSAT_V2_Home_Workload_Failure_Probability",
+  "SSAT_V2_Away_Whole_Game_Failure_Run_Cost",
+  "SSAT_V2_Home_Whole_Game_Failure_Run_Cost",
+  "SSAT_V2_Away_Calibration_Cohort",
+  "SSAT_V2_Home_Calibration_Cohort",
+  "SSAT_V2_Away_Cohort_Observations",
+  "SSAT_V2_Home_Cohort_Observations",
+  "SSAT_V2_Away_Cohort_Failures",
+  "SSAT_V2_Home_Cohort_Failures",
+  "SSAT_V2_Failure_Probability_Definition",
+  "SSAT_V2_Failure_Severity_Definition",
+  "SSAT_V2_Starter_Window_Use_Status",
   "Operator_Evidence_Status",
   "Operator_Evidence_Fields",
   "Operator_Evidence_Source",
@@ -619,6 +637,14 @@ const PREGAME_PACKET_HISTORY_NUMERIC_COLUMNS = new Set<string>([
   "Low_Center_Upper_Band",
   "SSAT_V1_Total",
   "SSAT_V2_Total",
+  "SSAT_V2_Away_Workload_Failure_Probability",
+  "SSAT_V2_Home_Workload_Failure_Probability",
+  "SSAT_V2_Away_Whole_Game_Failure_Run_Cost",
+  "SSAT_V2_Home_Whole_Game_Failure_Run_Cost",
+  "SSAT_V2_Away_Cohort_Observations",
+  "SSAT_V2_Home_Cohort_Observations",
+  "SSAT_V2_Away_Cohort_Failures",
+  "SSAT_V2_Home_Cohort_Failures",
   "Away_Pitcher_Effective_IP",
   "Home_Pitcher_Effective_IP",
   "Away_Bullpen_Exposure_IP",
@@ -1246,7 +1272,7 @@ const ACTIVE_PITCHING_INVENTORY_REPLAY_SUMMARY_V1_COLUMN_NAMES = [
   "Replay_Status", "Replay_TS",
 ] as const;
 const STARTER_WINDOW_ERROR_V1_COLUMN_NAMES = [
-  "Date","Game_ID","Team_Side","Batting_Team","Opposing_Team","Opposing_Starter","Opposing_Starter_Role","Frozen_Packet_Snapshot_TS","Frozen_Expected_IP","Frozen_Effective_IP","Frozen_Starter_Quality","Frozen_Starter_Quality_Source","Frozen_Active_Offense_Center","Frozen_Traffic_Factor","Frozen_Damage_Factor","Frozen_Run_Multiplier","Projected_Starter_Base_Runs","Projected_Traffic_Runs","Projected_Damage_Runs","Frozen_Expected_Starter_Window_Runs","Actual_Starter_IP","Actual_Starter_Window_Runs","Allocation_Inclusive_Error","Allocation_Inclusive_Abs_Error","Workload_Normalized_Expected_Starter_Window_Runs","Workload_Normalized_Error","Workload_Normalized_Abs_Error","Workload_Shortfall_IP","Outcome_State","Run_Outcome_State","Workload_Outcome_State","Tail_4Plus","Tail_5Plus","Tail_6Plus","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Actual_Workload_Bucket","Pressure_Shape","Traffic_Damage_CoSign","Lineup_Status","Matchup_Profile_Status","Frozen_Probability_Status","Feature_Lineage_Status","Actual_Lineage_Status","Research_Status","Active_Input","Replay_TS",
+  "Date","Game_ID","Team_Side","Batting_Team","Opposing_Team","Opposing_Starter","Opposing_Starter_Role","Frozen_Packet_Snapshot_TS","Frozen_Expected_IP","Frozen_Effective_IP","Frozen_Starter_Quality","Frozen_Starter_Quality_Source","Frozen_Active_Offense_Center","Frozen_Traffic_Factor","Frozen_Damage_Factor","Frozen_Run_Multiplier","Projected_Starter_Base_Runs","Projected_Traffic_Runs","Projected_Damage_Runs","Frozen_Expected_Starter_Window_Runs","Actual_Starter_IP","Actual_Starter_Window_Runs","Allocation_Inclusive_Error","Allocation_Inclusive_Abs_Error","Workload_Normalized_Expected_Starter_Window_Runs","Workload_Normalized_Error","Workload_Normalized_Abs_Error","Workload_Shortfall_IP","Outcome_State","Run_Outcome_State","Workload_Outcome_State","Tail_4Plus","Tail_5Plus","Tail_6Plus","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Actual_Workload_Bucket","Pressure_Shape","Traffic_Damage_CoSign","Lineup_Status","Matchup_Profile_Status","Frozen_Workload_Failure_Probability_Proxy","Frozen_Whole_Game_Failure_Run_Cost_Proxy","Frozen_Failure_Proxy_Cohort","Frozen_Failure_Proxy_Observations","Frozen_Failure_Proxy_Failures","Frozen_Failure_Proxy_Status","Frozen_Probability_Status","Feature_Lineage_Status","Actual_Lineage_Status","Research_Status","Active_Input","Replay_TS",
 ] as const;
 const STARTER_WINDOW_ERROR_SUMMARY_V1_COLUMN_NAMES = [
   "Dimension","Cohort","N","Slate_N","Workload_Normalized_Signed_Bias","Workload_Normalized_MAE","Workload_Normalized_Median_AE","Workload_Normalized_RMSE","Allocation_Inclusive_Signed_Bias","Allocation_Inclusive_MAE","Run_Detonation_Frequency","Workload_Failure_Frequency","Mean_Runs_Conditional_On_Detonation","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Quiet_Window_False_Positive_Rate","Detonation_False_Negative_Rate","Bias_CI_Lower","Bias_CI_Upper","Uncertainty_Method","Interpretation_Status","Instrumentation_Status","Probability_Calibration_Status","Commissioning_Status","Notes","Replay_TS",
@@ -1261,7 +1287,7 @@ const STARTER_WINDOW_FEATURE_GOV_V1_COLUMN_NAMES = [
   "Feature","Source","Freshness","Pregame_Availability","Leakage_Risk","Current_Active_Use","Research_Eligibility","Instrumentation_Status","Commissioning_Status","Fallback_Behavior","Notes","Audit_TS",
 ] as const;
 const STARTER_WINDOW_REPLAY_V1_COLUMN_NAMES = [
-  "Date","Game_ID","Team_Side","Frozen_Packet_Snapshot_TS","Opposing_Starter","Opposing_Starter_Role","Frozen_Expected_Starter_Window_Runs","Actual_Starter_Window_Runs","Allocation_Inclusive_Signed_Error","Workload_Normalized_Expected_Starter_Window_Runs","Workload_Normalized_Signed_Error","Workload_Normalized_Absolute_Error","Outcome_State","Run_Outcome_State","Workload_Outcome_State","Actual_Starter_IP","Frozen_Expected_IP","Workload_Shortfall_IP","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Pressure_Shape","Replay_Status","Active_Input","Replay_TS",
+  "Date","Game_ID","Team_Side","Frozen_Packet_Snapshot_TS","Opposing_Starter","Opposing_Starter_Role","Frozen_Expected_Starter_Window_Runs","Actual_Starter_Window_Runs","Allocation_Inclusive_Signed_Error","Workload_Normalized_Expected_Starter_Window_Runs","Workload_Normalized_Signed_Error","Workload_Normalized_Absolute_Error","Outcome_State","Run_Outcome_State","Workload_Outcome_State","Actual_Starter_IP","Frozen_Expected_IP","Workload_Shortfall_IP","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Pressure_Shape","Frozen_Workload_Failure_Probability_Proxy","Frozen_Whole_Game_Failure_Run_Cost_Proxy","Frozen_Failure_Proxy_Cohort","Frozen_Failure_Proxy_Observations","Frozen_Failure_Proxy_Failures","Frozen_Failure_Proxy_Status","Replay_Status","Active_Input","Replay_TS",
 ] as const;
 const FAILURE_CLASSIFICATION_SHADOW_V1_COLUMN_NAMES = [
   "Date",
@@ -13895,7 +13921,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
     frozenRows: 1,
     columns: diagnosticColumns(
       columns,
-      columns.filter((column) => /(^N$|_N$|Runs|Error|MAE|RMSE|Rate|Frequency|IP$|Factor$|Multiplier$|Quality$|Center$|Lower$|Upper$)/.test(column)),
+      columns.filter((column) => /(^N$|_N$|Runs|Error|MAE|RMSE|Rate|Frequency|Probability|Run_Cost|Observations|Failures|IP$|Factor$|Multiplier$|Quality$|Center$|Lower$|Upper$)/.test(column)),
       "MODULE_38",
     ),
   })),

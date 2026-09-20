@@ -158,6 +158,24 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "SSAT_V1_Total",
   "SSAT_V2_Status",
   "SSAT_V2_Total",
+  // Forward-only starter-window research instrumentation. SSAT v2 defines
+  // failure as an innings shortfall and its run-cost target as excess
+  // whole-game scoring. Preserve those semantics explicitly: these fields are
+  // useful candidate evidence, but are not a calibrated starter-window
+  // detonation probability or conditional starter-run severity estimate.
+  "SSAT_V2_Away_Workload_Failure_Probability",
+  "SSAT_V2_Home_Workload_Failure_Probability",
+  "SSAT_V2_Away_Whole_Game_Failure_Run_Cost",
+  "SSAT_V2_Home_Whole_Game_Failure_Run_Cost",
+  "SSAT_V2_Away_Calibration_Cohort",
+  "SSAT_V2_Home_Calibration_Cohort",
+  "SSAT_V2_Away_Cohort_Observations",
+  "SSAT_V2_Home_Cohort_Observations",
+  "SSAT_V2_Away_Cohort_Failures",
+  "SSAT_V2_Home_Cohort_Failures",
+  "SSAT_V2_Failure_Probability_Definition",
+  "SSAT_V2_Failure_Severity_Definition",
+  "SSAT_V2_Starter_Window_Use_Status",
   "Operator_Evidence_Status",
   "Operator_Evidence_Fields",
   "Operator_Evidence_Source",
@@ -808,6 +826,25 @@ export function buildPregamePacketInputs(
       blank(v1?.starter_survival_adjusted_total),
       v2?.calibration_status ?? "INSUFFICIENT_INPUT",
       blank(v2?.ssat_v2_total),
+      v2?.away_starter_survival_prob === null || v2?.away_starter_survival_prob === undefined
+        ? ""
+        : Number((1 - v2.away_starter_survival_prob).toFixed(4)),
+      v2?.home_starter_survival_prob === null || v2?.home_starter_survival_prob === undefined
+        ? ""
+        : Number((1 - v2.home_starter_survival_prob).toFixed(4)),
+      blank(v2?.away_starter_failure_run_cost),
+      blank(v2?.home_starter_failure_run_cost),
+      v2?.away_calibration_cohort ?? "",
+      v2?.home_calibration_cohort ?? "",
+      blank(v2?.away_cohort_observations),
+      blank(v2?.home_cohort_observations),
+      blank(v2?.away_cohort_failures),
+      blank(v2?.home_cohort_failures),
+      "P_ACTUAL_IP_LT_FROZEN_EXPECTED_IP_FROM_STRICTLY_EARLIER_SETTLED_HISTORY",
+      "MEAN_MAX_ACTUAL_GAME_TOTAL_MINUS_DUAL_SURVIVAL_TOTAL_0_CONDITIONAL_ON_WORKLOAD_FAILURE",
+      v2?.calibration_status === "PROSPECTIVE_SHADOW_CANDIDATE"
+        ? "PROXY_ONLY_NOT_STARTER_SCORING_CALIBRATED"
+        : "UNAVAILABLE_NO_EMPIRICAL_PROXY",
       ...operatorPacketProvenance(operator),
       summary.away_pitcher_effective_innings,
       summary.home_pitcher_effective_innings,

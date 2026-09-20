@@ -101,6 +101,29 @@ damage mechanism is unmeasurable from those fields and must be reported as
 `INSTRUMENTATION_DEAD`. Patch B remains a separate factual evidence source and
 is not mapped into this audit or the active projection by implication.
 
+## Starter-window supporting diagnostics and prospective instrumentation
+
+The six `STARTER_WINDOW_*_V1` sheets are frozen supporting diagnostics of this
+Module 37 investigation. They are not the start of a new downstream module
+family and must not acquire an active consumer or spawn additional research
+surfaces without a separate commissioning decision.
+
+Schema v72 prospectively preserves the already-existing SSAT v2 starter-side
+candidate evidence in `PREGAME_PACKET_HISTORY`. Its semantics are deliberately
+explicit:
+
+- `*_Workload_Failure_Probability` is
+  `P(actual IP < frozen Expected_IP)` from strictly earlier settled history;
+- `*_Whole_Game_Failure_Run_Cost` is mean positive whole-game scoring above the
+  dual-survival total conditional on that workload failure.
+
+Neither field is a calibrated starter-window scoring-detonation probability or
+exact on-mound conditional severity estimate. They are frozen proxy candidates
+whose prospective relationship to Module 32's exact starter-window outcomes
+can be evaluated later. Historical packets remain blank; no backfill is
+allowed. Until prospective evidence proves otherwise, the scoring-probability
+and scoring-severity bottleneck remains unresolved.
+
 ## Commissioning order
 
 1. freeze sample-floor derivation rows through 2026-09-17;
@@ -110,6 +133,10 @@ is not mapped into this audit or the active projection by implication.
 5. inspect repeated mechanisms only after each bucket reaches its frozen floor;
 6. propose a model repair only for a supported mechanism;
 7. replay and live-shadow that isolated repair before active deployment.
+
+No new coefficient, center adjustment, distribution weight, confidence input,
+or authorization input may be derived merely because the proxy fields are now
+observable.
 
 No Sept. 18 or later outcome may be used to tune a coefficient or change a
 sample floor.

@@ -40,7 +40,14 @@ function packet(overrides: Record<string, unknown> = {}): unknown[] {
 }
 
 test("starter-window audit derives side expectations from frozen inputs and exact on-mound outcomes", () => {
-  const packets=[Array.from(PREGAME_PACKET_HISTORY_HEADERS),packet()];
+  const packets=[Array.from(PREGAME_PACKET_HISTORY_HEADERS),packet({
+    SSAT_V2_Home_Workload_Failure_Probability:0.42,
+    SSAT_V2_Home_Whole_Game_Failure_Run_Cost:3.25,
+    SSAT_V2_Home_Calibration_Cohort:"ROLE_AND_WORKLOAD",
+    SSAT_V2_Home_Cohort_Observations:48,
+    SSAT_V2_Home_Cohort_Failures:20,
+    SSAT_V2_Starter_Window_Use_Status:"PROXY_ONLY_NOT_STARTER_SCORING_CALIBRATED",
+  })];
   const coverage=[coverageHeaders,row(coverageHeaders,{Date:"2026-09-01",Game_ID:"20260901_AAA_BBB",Phase_Row_Usable:"TRUE",Actual_Away_Offense_Starter_Window_Runs:5,Actual_Home_Offense_Starter_Window_Runs:1,Actual_Away_Starter_IP:6,Actual_Home_Starter_IP:4})];
   const cuts=deriveCutpoints(packets,coverage);
   const observations=parseStarterWindowObservations(packets,coverage,cuts);
@@ -56,6 +63,15 @@ test("starter-window audit derives side expectations from frozen inputs and exac
   assert.equal(away.normalized_error,-2.58);
   assert.equal(away.projected_damage,0);
   assert.equal(away.damage_bucket,"INSTRUMENTATION_DEAD");
+  assert.equal(away.failure_probability_proxy,0.42);
+  assert.equal(away.failure_run_cost_proxy,3.25);
+  assert.equal(away.failure_proxy_cohort,"ROLE_AND_WORKLOAD");
+  assert.equal(away.failure_proxy_observations,48);
+  assert.equal(away.failure_proxy_failures,20);
+  assert.equal(away.failure_proxy_status,"PROXY_ONLY_NOT_STARTER_SCORING_CALIBRATED");
+  const home=observations.find(r=>r.side==="HOME")!;
+  assert.equal(home.failure_probability_proxy,null);
+  assert.equal(home.failure_run_cost_proxy,null);
 });
 
 test("post-first-pitch packets and rows without exact phase evidence fail closed", () => {
@@ -70,8 +86,8 @@ test("Module 38 governance is research-only", () => {
   assert.equal(STARTER_WINDOW_COMMISSIONING_STATUS,"RESEARCH_ONLY_NOT_COMMISSIONED");
 });
 
-test("schema v71 exposes exactly the six Module 38 research sheets", () => {
-  assert.equal(WORKBOOK_SCHEMA_VERSION,71);
+test("schema v72 exposes exactly the six frozen Module 38 research sheets", () => {
+  assert.equal(WORKBOOK_SCHEMA_VERSION,72);
   for (const [name,headers] of [
     [STARTER_WINDOW_ERROR_SHEET,STARTER_WINDOW_ERROR_HEADERS],
     [STARTER_WINDOW_ERROR_SUMMARY_SHEET,STARTER_WINDOW_ERROR_SUMMARY_HEADERS],
@@ -88,5 +104,6 @@ test("active projection and board modules have no Module 38 consumer", () => {
   for (const file of ["module09_recalculation.ts","module11_outputExtraction.ts"]) {
     const source=readFileSync(new URL(`./${file}`,import.meta.url),"utf8");
     assert.doesNotMatch(source,/STARTER_WINDOW_(ERROR|REPLAY|FAILURE_BUCKETS)|module38_starterWindowDiscrimination/);
+    assert.doesNotMatch(source,/SSAT_V2_(Away|Home)_Workload_Failure_Probability|SSAT_V2_(Away|Home)_Whole_Game_Failure_Run_Cost/);
   }
 });

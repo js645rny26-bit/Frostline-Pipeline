@@ -411,13 +411,28 @@ test("future frozen packets preserve component-level moderation state without ch
     game_id: "20260824_AAA_BBB", preview_availability: "AVAILABLE", tail_estimate_status: "AVAILABLE",
     traffic_conversion_estimate: 0.4, hr_xbh_damage_estimate: 0.3,
   }] as never;
+  const ssatV2 = [{
+    game_id: "20260824_AAA_BBB",
+    calibration_status: "PROSPECTIVE_SHADOW_CANDIDATE",
+    ssat_v2_total: 8.7,
+    away_starter_survival_prob: 0.72,
+    home_starter_survival_prob: 0.61,
+    away_starter_failure_run_cost: 2.4,
+    home_starter_failure_run_cost: 3.1,
+    away_calibration_cohort: "ROLE_AND_WORKLOAD",
+    home_calibration_cohort: "WORKLOAD",
+    away_cohort_observations: 40,
+    home_cohort_observations: 35,
+    away_cohort_failures: 11,
+    home_cohort_failures: 14,
+  }] as never;
   const packet = buildPregamePacketInputs(
     summary,
     board,
     [{ legacy_game_id: "20260824_AAA_BBB", scheduled_utc_time: firstPitch }] as never,
     collision,
     [],
-    [],
+    ssatV2,
   )[0]!;
   const index = Object.fromEntries(PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]));
   assert.equal(packet.values.length, PREGAME_PACKET_HISTORY_COLS);
@@ -430,6 +445,26 @@ test("future frozen packets preserve component-level moderation state without ch
   assert.equal(packet.values[index.Lineup_Completeness_State], "AWAY_FULL_100|HOME_PARTIAL_66.7");
   assert.equal(packet.values[index.Engine_Version], "engine-test");
   assert.equal(packet.values[index.Schema_Version], WORKBOOK_SCHEMA_VERSION);
+  assert.equal(packet.values[index.SSAT_V2_Away_Workload_Failure_Probability], 0.28);
+  assert.equal(packet.values[index.SSAT_V2_Home_Workload_Failure_Probability], 0.39);
+  assert.equal(packet.values[index.SSAT_V2_Away_Whole_Game_Failure_Run_Cost], 2.4);
+  assert.equal(packet.values[index.SSAT_V2_Home_Whole_Game_Failure_Run_Cost], 3.1);
+  assert.equal(packet.values[index.SSAT_V2_Away_Calibration_Cohort], "ROLE_AND_WORKLOAD");
+  assert.equal(packet.values[index.SSAT_V2_Home_Calibration_Cohort], "WORKLOAD");
+  assert.equal(packet.values[index.SSAT_V2_Away_Cohort_Observations], 40);
+  assert.equal(packet.values[index.SSAT_V2_Home_Cohort_Failures], 14);
+  assert.equal(
+    packet.values[index.SSAT_V2_Starter_Window_Use_Status],
+    "PROXY_ONLY_NOT_STARTER_SCORING_CALIBRATED",
+  );
+  assert.match(
+    String(packet.values[index.SSAT_V2_Failure_Probability_Definition]),
+    /ACTUAL_IP_LT_FROZEN_EXPECTED_IP/,
+  );
+  assert.match(
+    String(packet.values[index.SSAT_V2_Failure_Severity_Definition]),
+    /ACTUAL_GAME_TOTAL_MINUS_DUAL_SURVIVAL_TOTAL/,
+  );
   // Day 1 stays exactly in its broad v46 population. Current code must not
   // retrospectively classify it under the separately versioned Day-2 cohort.
   assert.equal(packet.values[index.Strict_Structural_Cohort_Version], "");
@@ -577,6 +612,13 @@ test("v41 packet header migration preserves old frozen fields by name", () => {
     "Primary_Grade_Market_Line", "Primary_Grade_Market_Source", "Primary_Grade_Market_Status",
     "Away_Starter_Quality_Source", "Home_Starter_Quality_Source",
     "Away_Bullpen_Quality_Source", "Home_Bullpen_Quality_Source",
+    "SSAT_V2_Away_Workload_Failure_Probability", "SSAT_V2_Home_Workload_Failure_Probability",
+    "SSAT_V2_Away_Whole_Game_Failure_Run_Cost", "SSAT_V2_Home_Whole_Game_Failure_Run_Cost",
+    "SSAT_V2_Away_Calibration_Cohort", "SSAT_V2_Home_Calibration_Cohort",
+    "SSAT_V2_Away_Cohort_Observations", "SSAT_V2_Home_Cohort_Observations",
+    "SSAT_V2_Away_Cohort_Failures", "SSAT_V2_Home_Cohort_Failures",
+    "SSAT_V2_Failure_Probability_Definition", "SSAT_V2_Failure_Severity_Definition",
+    "SSAT_V2_Starter_Window_Use_Status",
   ].includes(name));
   const oldRow = Array(oldHeader.length).fill("");
   oldRow[oldHeader.indexOf("Game_ID")] = "20260824_AAA_BBB";
@@ -600,6 +642,9 @@ test("v41 packet header migration preserves old frozen fields by name", () => {
   assert.equal(migrated.rows[0]![index.Home_Bullpen_Quality_Source], "");
   assert.equal(migrated.rows[0]![index.Away_Workload_State_Status], "");
   assert.equal(migrated.rows[0]![index.Home_Workload_Notes], "");
+  assert.equal(migrated.rows[0]![index.SSAT_V2_Away_Workload_Failure_Probability], "");
+  assert.equal(migrated.rows[0]![index.SSAT_V2_Home_Whole_Game_Failure_Run_Cost], "");
+  assert.equal(migrated.rows[0]![index.SSAT_V2_Starter_Window_Use_Status], "");
 });
 
 test("workload-state shadow is frozen beside active Expected_IP without changing it", () => {
@@ -695,6 +740,13 @@ test("packet contract preserves market and dependent shadow fields as explicit c
     "Collision_Status",
     "Low_Center_Status",
     "SSAT_V2_Status",
+    "SSAT_V2_Away_Workload_Failure_Probability",
+    "SSAT_V2_Home_Workload_Failure_Probability",
+    "SSAT_V2_Away_Whole_Game_Failure_Run_Cost",
+    "SSAT_V2_Home_Whole_Game_Failure_Run_Cost",
+    "SSAT_V2_Failure_Probability_Definition",
+    "SSAT_V2_Failure_Severity_Definition",
+    "SSAT_V2_Starter_Window_Use_Status",
     "Traffic_Conversion_Runs",
     "HR_XBH_Damage_Runs",
     "Away_Pitcher_Effective_IP",
@@ -820,6 +872,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 71);
-  assert.equal(pregamePacketHistoryRange(5000), "A1:IS5000");
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 72);
+  assert.equal(pregamePacketHistoryRange(5000), "A1:JF5000");
 });
