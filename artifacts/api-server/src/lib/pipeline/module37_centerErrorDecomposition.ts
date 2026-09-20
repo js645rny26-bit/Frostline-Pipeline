@@ -12,6 +12,12 @@ export const CENTER_ERROR_DECOMPOSITION_VERSION =
 export const CENTER_ERROR_DECOMPOSITION_ACTIVE_INPUT = "NO" as const;
 export const CENTER_ERROR_SAMPLE_FLOOR_DERIVATION_THROUGH_DATE = "2026-09-17";
 export const CENTER_ERROR_DOMAIN_MIN_N = 100;
+export const STARTER_MECHANISM_FAMILY_SIZE = 6;
+export const STARTER_MECHANISM_FAMILYWISE_ALPHA = 0.05;
+export const STARTER_MECHANISM_BONFERRONI_ALPHA =
+  STARTER_MECHANISM_FAMILYWISE_ALPHA / STARTER_MECHANISM_FAMILY_SIZE;
+export const STARTER_MECHANISM_SIMULTANEOUS_CONFIDENCE =
+  1 - STARTER_MECHANISM_BONFERRONI_ALPHA;
 
 /**
  * Frozen after authoritative readback on 2026-09-19. Continuous floors were
@@ -36,6 +42,22 @@ export type CenterErrorBucket =
   | "ENVIRONMENT"
   | "TEAM_ALLOCATION"
   | "DISTRIBUTION_TAIL";
+
+export type MechanismEvidenceStatus =
+  | "INSTRUMENTATION_DEAD"
+  | "INSTRUMENTATION_PARTIAL"
+  | "FLOOR_NOT_FROZEN"
+  | "INSUFFICIENT_N"
+  | "PROVISIONAL_INTERVAL_INCLUDES_ZERO"
+  | "SUPPORTED_DIRECTIONAL_ERROR";
+
+export interface InstrumentationAudit {
+  status: "LIVE_VARYING" | "INSTRUMENTATION_DEAD" | "INSTRUMENTATION_PARTIAL";
+  eligible_n: number;
+  observed_n: number;
+  distinct_unrounded_values: number;
+  neutral_value: number;
+}
 
 export interface CenterPhaseInput {
   frozen_total: number;
@@ -321,4 +343,62 @@ export function bucketInterpretationStatus(
 ): "INTERPRETABLE" | "INSUFFICIENT_N" | "FLOOR_NOT_FROZEN" {
   if (frozenFloor === null) return "FLOOR_NOT_FROZEN";
   return eligibleN >= frozenFloor ? "INTERPRETABLE" : "INSUFFICIENT_N";
+}
+
+/**
+ * A mechanism whose published input never leaves its neutral value cannot be
+ * evaluated from that corpus. Missing observations remain partial rather than
+ * being silently converted to the neutral value.
+ */
+export function auditMechanismInstrumentation(
+  values: readonly (number | null)[],
+  neutralValue: number,
+  tolerance = 1e-12,
+): InstrumentationAudit {
+  const observed = values.filter(
+    (value): value is number => value !== null && Number.isFinite(value),
+  );
+  const distinct = new Set(observed.map((value) => value.toString())).size;
+  const allNeutral = observed.length > 0
+    && observed.every((value) => Math.abs(value - neutralValue) <= tolerance);
+  return {
+    status: observed.length < values.length
+      ? "INSTRUMENTATION_PARTIAL"
+      : allNeutral
+        ? "INSTRUMENTATION_DEAD"
+        : "LIVE_VARYING",
+    eligible_n: values.length,
+    observed_n: observed.length,
+    distinct_unrounded_values: distinct,
+    neutral_value: neutralValue,
+  };
+}
+
+/**
+ * A mechanism is supported only after its own frozen N floor passes and its
+ * familywise interval excludes zero. The caller must supply the simultaneous
+ * interval produced by slate-block resampling at
+ * STARTER_MECHANISM_SIMULTANEOUS_CONFIDENCE (99.1667% for six mechanisms).
+ */
+export function assessMechanismEvidence(input: {
+  instrumentation_status: InstrumentationAudit["status"];
+  eligible_n: number;
+  frozen_floor: number | null;
+  simultaneous_ci_lower: number | null;
+  simultaneous_ci_upper: number | null;
+}): MechanismEvidenceStatus {
+  if (input.instrumentation_status === "INSTRUMENTATION_DEAD") {
+    return "INSTRUMENTATION_DEAD";
+  }
+  if (input.instrumentation_status === "INSTRUMENTATION_PARTIAL") {
+    return "INSTRUMENTATION_PARTIAL";
+  }
+  if (input.frozen_floor === null) return "FLOOR_NOT_FROZEN";
+  if (input.eligible_n < input.frozen_floor) return "INSUFFICIENT_N";
+  if (
+    input.simultaneous_ci_lower === null
+    || input.simultaneous_ci_upper === null
+    || input.simultaneous_ci_lower <= 0 && input.simultaneous_ci_upper >= 0
+  ) return "PROVISIONAL_INTERVAL_INCLUDES_ZERO";
+  return "SUPPORTED_DIRECTIONAL_ERROR";
 }

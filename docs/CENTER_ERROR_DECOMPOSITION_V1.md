@@ -77,6 +77,30 @@ cohort carrying the miss. Otherwise the row remains an unresolved tail
 candidate or is attributed to the supported mechanism. Tail cannot be the
 dumping ground for unexplained large misses.
 
+## Starter-mechanism multiplicity and instrumentation
+
+The starter-window follow-up evaluates six predeclared mechanism families:
+starter quality, traffic, damage, conversion, survival/failure, and role or
+lineup observability. Each family must independently pass its frozen N floor.
+
+Directional support requires a slate-block interval excluding zero after
+familywise control. V1 uses Bonferroni control across six simultaneous claims:
+familywise alpha 0.05, per-mechanism alpha 0.008333, and a 99.1667% interval.
+The largest point estimate is not evidence when its simultaneous interval
+includes zero. Environment or role subcells below their own floor remain
+descriptive even when the parent mechanism is interpretable.
+
+Instrumentation is audited before error attribution. A fully populated field
+that never leaves its neutral value is `INSTRUMENTATION_DEAD`; a partially
+populated field is `INSTRUMENTATION_PARTIAL`. Neither can receive a
+`NOT_RESPONSIBLE` interpretation.
+
+In particular, a corpus where `Away/Home_Damage_Matchup_Factor` remains 1.0
+and `HR_XBH_Damage_Runs` remains 0 does not clear damage. It means the active
+damage mechanism is unmeasurable from those fields and must be reported as
+`INSTRUMENTATION_DEAD`. Patch B remains a separate factual evidence source and
+is not mapped into this audit or the active projection by implication.
+
 ## Commissioning order
 
 1. freeze sample-floor derivation rows through 2026-09-17;

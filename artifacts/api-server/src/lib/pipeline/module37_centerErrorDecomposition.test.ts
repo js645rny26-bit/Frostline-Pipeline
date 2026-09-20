@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   allocationBucketFloor,
+  assessMechanismEvidence,
+  auditMechanismInstrumentation,
   bucketInterpretationStatus,
   buildMarginalCenterDiagnostics,
   CENTER_ERROR_DECOMPOSITION_ACTIVE_INPUT,
@@ -10,6 +12,8 @@ import {
   decomposeCenterPhaseError,
   deriveContinuousBucketFloor,
   distributionTailBucketFloor,
+  STARTER_MECHANISM_BONFERRONI_ALPHA,
+  STARTER_MECHANISM_SIMULTANEOUS_CONFIDENCE,
 } from "./module37_centerErrorDecomposition.js";
 
 test("phase decomposition reconciles workload plus two rate residuals to total error", () => {
@@ -32,6 +36,39 @@ test("phase decomposition reconciles workload plus two rate residuals to total e
   assert.equal(result.total_error, -1);
   assert.ok(Math.abs(result.decomposition_sum! - result.total_error) < 1e-5);
   assert.ok(Math.abs(result.reconciliation_delta!) < 1e-5);
+});
+
+test("starter mechanism audit cannot interpret an inert damage channel as no effect", () => {
+  const factors = auditMechanismInstrumentation([1, 1, 1, 1], 1);
+  const damageRuns = auditMechanismInstrumentation([0, 0, 0, 0], 0);
+  assert.equal(factors.status, "INSTRUMENTATION_DEAD");
+  assert.equal(damageRuns.status, "INSTRUMENTATION_DEAD");
+  assert.equal(assessMechanismEvidence({
+    instrumentation_status: damageRuns.status,
+    eligible_n: 400,
+    frozen_floor: 100,
+    simultaneous_ci_lower: 0.2,
+    simultaneous_ci_upper: 0.4,
+  }), "INSTRUMENTATION_DEAD");
+});
+
+test("six mechanism claims use a familywise interval and require zero exclusion", () => {
+  assert.ok(Math.abs(STARTER_MECHANISM_BONFERRONI_ALPHA - 0.05 / 6) < 1e-12);
+  assert.ok(Math.abs(STARTER_MECHANISM_SIMULTANEOUS_CONFIDENCE - (1 - 0.05 / 6)) < 1e-12);
+  assert.equal(assessMechanismEvidence({
+    instrumentation_status: "LIVE_VARYING",
+    eligible_n: 150,
+    frozen_floor: 100,
+    simultaneous_ci_lower: -0.1,
+    simultaneous_ci_upper: 0.8,
+  }), "PROVISIONAL_INTERVAL_INCLUDES_ZERO");
+  assert.equal(assessMechanismEvidence({
+    instrumentation_status: "LIVE_VARYING",
+    eligible_n: 150,
+    frozen_floor: 100,
+    simultaneous_ci_lower: 0.1,
+    simultaneous_ci_upper: 0.8,
+  }), "SUPPORTED_DIRECTIONAL_ERROR");
 });
 
 test("phase decomposition rejects pitcher-run substitutes that do not reconcile", () => {

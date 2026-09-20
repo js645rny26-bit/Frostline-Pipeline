@@ -75,6 +75,15 @@ the workload-normalized frozen starter-phase expectation.
 This identifies the next audit target; it does not authorize a coefficient or
 an active correction.
 
+The six starter-mechanism follow-ups are governed as one family. Evidence
+requires a 99.1667% slate-block interval excluding zero after the mechanism's
+own frozen N floor passes. Point-estimate ranking alone is prohibited.
+
+Damage is currently `INSTRUMENTATION_DEAD` wherever the only candidate fields
+are constant `Damage_Matchup_Factor=1.0` and `HR_XBH_Damage_Runs=0`. This is an
+instrumentation finding, not evidence that damage is not responsible. Patch B
+remains unmapped and cannot be silently substituted.
+
 ## Allocation and tail controls
 
 - team allocation: 318 eligible, 317 comparable, 193 correct, 124 sign
