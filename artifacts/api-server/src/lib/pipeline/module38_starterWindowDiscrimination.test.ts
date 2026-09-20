@@ -1,0 +1,88 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFileSync } from "node:fs";
+import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
+import {
+  deriveCutpoints, parseStarterWindowObservations,
+  STARTER_WINDOW_ACTIVE_INPUT, STARTER_WINDOW_COMMISSIONING_STATUS,
+  STARTER_WINDOW_ERROR_HEADERS, STARTER_WINDOW_ERROR_SHEET,
+  STARTER_WINDOW_ERROR_SUMMARY_HEADERS, STARTER_WINDOW_ERROR_SUMMARY_SHEET,
+  STARTER_WINDOW_FAILURE_BUCKETS_HEADERS, STARTER_WINDOW_FAILURE_BUCKETS_SHEET,
+  STARTER_WINDOW_PAIR_AUDIT_HEADERS, STARTER_WINDOW_PAIR_AUDIT_SHEET,
+  STARTER_WINDOW_FEATURE_GOV_HEADERS, STARTER_WINDOW_FEATURE_GOV_SHEET,
+  STARTER_WINDOW_REPLAY_HEADERS, STARTER_WINDOW_REPLAY_SHEET,
+} from "./module38_starterWindowDiscrimination.js";
+import { WORKBOOK_SCHEMA, WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
+
+function row(headers: readonly string[], values: Record<string, unknown>): unknown[] {
+  return headers.map(h => values[h] ?? "");
+}
+
+const coverageHeaders = [
+  "Date","Game_ID","Phase_Row_Usable","Actual_Away_Offense_Starter_Window_Runs",
+  "Actual_Home_Offense_Starter_Window_Runs","Actual_Away_Starter_IP","Actual_Home_Starter_IP",
+];
+
+function packet(overrides: Record<string, unknown> = {}): unknown[] {
+  return row(PREGAME_PACKET_HISTORY_HEADERS, {
+    Date:"2026-09-01",Game_ID:"20260901_AAA_BBB",Away_Team:"AAA",Home_Team:"BBB",
+    Scheduled_First_Pitch:"2026-09-01T23:00:00.000Z",Packet_Status:"FROZEN_PREGAME",
+    Packet_Snapshot_TS:"2026-09-01T20:00:00.000Z",Away_Starter:"Away Starter",Home_Starter:"Home Starter",
+    Away_Starter_Role:"CONVENTIONAL_STARTER",Home_Starter_Role:"CONVENTIONAL_STARTER",
+    Away_Expected_IP:6,Home_Expected_IP:6,Away_Pitcher_Effective_IP:5.8,Home_Pitcher_Effective_IP:5.5,
+    Away_Starter_Quality:0.9,Home_Starter_Quality:1.2,Away_Starter_Quality_Source:"FIP",Home_Starter_Quality_Source:"FIP",
+    Away_Active_Offense_Center:4.5,Home_Active_Offense_Center:4.2,
+    Away_Traffic_Matchup_Factor:1.1,Home_Traffic_Matchup_Factor:0.95,
+    Away_Damage_Matchup_Factor:1,Home_Damage_Matchup_Factor:1,Run_Multiplier:1,
+    Away_Lineup_Status:"FULL",Home_Lineup_Status:"FULL",Away_Matchup_Profile_Status:"ACTIVE",Home_Matchup_Profile_Status:"ACTIVE",
+    ...overrides,
+  });
+}
+
+test("starter-window audit derives side expectations from frozen inputs and exact on-mound outcomes", () => {
+  const packets=[Array.from(PREGAME_PACKET_HISTORY_HEADERS),packet()];
+  const coverage=[coverageHeaders,row(coverageHeaders,{Date:"2026-09-01",Game_ID:"20260901_AAA_BBB",Phase_Row_Usable:"TRUE",Actual_Away_Offense_Starter_Window_Runs:5,Actual_Home_Offense_Starter_Window_Runs:1,Actual_Away_Starter_IP:6,Actual_Home_Starter_IP:4})];
+  const cuts=deriveCutpoints(packets,coverage);
+  const observations=parseStarterWindowObservations(packets,coverage,cuts);
+  assert.equal(observations.length,2);
+  const away=observations.find(r=>r.side==="AWAY")!;
+  assert.equal(away.opposing_starter,"Home Starter");
+  assert.equal(away.actual_runs,5);
+  assert.equal(away.actual_ip,4);
+  assert.equal(away.outcome,"FAILURE");
+  assert.equal(away.projected_damage,0);
+  assert.equal(away.damage_bucket,"INSTRUMENTATION_DEAD");
+});
+
+test("post-first-pitch packets and rows without exact phase evidence fail closed", () => {
+  const late=packet({Packet_Snapshot_TS:"2026-09-02T00:00:00.000Z"});
+  const packets=[Array.from(PREGAME_PACKET_HISTORY_HEADERS),late];
+  const coverage=[coverageHeaders,row(coverageHeaders,{Game_ID:"20260901_AAA_BBB",Phase_Row_Usable:"TRUE",Actual_Away_Offense_Starter_Window_Runs:5,Actual_Home_Offense_Starter_Window_Runs:1,Actual_Away_Starter_IP:6,Actual_Home_Starter_IP:4})];
+  assert.deepEqual(parseStarterWindowObservations(packets,coverage),[]);
+});
+
+test("Module 38 governance is research-only", () => {
+  assert.equal(STARTER_WINDOW_ACTIVE_INPUT,"NO");
+  assert.equal(STARTER_WINDOW_COMMISSIONING_STATUS,"RESEARCH_ONLY_NOT_COMMISSIONED");
+});
+
+test("schema v70 exposes exactly the six Module 38 research sheets", () => {
+  assert.equal(WORKBOOK_SCHEMA_VERSION,70);
+  for (const [name,headers] of [
+    [STARTER_WINDOW_ERROR_SHEET,STARTER_WINDOW_ERROR_HEADERS],
+    [STARTER_WINDOW_ERROR_SUMMARY_SHEET,STARTER_WINDOW_ERROR_SUMMARY_HEADERS],
+    [STARTER_WINDOW_FAILURE_BUCKETS_SHEET,STARTER_WINDOW_FAILURE_BUCKETS_HEADERS],
+    [STARTER_WINDOW_PAIR_AUDIT_SHEET,STARTER_WINDOW_PAIR_AUDIT_HEADERS],
+    [STARTER_WINDOW_FEATURE_GOV_SHEET,STARTER_WINDOW_FEATURE_GOV_HEADERS],
+    [STARTER_WINDOW_REPLAY_SHEET,STARTER_WINDOW_REPLAY_HEADERS],
+  ] as const) {
+    assert.deepEqual(WORKBOOK_SCHEMA.find(s=>s.name===name)?.columns.map(c=>c.name),Array.from(headers));
+  }
+});
+
+test("active projection and board modules have no Module 38 consumer", () => {
+  for (const file of ["module09_recalculation.ts","module11_outputExtraction.ts"]) {
+    const source=readFileSync(new URL(`./${file}`,import.meta.url),"utf8");
+    assert.doesNotMatch(source,/STARTER_WINDOW_(ERROR|REPLAY|FAILURE_BUCKETS)|module38_starterWindowDiscrimination/);
+  }
+});

@@ -67,6 +67,8 @@ function coverageRecord(index: number, usable = true): PhaseCoverageRecord {
     reconstruction: {
       status: "RECONSTRUCTED_VALIDATED",
       actual_starter_window_runs: 5,
+      actual_away_offense_starter_window_runs: 3,
+      actual_home_offense_starter_window_runs: 2,
       actual_post_starter_runs: 3,
       inherited_runner_crossings: 0,
       actual_total_from_pbp: 8,
@@ -180,6 +182,8 @@ test("phase reconstruction assigns inherited runs to the pitcher actually on the
   );
   assert.equal(result.status, "RECONSTRUCTED_VALIDATED");
   assert.equal(result.actual_starter_window_runs, 1);
+  assert.equal(result.actual_away_offense_starter_window_runs, 1);
+  assert.equal(result.actual_home_offense_starter_window_runs, 0);
   assert.equal(result.actual_post_starter_runs, 1);
   assert.equal(result.inherited_runner_crossings, 1);
 });

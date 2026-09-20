@@ -110,6 +110,10 @@ import {
   type ActivePitchingInventoryReplayResult,
 } from "./module36_activePitchingInventory.js";
 import {
+  runStarterWindowDiscrimination,
+  type StarterWindowDiscriminationResult,
+} from "./module38_starterWindowDiscrimination.js";
+import {
   runFailureClassificationReplay,
   syncFailureClassificationShadow,
   type FailureClassificationReplayResult,
@@ -1444,6 +1448,7 @@ export interface DailySettlementResult {
   slate_size_diagnostic_status: SlateSizeDiagnosticResult["status"];
   shadow_truth_direction_status: ShadowTruthDirectionResult["status"];
   active_pitching_inventory_replay_status: ActivePitchingInventoryReplayResult["status"];
+  starter_window_discrimination_status: StarterWindowDiscriminationResult["status"];
   packet_finalization_status: PregamePacketFinalizationResult["status"];
   full_ladder_sync_status: FullLadderAuditResult["status"];
   /** Schema documentation is refreshed by pregame publication, never settlement. */
@@ -1469,6 +1474,7 @@ export interface DailySettlementResult {
   slate_size_diagnostic: SlateSizeDiagnosticResult;
   shadow_truth_direction: ShadowTruthDirectionResult;
   active_pitching_inventory_replay: ActivePitchingInventoryReplayResult;
+  starter_window_discrimination: StarterWindowDiscriminationResult;
   packet_finalization: PregamePacketFinalizationResult;
   full_ladder_sync: FullLadderAuditResult;
   schema_documentation: RepairSchemaResult;
@@ -1675,6 +1681,26 @@ export async function runDailySettlement(
   warnings.push(...bullpen_phase_analysis.warnings.map((message) => `bullpen_phase_analysis: ${message}`));
   if (bullpen_phase_analysis.status === "failure") {
     warnings.push(...bullpen_phase_analysis.errors.map((message) => `bullpen_phase_analysis: ${message}`));
+  }
+
+  // Module 38 consumes only the immutable packet plus Module 32's exact
+  // team-side on-mound outcomes. It diagnoses starter-window centering and
+  // failure-tail discrimination but has no active projection consumer.
+  const starter_window_discrimination = await runStarterWindowDiscrimination({ workbookId }).catch(
+    (err: unknown): StarterWindowDiscriminationResult => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        status: "failure", replay_timestamp_utc: new Date().toISOString(),
+        eligible_side_rows: 0, eligible_games: 0, summary_rows_written: 0,
+        pair_rows_written: 0, exact_lineage_pct: 0, active_input: "NO",
+        commissioning_status: "RESEARCH_ONLY_NOT_COMMISSIONED",
+        warnings: [], errors: [msg],
+      };
+    },
+  );
+  warnings.push(...starter_window_discrimination.warnings.map((message) => `starter_window_discrimination: ${message}`));
+  if (starter_window_discrimination.status === "failure") {
+    warnings.push(...starter_window_discrimination.errors.map((message) => `starter_window_discrimination: ${message}`));
   }
 
   // Module 33 is a fixed-total allocation challenger. It reads only immutable
@@ -1955,6 +1981,7 @@ export async function runDailySettlement(
     { module: "MODULE_34_SLATE_SIZE_DIAGNOSTIC_V1", status: slate_size_diagnostic.status === "failure" ? "warning" : "success" },
     { module: "MODULE_35_SHADOW_TRUTH_DIRECTION_V1", status: shadow_truth_direction.status === "failure" ? "warning" : "success" },
     { module: "MODULE_36_ACTIVE_PITCHING_INVENTORY_REPLAY", status: active_pitching_inventory_replay.status === "failure" ? "warning" : "success" },
+    { module: "MODULE_38_STARTER_WINDOW_DISCRIMINATION", status: starter_window_discrimination.status === "failure" ? "warning" : "success" },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));
@@ -2014,6 +2041,7 @@ export async function runDailySettlement(
       slate_size_diagnostic_status: slate_size_diagnostic.status,
       shadow_truth_direction_status: shadow_truth_direction.status,
       active_pitching_inventory_replay_status: active_pitching_inventory_replay.status,
+      starter_window_discrimination_status: starter_window_discrimination.status,
       packet_finalization_status: packet_finalization.status,
       full_ladder_sync_status: full_ladder_sync.status,
       schema_documentation_status,
@@ -2055,6 +2083,7 @@ export async function runDailySettlement(
     slate_size_diagnostic_status: slate_size_diagnostic.status,
     shadow_truth_direction_status: shadow_truth_direction.status,
     active_pitching_inventory_replay_status: active_pitching_inventory_replay.status,
+    starter_window_discrimination_status: starter_window_discrimination.status,
     packet_finalization_status: packet_finalization.status,
     full_ladder_sync_status: full_ladder_sync.status,
     schema_documentation_status,
@@ -2079,6 +2108,7 @@ export async function runDailySettlement(
     slate_size_diagnostic,
     shadow_truth_direction,
     active_pitching_inventory_replay,
+    starter_window_discrimination,
     packet_finalization,
     full_ladder_sync,
     schema_documentation,

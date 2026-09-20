@@ -200,6 +200,23 @@ This is settlement research only. It has no active consumer and cannot change
 the published center, create a live run band, alter a market view, select a
 vehicle, or affect BET/PASS or authorization.
 
+## Starter-window discrimination research
+
+Schema v70 adds six Module 38 research surfaces: `STARTER_WINDOW_ERROR_V1`,
+`STARTER_WINDOW_ERROR_SUMMARY_V1`, `STARTER_WINDOW_FAILURE_BUCKETS_V1`,
+`STARTER_WINDOW_PAIR_AUDIT_V1`, `STARTER_WINDOW_FEATURE_GOV_V1`, and
+`STARTER_WINDOW_REPLAY_V1`. They join immutable pregame packet inputs to the
+exact runs scored by each batting side while the opposing designated starter
+was actually on the mound. MLB play-by-play current-pitcher attribution is
+required; pitcher R/ER and final-score allocation are inadmissible substitutes.
+
+Read feature governance before interpreting a cohort. Missing frozen
+starter-side failure probabilities stay unavailable. A uniformly neutral
+damage channel is labeled `INSTRUMENTATION_DEAD`, not “not responsible.” The
+audit separates signed center bias from absolute and tail discrimination. It
+cannot change a projection, confidence, market, vehicle, or authorization;
+`Active_Input=NO` is a commissioning sentinel.
+
 ### SSAT family interpretation
 
 `STARTER_SURVIVAL_DIFFERENTIATION_AUDIT` tests whether v2 has earned separate

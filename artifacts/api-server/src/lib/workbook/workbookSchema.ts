@@ -223,8 +223,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *  v67 (2026-09-17): Patch B derives cutoff-safe batter batted-ball damage
  *      evidence from retained D-1 Savant pitch events and materializes exact-
  *      lineup research profiles. Active HR/XBH damage remains gated off.
+ *  v68-v69 (2026-09-18/19): Patch B source-maturity governance and Module 36
+ *      Active Pitching Inventory remain research-only with no active consumer.
+ *  v70 (2026-09-20): Module 38 adds exact team-side starter-window outcome
+ *      attribution and governed calibration/discrimination replay surfaces.
  */
-export const WORKBOOK_SCHEMA_VERSION = 69;
+export const WORKBOOK_SCHEMA_VERSION = 70;
 
 export interface ColumnDef {
   name: string;
@@ -271,6 +275,7 @@ export interface ColumnDef {
     | "MODULE_34"
     | "MODULE_35"
     | "MODULE_36"
+    | "MODULE_38"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -1239,6 +1244,24 @@ const ACTIVE_PITCHING_INVENTORY_REPLAY_SUMMARY_V1_COLUMN_NAMES = [
   "Baseline_Misses_GE_3", "API_Misses_GE_3", "Baseline_Misses_GE_4",
   "API_Misses_GE_4", "Baseline_Misses_GE_5", "API_Misses_GE_5",
   "Replay_Status", "Replay_TS",
+] as const;
+const STARTER_WINDOW_ERROR_V1_COLUMN_NAMES = [
+  "Date","Game_ID","Team_Side","Batting_Team","Opposing_Team","Opposing_Starter","Opposing_Starter_Role","Frozen_Packet_Snapshot_TS","Frozen_Expected_IP","Frozen_Effective_IP","Frozen_Starter_Quality","Frozen_Starter_Quality_Source","Frozen_Active_Offense_Center","Frozen_Traffic_Factor","Frozen_Damage_Factor","Frozen_Run_Multiplier","Projected_Starter_Base_Runs","Projected_Traffic_Runs","Projected_Damage_Runs","Frozen_Expected_Starter_Window_Runs","Actual_Starter_IP","Actual_Starter_Window_Runs","Starter_Window_Error","Starter_Window_Abs_Error","Workload_Shortfall_IP","Outcome_State","Tail_4Plus","Tail_5Plus","Tail_6Plus","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Actual_Workload_Bucket","Pressure_Shape","Traffic_Damage_CoSign","Lineup_Status","Matchup_Profile_Status","Frozen_Probability_Status","Feature_Lineage_Status","Actual_Lineage_Status","Research_Status","Active_Input","Replay_TS",
+] as const;
+const STARTER_WINDOW_ERROR_SUMMARY_V1_COLUMN_NAMES = [
+  "Dimension","Cohort","N","Slate_N","Signed_Bias","MAE","Median_AE","RMSE","Failure_Frequency","Mean_Runs_Conditional_On_Failure","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Quiet_Window_False_Positive_Rate","Detonation_False_Negative_Rate","Bias_CI_Lower","Bias_CI_Upper","Uncertainty_Method","Interpretation_Status","Instrumentation_Status","Probability_Calibration_Status","Commissioning_Status","Notes","Replay_TS",
+] as const;
+const STARTER_WINDOW_FAILURE_BUCKETS_V1_COLUMN_NAMES = [
+  "Feature","Bucket","N","Failure_N","Failure_Frequency","Mean_Expected_Runs","Mean_Actual_Runs","Mean_Runs_Conditional_On_Failure","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Expected_Survival_Rate","Observed_Survival_Rate","Expected_Failure_Rate","Observed_Failure_Rate","Probability_Metric_Status","Discrimination_Status","Instrumentation_Status","Bucket_Cutpoint_Source","Notes","Replay_TS",
+] as const;
+const STARTER_WINDOW_PAIR_AUDIT_V1_COLUMN_NAMES = [
+  "Date","Game_ID","Case_Type","Team_Side","Opposing_Starter","Frozen_Expected_Starter_Window_Runs","Actual_Starter_Window_Runs","Starter_Window_Error","Frozen_Expected_IP","Actual_Starter_IP","Outcome_State","Pregame_Mechanism_Source","Pregame_Mechanism","Mechanism_Grade","Case_Interpretation","No_Outcome_Fitting_Status","Replay_TS",
+] as const;
+const STARTER_WINDOW_FEATURE_GOV_V1_COLUMN_NAMES = [
+  "Feature","Source","Freshness","Pregame_Availability","Leakage_Risk","Current_Active_Use","Research_Eligibility","Instrumentation_Status","Commissioning_Status","Fallback_Behavior","Notes","Audit_TS",
+] as const;
+const STARTER_WINDOW_REPLAY_V1_COLUMN_NAMES = [
+  "Date","Game_ID","Team_Side","Frozen_Packet_Snapshot_TS","Opposing_Starter","Opposing_Starter_Role","Frozen_Expected_Starter_Window_Runs","Actual_Starter_Window_Runs","Signed_Error","Absolute_Error","Outcome_State","Actual_Starter_IP","Frozen_Expected_IP","Workload_Shortfall_IP","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Pressure_Shape","Replay_Status","Active_Input","Replay_TS",
 ] as const;
 const FAILURE_CLASSIFICATION_SHADOW_V1_COLUMN_NAMES = [
   "Date",
@@ -13471,14 +13494,17 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Actual_Away_IP_Status", "Actual_Home_IP_Status", "Frozen_Expected_IP_Status",
         "Reconstruction_Required", "Reconstruction_Method", "Inherited_Runner_Ambiguity_Status",
         "Phase_Row_Usable", "Exclusion_Reason", "Game_PK", "Frozen_Packet_Snapshot_TS",
-        "Starter_Identity_Status", "Actual_Starter_Window_Runs", "Actual_Post_Starter_Runs",
+        "Starter_Identity_Status", "Actual_Starter_Window_Runs",
+        "Actual_Away_Offense_Starter_Window_Runs", "Actual_Home_Offense_Starter_Window_Runs",
+        "Actual_Post_Starter_Runs",
         "Actual_Total_Runs", "Actual_Away_Starter_IP", "Actual_Home_Starter_IP",
         "Frozen_Away_Expected_IP", "Frozen_Home_Expected_IP", "Frozen_Starter_Attack_Runs",
         "Frozen_Bullpen_Continuation_Runs", "Away_Starter_Shortfall_IP", "Home_Starter_Shortfall_IP",
         "Max_Starter_Shortfall_IP", "Workload_State", "Instrumentation_Version", "Coverage_TS",
       ],
       [
-        "Game_PK", "Actual_Starter_Window_Runs", "Actual_Post_Starter_Runs", "Actual_Total_Runs",
+        "Game_PK", "Actual_Starter_Window_Runs", "Actual_Away_Offense_Starter_Window_Runs",
+        "Actual_Home_Offense_Starter_Window_Runs", "Actual_Post_Starter_Runs", "Actual_Total_Runs",
         "Actual_Away_Starter_IP", "Actual_Home_Starter_IP", "Frozen_Away_Expected_IP",
         "Frozen_Home_Expected_IP", "Frozen_Starter_Attack_Runs", "Frozen_Bullpen_Continuation_Runs",
         "Away_Starter_Shortfall_IP", "Home_Starter_Shortfall_IP", "Max_Starter_Shortfall_IP",
@@ -13854,6 +13880,25 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
       "MODULE_36",
     ),
   },
+
+  ...([
+    ["STARTER_WINDOW_ERROR_V1", "One row per team-side exact on-mound starter window, joining immutable pregame inputs to settlement labels without creating an active projection.", STARTER_WINDOW_ERROR_V1_COLUMN_NAMES],
+    ["STARTER_WINDOW_ERROR_SUMMARY_V1", "Research-only center-calibration and distribution-discrimination summaries with slate-block bootstrap intervals and explicit instrumentation/sample governance.", STARTER_WINDOW_ERROR_SUMMARY_V1_COLUMN_NAMES],
+    ["STARTER_WINDOW_FAILURE_BUCKETS_V1", "Observed survival/failure severity and 4+/5+/6+ starter-window tails by outcome-blind frozen predictor buckets; missing probabilities stay unavailable.", STARTER_WINDOW_FAILURE_BUCKETS_V1_COLUMN_NAMES],
+    ["STARTER_WINDOW_PAIR_AUDIT_V1", "Declared Sept. 19 proof, inverse-control, and cancellation cases with predeclared-mechanism grading kept separate from posthoc explanations.", STARTER_WINDOW_PAIR_AUDIT_V1_COLUMN_NAMES],
+    ["STARTER_WINDOW_FEATURE_GOV_V1", "Feature-level source, freshness, pregame observability, leakage, active-use, and instrumentation governance for Module 38.", STARTER_WINDOW_FEATURE_GOV_V1_COLUMN_NAMES],
+    ["STARTER_WINDOW_REPLAY_V1", "Compact exact-lineage replay of frozen team-side starter-window expectation versus play-by-play on-mound outcomes. Active_Input is always NO.", STARTER_WINDOW_REPLAY_V1_COLUMN_NAMES],
+  ] as const).map(([name, description, columns]) => ({
+    name,
+    description,
+    section: "ANALYSIS" as const,
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      columns,
+      columns.filter((column) => /(^N$|_N$|Runs|Error|MAE|RMSE|Rate|Frequency|IP$|Factor$|Multiplier$|Quality$|Center$|Lower$|Upper$)/.test(column)),
+      "MODULE_38",
+    ),
+  })),
 
   {
     name: "MODEL_INPUT_CATALOG",

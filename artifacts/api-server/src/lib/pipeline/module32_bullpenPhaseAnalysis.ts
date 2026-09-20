@@ -62,6 +62,8 @@ export const BULLPEN_PHASE_COVERAGE_HEADERS = [
   "Frozen_Packet_Snapshot_TS",
   "Starter_Identity_Status",
   "Actual_Starter_Window_Runs",
+  "Actual_Away_Offense_Starter_Window_Runs",
+  "Actual_Home_Offense_Starter_Window_Runs",
   "Actual_Post_Starter_Runs",
   "Actual_Total_Runs",
   "Actual_Away_Starter_IP",
@@ -203,6 +205,8 @@ export interface PhaseReconstruction {
     | "SCORING_PITCHER_UNRESOLVED"
     | "PLAY_BY_PLAY_TOTAL_MISMATCH";
   actual_starter_window_runs: number | null;
+  actual_away_offense_starter_window_runs: number | null;
+  actual_home_offense_starter_window_runs: number | null;
   actual_post_starter_runs: number | null;
   inherited_runner_crossings: number;
   actual_total_from_pbp: number | null;
@@ -520,6 +524,8 @@ export function reconstructPhaseFromPlayByPlay(
     return {
       status: "PLAY_BY_PLAY_UNAVAILABLE",
       actual_starter_window_runs: null,
+      actual_away_offense_starter_window_runs: null,
+      actual_home_offense_starter_window_runs: null,
       actual_post_starter_runs: null,
       inherited_runner_crossings: 0,
       actual_total_from_pbp: null,
@@ -537,6 +543,8 @@ export function reconstructPhaseFromPlayByPlay(
     return {
       status: "STARTER_ON_MOUND_ID_UNRESOLVED",
       actual_starter_window_runs: null,
+      actual_away_offense_starter_window_runs: null,
+      actual_home_offense_starter_window_runs: null,
       actual_post_starter_runs: null,
       inherited_runner_crossings: 0,
       actual_total_from_pbp: null,
@@ -544,6 +552,8 @@ export function reconstructPhaseFromPlayByPlay(
   }
   let actualTotal = 0;
   let starterWindow = 0;
+  let awayOffenseStarterWindow = 0;
+  let homeOffenseStarterWindow = 0;
   let inheritedCrossings = 0;
   for (const play of plays) {
     const scoringRunners = (play.runners ?? []).filter(
@@ -557,6 +567,8 @@ export function reconstructPhaseFromPlayByPlay(
       return {
         status: "SCORING_PITCHER_UNRESOLVED",
         actual_starter_window_runs: null,
+        actual_away_offense_starter_window_runs: null,
+        actual_home_offense_starter_window_runs: null,
         actual_post_starter_runs: null,
         inherited_runner_crossings: inheritedCrossings,
         actual_total_from_pbp: actualTotal,
@@ -568,6 +580,11 @@ export function reconstructPhaseFromPlayByPlay(
       currentPitcherId === awayStarterId
     ) {
       starterWindow += scoringRunners.length;
+      const half = text(play.about?.halfInning).toLowerCase();
+      if (half === "top" && currentPitcherId === homeStarterId)
+        awayOffenseStarterWindow += scoringRunners.length;
+      if (half === "bottom" && currentPitcherId === awayStarterId)
+        homeOffenseStarterWindow += scoringRunners.length;
     }
     for (const runner of scoringRunners) {
       const responsible = numeric(runner.details?.responsiblePitcher?.id);
@@ -579,6 +596,8 @@ export function reconstructPhaseFromPlayByPlay(
     return {
       status: "PLAY_BY_PLAY_TOTAL_MISMATCH",
       actual_starter_window_runs: null,
+      actual_away_offense_starter_window_runs: null,
+      actual_home_offense_starter_window_runs: null,
       actual_post_starter_runs: null,
       inherited_runner_crossings: inheritedCrossings,
       actual_total_from_pbp: actualTotal,
@@ -587,6 +606,8 @@ export function reconstructPhaseFromPlayByPlay(
   return {
     status: "RECONSTRUCTED_VALIDATED",
     actual_starter_window_runs: starterWindow,
+    actual_away_offense_starter_window_runs: awayOffenseStarterWindow,
+    actual_home_offense_starter_window_runs: homeOffenseStarterWindow,
     actual_post_starter_runs: officialActualTotal - starterWindow,
     inherited_runner_crossings: inheritedCrossings,
     actual_total_from_pbp: actualTotal,
@@ -1041,6 +1062,8 @@ function coverageRow(
     record.snapshot_ts,
     `${record.away_starter_match}|${record.home_starter_match}`,
     record.reconstruction.actual_starter_window_runs ?? "",
+    record.reconstruction.actual_away_offense_starter_window_runs ?? "",
+    record.reconstruction.actual_home_offense_starter_window_runs ?? "",
     record.reconstruction.actual_post_starter_runs ?? "",
     record.actual_total,
     record.actual_away_ip ?? "",
@@ -1461,12 +1484,16 @@ function parseCachedReconstruction(
     const gameId = text(value(row, index, "Game_ID"));
     const gamePk = numeric(value(row, index, "Game_PK"));
     const starter = numeric(value(row, index, "Actual_Starter_Window_Runs"));
+    const awayStarter = numeric(value(row, index, "Actual_Away_Offense_Starter_Window_Runs"));
+    const homeStarter = numeric(value(row, index, "Actual_Home_Offense_Starter_Window_Runs"));
     const post = numeric(value(row, index, "Actual_Post_Starter_Runs"));
     const actualTotal = numeric(value(row, index, "Actual_Total_Runs"));
     if (
       !gameId ||
       gamePk === null ||
       starter === null ||
+      awayStarter === null ||
+      homeStarter === null ||
       post === null ||
       actualTotal === null
     )
@@ -1480,6 +1507,8 @@ function parseCachedReconstruction(
       reconstruction: {
         status: "RECONSTRUCTED_VALIDATED",
         actual_starter_window_runs: starter,
+        actual_away_offense_starter_window_runs: awayStarter,
+        actual_home_offense_starter_window_runs: homeStarter,
         actual_post_starter_runs: post,
         inherited_runner_crossings: inherited,
         actual_total_from_pbp: actualTotal,
@@ -1519,6 +1548,8 @@ async function reconstructMissing(
             return buildCoverageRecord(input, null, {
               status: "PLAY_BY_PLAY_UNAVAILABLE",
               actual_starter_window_runs: null,
+              actual_away_offense_starter_window_runs: null,
+              actual_home_offense_starter_window_runs: null,
               actual_post_starter_runs: null,
               inherited_runner_crossings: 0,
               actual_total_from_pbp: null,
@@ -1540,6 +1571,8 @@ async function reconstructMissing(
             return buildCoverageRecord(input, gamePk, {
               status: "PLAY_BY_PLAY_UNAVAILABLE",
               actual_starter_window_runs: null,
+              actual_away_offense_starter_window_runs: null,
+              actual_home_offense_starter_window_runs: null,
               actual_post_starter_runs: null,
               inherited_runner_crossings: 0,
               actual_total_from_pbp: null,
@@ -1622,7 +1655,7 @@ export async function runBullpenPhaseAnalysis(
         readOptional(workbookId, "SHADOW_OUTCOMES!A1:AW10000", warnings),
         readOptional(
           workbookId,
-          `${BULLPEN_PHASE_COVERAGE_SHEET}!A1:AI10000`,
+          `${BULLPEN_PHASE_COVERAGE_SHEET}!A1:AZ10000`,
           warnings,
         ),
       ]);
@@ -1650,7 +1683,7 @@ export async function runBullpenPhaseAnalysis(
       },
     ]);
     await Promise.all([
-      clearRange(workbookId, `${BULLPEN_PHASE_COVERAGE_SHEET}!A1:AI10000`),
+      clearRange(workbookId, `${BULLPEN_PHASE_COVERAGE_SHEET}!A1:AZ10000`),
       clearRange(workbookId, `${BULLPEN_PHASE_COVERAGE_SUMMARY_SHEET}!A1:F100`),
     ]);
     await Promise.all([

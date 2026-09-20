@@ -924,6 +924,21 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     readNote:
       "INSUFFICIENT_PROSPECTIVE_API_HISTORY is the correct initial state. Do not infer improvement from the proof cases or an empty replay.",
   },
+  ...[
+    ["STARTER_WINDOW_ERROR_V1", "One exact-lineage row per batting side, preserving frozen starter quality/workload/traffic/damage/offense evidence beside exact on-mound starter runs.", "Read Feature_Lineage_Status and Actual_Lineage_Status first; rows never use pitcher R/ER or final-score allocation."],
+    ["STARTER_WINDOW_ERROR_SUMMARY_V1", "Separates signed center bias from absolute/tail discrimination overall and by governed frozen feature cohort.", "Only INTERPRETABLE cells may support a later shadow experiment; damage-neutral cells remain instrumentation-dead."],
+    ["STARTER_WINDOW_FAILURE_BUCKETS_V1", "Reports observed survival/failure severity and 4+/5+/6+ tails by outcome-blind pregame buckets.", "Blank expected probabilities are intentional: Frostline does not persist calibrated starter-side failure probabilities."],
+    ["STARTER_WINDOW_PAIR_AUDIT_V1", "Preserves declared proof, inverse-control, and cancellation cases with predeclared-mechanism grading.", "POSTHOC_ONLY never counts as validation, and no case is a coefficient target."],
+    ["STARTER_WINDOW_FEATURE_GOV_V1", "Audits source, freshness, pregame observability, leakage, active use, and instrumentation health for each requested mechanism family.", "MISSING and INSTRUMENTATION_DEAD are not null findings about baseball importance."],
+    ["STARTER_WINDOW_REPLAY_V1", "Compact replay of frozen team-side starter-window expectation versus exact play-by-play outcomes.", "Active_Input=NO is a commissioning sentinel; this surface has no projection or decision consumer."],
+  ].map(([sheet, purpose, readNote]) => ({
+    sheet,
+    stage: "REPLAY" as const,
+    timing: "Daily settlement after Module 32 exact team-side phase reconstruction (Module 38)",
+    purpose,
+    boardRelationship: "Research-only. No projection, confidence, market, vehicle, or authorization influence.",
+    readNote,
+  })),
   {
     sheet: "FAILURE_CLASSIFICATION_SHADOW_V1",
     stage: "REPLAY",
