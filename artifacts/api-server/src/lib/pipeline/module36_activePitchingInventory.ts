@@ -280,13 +280,23 @@ function rosterLongOptions(
           && appearance.innings_pitched !== null,
         )
         .sort((left, right) => right.game_date.localeCompare(left.game_date) || right.game_pk - left.game_pk);
+      const latest = prior[0];
+      const latestDays = latest
+        ? Math.floor((Date.parse(`${slateDate}T12:00:00Z`) - Date.parse(`${latest.game_date}T12:00:00Z`)) / 86_400_000)
+        : null;
+      const latestPitches = latest?.pitches_thrown ?? 0;
+      const restedForMultiInning = latestDays !== null
+        && latestDays >= 2
+        && !(latestPitches >= 60 && latestDays < 5)
+        && !(latestPitches >= 30 && latestDays < 3);
+      if (!restedForMultiInning) return [];
       const recent = prior.filter((appearance) => {
         const days = Math.floor((Date.parse(`${slateDate}T12:00:00Z`) - Date.parse(`${appearance.game_date}T12:00:00Z`)) / 86_400_000);
         return days >= 2 && days <= 21;
       });
       const maxIp = recent.reduce((maximum, appearance) => Math.max(maximum, appearance.innings_pitched ?? 0), 0);
       const supported = maxIp >= 3 || recent.filter((appearance) => (appearance.innings_pitched ?? 0) >= 2).length >= 2;
-      return supported ? [{ pitcher, latest_date: recent[0]?.game_date ?? "", max_ip: maxIp }] : [];
+      return supported ? [{ pitcher, latest_date: latest?.game_date ?? "", max_ip: maxIp }] : [];
     })
     .sort((left, right) =>
       right.latest_date.localeCompare(left.latest_date)
