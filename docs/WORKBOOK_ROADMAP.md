@@ -202,7 +202,10 @@ vehicle, or affect BET/PASS or authorization.
 
 ## Starter-window discrimination research
 
-Schema v70 adds six Module 38 research surfaces: `STARTER_WINDOW_ERROR_V1`,
+Schema v71 refines the six Module 38 research surfaces with workload-normalized
+starter scoring-rate error, separate allocation-inclusive error, and distinct
+run-detonation versus workload-failure labels. Schema v70 originally added
+`STARTER_WINDOW_ERROR_V1`,
 `STARTER_WINDOW_ERROR_SUMMARY_V1`, `STARTER_WINDOW_FAILURE_BUCKETS_V1`,
 `STARTER_WINDOW_PAIR_AUDIT_V1`, `STARTER_WINDOW_FEATURE_GOV_V1`, and
 `STARTER_WINDOW_REPLAY_V1`. They join immutable pregame packet inputs to the

@@ -228,7 +228,7 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *  v70 (2026-09-20): Module 38 adds exact team-side starter-window outcome
  *      attribution and governed calibration/discrimination replay surfaces.
  */
-export const WORKBOOK_SCHEMA_VERSION = 70;
+export const WORKBOOK_SCHEMA_VERSION = 71;
 
 export interface ColumnDef {
   name: string;
@@ -1246,22 +1246,22 @@ const ACTIVE_PITCHING_INVENTORY_REPLAY_SUMMARY_V1_COLUMN_NAMES = [
   "Replay_Status", "Replay_TS",
 ] as const;
 const STARTER_WINDOW_ERROR_V1_COLUMN_NAMES = [
-  "Date","Game_ID","Team_Side","Batting_Team","Opposing_Team","Opposing_Starter","Opposing_Starter_Role","Frozen_Packet_Snapshot_TS","Frozen_Expected_IP","Frozen_Effective_IP","Frozen_Starter_Quality","Frozen_Starter_Quality_Source","Frozen_Active_Offense_Center","Frozen_Traffic_Factor","Frozen_Damage_Factor","Frozen_Run_Multiplier","Projected_Starter_Base_Runs","Projected_Traffic_Runs","Projected_Damage_Runs","Frozen_Expected_Starter_Window_Runs","Actual_Starter_IP","Actual_Starter_Window_Runs","Starter_Window_Error","Starter_Window_Abs_Error","Workload_Shortfall_IP","Outcome_State","Tail_4Plus","Tail_5Plus","Tail_6Plus","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Actual_Workload_Bucket","Pressure_Shape","Traffic_Damage_CoSign","Lineup_Status","Matchup_Profile_Status","Frozen_Probability_Status","Feature_Lineage_Status","Actual_Lineage_Status","Research_Status","Active_Input","Replay_TS",
+  "Date","Game_ID","Team_Side","Batting_Team","Opposing_Team","Opposing_Starter","Opposing_Starter_Role","Frozen_Packet_Snapshot_TS","Frozen_Expected_IP","Frozen_Effective_IP","Frozen_Starter_Quality","Frozen_Starter_Quality_Source","Frozen_Active_Offense_Center","Frozen_Traffic_Factor","Frozen_Damage_Factor","Frozen_Run_Multiplier","Projected_Starter_Base_Runs","Projected_Traffic_Runs","Projected_Damage_Runs","Frozen_Expected_Starter_Window_Runs","Actual_Starter_IP","Actual_Starter_Window_Runs","Allocation_Inclusive_Error","Allocation_Inclusive_Abs_Error","Workload_Normalized_Expected_Starter_Window_Runs","Workload_Normalized_Error","Workload_Normalized_Abs_Error","Workload_Shortfall_IP","Outcome_State","Run_Outcome_State","Workload_Outcome_State","Tail_4Plus","Tail_5Plus","Tail_6Plus","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Actual_Workload_Bucket","Pressure_Shape","Traffic_Damage_CoSign","Lineup_Status","Matchup_Profile_Status","Frozen_Probability_Status","Feature_Lineage_Status","Actual_Lineage_Status","Research_Status","Active_Input","Replay_TS",
 ] as const;
 const STARTER_WINDOW_ERROR_SUMMARY_V1_COLUMN_NAMES = [
-  "Dimension","Cohort","N","Slate_N","Signed_Bias","MAE","Median_AE","RMSE","Failure_Frequency","Mean_Runs_Conditional_On_Failure","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Quiet_Window_False_Positive_Rate","Detonation_False_Negative_Rate","Bias_CI_Lower","Bias_CI_Upper","Uncertainty_Method","Interpretation_Status","Instrumentation_Status","Probability_Calibration_Status","Commissioning_Status","Notes","Replay_TS",
+  "Dimension","Cohort","N","Slate_N","Workload_Normalized_Signed_Bias","Workload_Normalized_MAE","Workload_Normalized_Median_AE","Workload_Normalized_RMSE","Allocation_Inclusive_Signed_Bias","Allocation_Inclusive_MAE","Run_Detonation_Frequency","Workload_Failure_Frequency","Mean_Runs_Conditional_On_Detonation","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Quiet_Window_False_Positive_Rate","Detonation_False_Negative_Rate","Bias_CI_Lower","Bias_CI_Upper","Uncertainty_Method","Interpretation_Status","Instrumentation_Status","Probability_Calibration_Status","Commissioning_Status","Notes","Replay_TS",
 ] as const;
 const STARTER_WINDOW_FAILURE_BUCKETS_V1_COLUMN_NAMES = [
-  "Feature","Bucket","N","Failure_N","Failure_Frequency","Mean_Expected_Runs","Mean_Actual_Runs","Mean_Runs_Conditional_On_Failure","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Expected_Survival_Rate","Observed_Survival_Rate","Expected_Failure_Rate","Observed_Failure_Rate","Probability_Metric_Status","Discrimination_Status","Instrumentation_Status","Bucket_Cutpoint_Source","Notes","Replay_TS",
+  "Feature","Bucket","N","Run_Detonation_N","Run_Detonation_Frequency","Workload_Failure_N","Workload_Failure_Frequency","Mean_Expected_Runs","Mean_Workload_Normalized_Expected_Runs","Mean_Actual_Runs","Mean_Runs_Conditional_On_Detonation","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Expected_Survival_Rate","Observed_Survival_Rate","Expected_Failure_Rate","Observed_Failure_Rate","Probability_Metric_Status","Discrimination_Status","Instrumentation_Status","Bucket_Cutpoint_Source","Notes","Replay_TS",
 ] as const;
 const STARTER_WINDOW_PAIR_AUDIT_V1_COLUMN_NAMES = [
-  "Date","Game_ID","Case_Type","Team_Side","Opposing_Starter","Frozen_Expected_Starter_Window_Runs","Actual_Starter_Window_Runs","Starter_Window_Error","Frozen_Expected_IP","Actual_Starter_IP","Outcome_State","Pregame_Mechanism_Source","Pregame_Mechanism","Mechanism_Grade","Case_Interpretation","No_Outcome_Fitting_Status","Replay_TS",
+  "Date","Game_ID","Case_Type","Team_Side","Opposing_Starter","Frozen_Expected_Starter_Window_Runs","Actual_Starter_Window_Runs","Allocation_Inclusive_Error","Workload_Normalized_Expected_Starter_Window_Runs","Workload_Normalized_Error","Frozen_Expected_IP","Actual_Starter_IP","Outcome_State","Run_Outcome_State","Workload_Outcome_State","Pregame_Mechanism_Source","Pregame_Mechanism","Mechanism_Grade","Case_Interpretation","No_Outcome_Fitting_Status","Replay_TS",
 ] as const;
 const STARTER_WINDOW_FEATURE_GOV_V1_COLUMN_NAMES = [
   "Feature","Source","Freshness","Pregame_Availability","Leakage_Risk","Current_Active_Use","Research_Eligibility","Instrumentation_Status","Commissioning_Status","Fallback_Behavior","Notes","Audit_TS",
 ] as const;
 const STARTER_WINDOW_REPLAY_V1_COLUMN_NAMES = [
-  "Date","Game_ID","Team_Side","Frozen_Packet_Snapshot_TS","Opposing_Starter","Opposing_Starter_Role","Frozen_Expected_Starter_Window_Runs","Actual_Starter_Window_Runs","Signed_Error","Absolute_Error","Outcome_State","Actual_Starter_IP","Frozen_Expected_IP","Workload_Shortfall_IP","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Pressure_Shape","Replay_Status","Active_Input","Replay_TS",
+  "Date","Game_ID","Team_Side","Frozen_Packet_Snapshot_TS","Opposing_Starter","Opposing_Starter_Role","Frozen_Expected_Starter_Window_Runs","Actual_Starter_Window_Runs","Allocation_Inclusive_Signed_Error","Workload_Normalized_Expected_Starter_Window_Runs","Workload_Normalized_Signed_Error","Workload_Normalized_Absolute_Error","Outcome_State","Run_Outcome_State","Workload_Outcome_State","Actual_Starter_IP","Frozen_Expected_IP","Workload_Shortfall_IP","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Pressure_Shape","Replay_Status","Active_Input","Replay_TS",
 ] as const;
 const FAILURE_CLASSIFICATION_SHADOW_V1_COLUMN_NAMES = [
   "Date",

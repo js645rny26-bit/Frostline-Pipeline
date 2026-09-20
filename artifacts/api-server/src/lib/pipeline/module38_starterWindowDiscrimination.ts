@@ -24,8 +24,9 @@ export const STARTER_WINDOW_REPLAY_SHEET = "STARTER_WINDOW_REPLAY_V1";
 export const STARTER_WINDOW_VERSION = "STARTER_WINDOW_DISCRIMINATION_V1_2026-09-20";
 export const STARTER_WINDOW_ACTIVE_INPUT = "NO" as const;
 export const STARTER_WINDOW_COMMISSIONING_STATUS = "RESEARCH_ONLY_NOT_COMMISSIONED" as const;
-export const STARTER_WINDOW_MIN_INTERPRETABLE_N = 30;
+export const STARTER_WINDOW_MIN_INTERPRETABLE_N = 100;
 export const STARTER_WINDOW_BUCKET_DERIVATION_THROUGH_DATE = "2026-09-17";
+export const STARTER_WINDOW_BOOTSTRAP_REPLICATES = 5000;
 
 export const STARTER_WINDOW_ERROR_HEADERS = [
   "Date", "Game_ID", "Team_Side", "Batting_Team", "Opposing_Team", "Opposing_Starter",
@@ -34,8 +35,10 @@ export const STARTER_WINDOW_ERROR_HEADERS = [
   "Frozen_Active_Offense_Center", "Frozen_Traffic_Factor", "Frozen_Damage_Factor",
   "Frozen_Run_Multiplier", "Projected_Starter_Base_Runs", "Projected_Traffic_Runs",
   "Projected_Damage_Runs", "Frozen_Expected_Starter_Window_Runs", "Actual_Starter_IP",
-  "Actual_Starter_Window_Runs", "Starter_Window_Error", "Starter_Window_Abs_Error",
-  "Workload_Shortfall_IP", "Outcome_State", "Tail_4Plus", "Tail_5Plus", "Tail_6Plus",
+  "Actual_Starter_Window_Runs", "Allocation_Inclusive_Error", "Allocation_Inclusive_Abs_Error",
+  "Workload_Normalized_Expected_Starter_Window_Runs", "Workload_Normalized_Error",
+  "Workload_Normalized_Abs_Error", "Workload_Shortfall_IP", "Outcome_State",
+  "Run_Outcome_State", "Workload_Outcome_State", "Tail_4Plus", "Tail_5Plus", "Tail_6Plus",
   "Quality_Bucket", "Traffic_Bucket", "Damage_Bucket", "Offense_Bucket",
   "Expected_Workload_Bucket", "Actual_Workload_Bucket", "Pressure_Shape",
   "Traffic_Damage_CoSign", "Lineup_Status", "Matchup_Profile_Status",
@@ -44,8 +47,11 @@ export const STARTER_WINDOW_ERROR_HEADERS = [
 ] as const;
 
 export const STARTER_WINDOW_ERROR_SUMMARY_HEADERS = [
-  "Dimension", "Cohort", "N", "Slate_N", "Signed_Bias", "MAE", "Median_AE", "RMSE",
-  "Failure_Frequency", "Mean_Runs_Conditional_On_Failure", "Tail_4Plus_Rate",
+  "Dimension", "Cohort", "N", "Slate_N", "Workload_Normalized_Signed_Bias",
+  "Workload_Normalized_MAE", "Workload_Normalized_Median_AE", "Workload_Normalized_RMSE",
+  "Allocation_Inclusive_Signed_Bias", "Allocation_Inclusive_MAE",
+  "Run_Detonation_Frequency", "Workload_Failure_Frequency",
+  "Mean_Runs_Conditional_On_Detonation", "Tail_4Plus_Rate",
   "Tail_5Plus_Rate", "Tail_6Plus_Rate", "Quiet_Window_False_Positive_Rate",
   "Detonation_False_Negative_Rate", "Bias_CI_Lower", "Bias_CI_Upper",
   "Uncertainty_Method", "Interpretation_Status", "Instrumentation_Status",
@@ -53,8 +59,10 @@ export const STARTER_WINDOW_ERROR_SUMMARY_HEADERS = [
 ] as const;
 
 export const STARTER_WINDOW_FAILURE_BUCKETS_HEADERS = [
-  "Feature", "Bucket", "N", "Failure_N", "Failure_Frequency", "Mean_Expected_Runs",
-  "Mean_Actual_Runs", "Mean_Runs_Conditional_On_Failure", "Tail_4Plus_Rate",
+  "Feature", "Bucket", "N", "Run_Detonation_N", "Run_Detonation_Frequency",
+  "Workload_Failure_N", "Workload_Failure_Frequency", "Mean_Expected_Runs",
+  "Mean_Workload_Normalized_Expected_Runs", "Mean_Actual_Runs",
+  "Mean_Runs_Conditional_On_Detonation", "Tail_4Plus_Rate",
   "Tail_5Plus_Rate", "Tail_6Plus_Rate", "Expected_Survival_Rate",
   "Observed_Survival_Rate", "Expected_Failure_Rate", "Observed_Failure_Rate",
   "Probability_Metric_Status", "Discrimination_Status", "Instrumentation_Status",
@@ -64,7 +72,9 @@ export const STARTER_WINDOW_FAILURE_BUCKETS_HEADERS = [
 export const STARTER_WINDOW_PAIR_AUDIT_HEADERS = [
   "Date", "Game_ID", "Case_Type", "Team_Side", "Opposing_Starter",
   "Frozen_Expected_Starter_Window_Runs", "Actual_Starter_Window_Runs",
-  "Starter_Window_Error", "Frozen_Expected_IP", "Actual_Starter_IP", "Outcome_State",
+  "Allocation_Inclusive_Error", "Workload_Normalized_Expected_Starter_Window_Runs",
+  "Workload_Normalized_Error", "Frozen_Expected_IP", "Actual_Starter_IP", "Outcome_State",
+  "Run_Outcome_State", "Workload_Outcome_State",
   "Pregame_Mechanism_Source", "Pregame_Mechanism", "Mechanism_Grade",
   "Case_Interpretation", "No_Outcome_Fitting_Status", "Replay_TS",
 ] as const;
@@ -78,7 +88,10 @@ export const STARTER_WINDOW_FEATURE_GOV_HEADERS = [
 export const STARTER_WINDOW_REPLAY_HEADERS = [
   "Date", "Game_ID", "Team_Side", "Frozen_Packet_Snapshot_TS", "Opposing_Starter",
   "Opposing_Starter_Role", "Frozen_Expected_Starter_Window_Runs",
-  "Actual_Starter_Window_Runs", "Signed_Error", "Absolute_Error", "Outcome_State",
+  "Actual_Starter_Window_Runs", "Allocation_Inclusive_Signed_Error",
+  "Workload_Normalized_Expected_Starter_Window_Runs", "Workload_Normalized_Signed_Error",
+  "Workload_Normalized_Absolute_Error", "Outcome_State", "Run_Outcome_State",
+  "Workload_Outcome_State",
   "Actual_Starter_IP", "Frozen_Expected_IP", "Workload_Shortfall_IP", "Quality_Bucket",
   "Traffic_Bucket", "Damage_Bucket", "Offense_Bucket", "Expected_Workload_Bucket",
   "Pressure_Shape", "Replay_Status", "Active_Input", "Replay_TS",
@@ -94,8 +107,10 @@ export interface StarterWindowObservation {
   expected_ip: number; effective_ip: number; quality: number; quality_source: string;
   offense_center: number; traffic_factor: number; damage_factor: number; run_multiplier: number;
   projected_base: number; projected_traffic: number; projected_damage: number;
-  expected_runs: number; actual_ip: number; actual_runs: number; error: number; abs_error: number;
-  workload_shortfall: number; outcome: OutcomeState; lineup_status: string;
+  expected_runs: number; normalized_expected_runs: number; actual_ip: number; actual_runs: number;
+  error: number; abs_error: number; normalized_error: number; normalized_abs_error: number;
+  workload_shortfall: number; outcome: OutcomeState; run_outcome: string; workload_outcome: string;
+  lineup_status: string;
   matchup_status: string; quality_bucket: Bucket; traffic_bucket: Bucket;
   damage_bucket: Bucket; offense_bucket: Bucket; expected_workload_bucket: Bucket;
   actual_workload_bucket: Bucket; pressure_shape: string; cosign: string;
@@ -112,7 +127,7 @@ function val(row: readonly unknown[], index: ReadonlyMap<string, number>, name: 
 function mean(xs: readonly number[]): number | null { return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null; }
 function median(xs: readonly number[]): number | null { if (!xs.length) return null; const s = [...xs].sort((a,b)=>a-b); const m=Math.floor(s.length/2); return s.length%2?s[m]!:((s[m-1]!+s[m]!)/2); }
 function quantile(xs: readonly number[], p: number): number | null { if (!xs.length) return null; const s=[...xs].sort((a,b)=>a-b); const pos=(s.length-1)*p; const lo=Math.floor(pos), hi=Math.ceil(pos); return lo===hi?s[lo]!:s[lo]!+(s[hi]!-s[lo]!)*(pos-lo); }
-function tertiles(xs: readonly number[]): Cutpoints | null { const low=quantile(xs,1/3), high=quantile(xs,2/3); return low===null||high===null?null:{low,high}; }
+function tertiles(xs: readonly number[]): Cutpoints | null { const low=quantile(xs,1/3), high=quantile(xs,2/3); return low===null||high===null||Math.abs(high-low)<1e-9?null:{low,high}; }
 function bucket(v: number, c: Cutpoints | null): Bucket { return !c ? "UNAVAILABLE" : v<=c.low?"LOW":v<=c.high?"MID":"HIGH"; }
 
 function packetBeforeFirstPitch(row: readonly unknown[], i: ReadonlyMap<string, number>): boolean {
@@ -178,14 +193,20 @@ export function parseStarterWindowObservations(
       const traffic=base*(raw.traffic_factor!-1);
       const damage=(base+traffic)*(raw.damage_factor!-1);
       const expected=(base+traffic+damage)*raw.run_multiplier!;
-      const error=expected-actualRuns!; const shortfall=Math.max(0,raw.expected_ip!-actualIp!);
+      const normalizedExpected=expected/raw.expected_ip!*actualIp!;
+      const error=expected-actualRuns!; const normalizedError=normalizedExpected-actualRuns!;
+      const shortfall=Math.max(0,raw.expected_ip!-actualIp!);
       const outcome: OutcomeState = actualRuns!>=4 || shortfall>=2 ? "FAILURE" : actualRuns!<=2 && actualIp!>=raw.expected_ip!-0.5 ? "SURVIVAL" : "MIXED";
+      const runOutcome=actualRuns!>=4?"DETONATION":actualRuns!<=2?"QUIET":"MODERATE";
+      const workloadOutcome=shortfall>=2?"MATERIALLY_SHORT":actualIp!>=raw.expected_ip!-0.5?"REACHED_OR_NEAR_EXPECTED":"MODERATELY_SHORT";
       const cp=cutpoints;
       out.push({
         ...raw, expected_ip:raw.expected_ip!, effective_ip:raw.effective_ip!, quality:raw.quality!, offense_center:raw.offense_center!,
         traffic_factor:raw.traffic_factor!, damage_factor:raw.damage_factor!, run_multiplier:raw.run_multiplier!,
         projected_base:round(base), projected_traffic:round(traffic), projected_damage:round(damage), expected_runs:round(expected),
-        actual_ip:actualIp!, actual_runs:actualRuns!, error:round(error), abs_error:round(Math.abs(error)), workload_shortfall:round(shortfall), outcome,
+        normalized_expected_runs:round(normalizedExpected), actual_ip:actualIp!, actual_runs:actualRuns!, error:round(error),
+        abs_error:round(Math.abs(error)), normalized_error:round(normalizedError), normalized_abs_error:round(Math.abs(normalizedError)),
+        workload_shortfall:round(shortfall), outcome, run_outcome:runOutcome, workload_outcome:workloadOutcome,
         quality_bucket:assignBuckets?bucket(raw.quality!,cp?.quality??null):"UNAVAILABLE",
         traffic_bucket:assignBuckets?bucket(raw.traffic_factor!,cp?.traffic??null):"UNAVAILABLE",
         damage_bucket:raw.damage_factor===1?"INSTRUMENTATION_DEAD":assignBuckets?bucket(raw.damage_factor!,null):"UNAVAILABLE",
@@ -205,16 +226,18 @@ function seeded(seed:number){return()=>{seed|=0;seed=(seed+0x6d2b79f5)|0;let t=M
 function slateBootstrap(rows: readonly StarterWindowObservation[]): [number|null,number|null] {
   const dates=[...new Set(rows.map(r=>r.date))]; if(rows.length<STARTER_WINDOW_MIN_INTERPRETABLE_N||dates.length<5)return[null,null];
   const groups=new Map(dates.map(d=>[d,rows.filter(r=>r.date===d)])); const rand=seeded(38012026); const vals:number[]=[];
-  for(let k=0;k<2000;k++){const sample:StarterWindowObservation[]=[];for(let j=0;j<dates.length;j++) sample.push(...(groups.get(dates[Math.floor(rand()*dates.length)]!)??[])); const m=mean(sample.map(r=>r.error));if(m!==null)vals.push(m);}
-  return [quantile(vals,.025),quantile(vals,.975)];
+  for(let k=0;k<STARTER_WINDOW_BOOTSTRAP_REPLICATES;k++){const sample:StarterWindowObservation[]=[];for(let j=0;j<dates.length;j++) sample.push(...(groups.get(dates[Math.floor(rand()*dates.length)]!)??[])); const m=mean(sample.map(r=>r.normalized_error));if(m!==null)vals.push(m);}
+  return [quantile(vals,.0041665),quantile(vals,.9958335)];
 }
 
 function metrics(rows: readonly StarterWindowObservation[]) {
-  const errors=rows.map(r=>r.error), failures=rows.filter(r=>r.outcome==="FAILURE"); const [lo,hi]=slateBootstrap(rows);
+  const errors=rows.map(r=>r.normalized_error), rawErrors=rows.map(r=>r.error), detonations=rows.filter(r=>r.run_outcome==="DETONATION"); const [lo,hi]=slateBootstrap(rows);
   const quietFp=rows.filter(r=>r.expected_runs>=4&&r.actual_runs<=2).length/Math.max(rows.length,1);
   const detFn=rows.filter(r=>r.expected_runs<4&&r.actual_runs>=4).length/Math.max(rows.length,1);
   return { n:rows.length, slates:new Set(rows.map(r=>r.date)).size, bias:mean(errors), mae:mean(errors.map(Math.abs)), med:median(errors.map(Math.abs)), rmse:Math.sqrt(mean(errors.map(e=>e*e))??0),
-    failure:failures.length/Math.max(rows.length,1), conditional:mean(failures.map(r=>r.actual_runs)), t4:rows.filter(r=>r.actual_runs>=4).length/Math.max(rows.length,1), t5:rows.filter(r=>r.actual_runs>=5).length/Math.max(rows.length,1), t6:rows.filter(r=>r.actual_runs>=6).length/Math.max(rows.length,1), quietFp,detFn,lo,hi };
+    rawBias:mean(rawErrors),rawMae:mean(rawErrors.map(Math.abs)),detonation:detonations.length/Math.max(rows.length,1),
+    workloadFailure:rows.filter(r=>r.workload_outcome==="MATERIALLY_SHORT").length/Math.max(rows.length,1),
+    conditional:mean(detonations.map(r=>r.actual_runs)), t4:rows.filter(r=>r.actual_runs>=4).length/Math.max(rows.length,1), t5:rows.filter(r=>r.actual_runs>=5).length/Math.max(rows.length,1), t6:rows.filter(r=>r.actual_runs>=6).length/Math.max(rows.length,1), quietFp,detFn,lo,hi };
 }
 
 function groupRows(rows: readonly StarterWindowObservation[]): Array<[string,string,StarterWindowObservation[],string]> {
@@ -226,17 +249,17 @@ function groupRows(rows: readonly StarterWindowObservation[]): Array<[string,str
     ["PRESSURE_SHAPE",r=>r.pressure_shape,"LIVE_VARYING"],["OUTCOME_STATE",r=>r.outcome,"OUTCOME_LABEL_ONLY"],
   ];
   const result:Array<[string,string,StarterWindowObservation[],string]>=[];
-  for(const [d,fn,status] of dims){const map=new Map<string,StarterWindowObservation[]>();for(const r of rows){const c=fn(r);const a=map.get(c)??[];a.push(r);map.set(c,a);}for(const [c,a] of map)result.push([d,c,a,status]);}
+  for(const [d,fn,status] of dims){const map=new Map<string,StarterWindowObservation[]>();for(const r of rows){const c=fn(r);const a=map.get(c)??[];a.push(r);map.set(c,a);}for(const [c,a] of map)result.push([d,c,a,d==="EXPECTED_WORKLOAD"&&c==="UNAVAILABLE"?"INSTRUMENTATION_DEGENERATE":status]);}
   return result;
 }
 
 function summaryRows(rows: readonly StarterWindowObservation[], ts:string): unknown[][] {
-  return groupRows(rows).map(([dimension,cohort,group,instrument])=>{const m=metrics(group);const interpretable=group.length>=STARTER_WINDOW_MIN_INTERPRETABLE_N&&instrument!=="INSTRUMENTATION_DEAD";
-    return [dimension,cohort,m.n,m.slates,m.bias===null?"":round(m.bias),m.mae===null?"":round(m.mae),m.med===null?"":round(m.med),round(m.rmse),round(m.failure),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),round(m.quietFp),round(m.detFn),m.lo??"",m.hi??"",m.lo===null?"CI_UNAVAILABLE":"SLATE_DATE_BLOCK_BOOTSTRAP_2000",interpretable?"INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,"UNAVAILABLE_NO_FROZEN_STARTER_PROBABILITIES",STARTER_WINDOW_COMMISSIONING_STATUS,instrument==="INSTRUMENTATION_DEAD"?"A zero contribution is not evidence that damage is unimportant; the active channel is inert.":"No coefficient or active consumer.",ts];});
+  return groupRows(rows).map(([dimension,cohort,group,instrument])=>{const m=metrics(group);const interpretable=group.length>=STARTER_WINDOW_MIN_INTERPRETABLE_N&&!instrument.startsWith("INSTRUMENTATION_");
+    return [dimension,cohort,m.n,m.slates,m.bias===null?"":round(m.bias),m.mae===null?"":round(m.mae),m.med===null?"":round(m.med),round(m.rmse),m.rawBias===null?"":round(m.rawBias),m.rawMae===null?"":round(m.rawMae),round(m.detonation),round(m.workloadFailure),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),round(m.quietFp),round(m.detFn),m.lo??"",m.hi??"",m.lo===null?"CI_UNAVAILABLE":"SLATE_DATE_BLOCK_BOOTSTRAP_5000_BONFERRONI_99.1667",interpretable?"INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,"UNAVAILABLE_NO_FROZEN_STARTER_PROBABILITIES",STARTER_WINDOW_COMMISSIONING_STATUS,instrument==="INSTRUMENTATION_DEAD"?"A zero contribution is not evidence that damage is unimportant; the active channel is inert.":instrument==="INSTRUMENTATION_DEGENERATE"?"Frozen workload values do not support stable tertiles; no workload discrimination claim.":"Headline error is workload-normalized; allocation-inclusive error is retained separately.",ts];});
 }
 
 function failureRows(rows: readonly StarterWindowObservation[], ts:string): unknown[][] {
-  return groupRows(rows).filter(([d])=>!["ACTUAL_WORKLOAD_POSTGAME","OUTCOME_STATE"].includes(d)).map(([feature,b,group,instrument])=>{const m=metrics(group);const survival=group.filter(r=>r.outcome==="SURVIVAL").length/Math.max(group.length,1);return [feature,b,m.n,group.filter(r=>r.outcome==="FAILURE").length,round(m.failure),round(mean(group.map(r=>r.expected_runs))??0),round(mean(group.map(r=>r.actual_runs))??0),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),"",round(survival),"",round(m.failure),"UNAVAILABLE_NO_FROZEN_STARTER_PROBABILITIES",group.length>=STARTER_WINDOW_MIN_INTERPRETABLE_N&&instrument!=="INSTRUMENTATION_DEAD"?"DESCRIPTIVE_DISCRIMINATION_INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,feature==="OVERALL"?"N/A":`PREDICTOR_TERTILES_DERIVED_THROUGH_${STARTER_WINDOW_BUCKET_DERIVATION_THROUGH_DATE}`,instrument==="INSTRUMENTATION_DEAD"?"Cannot attribute a null effect to a frozen-neutral channel.":"Failure = 4+ on-mound runs OR >=2 IP shortfall; survival = <=2 runs and reached expected IP within 0.5.",ts];});
+  return groupRows(rows).filter(([d])=>!["ACTUAL_WORKLOAD_POSTGAME","OUTCOME_STATE"].includes(d)).map(([feature,b,group,instrument])=>{const m=metrics(group);const survival=group.filter(r=>r.outcome==="SURVIVAL").length/Math.max(group.length,1);const detonationN=group.filter(r=>r.run_outcome==="DETONATION").length;const workloadFailureN=group.filter(r=>r.workload_outcome==="MATERIALLY_SHORT").length;return [feature,b,m.n,detonationN,round(m.detonation),workloadFailureN,round(m.workloadFailure),round(mean(group.map(r=>r.expected_runs))??0),round(mean(group.map(r=>r.normalized_expected_runs))??0),round(mean(group.map(r=>r.actual_runs))??0),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),"",round(survival),"",round(m.detonation),"UNAVAILABLE_NO_FROZEN_STARTER_PROBABILITIES",group.length>=STARTER_WINDOW_MIN_INTERPRETABLE_N&&!instrument.startsWith("INSTRUMENTATION_")?"DESCRIPTIVE_DISCRIMINATION_INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,feature==="OVERALL"?"N/A":`PREDICTOR_TERTILES_DERIVED_THROUGH_${STARTER_WINDOW_BUCKET_DERIVATION_THROUGH_DATE}`,instrument==="INSTRUMENTATION_DEAD"?"Cannot attribute a null effect to a frozen-neutral channel.":"Run detonation (4+ runs) is separated from workload failure (>=2 IP shortfall).",ts];});
 }
 
 const CASES: Record<string,{type:string;source:string;mechanism:string;grade:string;interpretation:string}> = {
@@ -250,9 +273,9 @@ const CASES: Record<string,{type:string;source:string;mechanism:string;grade:str
   "20260919_ATL_HOU":{type:"CANCELLATION_CONTROL",source:"NO_VERIFIABLE_PREDECLARED_MECHANISM",mechanism:"",grade:"POSTHOC_ONLY",interpretation:"Accurate total hid opposing phase errors; no causal credit assigned."},
 };
 
-function observationRow(r:StarterWindowObservation,ts:string):unknown[]{return [r.date,r.game_id,r.side,r.batting_team,r.opposing_team,r.opposing_starter,r.opposing_role,r.snapshot_ts,r.expected_ip,r.effective_ip,r.quality,r.quality_source,r.offense_center,r.traffic_factor,r.damage_factor,r.run_multiplier,r.projected_base,r.projected_traffic,r.projected_damage,r.expected_runs,r.actual_ip,r.actual_runs,r.error,r.abs_error,r.workload_shortfall,r.outcome,r.actual_runs>=4?"TRUE":"FALSE",r.actual_runs>=5?"TRUE":"FALSE",r.actual_runs>=6?"TRUE":"FALSE",r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.actual_workload_bucket,r.pressure_shape,r.cosign,r.lineup_status,r.matchup_status,"UNAVAILABLE_NO_FROZEN_STARTER_PROBABILITIES","FROZEN_PREGAME_PACKET_ONLY","MLB_STATSAPI_PBP_CURRENT_PITCHER_EXACT",STARTER_WINDOW_COMMISSIONING_STATUS,STARTER_WINDOW_ACTIVE_INPUT,ts];}
-function replayRow(r:StarterWindowObservation,ts:string):unknown[]{return [r.date,r.game_id,r.side,r.snapshot_ts,r.opposing_starter,r.opposing_role,r.expected_runs,r.actual_runs,r.error,r.abs_error,r.outcome,r.actual_ip,r.expected_ip,r.workload_shortfall,r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.pressure_shape,"EXACT_FROZEN_LINEAGE_RESEARCH_ONLY",STARTER_WINDOW_ACTIVE_INPUT,ts];}
-function pairRows(rows:readonly StarterWindowObservation[],ts:string):unknown[][]{return rows.filter(r=>CASES[r.game_id]).map(r=>{const c=CASES[r.game_id]!;return[r.date,r.game_id,c.type,r.side,r.opposing_starter,r.expected_runs,r.actual_runs,r.error,r.expected_ip,r.actual_ip,r.outcome,c.source,c.mechanism,c.grade,c.interpretation,"NO_COEFFICIENT_TUNING_CASE_NOT_USED_AS_TARGET",ts];});}
+function observationRow(r:StarterWindowObservation,ts:string):unknown[]{return [r.date,r.game_id,r.side,r.batting_team,r.opposing_team,r.opposing_starter,r.opposing_role,r.snapshot_ts,r.expected_ip,r.effective_ip,r.quality,r.quality_source,r.offense_center,r.traffic_factor,r.damage_factor,r.run_multiplier,r.projected_base,r.projected_traffic,r.projected_damage,r.expected_runs,r.actual_ip,r.actual_runs,r.error,r.abs_error,r.normalized_expected_runs,r.normalized_error,r.normalized_abs_error,r.workload_shortfall,r.outcome,r.run_outcome,r.workload_outcome,r.actual_runs>=4?"TRUE":"FALSE",r.actual_runs>=5?"TRUE":"FALSE",r.actual_runs>=6?"TRUE":"FALSE",r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.actual_workload_bucket,r.pressure_shape,r.cosign,r.lineup_status,r.matchup_status,"UNAVAILABLE_NO_FROZEN_STARTER_PROBABILITIES","FROZEN_PREGAME_PACKET_ONLY","MLB_STATSAPI_PBP_CURRENT_PITCHER_EXACT",STARTER_WINDOW_COMMISSIONING_STATUS,STARTER_WINDOW_ACTIVE_INPUT,ts];}
+function replayRow(r:StarterWindowObservation,ts:string):unknown[]{return [r.date,r.game_id,r.side,r.snapshot_ts,r.opposing_starter,r.opposing_role,r.expected_runs,r.actual_runs,r.error,r.normalized_expected_runs,r.normalized_error,r.normalized_abs_error,r.outcome,r.run_outcome,r.workload_outcome,r.actual_ip,r.expected_ip,r.workload_shortfall,r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.pressure_shape,"EXACT_FROZEN_LINEAGE_RESEARCH_ONLY",STARTER_WINDOW_ACTIVE_INPUT,ts];}
+function pairRows(rows:readonly StarterWindowObservation[],ts:string):unknown[][]{return rows.filter(r=>CASES[r.game_id]).map(r=>{const c=CASES[r.game_id]!;return[r.date,r.game_id,c.type,r.side,r.opposing_starter,r.expected_runs,r.actual_runs,r.error,r.normalized_expected_runs,r.normalized_error,r.expected_ip,r.actual_ip,r.outcome,r.run_outcome,r.workload_outcome,c.source,c.mechanism,c.grade,c.interpretation,"NO_COEFFICIENT_TUNING_CASE_NOT_USED_AS_TARGET",ts];});}
 
 function featureGovRows(rows:readonly StarterWindowObservation[],ts:string):unknown[][] {
   const damageDead=rows.length>0&&rows.every(r=>r.damage_factor===1&&r.projected_damage===0);

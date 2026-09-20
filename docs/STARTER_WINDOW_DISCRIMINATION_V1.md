@@ -27,6 +27,19 @@ damage = (base + traffic) × (Damage_Factor - 1)
 expected starter-window runs = (base + traffic + damage) × Run_Multiplier
 ```
 
+Two errors are retained. The allocation-inclusive error compares that frozen
+expectation directly with actual on-mound runs. The primary scoring-rate error
+holds the frozen run rate fixed and substitutes actual starter innings:
+
+```text
+workload-normalized expected runs =
+  expected starter-window runs / frozen Expected_IP × actual starter IP
+```
+
+The latter reconciles the discrimination audit to Module 37's starter-phase
+rate question; the former remains visible so workload allocation is never
+silently discarded.
+
 ## Outcome labels
 
 These labels were declared before interpreting Module 38 results:
@@ -38,6 +51,10 @@ These labels were declared before interpreting Module 38 results:
 - `MIXED`: every other observation.
 
 Tail rates at 4+, 5+, and 6+ runs remain separate from the label.
+Module 38 also publishes orthogonal labels: `DETONATION` at 4+ exact on-mound
+runs and `MATERIALLY_SHORT` at a 2+ inning workload shortfall. Conditional
+failure severity is calculated only from run detonations, never from a
+workload-only failure.
 
 ## Feature governance
 
@@ -59,11 +76,12 @@ manufactured.
 ## Inference rules
 
 Module 38 reports signed bias and absolute/tail discrimination separately.
-Cells below N=30 are descriptive only. Bias intervals resample complete slate
-dates. Case studies never tune a coefficient. `POSTHOC_ONLY` mechanisms do not
-count as validation.
+Cells below N=100 are descriptive only. Bias intervals use 5,000 complete
+slate-date block-bootstrap samples and a predeclared 99.1667% Bonferroni
+interval across the six mechanism families. Degenerate frozen predictors do
+not receive an interpretable bucket. Case studies never tune a coefficient.
+`POSTHOC_ONLY` mechanisms do not count as validation.
 
 No shadow projection experiment is justified until a pregame-observable,
 adequately sampled mechanism separates detonations from inverse quiet controls
 without degrading the opposite error dimension.
-

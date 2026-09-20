@@ -50,6 +50,10 @@ test("starter-window audit derives side expectations from frozen inputs and exac
   assert.equal(away.actual_runs,5);
   assert.equal(away.actual_ip,4);
   assert.equal(away.outcome,"FAILURE");
+  assert.equal(away.run_outcome,"DETONATION");
+  assert.equal(away.workload_outcome,"MATERIALLY_SHORT");
+  assert.equal(away.normalized_expected_runs,2.42);
+  assert.equal(away.normalized_error,-2.58);
   assert.equal(away.projected_damage,0);
   assert.equal(away.damage_bucket,"INSTRUMENTATION_DEAD");
 });
@@ -66,8 +70,8 @@ test("Module 38 governance is research-only", () => {
   assert.equal(STARTER_WINDOW_COMMISSIONING_STATUS,"RESEARCH_ONLY_NOT_COMMISSIONED");
 });
 
-test("schema v70 exposes exactly the six Module 38 research sheets", () => {
-  assert.equal(WORKBOOK_SCHEMA_VERSION,70);
+test("schema v71 exposes exactly the six Module 38 research sheets", () => {
+  assert.equal(WORKBOOK_SCHEMA_VERSION,71);
   for (const [name,headers] of [
     [STARTER_WINDOW_ERROR_SHEET,STARTER_WINDOW_ERROR_HEADERS],
     [STARTER_WINDOW_ERROR_SUMMARY_SHEET,STARTER_WINDOW_ERROR_SUMMARY_HEADERS],
