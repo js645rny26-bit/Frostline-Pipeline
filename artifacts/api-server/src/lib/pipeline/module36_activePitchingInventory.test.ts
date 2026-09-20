@@ -18,6 +18,7 @@ import type { NormalizedGame } from "./module06_normalization.js";
 import type { BullpenResult, RelieverStat } from "./module04b_bullpenUsage.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
 import type { SWEAppearance, SWEGameState } from "./module02i_starterWorkloadEstimator.js";
+import type { ActiveRosterPitcher } from "./module02c_batterSeasonStats.js";
 
 const pitcher = (id: number, name: string, role: string, ip: number) => ({
   player_id: id, name, hand: "R", role, role_confidence: "high" as const,
@@ -116,6 +117,28 @@ test("missing pregame bullpen source fails closed instead of inventing a followe
   assert.equal(home.expected_bulk_pitcher, "");
   assert.equal(home.api_shadow_opposing_offense_runs, null);
   assert.match(home.missing_data_flags, /BULLPEN_SOURCE_UNAVAILABLE/);
+});
+
+test("active-roster multi-inning options are surfaced without fabricating an expected follower", () => {
+  const rosterPitchers = new Map<number, ActiveRosterPitcher[]>([[2, [
+    { team_id: 2, player_id: 30, full_name: "Roster Swingman" },
+  ]] ]);
+  const bullpenWithoutHomeLongArm: BullpenResult = {
+    ...bullpen,
+    relievers: bullpen.relievers.filter((row) => row.team_abbr !== "HME"),
+  };
+  const rows = buildActivePitchingInventory(
+    [game], [summary], bullpenWithoutHomeLongArm, appearances(30), new Map([[game.legacy_game_id, sweState(6)]]),
+    new Map(), new Map(), "2026-09-18", "2026-09-19T15:00:00Z", rosterPitchers,
+  );
+  const home = rows.find((row) => row.team_side === "HOME")!;
+  assert.equal(home.expected_bulk_pitcher, "");
+  assert.equal(home.expected_bulk_ip, null);
+  assert.equal(home.api_shadow_run_delta, null);
+  assert.equal(home.pitching_plan_type, "OPENER_PLUS_WEAK_LONG_RELIEF");
+  assert.match(home.long_relief_options, /Roster Swingman \[ROSTER_HISTORY_ONLY\]/);
+  assert.match(home.missing_data_flags, /ROSTER_MULTI_INNING_OPTIONS_UNCONFIRMED/);
+  assert.match(home.source_provenance, /MLB_ACTIVE_ROSTER/);
 });
 
 test("Module 36 governance sentinels cannot authorize an active projection", () => {

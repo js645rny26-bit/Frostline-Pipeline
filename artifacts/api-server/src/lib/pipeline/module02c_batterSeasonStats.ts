@@ -79,6 +79,18 @@ interface RosterPerson {
 
 interface RosterEntry {
   person?: RosterPerson;
+  position?: { abbreviation?: string; code?: string; type?: string };
+}
+
+export interface ActiveRosterPitcher {
+  team_id: number;
+  player_id: number;
+  full_name: string;
+}
+
+export interface TeamRosterDirectory {
+  name_to_id: Map<string, number>;
+  pitchers_by_team_id: Map<number, ActiveRosterPitcher[]>;
 }
 
 interface PersonStatSplit {
@@ -106,16 +118,19 @@ interface Person {
  * The map is used by module09 to resolve lineup names (from mlbstartingnine)
  * to MLB player IDs needed for the batter stats lookup.
  */
-export async function fetchTeamRosters(
+export async function fetchTeamRosterDirectory(
   teamIds: number[],
   season: string,
-): Promise<Map<string, number>> {
+): Promise<TeamRosterDirectory> {
   const uniqueIds = [...new Set(teamIds.filter((id) => id > 0))];
-  if (uniqueIds.length === 0) return new Map();
+  if (uniqueIds.length === 0) {
+    return { name_to_id: new Map(), pitchers_by_team_id: new Map() };
+  }
 
   logger.info({ teams: uniqueIds.length, season }, "MODULE_02c: Fetching team rosters");
 
   const nameToId = new Map<string, number>();
+  const pitchersByTeamId = new Map<number, ActiveRosterPitcher[]>();
 
   const settled = await Promise.allSettled(
     uniqueIds.map(async (teamId) => {
@@ -141,12 +156,18 @@ export async function fetchTeamRosters(
     const s = settled[i]!;
     if (s.status === "fulfilled") {
       successCount++;
+      const teamId = uniqueIds[i]!;
+      const pitchers: ActiveRosterPitcher[] = [];
       for (const entry of s.value) {
         const p = entry.person;
         if (p?.id && p.fullName) {
           nameToId.set(normalizeForMatch(p.fullName), p.id);
+          if (entry.position?.abbreviation === "P" || entry.position?.code === "1" || entry.position?.type === "Pitcher") {
+            pitchers.push({ team_id: teamId, player_id: p.id, full_name: p.fullName });
+          }
         }
       }
+      pitchersByTeamId.set(teamId, pitchers);
     } else {
       logger.warn(
         { teamId: uniqueIds[i], err: String(s.reason) },
@@ -156,10 +177,18 @@ export async function fetchTeamRosters(
   }
 
   logger.info(
-    { teams: successCount, players: nameToId.size },
+    { teams: successCount, players: nameToId.size, pitchers: [...pitchersByTeamId.values()].reduce((sum, rows) => sum + rows.length, 0) },
     "MODULE_02c: Roster fetch complete",
   );
-  return nameToId;
+  return { name_to_id: nameToId, pitchers_by_team_id: pitchersByTeamId };
+}
+
+/** Backwards-compatible name-only view for existing lineup and replay callers. */
+export async function fetchTeamRosters(
+  teamIds: number[],
+  season: string,
+): Promise<Map<string, number>> {
+  return (await fetchTeamRosterDirectory(teamIds, season)).name_to_id;
 }
 
 // ─── Batter stats fetch ───────────────────────────────────────────────────────

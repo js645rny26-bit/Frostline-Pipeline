@@ -896,11 +896,11 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "AUDIT",
     timing: "Every legitimate pre-first-pitch publish after Module 09 and SWE preparation (Module 36)",
     purpose:
-      "Prospectively preserves the named starter, source-supported inferred bulk/swing options, explicit availability gaps, and starter/bulk/true-bullpen innings allocation.",
+      "Prospectively preserves the named starter, source-supported inferred bulk/swing options, active-roster multi-inning candidates, explicit availability gaps, and starter/bulk/true-bullpen innings allocation.",
     boardRelationship:
       "Research-only. Active_Input=NO; no Module 09, GAME_SUMMARY, SLATE_BOARD, market, truth, confidence, or authorization consumer exists.",
     readNote:
-      "Read Bulk_Observability and Pitcher_Chain_Status before the estimate. PROBABLE_INFERRED is not an announced follower, and NOT_OBSERVABLE_PREGAME must not be reconstructed from postgame pitcher order.",
+      "Read Bulk_Observability and Pitcher_Chain_Status before the estimate. A [ROSTER_HISTORY_ONLY] long option is not an announced follower and cannot populate Expected_Bulk_Pitcher or a shadow delta; missing pregame identity must never be reconstructed from postgame pitcher order.",
   },
   {
     sheet: "ACTIVE_PITCHING_INVENTORY_SUMMARY_V1",

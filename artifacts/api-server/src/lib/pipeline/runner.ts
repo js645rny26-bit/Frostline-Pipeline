@@ -21,7 +21,7 @@ import {
 import { fetchStarterPrevOutings } from "./module04d_starterPrevOuting.js";
 import { fetchPlateUmpires } from "./module04e_umpires.js";
 import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
-import { fetchTeamRosters, fetchBatterSeasonStats, normalizeForMatch } from "./module02c_batterSeasonStats.js";
+import { fetchTeamRosterDirectory, fetchBatterSeasonStats, normalizeForMatch } from "./module02c_batterSeasonStats.js";
 import { fetchStatcastBatterLeaderboard } from "./module02d_statcastBatters.js";
 import {
   fetchStatcastPitcherExpectedLeaderboard,
@@ -440,7 +440,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     ? applyStartingNineStarterFallbacks(rawManifest, startingNineResult).manifest
     : null;
 
-  const [bullpenResult, starterOutings, umpireResult, teamRunRates, oddsResult, rotowireProps, rosterNameMap, statcastPreviewFetch] = await Promise.all([
+  const [bullpenResult, starterOutings, umpireResult, teamRunRates, oddsResult, rotowireProps, rosterDirectory, statcastPreviewFetch] = await Promise.all([
     fetchBullpenUsage(date, slateTeamIds).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: bullpen fetch threw — skipping");
       return null;
@@ -466,9 +466,9 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: Rotowire props fetch threw — skipping (shadow mode)");
       return null as RotowirePropsResult | null;
     }),
-    fetchTeamRosters(slateTeamIds, date.slice(0, 4)).catch((err: unknown) => {
+    fetchTeamRosterDirectory(slateTeamIds, date.slice(0, 4)).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: team roster fetch threw — returning empty map");
-      return new Map<string, number>();
+      return { name_to_id: new Map<string, number>(), pitchers_by_team_id: new Map() };
     }),
     // Module 02e: Statcast game preview — fail-open; runs in parallel with other fetches
     mutableGames.length > 0
@@ -478,6 +478,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
         })
       : Promise.resolve(null as StatcastPreviewResult | null),
   ]);
+  const rosterNameMap = rosterDirectory.name_to_id;
 
   if (bullpenResult) {
     const lvl = bullpenResult.status === "success" ? "info" : "warn";
@@ -1241,6 +1242,8 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     pitcherSeasonStats?.stats ?? new Map(),
     statcastPitcherExpectedMap,
     statcastDataThroughDate,
+    undefined,
+    rosterDirectory.pitchers_by_team_id,
   );
   const mod36 = await writeActivePitchingInventory(date, apiRows, {
     workbookId,
