@@ -42,6 +42,17 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
       "Check official/projected status and coverage before trusting allocation.",
   },
   {
+    sheet: "STARTING_NINE_TEAM_PAGE_V1",
+    stage: "PREGAME_INPUT",
+    timing: "Every legitimate pre-first-pitch publish (Module 08c)",
+    purpose:
+      "Materializes the slate's individual Starting Nine team pages: named starter identity plus descriptive opponent split, park, and umpire context.",
+    boardRelationship:
+      "Only an MLBAM-verified named starter may fill an otherwise unresolved MLB schedule slot. All remaining page statistics are display-only and have no projection or decision consumer.",
+    readNote:
+      "Check Starter_Fallback_Applied, Starting_Pitcher_Identity_Status, Source_Status, Active_Input=NO, and Mapping_Status before using the page as supporting context.",
+  },
+  {
     sheet: "TEAM_FORM_INPUT",
     stage: "PREGAME_INPUT",
     timing: "Every publish (Module 08)",

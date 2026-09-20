@@ -133,7 +133,7 @@ function buildDailyMatchupsRows(
       environment.combined_multiplier,                                 // V: Run_Multiplier (Module 09 later mirrors its effective capped value)
       now,                                                             // W: L30_RS_Observed_TS (pipeline-observed, not provider-published)
       now,                                                             // X: Pipeline_Last_Updated
-      "",                                                              // Y: Notes
+      `Starter_Source:A=${g.away_pitcher.identity_source ?? "UNRESOLVED"};H=${g.home_pitcher.identity_source ?? "UNRESOLVED"}`, // Y: Notes
       // ── Away starter last outing (Baseball Savant) ─────────────────
       awayOuting?.outing_date  ?? "",                                  // Z:  Away_Last_Outing_Date
       awayOuting?.ip_display   ?? "",                                  // AA: Away_Last_IP
@@ -452,7 +452,11 @@ export async function writeGoogleSheetsFeed(
   const failed: string[] = [];
 
   const snMap = buildStartingNineMap(
-    startingNineData ?? { status: "failure", date: runDate, games: [], games_parsed: 0, games_matched: 0, errors: [] },
+    startingNineData ?? {
+      status: "failure", date: runDate, games: [], games_parsed: 0, games_matched: 0, errors: [],
+      team_pages: [], team_pages_requested: 0, team_pages_parsed: 0,
+      team_page_status: "failure", team_page_errors: [],
+    },
     normalized.games.map((game) => game.legacy_game_id),
   );
   const statsMap = pitcherSeasonStats?.stats ?? new Map<number, PitcherSeasonStats>();

@@ -12,6 +12,9 @@ export interface ProbablePitcherData {
   id: number | null;
   fullName: string | null;
   hand: string | null;
+  source?: "MLB_STATS_API" | "MLB_STARTING_NINE_TEAM_PAGE";
+  sourceObservedTs?: string | null;
+  sourceUrl?: string | null;
 }
 
 export interface GameTeamData {
@@ -123,11 +126,17 @@ function normalizeGame(raw: any): ScheduleGameData {
       id: awayProb?.id ?? null,
       fullName: awayProb?.fullName ?? null,
       hand: awayProb?.pitchHand?.code ?? null,
+      source: awayProb?.id && awayProb?.fullName ? "MLB_STATS_API" : undefined,
+      sourceObservedTs: null,
+      sourceUrl: null,
     },
     homeProbablePitcher: {
       id: homeProb?.id ?? null,
       fullName: homeProb?.fullName ?? null,
       hand: homeProb?.pitchHand?.code ?? null,
+      source: homeProb?.id && homeProb?.fullName ? "MLB_STATS_API" : undefined,
+      sourceObservedTs: null,
+      sourceUrl: null,
     },
     status: {
       abstractGameState: raw?.status?.abstractGameState ?? null,

@@ -17,6 +17,9 @@ export interface PitcherClassificationData {
   expected_pitches: number | null;
   expected_innings: number | null;
   reasoning: string;
+  identity_source?: "MLB_STATS_API" | "MLB_STARTING_NINE_TEAM_PAGE" | "UNRESOLVED";
+  identity_source_observed_ts?: string | null;
+  identity_source_url?: string | null;
 }
 
 export interface ClassifiedGame {
@@ -37,6 +40,9 @@ function classifySinglePitcher(
   pitcherName: string | null,
   hand: string | null,
   workloadData: { status?: string; rolling_stats?: { l30?: { appearances?: number; avg_pitches_per_appearance?: number } }; recent_games_count?: number } | undefined,
+  identitySource: "MLB_STATS_API" | "MLB_STARTING_NINE_TEAM_PAGE" | undefined,
+  identitySourceObservedTs: string | null | undefined,
+  identitySourceUrl: string | null | undefined,
 ): PitcherClassificationData {
   if (!pitcherId || !pitcherName) {
     return {
@@ -49,6 +55,9 @@ function classifySinglePitcher(
       expected_pitches: null,
       expected_innings: null,
       reasoning: "No probable pitcher listed",
+      identity_source: "UNRESOLVED",
+      identity_source_observed_ts: identitySourceObservedTs ?? null,
+      identity_source_url: identitySourceUrl ?? null,
     };
   }
 
@@ -68,6 +77,9 @@ function classifySinglePitcher(
       expected_pitches: 85,
       expected_innings: 5.5,
       reasoning: "No Statcast workload data; probable starter classified using seasonal baseline",
+      identity_source: identitySource ?? "MLB_STATS_API",
+      identity_source_observed_ts: identitySourceObservedTs ?? null,
+      identity_source_url: identitySourceUrl ?? null,
     };
   }
 
@@ -88,6 +100,9 @@ function classifySinglePitcher(
       expected_pitches: expectedPitches,
       expected_innings: expectedInnings,
       reasoning: `No pitches in last 30 days but active in 60-day window (${appearances} appearances); probable IL returnee`,
+      identity_source: identitySource ?? "MLB_STATS_API",
+      identity_source_observed_ts: identitySourceObservedTs ?? null,
+      identity_source_url: identitySourceUrl ?? null,
     };
   }
 
@@ -138,6 +153,9 @@ function classifySinglePitcher(
     expected_pitches: expectedPitches,
     expected_innings: expectedInnings,
     reasoning,
+    identity_source: identitySource ?? "MLB_STATS_API",
+    identity_source_observed_ts: identitySourceObservedTs ?? null,
+    identity_source_url: identitySourceUrl ?? null,
   };
 }
 
@@ -158,12 +176,18 @@ export function classifyPitcherRoles(
       game.awayProbablePitcher.fullName,
       game.awayProbablePitcher.hand,
       game.awayProbablePitcher.id ? workloadById.get(game.awayProbablePitcher.id) : undefined,
+      game.awayProbablePitcher.source,
+      game.awayProbablePitcher.sourceObservedTs,
+      game.awayProbablePitcher.sourceUrl,
     );
     const homePitcher = classifySinglePitcher(
       game.homeProbablePitcher.id,
       game.homeProbablePitcher.fullName,
       game.homeProbablePitcher.hand,
       game.homeProbablePitcher.id ? workloadById.get(game.homeProbablePitcher.id) : undefined,
+      game.homeProbablePitcher.source,
+      game.homeProbablePitcher.sourceObservedTs,
+      game.homeProbablePitcher.sourceUrl,
     );
 
     if (awayPitcher.role === "UNRESOLVED") unresolved++;

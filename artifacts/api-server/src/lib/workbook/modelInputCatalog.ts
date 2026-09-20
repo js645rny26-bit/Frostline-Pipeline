@@ -99,6 +99,7 @@ type SourceFreshnessKey =
   | "SAVANT_PITCH_LEVEL"
   | "TEAM_FORM"
   | "STARTING_NINE_LINEUPS"
+  | "STARTING_NINE_TEAM_PAGE"
   | "STARTING_NINE_PARK"
   | "BULLPEN_REPORT"
   | "INSIDE_THE_PEN"
@@ -228,6 +229,15 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     "TODAY_LINEUPS.Date/Notes + RUN_ENVIRONMENT",
     "Lineup coverage and official/projected state must be read per team; partial coverage attenuates active lineup effects.",
     "STARTING_NINE_LINEUPS",
+  ),
+  SOURCE(
+    "SOURCE_STARTING_NINE_TEAM_PAGE",
+    "MLB Starting Nine individual team pages",
+    "mlbstartingnine.com/lineups/{team}/",
+    "EVERY_PREGAME_RUN",
+    "STARTING_NINE_TEAM_PAGE_V1.Observed_TS_UTC + Source_Status + Source_URL",
+    "A game/team/MLBAM-verified named starter may fill only an unresolved MLB schedule probable-pitcher slot. Existing MLB starter identities are never overwritten. All split, season, park, and umpire fields are DISPLAY_ONLY_NOT_PROJECTION_INPUT pending separate commissioning.",
+    "STARTING_NINE_TEAM_PAGE",
   ),
   SOURCE(
     "SOURCE_STARTING_NINE_BULLPEN",
@@ -789,9 +799,10 @@ async function collectSourceObservations(
   workbookId: string,
   date: string,
 ): Promise<Map<SourceFreshnessKey, SourceObservation>> {
-  const [daily, lineups, teamForm, bullpen, environment, preview, odds, player, outcomes, gameSummary, packet, sourceLog] = await Promise.all([
+  const [daily, lineups, teamPages, teamForm, bullpen, environment, preview, odds, player, outcomes, gameSummary, packet, sourceLog] = await Promise.all([
     readTable(workbookId, "DAILY_MATCHUPS!A1:AU100"),
     readTable(workbookId, "TODAY_LINEUPS!A1:T1000"),
+    readTable(workbookId, "STARTING_NINE_TEAM_PAGE_V1!A1:AN100"),
     readTable(workbookId, "TEAM_FORM_INPUT!A1:H100"),
     readTable(workbookId, "BULLPEN_USAGE_DAILY!A1:U500"),
     readTable(workbookId, "RUN_ENVIRONMENT!A1:L100"),
@@ -805,6 +816,7 @@ async function collectSourceObservations(
   ]);
   const dailyRows = rowsForDate(daily, date);
   const lineupsRows = rowsForDate(lineups, date);
+  const teamPageRows = rowsForDate(teamPages, date);
   const teamFormRows = rowsForDate(teamForm, date);
   const bullpenRows = rowsForDate(bullpen, date);
   const environmentRows = rowsForDate(environment, date);
@@ -888,6 +900,18 @@ async function collectSourceObservations(
     state: lineupsRows.length === 0
       ? "NOT_MATERIALIZED_FOR_SLATE"
       : lineupMissing ? `PARTIAL_MATERIALIZED (${lineupsRows.length})` : `CURRENT_MATERIALIZED (${lineupsRows.length})`,
+  });
+  const teamPageIdentityIndex = headerIndex(teamPages.headers, "Starting_Pitcher_Identity_Status");
+  const verifiedTeamPages = teamPageIdentityIndex < 0
+    ? 0
+    : teamPageRows.filter((row) => text(row[teamPageIdentityIndex]) === "MLB_ID_VERIFIED").length;
+  observations.set("STARTING_NINE_TEAM_PAGE", {
+    ...observation(date, teamPageRows, teamPages.headers, "Observed_TS_UTC"),
+    state: teamPageRows.length === 0
+      ? "NOT_MATERIALIZED_FOR_SLATE"
+      : verifiedTeamPages === teamPageRows.length
+        ? `CURRENT_VERIFIED (${verifiedTeamPages}/${teamPageRows.length})`
+        : `PARTIAL_OR_UNVERIFIED (${verifiedTeamPages}/${teamPageRows.length})`,
   });
   observations.set("STARTING_NINE_PARK", {
     ...observation(date, environmentRows, environment.headers), timestamp: pipelineTs,

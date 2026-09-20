@@ -11,7 +11,13 @@ import { classifyPitcherRoles } from "./module03_pitcherClassification.js";
 import { fetchWeatherForecasts } from "./module04_openMeteo.js";
 import { fetchTeamSplitsWithFallback } from "./module05_fangraphs.js";
 import { fetchBullpenUsage } from "./module04b_bullpenUsage.js";
-import { fetchStartingNine, buildStartingNineMap } from "./module04c_startingNine.js";
+import {
+  applyStartingNineStarterFallbacks,
+  fetchStartingNine,
+  buildStartingNineMap,
+  type StartingNineResult,
+  type StartingNineStarterFallback,
+} from "./module04c_startingNine.js";
 import { fetchStarterPrevOutings } from "./module04d_starterPrevOuting.js";
 import { fetchPlateUmpires } from "./module04e_umpires.js";
 import { fetchPitcherSeasonStats } from "./module02b_pitcherSeasonStats.js";
@@ -71,6 +77,10 @@ import { validateNormalizedSlate } from "./module07_validation.js";
 import { writeGoogleSheetsFeed, type Module08Result } from "./module08_feedWriter.js";
 import { fetchStatcastPreviews, type StatcastPreviewResult } from "./module02e_statcastPreview.js";
 import { writeStatcastPreviewFeed, type StatcastPreviewWriterResult } from "./module08b_statcastPreviewWriter.js";
+import {
+  writeStartingNineTeamPageFeed,
+  type StartingNineTeamPageWriterResult,
+} from "./module08c_startingNineTeamPageWriter.js";
 import { verifyRecalculation, type Module09Result } from "./module09_recalculation.js";
 import { seedSlateInput, type Module10Result } from "./module10_slateInput.js";
 import { extractOutputBoards, type Module11Result } from "./module11_outputExtraction.js";
@@ -162,6 +172,10 @@ export interface PipelineSlateResult {
   games: ReturnType<typeof normalizeSlate>["games"];
   /** Frozen-source input for the workload shadow; never active Expected_IP. */
   workload: WorkloadResult;
+  /** Main-card plus individual team-page evidence captured before classification. */
+  starting_nine_result: StartingNineResult | null;
+  /** Verified team-page identities used only where MLB omitted the probable starter. */
+  starting_nine_starter_fallbacks: StartingNineStarterFallback[];
   validation: ReturnType<typeof validateNormalizedSlate>;
   module_statuses: ModuleStatus[];
   fangraphs_source: string;
@@ -216,6 +230,8 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
         pitchers: [],
         status: "no_pitchers",
       },
+      starting_nine_result: null,
+      starting_nine_starter_fallbacks: [],
       validation: {
         validation_timestamp_utc: new Date().toISOString(),
         status: "FAIL",
@@ -229,9 +245,30 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
     };
   }
 
-  // Collect unique pitcher IDs
+  // Module 04c now follows the slate's team pages before workload and role
+  // classification. MLB remains authoritative; a verified team-page starter
+  // fills only a genuinely unresolved schedule slot.
+  const startingNineResult = await fetchStartingNine(date).catch((error: unknown) => {
+    logger.warn({ err: error instanceof Error ? error.message : String(error) }, "Pipeline: Starting Nine pre-classification fetch failed");
+    return null;
+  });
+  const starterFallback = applyStartingNineStarterFallbacks(manifest, startingNineResult);
+  const resolvedManifest = starterFallback.manifest;
+  moduleStatuses.push({
+    module: "04c_starting_nine_team_pages",
+    status: startingNineResult?.team_page_status === "success" ? "PASS" : "WARN",
+    message: startingNineResult
+      ? `${startingNineResult.team_pages_parsed}/${startingNineResult.team_pages_requested} team pages; ${starterFallback.applied.length} verified starter fallbacks`
+      : "Starting Nine team pages unavailable; MLB-only starter identity retained",
+    count: startingNineResult?.team_pages_parsed ?? 0,
+  });
+  if (starterFallback.warnings.length > 0) {
+    logger.warn({ warnings: starterFallback.warnings }, "Pipeline: Starting Nine starter fallback warnings");
+  }
+
+  // Collect unique pitcher IDs after the fail-closed fallback boundary.
   const pitcherIds = new Set<number>();
-  for (const game of manifest.games) {
+  for (const game of resolvedManifest.games) {
     if (game.awayProbablePitcher.id) pitcherIds.add(game.awayProbablePitcher.id);
     if (game.homeProbablePitcher.id) pitcherIds.add(game.homeProbablePitcher.id);
   }
@@ -239,7 +276,7 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
   // Modules 02, 04, 05 can run concurrently
   const [workload, weather, splits] = await Promise.all([
     fetchPitcherWorkload(Array.from(pitcherIds), date),
-    fetchWeatherForecasts(manifest),
+    fetchWeatherForecasts(resolvedManifest),
     fetchTeamSplitsWithFallback(date),
   ]);
 
@@ -263,7 +300,7 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
   });
 
   // Module 03: Pitcher classification
-  const roles = classifyPitcherRoles(manifest, workload);
+  const roles = classifyPitcherRoles(resolvedManifest, workload);
   const resolvedCount = roles.games.flatMap((g) => [g.away_pitcher, g.home_pitcher]).filter((p) => p.role !== "UNRESOLVED").length;
   const totalPitchers = roles.games.length * 2;
   moduleStatuses.push({
@@ -274,7 +311,7 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
   });
 
   // Module 06: Normalization
-  const normalized = normalizeSlate(manifest, workload, roles, weather, splits);
+  const normalized = normalizeSlate(resolvedManifest, workload, roles, weather, splits);
   moduleStatuses.push({
     module: "06_normalization",
     status: normalized.status === "success" ? "PASS" : "FAIL",
@@ -301,6 +338,8 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
     total_games: normalized.games.length,
     games: normalized.games,
     workload,
+    starting_nine_result: startingNineResult,
+    starting_nine_starter_fallbacks: starterFallback.applied,
     validation,
     module_statuses: moduleStatuses,
     fangraphs_source: splits.retrieval_source,
@@ -319,6 +358,8 @@ export interface PublishResult {
   module_08b: StatcastPreviewWriterResult;
   /** Module 08b fetch result: per-game Baseball Savant preview data */
   module_08b_preview: StatcastPreviewResult;
+  /** Module 08c: current-slate Starting Nine team-page evidence; descriptive fields are not projection inputs. */
+  module_08c_starting_nine_team_pages: StartingNineTeamPageWriterResult;
   module_09: Module09Result;
   module_09_shadow: ShadowValidationResult;
   /** Module 09s: Statcast shadow audit — per-game xwOBA shadow projection. Shadow-only; no CORE impact. */
@@ -358,6 +399,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
 
   // Modules 01–07
   const slate = await runPipeline(date);
+  const startingNineResult = slate.starting_nine_result;
   // P0 temporal firewall: partition a staggered slate game-by-game. Started or
   // time-unresolved games are protected and carried forward verbatim; later
   // games remain eligible for prospective refresh. If none remain mutable the
@@ -393,15 +435,14 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   );
 
   // Fetch schedule manifest for pitcher IDs (needed by module04d)
-  const manifest = await fetchMlbSchedule(date).catch(() => null);
+  const rawManifest = await fetchMlbSchedule(date).catch(() => null);
+  const manifest = rawManifest
+    ? applyStartingNineStarterFallbacks(rawManifest, startingNineResult).manifest
+    : null;
 
-  const [bullpenResult, startingNineResult, starterOutings, umpireResult, teamRunRates, oddsResult, rotowireProps, rosterNameMap, statcastPreviewFetch] = await Promise.all([
+  const [bullpenResult, starterOutings, umpireResult, teamRunRates, oddsResult, rotowireProps, rosterNameMap, statcastPreviewFetch] = await Promise.all([
     fetchBullpenUsage(date, slateTeamIds).catch((err: unknown) => {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: bullpen fetch threw — skipping");
-      return null;
-    }),
-    fetchStartingNine(date).catch((err: unknown) => {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Full pipeline: startingNine fetch threw — skipping");
       return null;
     }),
     manifest
@@ -775,6 +816,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
       module_08: mod08,
       module_08b: { status: "failure", write_timestamp_utc: new Date().toISOString(), rows_written: 0, errors: ["Skipped: Module 08 failed"] },
       module_08b_preview: statcastPreviewFetch ?? { status: "failure", fetch_timestamp: new Date().toISOString(), games_expected: 0, games_available: 0, games_parsed: 0, games_missing: 0, games_failed: 0, games_identity_mismatch: 0, games: [] },
+      module_08c_starting_nine_team_pages: { status: "failure", write_timestamp_utc: new Date().toISOString(), rows_written: 0, pages_requested: 0, pages_parsed: 0, starter_fallbacks_applied: 0, errors: ["Skipped: Module 08 failed"] },
       module_09: { status: "error", verification_timestamp_utc: new Date().toISOString(), checks: { game_integration: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, game_summary: { status: "error", expected_rows: 0, actual_rows: 0, formula_errors: [] }, consistency_check: { status: "inconsistent", read_1_timestamp: "", read_2_timestamp: "", diff_seconds: 0 } }, recalculation_time_ms: 0, game_summary_rows: [] },
       module_09_shadow: shadowSkipped,
       module_09s_statcast_shadow: { status: "skipped", write_timestamp_utc: new Date().toISOString(), rows_computed: 0, rows_written: 0, collision_history_rows_written: 0, errors: ["Skipped: Module 08 failed"], shadow_rows: [] },
@@ -860,6 +902,34 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   );
   if (mod08b.status !== "success") {
     allErrors.push({ module: "08b_statcast_preview_writer", error: mod08b.errors[0] ?? "write failed", timestamp: new Date().toISOString() });
+  }
+
+  // Module 08c: publish the exact individual team-page evidence used at the
+  // starter-identity fallback boundary. The descriptive stats remain visibly
+  // research/display-only and are not consumed by Module 09.
+  const mod08c: StartingNineTeamPageWriterResult = startingNineResult
+    ? await writeStartingNineTeamPageFeed(
+        startingNineResult,
+        slate.games,
+        slate.starting_nine_starter_fallbacks,
+        workbookId,
+        publicationProtectionNow(),
+      )
+    : {
+        status: "partial",
+        write_timestamp_utc: new Date().toISOString(),
+        rows_written: 0,
+        pages_requested: 0,
+        pages_parsed: 0,
+        starter_fallbacks_applied: 0,
+        errors: ["Starting Nine team pages unavailable; MLB starter identities retained"],
+      };
+  if (mod08c.status === "failure") {
+    allErrors.push({
+      module: "08c_starting_nine_team_pages",
+      error: mod08c.errors[0] ?? "write failed",
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // Module 09: Compute + write GAME_INTEGRATION and GAME_SUMMARY
@@ -1399,6 +1469,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     module_08: mod08,
     module_08b: mod08b,
     module_08b_preview: previewFetchResult,
+    module_08c_starting_nine_team_pages: mod08c,
     module_09: mod09,
     module_09_shadow: mod12s,
     module_09s_statcast_shadow: mod09s,

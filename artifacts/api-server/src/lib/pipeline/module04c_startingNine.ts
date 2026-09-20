@@ -1,6 +1,9 @@
 /**
  * Module 04c: MLB Starting Nine Scraper
  * Fetches live starting lineups and park factors from mlbstartingnine.com.
+ * It also follows the slate's individual team-page links. Those pages expose
+ * the named starter and descriptive opponent/park/umpire context that is not
+ * present on the main slate page.
  *
  * Data extracted:
  *  - Batting order (1–9) + player name           → ld+json SportsEvent blocks (reliable SSR)
@@ -51,6 +54,60 @@ export interface StartingNineGame {
   home_lineup: LineupPlayer[];
 }
 
+export interface StartingNineSplitLine {
+  avg: number | null;
+  ops: number | null;
+  hr: number | null;
+  k: number | null;
+}
+
+export interface StartingNineTeamPage {
+  date: string;
+  game_id: string | null;
+  team_abbr: string | null;
+  opponent_abbr: string | null;
+  team_side: "away" | "home" | "unknown";
+  scheduled_first_pitch_utc: string | null;
+  lineup_status: "official" | "projected" | "unknown";
+  starting_pitcher_id: number | null;
+  starting_pitcher_name: string | null;
+  starting_pitcher_hand: string | null;
+  starting_pitcher_identity_status: "MLB_ID_VERIFIED" | "UNVERIFIED" | "MISSING";
+  opposing_pitcher_id: number | null;
+  opposing_pitcher_name: string | null;
+  opposing_pitcher_hand: string | null;
+  opposing_pitcher_ip: number | null;
+  opposing_pitcher_era: number | null;
+  opposing_pitcher_whip: number | null;
+  opposing_pitcher_so: number | null;
+  opposing_pitcher_vs_lhb: StartingNineSplitLine;
+  opposing_pitcher_vs_rhb: StartingNineSplitLine;
+  park_runs_index: number | null;
+  park_hr_lhb_index: number | null;
+  park_hr_rhb_index: number | null;
+  umpire: string | null;
+  umpire_k_rate: number | null;
+  umpire_bb_rate: number | null;
+  umpire_runs_per_game: number | null;
+  observed_ts_utc: string;
+  source_url: string;
+  source_status: "PARSED" | "PARTIAL" | "REJECTED";
+  source_notes: string[];
+  active_input: "NO";
+  mapping_status: "DISPLAY_ONLY_NOT_PROJECTION_INPUT";
+}
+
+export interface StartingNineStarterFallback {
+  game_id: string;
+  team_abbr: string;
+  team_side: "away" | "home";
+  pitcher_id: number;
+  pitcher_name: string;
+  pitcher_hand: string;
+  source_url: string;
+  observed_ts_utc: string;
+}
+
 export interface StartingNineResult {
   status: "success" | "partial" | "failure";
   date: string;
@@ -58,6 +115,11 @@ export interface StartingNineResult {
   games_parsed: number;
   games_matched: number;  // resolved to a legacy_game_id
   errors: string[];
+  team_pages: StartingNineTeamPage[];
+  team_pages_requested: number;
+  team_pages_parsed: number;
+  team_page_status: "success" | "partial" | "failure";
+  team_page_errors: string[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -110,6 +172,47 @@ function parseMatchupName(name: string): { away: string; home: string } | null {
 function parsePct(s: string): number {
   return parseInt(s, 10);
 }
+
+function decodeHtml(value: string): string {
+  const named: Record<string, string> = {
+    amp: "&", apos: "'", quot: '"', lt: "<", gt: ">", nbsp: " ",
+  };
+  return value
+    .replace(/&#(\d+);/g, (_match, digits: string) => String.fromCodePoint(Number(digits)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, digits: string) => String.fromCodePoint(Number.parseInt(digits, 16)))
+    .replace(/&([a-z]+);/gi, (match, name: string) => named[name.toLowerCase()] ?? match);
+}
+
+function stripHtml(value: string): string {
+  return decodeHtml(value.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+}
+
+function parseOptionalNumber(value: string | undefined): number | null {
+  if (!value || value === "-") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizePersonName(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function buildStartingNineTeamSlugMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const { canonical_abbr, full_name } of Object.values(SOURCE_MAPPINGS)) {
+    map.set(full_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), canonical_abbr);
+  }
+  // The site dropped the city from the Athletics slug.
+  map.set("athletics", "OAK");
+  return map;
+}
+
+const STARTING_NINE_TEAM_SLUGS = buildStartingNineTeamSlugMap();
 
 // ─── HTML parsers ─────────────────────────────────────────────────────────────
 
@@ -219,6 +322,256 @@ function parseParkFactors(html: string): ParkFactors[] {
   return results;
 }
 
+function emptySplitLine(): StartingNineSplitLine {
+  return { avg: null, ops: null, hr: null, k: null };
+}
+
+function parseTeamPageLinks(html: string): Map<string, string> {
+  const links = new Map<string, string>();
+  for (const match of html.matchAll(/href="(\/lineups\/([^"/]+)\/)"/gi)) {
+    const slug = match[2]!.toLowerCase();
+    const teamAbbr = STARTING_NINE_TEAM_SLUGS.get(slug);
+    if (teamAbbr) links.set(teamAbbr, `${BASE_URL}${match[1]}`);
+  }
+  return links;
+}
+
+interface TeamPageEvent {
+  gameId: string | null;
+  teamAbbr: string | null;
+  opponentAbbr: string | null;
+  side: "away" | "home" | "unknown";
+  firstPitchUtc: string | null;
+  lineupStatus: "official" | "projected" | "unknown";
+}
+
+function parseTeamPageEvent(html: string, requestedDate: string, expectedTeamAbbr: string | null): TeamPageEvent {
+  const fallback: TeamPageEvent = {
+    gameId: null,
+    teamAbbr: null,
+    opponentAbbr: null,
+    side: "unknown",
+    firstPitchUtc: null,
+    lineupStatus: "unknown",
+  };
+  const blockRe = /<script type="application\/ld\+json">([\s\S]*?)<\/script>/g;
+  for (const [, raw] of html.matchAll(blockRe)) {
+    let data: unknown;
+    try { data = JSON.parse(raw!.trim()); } catch { continue; }
+    const items: unknown[] = Array.isArray(data) ? data : [data];
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      const event = item as Record<string, unknown>;
+      if (event["@type"] !== "SportsEvent") continue;
+      const matchup = parseMatchupName(String(event["name"] ?? ""));
+      if (!matchup) continue;
+      const awayAbbr = resolveTeam(matchup.away);
+      const homeAbbr = resolveTeam(matchup.home);
+      const competitors = (event["competitor"] as unknown[]) ?? [];
+      let teamAbbr: string | null = expectedTeamAbbr;
+      let side: TeamPageEvent["side"] = "unknown";
+      let lineupStatus: TeamPageEvent["lineupStatus"] = "unknown";
+      for (let index = 0; index < competitors.length; index++) {
+        const competitor = competitors[index] as Record<string, unknown>;
+        const competitorAbbr = resolveTeam(String(competitor["name"] ?? ""));
+        if (expectedTeamAbbr && competitorAbbr !== expectedTeamAbbr) continue;
+        const subOrg = competitor["subOrganization"] as Record<string, unknown> | undefined;
+        teamAbbr = competitorAbbr;
+        side = index === 0 ? "away" : index === 1 ? "home" : "unknown";
+        lineupStatus = !subOrg
+          ? "unknown"
+          : String(subOrg["name"] ?? "").toLowerCase().includes("official")
+            ? "official"
+            : "projected";
+        break;
+      }
+      const firstPitchUtc = typeof event["startDate"] === "string" ? event["startDate"] : null;
+      if (firstPitchUtc) {
+        const eventDateEt = new Date(firstPitchUtc).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+        if (eventDateEt !== requestedDate) return fallback;
+      }
+      const opponentAbbr = teamAbbr === awayAbbr ? homeAbbr : teamAbbr === homeAbbr ? awayAbbr : null;
+      return {
+        gameId: awayAbbr && homeAbbr ? buildGameId(requestedDate, awayAbbr, homeAbbr) : null,
+        teamAbbr,
+        opponentAbbr,
+        side,
+        firstPitchUtc,
+        lineupStatus,
+      };
+    }
+  }
+  return fallback;
+}
+
+/** Parse one individual team page. Exported for deterministic fixture tests. */
+export function parseStartingNineTeamPageHtml(
+  html: string,
+  requestedDate: string,
+  sourceUrl: string,
+  observedTsUtc: string,
+): StartingNineTeamPage {
+  const slug = sourceUrl.match(/\/lineups\/([^/]+)\/?(?:\?|$)/i)?.[1]?.toLowerCase() ?? "";
+  const expectedTeamAbbr = STARTING_NINE_TEAM_SLUGS.get(slug) ?? null;
+  const event = parseTeamPageEvent(html, requestedDate, expectedTeamAbbr);
+  const notes: string[] = [];
+  const starterSectionStart = html.search(/>\s*Starting Pitcher\s*</i);
+  const starterSectionEnd = starterSectionStart >= 0
+    ? html.indexOf("DFS Projections", starterSectionStart)
+    : -1;
+  const starterSection = starterSectionStart >= 0
+    ? html.slice(starterSectionStart, starterSectionEnd > starterSectionStart ? starterSectionEnd : starterSectionStart + 4000)
+    : "";
+  const starterIdRaw = starterSection.match(/\/people\/(\d+)\/headshot/i)?.[1];
+  const starterNameRaw = starterSection.match(/<a\s+href="\/players\/[^"]+"[^>]*>([^<]+)<\/a>/i)?.[1];
+  const startingPitcherId = starterIdRaw ? Number(starterIdRaw) : null;
+  const startingPitcherName = starterNameRaw ? stripHtml(starterNameRaw) : null;
+  if (!startingPitcherId || !startingPitcherName) notes.push("STARTING_PITCHER_MISSING");
+
+  const opposingStart = html.search(/Opposing Pitcher:/i);
+  const opposingEnd = opposingStart >= 0 ? html.indexOf("Batter Splits", opposingStart) : -1;
+  const opposingHtml = opposingStart >= 0
+    ? html.slice(opposingStart, opposingEnd > opposingStart ? opposingEnd : opposingStart + 5000)
+    : "";
+  const opposingText = stripHtml(opposingHtml);
+  const opposingPitcherNameRaw = opposingHtml.match(/Opposing Pitcher:\s*<a[^>]*>([^<]+)<\/a>/i)?.[1];
+  const splitMatch = opposingText.match(
+    /vs LHB\s+([.\d-]+)\s+([.\d-]+)\s+(\d+|-)\s+(\d+|-)\s+vs RHB\s+([.\d-]+)\s+([.\d-]+)\s+(\d+|-)\s+(\d+|-)/i,
+  );
+  const seasonMatch = opposingText.match(
+    /SEASON:\s*([\d.]+)\s+IP\s+([\d.]+)\s+ERA\s+([\d.]+)\s+WHIP\s+(\d+)\s+SO/i,
+  );
+  const batterSplitHeader = html.match(/Batter Splits[\s\S]{0,1200}?vs\s+(LHP|RHP)\s*\(OPS\)/i)?.[1]?.toUpperCase() ?? null;
+  const stripped = stripHtml(html);
+  const parkMatch = stripped.match(/Park Factors\s*\(100\s*=\s*Avg\)\s*Runs:\s*(\d+)\s*HR\s*\(LHB\):\s*(\d+)\s*HR\s*\(RHB\):\s*(\d+)/i);
+  const umpireMatch = stripped.match(/Umpire:\s*([^:]+?)\s+K Rate:\s*([\d.]+|-)%?\s+BB Rate:\s*([\d.]+|-)%?\s+Runs\/Game:\s*([\d.]+|-)/i);
+
+  if (!event.gameId || !event.teamAbbr || !event.opponentAbbr) notes.push("GAME_IDENTITY_MISMATCH");
+  if (!opposingPitcherNameRaw) notes.push("OPPOSING_PITCHER_STATS_MISSING");
+
+  return {
+    date: requestedDate,
+    game_id: event.gameId,
+    team_abbr: event.teamAbbr,
+    opponent_abbr: event.opponentAbbr,
+    team_side: event.side,
+    scheduled_first_pitch_utc: event.firstPitchUtc,
+    lineup_status: event.lineupStatus,
+    starting_pitcher_id: startingPitcherId,
+    starting_pitcher_name: startingPitcherName,
+    starting_pitcher_hand: null,
+    starting_pitcher_identity_status: startingPitcherId && startingPitcherName ? "UNVERIFIED" : "MISSING",
+    opposing_pitcher_id: null,
+    opposing_pitcher_name: opposingPitcherNameRaw ? stripHtml(opposingPitcherNameRaw) : null,
+    opposing_pitcher_hand: batterSplitHeader === "LHP" ? "L" : batterSplitHeader === "RHP" ? "R" : null,
+    opposing_pitcher_ip: parseOptionalNumber(seasonMatch?.[1]),
+    opposing_pitcher_era: parseOptionalNumber(seasonMatch?.[2]),
+    opposing_pitcher_whip: parseOptionalNumber(seasonMatch?.[3]),
+    opposing_pitcher_so: parseOptionalNumber(seasonMatch?.[4]),
+    opposing_pitcher_vs_lhb: splitMatch ? {
+      avg: parseOptionalNumber(splitMatch[1]), ops: parseOptionalNumber(splitMatch[2]),
+      hr: parseOptionalNumber(splitMatch[3]), k: parseOptionalNumber(splitMatch[4]),
+    } : emptySplitLine(),
+    opposing_pitcher_vs_rhb: splitMatch ? {
+      avg: parseOptionalNumber(splitMatch[5]), ops: parseOptionalNumber(splitMatch[6]),
+      hr: parseOptionalNumber(splitMatch[7]), k: parseOptionalNumber(splitMatch[8]),
+    } : emptySplitLine(),
+    park_runs_index: parseOptionalNumber(parkMatch?.[1]),
+    park_hr_lhb_index: parseOptionalNumber(parkMatch?.[2]),
+    park_hr_rhb_index: parseOptionalNumber(parkMatch?.[3]),
+    umpire: umpireMatch?.[1] ? umpireMatch[1].trim() : null,
+    umpire_k_rate: parseOptionalNumber(umpireMatch?.[2]),
+    umpire_bb_rate: parseOptionalNumber(umpireMatch?.[3]),
+    umpire_runs_per_game: parseOptionalNumber(umpireMatch?.[4]),
+    observed_ts_utc: observedTsUtc,
+    source_url: sourceUrl,
+    source_status: notes.includes("GAME_IDENTITY_MISMATCH")
+      ? "REJECTED"
+      : notes.length > 0 ? "PARTIAL" : "PARSED",
+    source_notes: notes,
+    active_input: "NO",
+    mapping_status: "DISPLAY_ONLY_NOT_PROJECTION_INPUT",
+  };
+}
+
+async function fetchStartingNineTeamPages(
+  html: string,
+  date: string,
+): Promise<{ pages: StartingNineTeamPage[]; requested: number; errors: string[] }> {
+  const links = [...parseTeamPageLinks(html).entries()];
+  const pages: StartingNineTeamPage[] = [];
+  const errors: string[] = [];
+  const concurrency = 6;
+  for (let index = 0; index < links.length; index += concurrency) {
+    const batch = links.slice(index, index + concurrency);
+    const results = await Promise.all(batch.map(async ([expectedTeam, url]) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15_000);
+      try {
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; FrostlinePipeline/1.0)" },
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const observedTs = new Date().toISOString();
+        const page = parseStartingNineTeamPageHtml(await response.text(), date, url, observedTs);
+        if (page.team_abbr !== expectedTeam) {
+          page.source_status = "REJECTED";
+          page.source_notes.push(`EXPECTED_TEAM_${expectedTeam}_GOT_${page.team_abbr ?? "NONE"}`);
+        }
+        return page;
+      } catch (error: unknown) {
+        errors.push(`${expectedTeam}: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    }));
+    pages.push(...results.filter((page): page is StartingNineTeamPage => page !== null));
+  }
+
+  const ids = [...new Set(pages.map((page) => page.starting_pitcher_id).filter((id): id is number => id !== null))];
+  if (ids.length > 0) {
+    try {
+      const response = await fetch(`https://statsapi.mlb.com/api/v1/people?personIds=${ids.join(",")}`, {
+        headers: { "User-Agent": "FrostlinePipeline/1.0" },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json() as {
+        people?: Array<{ id?: number; fullName?: string; pitchHand?: { code?: string }; primaryPosition?: { type?: string } }>;
+      };
+      const people = new Map((payload.people ?? []).map((person) => [person.id, person]));
+      for (const page of pages) {
+        if (!page.starting_pitcher_id || !page.starting_pitcher_name) continue;
+        const person = people.get(page.starting_pitcher_id);
+        const nameMatches = normalizePersonName(person?.fullName) === normalizePersonName(page.starting_pitcher_name);
+        if (person && nameMatches && person.primaryPosition?.type === "Pitcher" && person.pitchHand?.code) {
+          page.starting_pitcher_hand = person.pitchHand.code;
+          page.starting_pitcher_identity_status = "MLB_ID_VERIFIED";
+        } else {
+          page.source_status = page.source_status === "REJECTED" ? "REJECTED" : "PARTIAL";
+          page.source_notes.push("MLB_IDENTITY_VERIFICATION_FAILED");
+        }
+      }
+    } catch (error: unknown) {
+      errors.push(`MLB identity verification: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const byGameAndTeam = new Map(
+    pages.filter((page) => page.game_id && page.team_abbr).map((page) => [`${page.game_id}|${page.team_abbr}`, page]),
+  );
+  for (const page of pages) {
+    if (!page.game_id || !page.opponent_abbr || !page.opposing_pitcher_name) continue;
+    const opponent = byGameAndTeam.get(`${page.game_id}|${page.opponent_abbr}`);
+    if (opponent?.starting_pitcher_id
+      && normalizePersonName(opponent.starting_pitcher_name) === normalizePersonName(page.opposing_pitcher_name)) {
+      page.opposing_pitcher_id = opponent.starting_pitcher_id;
+    }
+  }
+  return { pages, requested: links.length, errors };
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function fetchStartingNine(date: string): Promise<StartingNineResult> {
@@ -231,6 +584,11 @@ export async function fetchStartingNine(date: string): Promise<StartingNineResul
     games_parsed: 0,
     games_matched: 0,
     errors: [],
+    team_pages: [],
+    team_pages_requested: 0,
+    team_pages_parsed: 0,
+    team_page_status: "failure",
+    team_page_errors: [],
   };
 
   let html: string;
@@ -310,11 +668,121 @@ export async function fetchStartingNine(date: string): Promise<StartingNineResul
     result.status = "partial";
   }
 
+  // Individual team pages carry the named starter and descriptive matchup
+  // tables that the slate page omits. Failures here do not invalidate the
+  // already-parsed lineups/park factors; consumers must inspect the separate
+  // team_page_status and per-row source_status fields.
+  const teamPageResult = await fetchStartingNineTeamPages(html, date);
+  result.team_pages = teamPageResult.pages;
+  result.team_pages_requested = teamPageResult.requested;
+  result.team_pages_parsed = teamPageResult.pages.filter((page) => page.source_status !== "REJECTED").length;
+  result.team_page_errors = teamPageResult.errors;
+  result.team_page_status = result.team_pages_parsed === result.team_pages_requested && result.team_pages_requested > 0
+    ? "success"
+    : result.team_pages_parsed > 0 ? "partial" : "failure";
+
   logger.info(
-    { parsed: result.games_parsed, matched: result.games_matched, status: result.status },
+    {
+      parsed: result.games_parsed,
+      matched: result.games_matched,
+      status: result.status,
+      team_pages_requested: result.team_pages_requested,
+      team_pages_parsed: result.team_pages_parsed,
+      team_page_status: result.team_page_status,
+    },
     "MODULE_04c: Starting Nine fetch complete",
   );
   return result;
+}
+
+/**
+ * Fill only genuinely unresolved MLB probable-pitcher slots from verified
+ * Starting Nine team pages. A valid MLB schedule pitcher always wins. A
+ * doubleheader is withheld because the team page exposes only date+teams.
+ */
+export function applyStartingNineStarterFallbacks(
+  manifest: import("./module01_mlbStatsApi.js").GameScheduleResult,
+  result: StartingNineResult | null,
+): { manifest: import("./module01_mlbStatsApi.js").GameScheduleResult; applied: StartingNineStarterFallback[]; warnings: string[] } {
+  if (!result || result.team_pages.length === 0) return { manifest, applied: [], warnings: [] };
+  const warnings: string[] = [];
+  const applied: StartingNineStarterFallback[] = [];
+  const gamesByBase = new Map<string, typeof manifest.games>();
+  for (const game of manifest.games) {
+    const base = baseGameId(game.legacy_game_id);
+    const games = gamesByBase.get(base) ?? [];
+    games.push(game);
+    gamesByBase.set(base, games);
+  }
+  const pageByGameTeam = new Map(
+    result.team_pages
+      .filter((page) => page.game_id && page.team_abbr)
+      .map((page) => [`${page.game_id}|${page.team_abbr}`, page]),
+  );
+
+  const games = manifest.games.map((game) => {
+    const base = baseGameId(game.legacy_game_id);
+    if ((gamesByBase.get(base)?.length ?? 0) !== 1) {
+      if (!game.awayProbablePitcher.id || !game.homeProbablePitcher.id) {
+        warnings.push(`${game.legacy_game_id}: Starting Nine fallback withheld for ambiguous doubleheader identity`);
+      }
+      return game;
+    }
+
+    const resolveSide = (
+      side: "away" | "home",
+      current: typeof game.awayProbablePitcher,
+      teamAbbr: string,
+      opponentAbbr: string,
+    ): typeof game.awayProbablePitcher => {
+      if (current.id && current.fullName) return current;
+      const page = pageByGameTeam.get(`${base}|${teamAbbr}`);
+      if (!page
+        || page.source_status === "REJECTED"
+        || page.opponent_abbr !== opponentAbbr
+        || page.team_side !== side
+        || page.starting_pitcher_identity_status !== "MLB_ID_VERIFIED"
+        || !page.starting_pitcher_id
+        || !page.starting_pitcher_name
+        || !page.starting_pitcher_hand) return current;
+      if (current.id && current.id !== page.starting_pitcher_id) {
+        warnings.push(`${game.legacy_game_id} ${side}: partial MLB identity conflicts with Starting Nine; fallback withheld`);
+        return current;
+      }
+      if (current.fullName
+        && normalizePersonName(current.fullName) !== normalizePersonName(page.starting_pitcher_name)) {
+        warnings.push(`${game.legacy_game_id} ${side}: partial MLB name conflicts with Starting Nine; fallback withheld`);
+        return current;
+      }
+      applied.push({
+        game_id: game.legacy_game_id,
+        team_abbr: teamAbbr,
+        team_side: side,
+        pitcher_id: page.starting_pitcher_id,
+        pitcher_name: page.starting_pitcher_name,
+        pitcher_hand: page.starting_pitcher_hand,
+        source_url: page.source_url,
+        observed_ts_utc: page.observed_ts_utc,
+      });
+      return {
+        id: page.starting_pitcher_id,
+        fullName: page.starting_pitcher_name,
+        hand: page.starting_pitcher_hand,
+        source: "MLB_STARTING_NINE_TEAM_PAGE",
+        sourceObservedTs: page.observed_ts_utc,
+        sourceUrl: page.source_url,
+      };
+    };
+
+    const away = game.awayTeam.abbreviation;
+    const home = game.homeTeam.abbreviation;
+    return {
+      ...game,
+      awayProbablePitcher: resolveSide("away", game.awayProbablePitcher, away, home),
+      homeProbablePitcher: resolveSide("home", game.homeProbablePitcher, home, away),
+    };
+  });
+  return { manifest: { ...manifest, games }, applied, warnings };
 }
 
 /**

@@ -232,8 +232,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      probability and whole-game failure-cost proxies in the canonical
  *      packet for prospective starter-window calibration. They remain
  *      explicitly non-equivalent to starter-scoring probability/severity.
+ *  v73 (2026-09-20): follows MLB Starting Nine individual team pages,
+ *      permits an MLBAM-verified starter fallback only when MLB omits the
+ *      probable starter, and publishes all richer page statistics as
+ *      display-only evidence with explicit no-projection sentinels.
  */
-export const WORKBOOK_SCHEMA_VERSION = 72;
+export const WORKBOOK_SCHEMA_VERSION = 73;
 
 export interface ColumnDef {
   name: string;
@@ -248,6 +252,7 @@ export interface ColumnDef {
     | "MODULE_05d"
     | "MODULE_08"
     | "MODULE_08b"
+    | "MODULE_08c"
     | "MODULE_09"
     | "MODULE_09s"
     | "MODULE_09t"
@@ -348,6 +353,12 @@ const PREGAME_PACKET_HISTORY_COLUMN_NAMES = [
   "Lock_Status",
   "Away_Starter",
   "Home_Starter",
+  "Away_Starter_Identity_Source",
+  "Home_Starter_Identity_Source",
+  "Away_Starter_Identity_Source_TS",
+  "Home_Starter_Identity_Source_TS",
+  "Away_Starter_Identity_Source_URL",
+  "Home_Starter_Identity_Source_URL",
   "Away_Starter_Role",
   "Home_Starter_Role",
   "Away_Expected_IP",
@@ -1213,6 +1224,19 @@ const SHADOW_TRUTH_SUMMARY_V1_COLUMN_NAMES = [
   "Shadow_Directions_Frozen", "Correct", "Incorrect", "Push", "Ungradable",
   "Directional_Eligible_N", "Directional_Accuracy", "Research_Status",
   "Summary_Notes", "Replay_TS",
+] as const;
+const STARTING_NINE_TEAM_PAGE_V1_COLUMN_NAMES = [
+  "Date", "Game_ID", "Team", "Opponent", "Team_Side", "Scheduled_First_Pitch",
+  "Lineup_Status", "Starting_Pitcher_ID", "Starting_Pitcher_Name", "Starting_Pitcher_Hand",
+  "Starting_Pitcher_Identity_Status", "Starter_Fallback_Applied",
+  "Opposing_Pitcher_ID", "Opposing_Pitcher_Name", "Opposing_Pitcher_Hand",
+  "Opposing_Pitcher_IP", "Opposing_Pitcher_ERA", "Opposing_Pitcher_WHIP", "Opposing_Pitcher_SO",
+  "Opposing_vs_LHB_AVG", "Opposing_vs_LHB_OPS", "Opposing_vs_LHB_HR", "Opposing_vs_LHB_K",
+  "Opposing_vs_RHB_AVG", "Opposing_vs_RHB_OPS", "Opposing_vs_RHB_HR", "Opposing_vs_RHB_K",
+  "Park_Runs_Index", "Park_HR_LHB_Index", "Park_HR_RHB_Index",
+  "Umpire", "Umpire_K_Rate", "Umpire_BB_Rate", "Umpire_Runs_Per_Game",
+  "Observed_TS_UTC", "Source_URL", "Source_Status", "Source_Notes",
+  "Active_Input", "Mapping_Status",
 ] as const;
 const ACTIVE_PITCHING_INVENTORY_V1_COLUMN_NAMES = [
   "Date", "Game_ID", "Team_Side", "Pitching_Team", "Opposing_Offense",
@@ -13835,6 +13859,26 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Push", "Ungradable", "Directional_Eligible_N", "Directional_Accuracy",
       ],
       "MODULE_35",
+    ),
+  },
+
+  {
+    name: "STARTING_NINE_TEAM_PAGE_V1",
+    description:
+      "Current-slate materialization of individual MLB Starting Nine team pages. A verified named starter may fill only an unresolved MLB probable-pitcher slot; opponent splits, park, and umpire context remain display-only and cannot change projections or decisions.",
+    section: "INPUT",
+    frozenRows: 1,
+    columns: diagnosticColumns(
+      STARTING_NINE_TEAM_PAGE_V1_COLUMN_NAMES,
+      [
+        "Starting_Pitcher_ID", "Opposing_Pitcher_ID", "Opposing_Pitcher_IP",
+        "Opposing_Pitcher_ERA", "Opposing_Pitcher_WHIP", "Opposing_Pitcher_SO",
+        "Opposing_vs_LHB_AVG", "Opposing_vs_LHB_OPS", "Opposing_vs_LHB_HR", "Opposing_vs_LHB_K",
+        "Opposing_vs_RHB_AVG", "Opposing_vs_RHB_OPS", "Opposing_vs_RHB_HR", "Opposing_vs_RHB_K",
+        "Park_Runs_Index", "Park_HR_LHB_Index", "Park_HR_RHB_Index",
+        "Umpire_K_Rate", "Umpire_BB_Rate", "Umpire_Runs_Per_Game",
+      ],
+      "MODULE_08c",
     ),
   },
 

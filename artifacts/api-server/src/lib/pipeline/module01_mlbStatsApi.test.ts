@@ -50,6 +50,11 @@ test("team-only lineup cards are withheld when a doubleheader makes them ambiguo
     games_parsed: 1,
     games_matched: 1,
     errors: [],
+    team_pages: [],
+    team_pages_requested: 0,
+    team_pages_parsed: 0,
+    team_page_status: "failure" as const,
+    team_page_errors: [],
     games: [{
       game_id: "20260817_STL_CIN",
       away_abbr: "STL",

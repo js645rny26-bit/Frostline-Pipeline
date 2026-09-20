@@ -116,6 +116,12 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Lock_Status",
   "Away_Starter",
   "Home_Starter",
+  "Away_Starter_Identity_Source",
+  "Home_Starter_Identity_Source",
+  "Away_Starter_Identity_Source_TS",
+  "Home_Starter_Identity_Source_TS",
+  "Away_Starter_Identity_Source_URL",
+  "Home_Starter_Identity_Source_URL",
   "Away_Starter_Role",
   "Home_Starter_Role",
   "Away_Expected_IP",
@@ -779,6 +785,20 @@ export function buildPregamePacketInputs(
       boardRow.lock_status,
       operatorValue(operator, "AWAY_STARTER") ?? summary.away_pitcher,
       operatorValue(operator, "HOME_STARTER") ?? summary.home_pitcher,
+      operatorValue(operator, "AWAY_STARTER")
+        ? "MANUAL_OPERATOR"
+        : (game.away_pitcher?.identity_source ?? "UNRESOLVED"),
+      operatorValue(operator, "HOME_STARTER")
+        ? "MANUAL_OPERATOR"
+        : (game.home_pitcher?.identity_source ?? "UNRESOLVED"),
+      operatorValue(operator, "AWAY_STARTER")
+        ? operatorFieldTimestamp(operator, "AWAY_STARTER")
+        : (game.away_pitcher?.identity_source_observed_ts ?? ""),
+      operatorValue(operator, "HOME_STARTER")
+        ? operatorFieldTimestamp(operator, "HOME_STARTER")
+        : (game.home_pitcher?.identity_source_observed_ts ?? ""),
+      operatorValue(operator, "AWAY_STARTER") ? "" : (game.away_pitcher?.identity_source_url ?? ""),
+      operatorValue(operator, "HOME_STARTER") ? "" : (game.home_pitcher?.identity_source_url ?? ""),
       operatorValue(operator, "AWAY_STARTER_ROLE") ?? summary.away_pitcher_role,
       operatorValue(operator, "HOME_STARTER_ROLE") ?? summary.home_pitcher_role,
       blank(summary.away_expected_innings),
