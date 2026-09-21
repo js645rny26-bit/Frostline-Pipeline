@@ -81,7 +81,7 @@ const summary = {
   away_active_offense_center: 4.4, home_active_offense_center: 4.1,
 } as GameSummaryRow;
 
-test("API separates a credible inferred bulk phase from true bullpen exposure", () => {
+test("availability plus multi-inning history cannot designate an expected bulk pitcher", () => {
   const rows = buildActivePitchingInventory(
     [game], [summary], bullpen, [...appearances(21), ...appearances(22), ...appearances(11)],
     new Map([[game.legacy_game_id, sweState(6)]]),
@@ -94,17 +94,58 @@ test("API separates a credible inferred bulk phase from true bullpen exposure", 
   );
   assert.equal(rows.length, 2);
   const home = rows.find((row) => row.team_side === "HOME")!;
-  assert.equal(home.pitching_plan_type, "OPENER_PLUS_CREDIBLE_BULK");
-  assert.equal(home.expected_bulk_pitcher, "Credible Bulk");
-  assert.equal(home.bulk_observability, "PROBABLE_INFERRED");
+  assert.equal(home.pitching_plan_type, "OPENER_PLUS_FRAGMENTED_BRIDGE");
+  assert.equal(home.expected_bulk_pitcher, "");
+  assert.equal(home.bulk_observability, "NOT_OBSERVABLE_PREGAME");
   assert.equal(home.expected_starter_phase_ip, 1.2);
-  assert.equal(home.expected_bulk_phase_ip, 4);
-  assert.equal(home.true_bullpen_exposure_ip, 3.8);
-  assert.equal(home.projection_effect_status, "SHADOW_DELTA_AVAILABLE");
-  assert.notEqual(home.api_shadow_run_delta, null);
+  assert.equal(home.expected_bulk_phase_ip, null);
+  assert.equal(home.true_bullpen_exposure_ip, 7.8);
+  assert.equal(home.projection_effect_status, "NOT_ESTIMABLE");
+  assert.equal(home.api_shadow_run_delta, null);
+  assert.match(home.long_relief_options, /Credible Bulk \[ROSTER_HISTORY_ONLY\]/);
+  assert.match(home.long_relief_options, /Secondary \[ROSTER_HISTORY_ONLY\]/);
+  assert.match(home.missing_data_flags, /EXPECTED_BULK_IDENTITY_NOT_OBSERVABLE/);
   const away = rows.find((row) => row.team_side === "AWAY")!;
   assert.equal(away.pitching_plan_type, "CONVENTIONAL_STARTER");
   assert.equal(away.expected_bulk_ip, null);
+});
+
+test("Dodgers opener fixture keeps Sheehan as roster history without postgame backfill", () => {
+  const dodgersGame: NormalizedGame = {
+    ...game,
+    legacy_game_id: "20260920_SFG_LAD",
+    date: "2026-09-20",
+    scheduled_utc_time: "2026-09-20T20:10:00Z",
+    home_team: { team_id: 119, team_abbr: "LAD", team_name: "Los Angeles Dodgers" },
+    away_team: { team_id: 137, team_abbr: "SFG", team_name: "San Francisco Giants" },
+    home_pitcher: pitcher(700000, "Jack Dreyer", "OPENER", 1.2),
+  };
+  const dodgersSummary = {
+    ...summary,
+    game_id: dodgersGame.legacy_game_id,
+    date: dodgersGame.date,
+    away_team: "SFG",
+    home_team: "LAD",
+  } as GameSummaryRow;
+  const dodgersBullpen: BullpenResult = {
+    ...bullpen,
+    date: dodgersGame.date,
+    relievers: [reliever(686218, "Emmet Sheehan", "LAD")],
+  };
+  const rows = buildActivePitchingInventory(
+    [dodgersGame], [dodgersSummary], dodgersBullpen, appearances(686218),
+    new Map(), new Map(), new Map(), "2026-09-19", "2026-09-20T17:00:00Z",
+    new Map([[119, [{ team_id: 119, player_id: 686218, full_name: "Emmet Sheehan" }]]]),
+  );
+  const home = rows.find((row) => row.team_side === "HOME")!;
+  assert.equal(home.named_starter, "Jack Dreyer");
+  assert.equal(home.expected_bulk_pitcher, "");
+  assert.equal(home.expected_bulk_phase_ip, null);
+  assert.equal(home.pitcher_chain_status, "CHAIN_PARTIAL_NOT_PROJECTION_READY");
+  assert.equal(home.true_bullpen_exposure_ip, 7.8);
+  assert.equal(home.api_shadow_run_delta, null);
+  assert.match(home.long_relief_options, /Emmet Sheehan \[ROSTER_HISTORY_ONLY\]/);
+  assert.doesNotMatch(home.expected_pitching_sequence, /Sheehan/);
 });
 
 test("missing pregame bullpen source fails closed instead of inventing a follower", () => {

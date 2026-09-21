@@ -235,8 +235,8 @@ const ENTRIES: ModelInputCatalogEntry[] = [
     "MLB Starting Nine individual team pages",
     "mlbstartingnine.com/lineups/{team}/",
     "EVERY_PREGAME_RUN",
-    "STARTING_NINE_TEAM_PAGE_V1.Observed_TS_UTC + Source_Status + Source_URL",
-    "A game/team/MLBAM-verified named starter may fill only an unresolved MLB schedule probable-pitcher slot. Existing MLB starter identities are never overwritten. All split, season, park, and umpire fields are DISPLAY_ONLY_NOT_PROJECTION_INPUT pending separate commissioning.",
+    "STARTING_NINE_TEAM_PAGE_V1.Observed_TS_UTC + Source_Status + Source_URL; exact HTML/hash chronology in SOURCE_ACQUISITION_LOG and SOURCE_RAW_SNAPSHOT",
+    "A game/team/MLBAM-verified named starter may fill only an unresolved MLB schedule probable-pitcher slot. Existing MLB starter identities are never overwritten. All split, season, park, and umpire fields are DISPLAY_ONLY_NOT_PROJECTION_INPUT. The page does not prove a statistics data-through date, so source retention leaves it blank.",
     "STARTING_NINE_TEAM_PAGE",
   ),
   SOURCE(
@@ -449,13 +449,13 @@ const ENTRIES: ModelInputCatalogEntry[] = [
   {
     recordType: "INPUT", id: "ACTIVE_PITCHING_INVENTORY_V1", label: "Active Pitching Inventory V1 chain shadow",
     layer: "BASEBALL_MODEL", outputClass: "SHADOW_CHALLENGER", operationalStatus: "SHADOW_ONLY",
-    definition: "Pregame identity-and-sequence inventory that separates the named starter/opener, source-supported inferred bulk or swing option, and true unidentified bullpen remainder before a research-only phase-allocation delta is calculated.",
+    definition: "Pregame identity-and-sequence inventory that separates the named starter/opener, explicitly source-supported bulk or swing identity when available, and true unidentified bullpen remainder before a research-only phase-allocation delta is calculated.",
     statisticalWindow: "D-1 retained pitcher appearances plus same-day pregame reliever availability", gameWindow: "STARTER/OPENER -> BULK/SWING -> TRUE BULLPEN",
     primarySource: "SOURCE_MLB_SCHEDULE + SOURCE_STARTING_NINE_BULLPEN + SOURCE_SAVANT_PITCH_LEVEL + SOURCE_MLB_PITCHER_SEASON", fallbackSource: "Explicit NOT_OBSERVABLE_PREGAME or MISSING_DUE_TO_SOURCE_FAILURE",
     refreshCadence: "EVERY_LEGITIMATE_PREGAME_RUN", freshnessEvidence: "ACTIVE_PITCHING_INVENTORY_V1 Data_Through_Date/Snapshot_TS/Source_Provenance/Deterministic_Hash",
     workbookLocation: "ACTIVE_PITCHING_INVENTORY_V1; ACTIVE_PITCHING_INVENTORY_SUMMARY_V1", feedsActiveProjection: "NO", feedsDecisionBoard: "NO",
     correlationFamily: "PITCHING_CHAIN_IDENTITY_AND_PHASE_ALLOCATION", missingBehavior: "Unknown follower identity, insufficient SWE workload, or missing availability fails closed; postgame pitcher order is never backfilled as pregame evidence.",
-    notes: "Module 36 reuses production Expected_IP and separately preserves SWE. It identifies WHO may absorb innings; it does not create a second workload or bullpen-quality model. Active_Input=NO and SHADOW_ONLY_NOT_COMMISSIONED are commissioning sentinels.", freshnessKey: "BULLPEN_REPORT",
+    notes: "Module 36 reuses production Expected_IP and separately preserves SWE. Availability, roster membership, and multi-inning history remain ROSTER_HISTORY_ONLY unless a pregame source designates the follower. It does not create a second workload or bullpen-quality model. Active_Input=NO and SHADOW_ONLY_NOT_COMMISSIONED are commissioning sentinels.", freshnessKey: "BULLPEN_REPORT",
   },
   {
     recordType: "INPUT", id: "PARK_ENVIRONMENT", label: "Park run factor",

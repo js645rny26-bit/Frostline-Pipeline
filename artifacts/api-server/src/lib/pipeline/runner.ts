@@ -15,6 +15,7 @@ import {
   applyStartingNineStarterFallbacks,
   fetchStartingNine,
   buildStartingNineMap,
+  selectMutableStartingNineTeamPageSnapshots,
   type StartingNineResult,
   type StartingNineStarterFallback,
 } from "./module04c_startingNine.js";
@@ -424,6 +425,33 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
   const splits = await fetchTeamSplitsWithFallback(date);
 
   const allErrors: Array<{ module: string; error: string; timestamp: string }> = [];
+
+  // The visible team-page sheet is a current-state view. Preserve each exact
+  // mutable-game response in the existing append-only source ledgers so late
+  // refresh chronology remains auditable without creating another workbook
+  // surface or allowing these display-only fields into the projection.
+  const mutableTeamPageSnapshots = selectMutableStartingNineTeamPageSnapshots(
+    startingNineResult?.team_pages ?? [],
+    mutableIds,
+  );
+  for (const sourceSnapshot of mutableTeamPageSnapshots) {
+    const snapshotWrite = await persistSourceSnapshot(sourceSnapshot, workbookId).catch((error: unknown) => ({
+      status: "failure" as const,
+      errors: [error instanceof Error ? error.message : String(error)],
+    }));
+    if (snapshotWrite.status !== "success") {
+      const detail = snapshotWrite.errors.join("; ") || "raw team-page response was not retained";
+      allErrors.push({
+        module: "04c_starting_nine_team_page_source",
+        error: `SOURCE_SNAPSHOT_RETENTION_GAP: ${sourceSnapshot.request_url}: ${detail}`,
+        timestamp: new Date().toISOString(),
+      });
+      logger.warn(
+        { source_url: sourceSnapshot.request_url, detail },
+        "Full pipeline: Starting Nine team-page source chronology was not retained",
+      );
+    }
+  }
 
   // Module 04b + 04c: Bullpen usage and Starting Nine — fetch in parallel, both non-blocking
   const slateTeamIds = Array.from(

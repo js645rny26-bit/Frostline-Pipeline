@@ -24,11 +24,9 @@ import type { StatcastPitcherExpectedStats } from "./module02f_statcastPitcherEx
 import type { ActiveRosterPitcher } from "./module02c_batterSeasonStats.js";
 import {
   computeTeamBullpenQuality,
-  resolveStarterQuality,
   type GameSummaryRow,
 } from "./module09_recalculation.js";
 import {
-  estimateStarterWorkload,
   type SWEAppearance,
   type SWEGameState,
 } from "./module02i_starterWorkloadEstimator.js";
@@ -212,7 +210,7 @@ function hasChainNeed(role: string, expectedIp: number | null): boolean {
     || (expectedIp !== null && expectedIp <= 4);
 }
 
-function eligibleBulkCandidates(
+function bullpenRosterHistoryOptions(
   team: string,
   starterId: number | null,
   relievers: readonly RelieverStat[],
@@ -341,8 +339,8 @@ function resolveSide(
   const sideSwe = side === "AWAY" ? swe?.away : swe?.home;
   const productionIp = pitcher.expected_innings;
   const bullpenSourceAvailable = bullpen !== null && bullpen.status !== "failure";
-  const candidates = bullpenSourceAvailable && hasChainNeed(pitcher.role, productionIp)
-    ? eligibleBulkCandidates(team, pitcher.player_id, bullpen!.relievers, appearances, game.date)
+  const bullpenHistoryOptions = bullpenSourceAvailable && hasChainNeed(pitcher.role, productionIp)
+    ? bullpenRosterHistoryOptions(team, pitcher.player_id, bullpen!.relievers, appearances, game.date)
     : [];
   const rosterOptions = hasChainNeed(pitcher.role, productionIp)
     ? rosterLongOptions(
@@ -353,41 +351,30 @@ function resolveSide(
         game.date,
       )
     : [];
-  const primary = candidates[0];
-  const secondary = candidates[1];
-  const primarySwe = primary?.reliever.player_id
-    ? estimateStarterWorkload(primary.reliever.player_id, "BULK", game.date, dataThroughDate, appearances, null)
-    : null;
-  const secondarySwe = secondary?.reliever.player_id
-    ? estimateStarterWorkload(secondary.reliever.player_id, "BULK", game.date, dataThroughDate, appearances, null)
-    : null;
-  // A role fallback is not pitcher-specific evidence. Only an estimated SWE
-  // workload may create a credible bulk phase in the projection challenger.
-  const bulkIp = primarySwe?.status === "ESTIMATED" ? primarySwe.expected_ip : null;
-  const secondaryIp = secondarySwe?.status === "ESTIMATED" ? secondarySwe.expected_ip : null;
+  // Neither the daily bullpen availability report nor historical multi-inning
+  // use designates the manager's intended follower. They may surface roster
+  // plausibility, but only a future explicit pregame follower source may
+  // populate Expected_Bulk_Pitcher and unlock an API shadow delta.
+  const bulkIp: number | null = null;
   const starterIp = productionIp;
-  const bullpenIp = starterIp === null ? null : round(Math.max(0, 9 - starterIp - (bulkIp ?? 0)));
-  const plan = planType(pitcher.role, starterIp, bulkIp !== null, Math.max(candidates.length, rosterOptions.length));
+  const bullpenIp = starterIp === null ? null : round(Math.max(0, 9 - starterIp));
+  const historyOptionCount = new Set([
+    ...bullpenHistoryOptions.map((candidate) => candidate.reliever.player_id),
+    ...rosterOptions.map((option) => option.pitcher.player_id),
+  ]).size;
+  const plan = planType(pitcher.role, starterIp, false, historyOptionCount);
   const observability: APIObservability = !bullpenSourceAvailable
     ? "MISSING_DUE_TO_SOURCE_FAILURE"
-    : primary ? "PROBABLE_INFERRED" : "NOT_OBSERVABLE_PREGAME";
+    : "NOT_OBSERVABLE_PREGAME";
   const bullpenQuality = bullpenSourceAvailable
     ? computeTeamBullpenQuality(team, bullpen!.relievers, pitcherStats, statcastPitcherStats)
-    : null;
-  const bulkQuality = primary?.reliever.player_id
-    ? resolveStarterQuality(primary.reliever.player_id, pitcherStats, statcastPitcherStats)
     : null;
   const baselineOffenseRuns = summary
     ? side === "AWAY" ? summary.projected_home_runs : summary.projected_away_runs
     : null;
-  const offenseCenter = summary
-    ? side === "AWAY" ? summary.home_active_offense_center : summary.away_active_offense_center
-    : null;
-  const projectionEligible = bulkIp !== null && bulkQuality !== null && bullpenQuality !== null && offenseCenter !== null && baselineOffenseRuns !== null;
-  const delta = projectionEligible
-    ? round(offenseCenter * (bulkIp / 9) * (bulkQuality.factor - bullpenQuality.factor))
-    : null;
-  const projected = delta === null || baselineOffenseRuns === null ? null : round(baselineOffenseRuns + delta);
+  const projectionEligible = false;
+  const delta: number | null = null;
+  const projected: number | null = null;
   const unavailable = bullpenSourceAvailable
     ? bullpen!.relievers.filter((reliever) => reliever.team_abbr === team && reliever.availability_status === "UNAVAILABLE").map((reliever) => reliever.full_name)
     : [];
@@ -396,33 +383,25 @@ function resolveSide(
     : [];
   const missing = [
     !bullpenSourceAvailable ? "BULLPEN_SOURCE_UNAVAILABLE" : "",
-    !primary && hasChainNeed(pitcher.role, productionIp) ? "EXPECTED_BULK_IDENTITY_NOT_OBSERVABLE" : "",
-    !primary && rosterOptions.length > 0 ? "ROSTER_MULTI_INNING_OPTIONS_UNCONFIRMED" : "",
-    primary && bulkIp === null ? "BULK_SWE_WORKLOAD_INSUFFICIENT" : "",
+    hasChainNeed(pitcher.role, productionIp) ? "EXPECTED_BULK_IDENTITY_NOT_OBSERVABLE" : "",
+    historyOptionCount > 0 ? "ROSTER_MULTI_INNING_OPTIONS_UNCONFIRMED" : "",
     !summary ? "ACTIVE_SUMMARY_UNAVAILABLE" : "",
     projectionEligible ? "" : "API_PROJECTION_EFFECT_NOT_ESTIMABLE",
   ].filter(Boolean);
   const chainStatus = plan === "CONVENTIONAL_STARTER"
     ? "NO_BULK_PHASE_EXPECTED"
     : projectionEligible ? "INFERRED_CHAIN_SHADOW_READY" : "CHAIN_PARTIAL_NOT_PROJECTION_READY";
-  const explicitCandidateIds = new Set(candidates.map((candidate) => candidate.reliever.player_id));
+  const bullpenOptionIds = new Set(bullpenHistoryOptions.map((candidate) => candidate.reliever.player_id));
   const longRelief = [
-    ...candidates.map((candidate) => candidate.reliever.full_name),
+    ...bullpenHistoryOptions.map((candidate) => `${candidate.reliever.full_name} [ROSTER_HISTORY_ONLY]`),
     ...rosterOptions
-      .filter((option) => !explicitCandidateIds.has(option.pitcher.player_id))
+      .filter((option) => !bullpenOptionIds.has(option.pitcher.player_id))
       .map((option) => `${option.pitcher.full_name} [ROSTER_HISTORY_ONLY]`),
   ];
   const sequence = [
     pitcher.name || "UNRESOLVED_STARTER",
-    primary?.reliever.full_name ? `${primary.reliever.full_name} [INFERRED_BULK]` : "",
-    secondary?.reliever.full_name ? `${secondary.reliever.full_name} [SECONDARY_OPTION]` : "",
     "REMAINING_AVAILABLE_RELIEF_POOL",
   ].filter(Boolean).join(" > ");
-  const expectedPitches = bulkIp === null || primarySwe?.l5_ip === null
-    ? null
-    : round((primary.appearances.filter((appearance) => appearance.started_game).slice(0, 5)
-        .reduce((sum, appearance) => sum + appearance.pitches_thrown, 0)
-      / Math.max(1, primary.appearances.filter((appearance) => appearance.started_game).slice(0, 5).length)), 1);
   const base: Omit<ActivePitchingInventoryRow, "deterministic_hash"> = {
     date: game.date, game_id: game.legacy_game_id, team_side: side, pitching_team: team,
     opposing_offense: offense, scheduled_first_pitch: game.scheduled_utc_time ?? "",
@@ -431,12 +410,12 @@ function resolveSide(
     named_starter_role: pitcher.role, starter_expected_ip: pitcher.expected_innings,
     starter_expected_pitches: pitcher.expected_pitches, starter_role_confidence: pitcher.role_confidence,
     production_expected_ip: productionIp, swe_expected_ip: sideSwe?.expected_ip ?? null,
-    swe_status: sideSwe?.status ?? "UNAVAILABLE", expected_bulk_pitcher_id: primary?.reliever.player_id ?? null,
-    expected_bulk_pitcher: primary?.reliever.full_name ?? "", expected_bulk_ip: bulkIp,
-    expected_bulk_pitches: expectedPitches, bulk_role_confidence: projectionEligible ? "MEDIUM" : primary ? "LOW" : "NONE",
-    bulk_observability: observability, bulk_swe_status: primarySwe?.status ?? "NOT_EVALUATED",
-    secondary_bulk_or_swing: secondary?.reliever.full_name ?? "", secondary_bulk_expected_ip: secondaryIp,
-    secondary_bulk_confidence: secondaryIp !== null ? "LOW" : "NONE",
+    swe_status: sideSwe?.status ?? "UNAVAILABLE", expected_bulk_pitcher_id: null,
+    expected_bulk_pitcher: "", expected_bulk_ip: bulkIp,
+    expected_bulk_pitches: null, bulk_role_confidence: "NONE",
+    bulk_observability: observability, bulk_swe_status: "NOT_EVALUATED",
+    secondary_bulk_or_swing: "", secondary_bulk_expected_ip: null,
+    secondary_bulk_confidence: "NONE",
     expected_leverage_bridge: "", long_relief_options: longRelief.join(" | "),
     unavailable_pitchers: unavailable.join(" | "), limited_pitchers: limited.join(" | "),
     expected_pitching_sequence: sequence, expected_starter_phase_ip: starterIp,
@@ -448,7 +427,7 @@ function resolveSide(
     freshness: dataThroughDate === new Date(new Date(`${game.date}T12:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10) ? "CURRENT_D1" : "STALE_OR_UNVERIFIED",
     missing_data_flags: missing.join(" | "), baseline_opposing_offense_runs: baselineOffenseRuns,
     api_shadow_opposing_offense_runs: projected, api_shadow_run_delta: delta,
-    expected_bulk_quality_factor: bulkQuality?.factor ?? null,
+    expected_bulk_quality_factor: null,
     generic_bullpen_quality_factor: bullpenQuality?.factor ?? null,
     projection_effect_status: projectionEligible ? "SHADOW_DELTA_AVAILABLE" : "NOT_ESTIMABLE",
     record_status: "RESEARCH_ONLY_PROSPECTIVE", 

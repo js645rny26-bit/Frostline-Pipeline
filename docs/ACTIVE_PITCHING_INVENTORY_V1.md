@@ -39,9 +39,13 @@ as pregame evidence.
 
 `opener + credible multi-inning follower` is structurally different from
 `opener + eight innings of unidentified bullpen`. Module 36 resolves the
-available pregame evidence into:
+available pregame evidence into the first of these only when a pregame source
+actually designates the follower:
 
-`named starter/opener -> inferred bulk/swing option -> remaining available relief pool`
+`named starter/opener -> source-supported bulk/swing option -> remaining available relief pool`
+
+Availability, roster membership, and prior multi-inning work establish only
+`ROSTER_HISTORY_ONLY`. Together they cannot name the intended follower.
 
 It preserves production `Expected_IP`, SWE `Expected_IP`, and API phase
 allocation as three separate objects. It does not create a parallel workload
@@ -54,9 +58,10 @@ or bullpen-quality model.
 | Named starter, identity, role | MLB schedule + Module 03 | Known | Frozen in packets | `KNOWN_PREGAME`; unresolved stays unresolved |
 | Production workload | MLB D-1 game logs + Module 03 | Known | Frozen in packets | Existing active value, unchanged |
 | SWE workload | Retained D-1 Savant pitch appearances | Known when retained | Frozen only for prospective SWE/API runs | Separate research object |
-| Reliever identity/availability | MLB Starting Nine bullpen report | Known on live run | Not historically retained as an immutable raw/pregame chain snapshot | Source failure/absence fails closed |
-| Multi-inning capability | D-1 SWE appearance history | Deterministic historical description | Available only where daily source retention exists | Candidate is `PROBABLE_INFERRED`, never announced/known |
-| Bulk expected IP | Existing SWE estimator applied to identified candidate | Available only with pitcher-specific eligible start history | Same limitation as SWE | Role fallback cannot create a credible bulk phase |
+| Reliever identity/availability | MLB Starting Nine bullpen report | Known on live run | Not historically retained as an immutable raw/pregame chain snapshot | Availability is pool evidence, not follower designation |
+| Multi-inning capability | MLB active roster + D-1 SWE appearance history | Deterministic historical description | Available only where daily source retention exists | `[ROSTER_HISTORY_ONLY]`; cannot populate expected bulk |
+| Bulk identity | Explicit pregame follower designation | No current source | Unavailable | Remains blank; roster plausibility fails closed |
+| Bulk expected IP | Existing SWE estimator after a source-supported identity exists | No current eligible identity | Same limitation as SWE | Workload cannot manufacture identity |
 | Bulk run prevention | Existing Module 09 FIP/ERA/xERA-fallback resolver | Known when season source exists | Same as source retention | No second quality model |
 | Generic bullpen quality | Existing Module 09 available-pool resolver | Known when bullpen source is live | Not a historical chain identity | Existing neutral fallback remains explicit |
 | Actual chain | Official final MLB boxscore | Postgame only | Settlement diagnostic | Never used to create or repair pregame inventory |
@@ -66,27 +71,35 @@ source declares arm availability but not the manager's intended leverage
 sequence. The available pool, long-relief options, unavailable arms, and tired
 arms are still preserved.
 
-## Inference contract
+## Follower-evidence contract
 
-A reliever can become a source-supported bulk candidate only when:
+The daily availability report and D-1 appearance history may identify rested,
+multi-inning roster options. They are published only as deterministic
+`[ROSTER_HISTORY_ONLY]` inventory. They may not populate
+`Expected_Bulk_Pitcher`, enter `Expected_Pitching_Sequence`, reduce true
+bullpen exposure, or create a shadow delta.
 
-- the same-day pregame source marks the arm `AVAILABLE`;
-- MLBAM identity is present;
-- the arm is not the named starter; and
-- retained D-1 appearances show at least one 3+ IP appearance, at least two
-  2+ IP appearances, or the existing bullpen feed describes the arm as
-  `LONG_RELIEF`.
+A bulk identity becomes eligible only when a retained pregame source actually
+names or strongly designates that pitcher as the expected follower for the
+exact game/team/side and MLBAM identity verifies. No current source satisfies
+that contract. Until one does, opener rows remain
+`CHAIN_PARTIAL_NOT_PROJECTION_READY` and assign the unidentified remainder to
+the generic bullpen.
 
-Candidate ranking is deterministic: multi-inning appearance count, maximum
-prior IP, latest prior appearance, then MLBAM ID. The identity is labeled
-`PROBABLE_INFERRED`. A projection delta is available only when existing SWE
-returns a pitcher-specific `ESTIMATED` bulk workload and both existing bulk
-and generic-bullpen quality resolvers succeed.
+Any future shadow delta may reallocate only source-supported bulk innings from
+the generic bullpen quality factor to that pitcher's existing run-prevention
+factor. All other offense, matchup, traffic, damage, conversion, environment,
+and market inputs remain untouched.
 
-The shadow delta reallocates only the identified bulk innings from the generic
-bullpen quality factor to that pitcher's existing run-prevention factor. All
-other offense, matchup, traffic, damage, conversion, environment, and market
-inputs remain untouched.
+## Starting Nine team-page chronology
+
+`STARTING_NINE_TEAM_PAGE_V1` remains the current-state display surface. Each
+exact mutable-game HTML response is also retained in the existing append-only
+`SOURCE_ACQUISITION_LOG` / `SOURCE_RAW_SNAPSHOT` ledgers with URL, observed
+timestamp, raw hash, parser version, MLBAM coverage, and source status. The
+page does not establish a trustworthy statistics data-through date, so that
+field remains blank rather than being inferred. Identical bytes and governing
+metadata deduplicate; materially changed bytes or status append a new record.
 
 ## Historical replay and proof cases
 

@@ -13907,7 +13907,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "ACTIVE_PITCHING_INVENTORY_V1",
     description:
-      "Prospective price-blind research inventory of the named starter, source-supported inferred bulk/swing options, availability state, and starter/bulk/true-bullpen innings allocation. Active_Input=NO and Projection_Mapping_Status=SHADOW_ONLY_NOT_COMMISSIONED are fail-closed commissioning sentinels.",
+      "Prospective price-blind research inventory of the named starter, explicitly source-supported bulk/swing identity when available, roster-history-only options, availability state, and starter/bulk/true-bullpen innings allocation. Active_Input=NO and Projection_Mapping_Status=SHADOW_ONLY_NOT_COMMISSIONED are fail-closed commissioning sentinels.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(

@@ -46,11 +46,11 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "PREGAME_INPUT",
     timing: "Every legitimate pre-first-pitch publish (Module 08c)",
     purpose:
-      "Materializes the slate's individual Starting Nine team pages: named starter identity plus descriptive opponent split, park, and umpire context.",
+      "Materializes the current state of the slate's individual Starting Nine team pages: named starter identity plus descriptive opponent split, park, and umpire context. Exact mutable-game HTML chronology is retained in the existing source ledgers.",
     boardRelationship:
       "Only an MLBAM-verified named starter may fill an otherwise unresolved MLB schedule slot. All remaining page statistics are display-only and have no projection or decision consumer.",
     readNote:
-      "Check Starter_Fallback_Applied, Starting_Pitcher_Identity_Status, Source_Status, Active_Input=NO, and Mapping_Status before using the page as supporting context.",
+      "Check Starter_Fallback_Applied, Starting_Pitcher_Identity_Status, Source_Status, Active_Input=NO, and Mapping_Status before using the page as supporting context; use SOURCE_ACQUISITION_LOG for refresh chronology.",
   },
   {
     sheet: "TEAM_FORM_INPUT",
@@ -896,11 +896,11 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "AUDIT",
     timing: "Every legitimate pre-first-pitch publish after Module 09 and SWE preparation (Module 36)",
     purpose:
-      "Prospectively preserves the named starter, source-supported inferred bulk/swing options, active-roster multi-inning candidates, explicit availability gaps, and starter/bulk/true-bullpen innings allocation.",
+      "Prospectively preserves the named starter, explicitly source-supported bulk/swing identity when available, active-roster multi-inning candidates, explicit availability gaps, and starter/bulk/true-bullpen innings allocation.",
     boardRelationship:
       "Research-only. Active_Input=NO; no Module 09, GAME_SUMMARY, SLATE_BOARD, market, truth, confidence, or authorization consumer exists.",
     readNote:
-      "Read Bulk_Observability and Pitcher_Chain_Status before the estimate. A [ROSTER_HISTORY_ONLY] long option is not an announced follower and cannot populate Expected_Bulk_Pitcher or a shadow delta; missing pregame identity must never be reconstructed from postgame pitcher order.",
+      "Read Bulk_Observability and Pitcher_Chain_Status before the estimate. Availability plus history remains [ROSTER_HISTORY_ONLY], not a designated follower, and cannot populate Expected_Bulk_Pitcher or a shadow delta; missing pregame identity must never be reconstructed from postgame pitcher order.",
   },
   {
     sheet: "ACTIVE_PITCHING_INVENTORY_SUMMARY_V1",

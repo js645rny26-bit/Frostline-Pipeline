@@ -17,6 +17,7 @@
 import { logger } from "../../lib/logger.js";
 import { SOURCE_MAPPINGS } from "./config.js";
 import { baseGameId } from "./module01_mlbStatsApi.js";
+import type { SourceSnapshot } from "./module02_sourceSnapshots.js";
 
 const BASE_URL = "https://mlbstartingnine.com";
 
@@ -95,6 +96,8 @@ export interface StartingNineTeamPage {
   source_notes: string[];
   active_input: "NO";
   mapping_status: "DISPLAY_ONLY_NOT_PROJECTION_INPUT";
+  /** Untouched HTML retained in the existing append-only source ledger. */
+  source_snapshot?: SourceSnapshot | null;
 }
 
 export interface StartingNineStarterFallback {
@@ -200,6 +203,73 @@ function normalizePersonName(value: string | null | undefined): string {
     .replace(/[^a-z0-9]+/gi, " ")
     .trim()
     .toLowerCase();
+}
+
+const STARTING_NINE_TEAM_PAGE_EXPECTED_FIELDS = [
+  "STARTER_IDENTITY", "STARTER_HAND", "OPPOSING_PITCHER_SEASON",
+  "OPPOSING_PITCHER_PLATOON", "PARK_INDEXES", "UMPIRE_CONTEXT",
+] as const;
+
+/**
+ * Preserve the exact team-page response separately from the current-state
+ * workbook view. The page does not publish a trustworthy statistics
+ * data-through date, so that field deliberately remains blank.
+ */
+export function buildStartingNineTeamPageSourceSnapshot(
+  page: StartingNineTeamPage,
+  rawHtml: string,
+): SourceSnapshot {
+  const observed = [
+    page.starting_pitcher_id && page.starting_pitcher_name ? "STARTER_IDENTITY" : "",
+    page.starting_pitcher_hand ? "STARTER_HAND" : "",
+    page.opposing_pitcher_ip !== null || page.opposing_pitcher_era !== null
+      || page.opposing_pitcher_whip !== null || page.opposing_pitcher_so !== null
+      ? "OPPOSING_PITCHER_SEASON" : "",
+    page.opposing_pitcher_vs_lhb.avg !== null || page.opposing_pitcher_vs_rhb.avg !== null
+      ? "OPPOSING_PITCHER_PLATOON" : "",
+    page.park_runs_index !== null || page.park_hr_lhb_index !== null || page.park_hr_rhb_index !== null
+      ? "PARK_INDEXES" : "",
+    page.umpire !== null || page.umpire_k_rate !== null || page.umpire_bb_rate !== null
+      || page.umpire_runs_per_game !== null ? "UMPIRE_CONTEXT" : "",
+  ].filter(Boolean);
+  return {
+    canonical_source_id: "MLB_STARTING_NINE_TEAM_PAGE",
+    request_url: page.source_url,
+    fetch_timestamp_utc: page.observed_ts_utc,
+    data_through_date: "",
+    raw_response: rawHtml,
+    row_count: 1,
+    expected_columns: [...STARTING_NINE_TEAM_PAGE_EXPECTED_FIELDS],
+    observed_columns: observed,
+    mlbam_coverage: page.starting_pitcher_identity_status === "MLB_ID_VERIFIED" ? 1 : 0,
+    parser_version: "STARTING_NINE_TEAM_PAGE_V1",
+    source_status: page.source_status === "PARSED"
+      ? "CURRENT" : page.source_status === "PARTIAL" ? "PARTIAL" : "SCHEMA_DRIFT",
+    fallback_used: "NONE",
+    notes: [
+      `SLATE_DATE=${page.date}`,
+      `GAME_ID=${page.game_id ?? "UNRESOLVED"}`,
+      `TEAM=${page.team_abbr ?? "UNRESOLVED"}`,
+      `SIDE=${page.team_side}`,
+      `IDENTITY=${page.starting_pitcher_identity_status}`,
+      `PAGE_STATUS=${page.source_status}`,
+      ...page.source_notes,
+    ].join(";"),
+  };
+}
+
+/** Retain only pages belonging to games still mutable at this exact publish. */
+export function selectMutableStartingNineTeamPageSnapshots(
+  pages: readonly StartingNineTeamPage[],
+  mutableGameIds: ReadonlySet<string>,
+): SourceSnapshot[] {
+  const mutableBaseIds = new Set([...mutableGameIds].map((gameId) => baseGameId(gameId)));
+  return pages
+    .filter((page) => page.game_id !== null
+      && mutableBaseIds.has(baseGameId(page.game_id))
+      && page.source_snapshot !== null
+      && page.source_snapshot !== undefined)
+    .map((page) => page.source_snapshot!);
 }
 
 function buildStartingNineTeamSlugMap(): Map<string, string> {
@@ -500,6 +570,7 @@ async function fetchStartingNineTeamPages(
 ): Promise<{ pages: StartingNineTeamPage[]; requested: number; errors: string[] }> {
   const links = [...parseTeamPageLinks(html).entries()];
   const pages: StartingNineTeamPage[] = [];
+  const rawByUrl = new Map<string, string>();
   const errors: string[] = [];
   const concurrency = 6;
   for (let index = 0; index < links.length; index += concurrency) {
@@ -514,7 +585,9 @@ async function fetchStartingNineTeamPages(
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const observedTs = new Date().toISOString();
-        const page = parseStartingNineTeamPageHtml(await response.text(), date, url, observedTs);
+        const rawHtml = await response.text();
+        rawByUrl.set(url, rawHtml);
+        const page = parseStartingNineTeamPageHtml(rawHtml, date, url, observedTs);
         if (page.team_abbr !== expectedTeam) {
           page.source_status = "REJECTED";
           page.source_notes.push(`EXPECTED_TEAM_${expectedTeam}_GOT_${page.team_abbr ?? "NONE"}`);
@@ -562,12 +635,17 @@ async function fetchStartingNineTeamPages(
     pages.filter((page) => page.game_id && page.team_abbr).map((page) => [`${page.game_id}|${page.team_abbr}`, page]),
   );
   for (const page of pages) {
-    if (!page.game_id || !page.opponent_abbr || !page.opposing_pitcher_name) continue;
-    const opponent = byGameAndTeam.get(`${page.game_id}|${page.opponent_abbr}`);
-    if (opponent?.starting_pitcher_id
-      && normalizePersonName(opponent.starting_pitcher_name) === normalizePersonName(page.opposing_pitcher_name)) {
-      page.opposing_pitcher_id = opponent.starting_pitcher_id;
+    if (page.game_id && page.opponent_abbr && page.opposing_pitcher_name) {
+      const opponent = byGameAndTeam.get(`${page.game_id}|${page.opponent_abbr}`);
+      if (opponent?.starting_pitcher_id
+        && normalizePersonName(opponent.starting_pitcher_name) === normalizePersonName(page.opposing_pitcher_name)) {
+        page.opposing_pitcher_id = opponent.starting_pitcher_id;
+      }
     }
+    const rawHtml = rawByUrl.get(page.source_url);
+    page.source_snapshot = rawHtml === undefined
+      ? null
+      : buildStartingNineTeamPageSourceSnapshot(page, rawHtml);
   }
   return { pages, requested: links.length, errors };
 }

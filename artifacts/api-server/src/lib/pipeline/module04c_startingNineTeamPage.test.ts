@@ -4,10 +4,13 @@ import type { GameScheduleResult, ScheduleGameData } from "./module01_mlbStatsAp
 import type { NormalizedGame } from "./module06_normalization.js";
 import {
   applyStartingNineStarterFallbacks,
+  buildStartingNineTeamPageSourceSnapshot,
   parseStartingNineTeamPageHtml,
+  selectMutableStartingNineTeamPageSnapshots,
   type StartingNineResult,
   type StartingNineTeamPage,
 } from "./module04c_startingNine.js";
+import { materializeSourceSnapshot } from "./module02_sourceSnapshots.js";
 import {
   buildStartingNineTeamPageRows,
   STARTING_NINE_TEAM_PAGE_HEADERS,
@@ -105,6 +108,36 @@ test("individual team page parses the requested team rather than the first compe
   assert.equal(page.umpire, "Pat Hoberg");
   assert.equal(page.active_input, "NO");
   assert.equal(page.mapping_status, "DISPLAY_ONLY_NOT_PROJECTION_INPUT");
+});
+
+test("team-page HTML is retained byte-faithfully with cutoff-safe provenance", () => {
+  const page = teamPage();
+  const source = buildStartingNineTeamPageSourceSnapshot(page, TEAM_PAGE_HTML);
+  const first = materializeSourceSnapshot(source);
+  const second = materializeSourceSnapshot(source);
+  assert.equal(source.canonical_source_id, "MLB_STARTING_NINE_TEAM_PAGE");
+  assert.equal(source.fetch_timestamp_utc, "2026-09-20T13:40:00.000Z");
+  assert.equal(source.data_through_date, "");
+  assert.equal(source.raw_response, TEAM_PAGE_HTML);
+  assert.equal(source.mlbam_coverage, 1);
+  assert.equal(source.source_status, "CURRENT");
+  assert.match(source.notes, /GAME_ID=20260920_SFG_LAD/);
+  assert.equal(first.raw_response_sha256, second.raw_response_sha256);
+  assert.equal(first.snapshot_id, second.snapshot_id);
+});
+
+test("team-page chronology retains only games still mutable at publication", () => {
+  const mutable = teamPage();
+  mutable.source_snapshot = buildStartingNineTeamPageSourceSnapshot(mutable, TEAM_PAGE_HTML);
+  const protectedPage = { ...mutable, game_id: "20260920_SFG_SDP", source_url: "https://mlbstartingnine.com/lineups/san-diego-padres/" };
+  protectedPage.source_snapshot = buildStartingNineTeamPageSourceSnapshot(protectedPage, "protected-html");
+  const selected = selectMutableStartingNineTeamPageSnapshots(
+    [mutable, protectedPage],
+    new Set(["20260920_SFG_LAD"]),
+  );
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0]!.request_url, mutable.source_url);
+  assert.equal(selected[0]!.raw_response, TEAM_PAGE_HTML);
 });
 
 test("verified team-page starter fills only an unresolved MLB slot", () => {
