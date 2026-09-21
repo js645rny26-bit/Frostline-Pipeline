@@ -56,7 +56,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
   Module 33 then writes the four `ALLOCATION_BRIDGE_*_V1` research surfaces.
   It uses immutable frozen packet evidence, keeps the game total unchanged,
   and cannot alter active team projections or decisions.
-  Module 38 then uses Module 32's exact batting-side starter-window outcomes
+  Module 37 starter-window support then uses Module 32's exact batting-side starter-window outcomes
   to diagnose starter quality, workload, traffic, offense, survival, and tail
   discrimination. Missing frozen probabilities and inert damage fields stay
   explicitly unavailable; the module is research-only and cannot tune or

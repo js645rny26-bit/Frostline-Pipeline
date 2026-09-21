@@ -945,7 +945,7 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
   ].map(([sheet, purpose, readNote]) => ({
     sheet,
     stage: "REPLAY" as const,
-    timing: "Daily settlement after Module 32 exact team-side phase reconstruction (Module 38)",
+    timing: "Daily settlement after Module 32 exact team-side phase reconstruction (Module 37 starter-window support)",
     purpose,
     boardRelationship: "Research-only. No projection, confidence, market, vehicle, or authorization influence.",
     readNote,

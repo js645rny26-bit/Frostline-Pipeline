@@ -8,7 +8,7 @@ and supersedes these counts when its authoritative readback is cited.
 
 ## Coverage and lineage
 
-Module 38 published 602 team-side observations spanning 301 games and 24
+Module 37 starter-window support published 602 team-side observations spanning 301 games and 24
 slates. The underlying Module 32 phase corpus contained 324 usable games, so
 the complete frozen-feature join covers 92.90% of the exact phase corpus.
 Every included outcome uses MLB Stats API play-by-play current-pitcher

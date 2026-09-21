@@ -122,7 +122,7 @@ import {
 import {
   runStarterWindowDiscrimination,
   type StarterWindowDiscriminationResult,
-} from "./module38_starterWindowDiscrimination.js";
+} from "./module37_starterWindowDiscrimination.js";
 import {
   runFailureClassificationReplay,
   syncFailureClassificationShadow,
@@ -1757,7 +1757,7 @@ export async function runDailySettlement(
     warnings.push(...bullpen_phase_analysis.errors.map((message) => `bullpen_phase_analysis: ${message}`));
   }
 
-  // Module 38 consumes only the immutable packet plus Module 32's exact
+  // Module 37 starter-window support consumes only the immutable packet plus Module 32's exact
   // team-side on-mound outcomes. It diagnoses starter-window centering and
   // failure-tail discrimination but has no active projection consumer.
   const starter_window_discrimination = await runStarterWindowDiscrimination({ workbookId }).catch(
@@ -2055,7 +2055,7 @@ export async function runDailySettlement(
     { module: "MODULE_34_SLATE_SIZE_DIAGNOSTIC_V1", status: slate_size_diagnostic.status === "failure" ? "warning" : "success" },
     { module: "MODULE_35_SHADOW_TRUTH_DIRECTION_V1", status: shadow_truth_direction.status === "failure" ? "warning" : "success" },
     { module: "MODULE_36_ACTIVE_PITCHING_INVENTORY_REPLAY", status: active_pitching_inventory_replay.status === "failure" ? "warning" : "success" },
-    { module: "MODULE_38_STARTER_WINDOW_DISCRIMINATION", status: starter_window_discrimination.status === "failure" ? "warning" : "success" },
+    { module: "MODULE_37_STARTER_WINDOW_DISCRIMINATION_SUPPORT", status: starter_window_discrimination.status === "failure" ? "warning" : "success" },
   ];
   errors.push(...packet_finalization.errors.map((message) => `packet_finalization: ${message}`));
   errors.push(...full_ladder_sync.errors.map((message) => `full_ladder_sync: ${message}`));

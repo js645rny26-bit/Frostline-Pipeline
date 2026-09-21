@@ -406,7 +406,7 @@ export async function repairWorkbookSchemaReference(
         "v67 (2026-09-17): Patch B derives D-1 batter batted-ball damage evidence from retained Savant pitch-level snapshots and materializes exact-lineup research profiles. Active HR/XBH damage remains fail-closed and no projection, board, packet, market, or authorization consumer is added.",
         "v68 (2026-09-18): Patch B adds lineup-state provenance, sample-adequacy governance, deterministic identity hygiene, cumulative-history reconciliation, and hold-state sentinels while all damage mapping remains uncommissioned.",
         "v69 (2026-09-19): Module 36 adds the prospective research-only Active Pitching Inventory, separating named starter/opener, source-supported inferred bulk/swing options, and true generic bullpen exposure. Historical chains cannot be reconstructed from postgame order; active projections remain unchanged.",
-        "v70 (2026-09-20): Module 38 adds a settlement-only starter-window discrimination audit using immutable pregame packets and exact play-by-play current-pitcher run attribution by batting side. It separates mean calibration from survival/failure-tail discrimination, marks unavailable probabilities and dead damage instrumentation explicitly, and has no active consumer.",
+        "v70 (2026-09-20): Module 37 starter-window support adds a settlement-only discrimination audit using immutable pregame packets and exact play-by-play current-pitcher run attribution by batting side. It separates mean calibration from survival/failure-tail discrimination, marks unavailable probabilities and dead damage instrumentation explicitly, and has no active consumer.",
     ],
     [
       "Workbook_Purpose",

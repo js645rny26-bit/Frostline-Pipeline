@@ -1,5 +1,5 @@
 /**
- * Module 38: Starter Window Discrimination Audit V1.
+ * Module 37 supporting component: Starter Window Discrimination Audit V1.
  *
  * Settlement-only research. Every predictor is read from an immutable,
  * legitimate pre-first-pitch packet. Outcomes are exact MLB play-by-play runs
@@ -525,7 +525,7 @@ export async function runStarterWindowDiscrimination(options:{workbookId?:string
       writeRange(workbookId,`${STARTER_WINDOW_REPLAY_SHEET}!A1`,[Array.from(STARTER_WINDOW_REPLAY_HEADERS),...rows.map(r=>replayRow(r,ts))]),
       ...(objectivePostmortem.length>0?[writeRange(workbookId,"GAME_TRUTH_REPLAY_V1!A1",objectivePostmortem)]:[]),
     ]);
-    logger.info({side_rows:rows.length,games:new Set(rows.map(r=>r.game_id)).size},"MODULE_38: starter-window discrimination audit written");
+    logger.info({side_rows:rows.length,games:new Set(rows.map(r=>r.game_id)).size},"MODULE_37: starter-window discrimination audit written");
     return{status:"success",replay_timestamp_utc:ts,eligible_side_rows:rows.length,eligible_games:new Set(rows.map(r=>r.game_id)).size,summary_rows_written:summaries.length,pair_rows_written:pairs.length,objective_postmortem_rows_written:Math.max(0,objectivePostmortem.length-1),exact_lineage_pct:rows.length?100:0,active_input:"NO",commissioning_status:STARTER_WINDOW_COMMISSIONING_STATUS,warnings,errors};
-  }catch(e){const m=e instanceof Error?e.message:String(e);errors.push(m);logger.error({err:m},"MODULE_38 failed");return{status:"failure",replay_timestamp_utc:ts,eligible_side_rows:0,eligible_games:0,summary_rows_written:0,pair_rows_written:0,exact_lineage_pct:0,active_input:"NO",commissioning_status:STARTER_WINDOW_COMMISSIONING_STATUS,warnings,errors};}
+  }catch(e){const m=e instanceof Error?e.message:String(e);errors.push(m);logger.error({err:m},"MODULE_37 starter-window discrimination support failed");return{status:"failure",replay_timestamp_utc:ts,eligible_side_rows:0,eligible_games:0,summary_rows_written:0,pair_rows_written:0,exact_lineage_pct:0,active_input:"NO",commissioning_status:STARTER_WINDOW_COMMISSIONING_STATUS,warnings,errors};}
 }

@@ -3,7 +3,7 @@
 Status: `RESEARCH_ONLY_NOT_COMMISSIONED`  
 Active input: `NO`
 
-Module 38 diagnoses why Frostline's frozen starter-window center differs from
+This is a supporting component of Module 37. It diagnoses why Frostline's frozen starter-window center differs from
 the exact scoring observed while each designated starter was actually on the
 mound. It cannot change a projection, coefficient, confidence, market,
 vehicle, or decision.
@@ -42,7 +42,7 @@ silently discarded.
 
 ## Outcome labels
 
-These labels were declared before interpreting Module 38 results:
+These labels were declared before interpreting Module 37 starter-window support results:
 
 - `FAILURE`: at least four exact on-mound starter-window runs, or at least a
   two-inning shortfall versus frozen Expected_IP.
@@ -51,7 +51,7 @@ These labels were declared before interpreting Module 38 results:
 - `MIXED`: every other observation.
 
 Tail rates at 4+, 5+, and 6+ runs remain separate from the label.
-Module 38 also publishes orthogonal labels: `DETONATION` at 4+ exact on-mound
+Module 37 starter-window support also publishes orthogonal labels: `DETONATION` at 4+ exact on-mound
 runs and `MATERIALLY_SHORT` at a 2+ inning workload shortfall. Conditional
 failure severity is calculated only from run detonations, never from a
 workload-only failure.
@@ -80,7 +80,7 @@ manufactured.
 
 ## Inference rules
 
-Module 38 reports signed bias and absolute/tail discrimination separately.
+Module 37 starter-window support reports signed bias and absolute/tail discrimination separately.
 Cells below N=100 are descriptive only. Bias intervals use 5,000 complete
 slate-date block-bootstrap samples and a predeclared 99.1667% Bonferroni
 interval across the six mechanism families. Degenerate frozen predictors do

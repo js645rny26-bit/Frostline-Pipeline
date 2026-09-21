@@ -225,7 +225,7 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      lineup research profiles. Active HR/XBH damage remains gated off.
  *  v68-v69 (2026-09-18/19): Patch B source-maturity governance and Module 36
  *      Active Pitching Inventory remain research-only with no active consumer.
- *  v70-v71 (2026-09-20): Module 38 adds exact team-side starter-window
+ *  v70-v71 (2026-09-20): Module 37 starter-window support adds exact team-side
  *      outcome attribution and governed calibration/discrimination replay
  *      surfaces, then separates rate error from workload allocation.
  *  v72 (2026-09-20): freezes the already-existing SSAT v2 workload-failure
@@ -289,7 +289,7 @@ export interface ColumnDef {
     | "MODULE_34"
     | "MODULE_35"
     | "MODULE_36"
-    | "MODULE_38"
+    | "MODULE_37"
     | "FORMULA"
     | "OPERATOR"
     | "SYSTEM";
@@ -13978,7 +13978,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
     ["STARTER_WINDOW_ERROR_SUMMARY_V1", "Research-only center-calibration and distribution-discrimination summaries with slate-block bootstrap intervals and explicit instrumentation/sample governance.", STARTER_WINDOW_ERROR_SUMMARY_V1_COLUMN_NAMES],
     ["STARTER_WINDOW_FAILURE_BUCKETS_V1", "Observed survival/failure severity and 4+/5+/6+ starter-window tails by outcome-blind frozen predictor buckets; missing probabilities stay unavailable.", STARTER_WINDOW_FAILURE_BUCKETS_V1_COLUMN_NAMES],
     ["STARTER_WINDOW_PAIR_AUDIT_V1", "Declared Sept. 19 proof, inverse-control, and cancellation cases with predeclared-mechanism grading kept separate from posthoc explanations.", STARTER_WINDOW_PAIR_AUDIT_V1_COLUMN_NAMES],
-    ["STARTER_WINDOW_FEATURE_GOV_V1", "Feature-level source, freshness, pregame observability, leakage, active-use, and instrumentation governance for Module 38.", STARTER_WINDOW_FEATURE_GOV_V1_COLUMN_NAMES],
+    ["STARTER_WINDOW_FEATURE_GOV_V1", "Feature-level source, freshness, pregame observability, leakage, active-use, and instrumentation governance for Module 37 starter-window support.", STARTER_WINDOW_FEATURE_GOV_V1_COLUMN_NAMES],
     ["STARTER_WINDOW_REPLAY_V1", "Compact exact-lineage replay of frozen team-side starter-window expectation versus play-by-play on-mound outcomes. Active_Input is always NO.", STARTER_WINDOW_REPLAY_V1_COLUMN_NAMES],
   ] as const).map(([name, description, columns]) => ({
     name,
@@ -13988,7 +13988,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
     columns: diagnosticColumns(
       columns,
       columns.filter((column) => /(^N$|_N$|Runs|Error|MAE|RMSE|Rate|Frequency|Probability|Run_Cost|Observations|Failures|IP$|Factor$|Multiplier$|Quality$|Center$|Lower$|Upper$)/.test(column)),
-      "MODULE_38",
+      "MODULE_37",
     ),
   })),
 

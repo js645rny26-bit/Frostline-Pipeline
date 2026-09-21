@@ -11,7 +11,7 @@ import {
   STARTER_WINDOW_PAIR_AUDIT_HEADERS, STARTER_WINDOW_PAIR_AUDIT_SHEET,
   STARTER_WINDOW_FEATURE_GOV_HEADERS, STARTER_WINDOW_FEATURE_GOV_SHEET,
   STARTER_WINDOW_REPLAY_HEADERS, STARTER_WINDOW_REPLAY_SHEET,
-} from "./module38_starterWindowDiscrimination.js";
+} from "./module37_starterWindowDiscrimination.js";
 import { GAME_TRUTH_REPLAY_HEADERS } from "./module24_postgameDiagnostics.js";
 import { WORKBOOK_SCHEMA, WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
 
@@ -84,7 +84,7 @@ test("post-first-pitch packets and rows without exact phase evidence fail closed
   assert.deepEqual(parseStarterWindowObservations(packets,coverage),[]);
 });
 
-test("Module 38 governance is research-only", () => {
+test("Module 37 starter-window discrimination support is research-only", () => {
   assert.equal(STARTER_WINDOW_ACTIVE_INPUT,"NO");
   assert.equal(STARTER_WINDOW_COMMISSIONING_STATUS,"RESEARCH_ONLY_NOT_COMMISSIONED");
 });
@@ -140,10 +140,10 @@ test("objective postmortem grades every frozen game from exact phase evidence wi
   assert.equal(at("Pregame_Causal_Detail_Status"),"NOT_FROZEN_CAUSAL_DETAIL_UNAVAILABLE");
 });
 
-test("active projection and board modules have no Module 38 consumer", () => {
+test("active projection and board modules have no Module 37 starter-window discrimination consumer", () => {
   for (const file of ["module09_recalculation.ts","module11_outputExtraction.ts"]) {
     const source=readFileSync(new URL(`./${file}`,import.meta.url),"utf8");
-    assert.doesNotMatch(source,/STARTER_WINDOW_(ERROR|REPLAY|FAILURE_BUCKETS)|module38_starterWindowDiscrimination/);
+    assert.doesNotMatch(source,/STARTER_WINDOW_(ERROR|REPLAY|FAILURE_BUCKETS)|module37_starterWindowDiscrimination/);
     assert.doesNotMatch(source,/SSAT_V2_(Away|Home)_Workload_Failure_Probability|SSAT_V2_(Away|Home)_Whole_Game_Failure_Run_Cost/);
   }
 });
