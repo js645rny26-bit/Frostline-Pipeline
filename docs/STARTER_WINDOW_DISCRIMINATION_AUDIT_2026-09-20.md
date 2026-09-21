@@ -2,8 +2,9 @@
 
 Status: `RESEARCH_ONLY_NOT_COMMISSIONED`  
 Active input: `NO`  
-Authoritative workflow: `35494729737` (`e268765`)  
-Authoritative replay timestamp: `2026-09-20T06:39:26.520Z`
+The figures below are the pre-settlement snapshot retained for provenance.
+Schema v74 appends the settled September 20 observations to the same surfaces
+and supersedes these counts when its authoritative readback is cited.
 
 ## Coverage and lineage
 
@@ -121,3 +122,16 @@ renamed or interpreted as calibrated starter-scoring probability/severity.
 Historical packets are not backfilled. Source-safe K/BB/whiff and commissioned
 damage evidence remain separate future instrumentation needs. Active
 projections, confidence, market, vehicle, and decisions remain unchanged.
+
+## Settled September 20 interpretation
+
+September 20 supplied a large positive starter-window projection error while
+the historical corpus retained a supported negative workload-normalized mean
+bias. This is discrimination evidence, not a stable reversal of the corpus
+sign. The existing replay now measures material errors in both directions and
+ordered detonation contrasts. No coefficient may be chosen from September 20.
+
+The same settlement extends `GAME_TRUTH_REPLAY_V1` with exact Module 32 phase
+outcomes and objective full-rep grades. It does not reconstruct the manually
+discussed causal thesis, Hard Rock line, or blocker when those items were not
+frozen before first pitch.

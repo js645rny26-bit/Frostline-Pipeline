@@ -202,7 +202,12 @@ vehicle, or affect BET/PASS or authorization.
 
 ## Starter-window discrimination research
 
-Schema v71 refines the six Module 38 research surfaces with workload-normalized
+Schema v74 extends the six supporting Module 37 starter-window research
+surfaces with two-sided material-error states, survival/detonation intervals,
+conditional-severity intervals, and predeclared high-versus-low detonation
+contrasts. It also adds exact phase and objective full-rep research grades to
+the existing `GAME_TRUTH_REPLAY_V1`; it creates no new sheet or active
+consumer. Schema v71 refined these surfaces with workload-normalized
 starter scoring-rate error, separate allocation-inclusive error, and distinct
 run-detonation versus workload-failure labels. Schema v70 originally added
 `STARTER_WINDOW_ERROR_V1`,
@@ -439,7 +444,7 @@ Final results + frozen prospective state
 | `ALLOCATION_BRIDGE_SUMMARY_V1`      | Daily settlement, Module 33  | Overall and declared strength, lineup, role, bullpen-data, and total-error cohort comparison with one research verdict.         | Research verdict only; never automatic promotion.                 | Read overall and TOTAL_GOOD_ALLOCATION_BAD rows before subgroup detail.                                                                        |
 | `ALLOCATION_BRIDGE_DIAG_V1`         | Daily settlement, Module 33  | Per-game allocation miss taxonomy, evidence status, dominant driver, and named Sept. 13 case flags.                             | Postgame diagnosis only.                                           | Do not force a mechanism when evidence is insufficient; known damage inactivity stays explicit.                                               |
 | `CONVERSION_SETTLEMENT_DIAGNOSTICS` | Daily settlement, Module 24  | Per-team hits, walks/HBP, baserunners, HR/XBH, actual runs, and frozen collision signal.                                        | Diagnostic only.                                                   | Separate access from conversion. `UNAVAILABLE_FROM_MLB_BOXSCORE` contact values are gaps, not neutral evidence.                              |
-| `GAME_TRUTH_REPLAY_V1`              | Daily settlement, Module 24  | Frozen-packet replay joining total/allocation error, starter paths, legacy pitcher-charged phase fields, and conversion outcomes. | Shadow-only diagnosis.                                             | Its phase fields are descriptive legacy values; use Module 32 exact PBP outputs for phase-error inference.                                    |
+| `GAME_TRUTH_REPLAY_V1`              | Daily settlement, Modules 24 and 38 | Frozen-packet replay joining total/allocation error, starter paths, conversion outcomes, exact Module 32 phase outcomes, and objective full-rep postmortem grades. | Shadow-only diagnosis; no confidence or decision consumer. | Legacy phase fields remain descriptive. Exact phase fields use Module 32 PBP. Vehicle grades require a frozen literal executable line; chat-only causal detail is never backfilled. |
 | `BVH_PROJECTION_REPLAY_V1`          | Daily settlement, Module 31  | Grades only prospectively frozen existing-versus-BVH team and total projections.                                                | Research only; missing pregame BVH is never reconstructed.         | Review total and allocation changes together; material rows retain exact batter-driver traces.                                                |
 | `BVH_PROJECTION_SUMMARY_V1`         | Daily settlement, Module 31  | Descriptive BVH comparison by opposing hand, coverage, and chain-uncertainty cohort.                                             | No promotion or authorization consumer.                            | N<200 is descriptive; N=200 starts the declared paired promotion review and does not auto-promote.                                           |
 | `FULL_LADDER_SETTLEMENT`            | Daily settlement, Module 24  | Every frozen half-number total counterfactual plus selected/adjacent vehicle grade.                                             | Diagnostic only; `NO_WAGER_REPORTED` remains distinct from result. | Use it to separate direction, threshold, and mechanism outcomes.                                                                             |

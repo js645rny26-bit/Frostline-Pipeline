@@ -296,6 +296,24 @@ export const GAME_TRUTH_REPLAY_HEADERS = [
   "Frozen_Collision_Status",
   "Frozen_Collision_Traffic_Estimate",
   "Frozen_Collision_Damage_Estimate",
+  // Module 37 supporting diagnostics populate these settlement-only fields
+  // after Module 32 has reconstructed exact on-mound phase runs. They are
+  // objective research grades, never projection or authorization inputs.
+  "Exact_Actual_Starter_Window_Runs",
+  "Exact_Actual_Post_Starter_Runs",
+  "Exact_Phase_Lineage_Status",
+  "Frozen_Direction",
+  "Frozen_Operational_Decision",
+  "Frozen_Blocker",
+  "Frozen_Primary_Grade_Market_Line",
+  "Frozen_Primary_Grade_Market_Source",
+  "Frozen_Primary_Grade_Market_Status",
+  "Objective_Game_Truth_Grade",
+  "Objective_Phase_Mechanism_Proxy_Grade",
+  "Objective_Vehicle_Capture_Grade",
+  "Objective_Authorization_Blocker_Grade",
+  "Pregame_Causal_Detail_Status",
+  "Objective_Grade_Derivability_Status",
   "Replay_Status",
   "Settlement_TS",
 ] as const;
@@ -365,6 +383,13 @@ export interface FrozenPacketDiagnosticInput {
   operator_evidence_status?: string;
   away_lineup_status?: string;
   home_lineup_status?: string;
+  direction?: string;
+  final_decision?: string;
+  final_blocker?: string;
+  primary_grade_market_line?: number | null;
+  primary_grade_market_source?: string;
+  primary_grade_market_status?: string;
+  opener_chain_state?: string;
 }
 
 export interface StarterDimension {
@@ -570,6 +595,13 @@ export function parseFrozenPacketDiagnostics(
       operator_evidence_status: text(value(row, "Operator_Evidence_Status")),
       away_lineup_status: text(value(row, "Away_Lineup_Status")),
       home_lineup_status: text(value(row, "Home_Lineup_Status")),
+      direction: text(value(row, "Direction")),
+      final_decision: text(value(row, "Final_Decision")),
+      final_blocker: text(value(row, "Final_Blocker")),
+      primary_grade_market_line: numeric(value(row, "Primary_Grade_Market_Line")),
+      primary_grade_market_source: text(value(row, "Primary_Grade_Market_Source")),
+      primary_grade_market_status: text(value(row, "Primary_Grade_Market_Status")),
+      opener_chain_state: text(value(row, "Opener_Chain_State")),
     });
   }
   return packetByGame;
@@ -1892,6 +1924,11 @@ export function buildGameTruthReplay(
     packet.collision_status || "SOURCE_UNAVAILABLE",
     packet.collision_traffic_estimate ?? "",
     packet.collision_damage_estimate ?? "",
+    // Populated by the existing Module 37 starter-window research pass after
+    // exact Module 32 phase reconstruction is available. Keep blanks here so
+    // Module 24 remains independent of execution order and never substitutes
+    // pitcher-charged R for exact on-mound phase runs.
+    "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
     "FROZEN_PACKET_AND_FINAL_VERIFIED",
     outcome.settlement_ts,
   ];

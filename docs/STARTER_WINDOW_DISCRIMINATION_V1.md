@@ -56,6 +56,11 @@ runs and `MATERIALLY_SHORT` at a 2+ inning workload shortfall. Conditional
 failure severity is calculated only from run detonations, never from a
 workload-only failure.
 
+Schema v74 additionally retains `OVERPROJECTED_2PLUS`,
+`UNDERPROJECTED_2PLUS`, or `WITHIN_2_RUNS` from the workload-normalized error.
+This allows the same existing surface to test both recent overprojection and
+the historical low mean bias without changing a center.
+
 ## Feature governance
 
 Starter quality, expected/effective workload, the active traffic factor, and
@@ -82,6 +87,16 @@ interval across the six mechanism families. Degenerate frozen predictors do
 not receive an interpretable bucket. Case studies never tune a coefficient.
 `POSTHOC_ONLY` mechanisms do not count as validation.
 
+Detonation and survival rates, conditional detonation severity, and ordered
+high-versus-low feature contrasts use the same complete-slate bootstrap and
+simultaneous interval. Tail-probability calibration and conditional-severity
+calibration remain explicitly unavailable until a genuine frozen probability
+and conditional severity forecast exist; an expected run center is not
+silently relabeled as either object.
+
 No shadow projection experiment is justified until a pregame-observable,
 adequately sampled mechanism separates detonations from inverse quiet controls
 without degrading the opposite error dimension.
+
+The `STARTER_WINDOW_*_V1` sheets remain supporting diagnostics of Module 37,
+not a new module family. They have no active consumer.

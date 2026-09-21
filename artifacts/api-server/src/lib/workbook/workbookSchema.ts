@@ -236,8 +236,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      permits an MLBAM-verified starter fallback only when MLB omits the
  *      probable starter, and publishes all richer page statistics as
  *      display-only evidence with explicit no-projection sentinels.
+ *  v74 (2026-09-21): extends the existing Module 37 starter-window and
+ *      GAME_TRUTH_REPLAY postmortem surfaces with material-error states,
+ *      slate-block tail/discrimination intervals, and objective all-game
+ *      truth/phase/vehicle/authorization grades. No active consumer exists.
  */
-export const WORKBOOK_SCHEMA_VERSION = 73;
+export const WORKBOOK_SCHEMA_VERSION = 74;
 
 export interface ColumnDef {
   name: string;
@@ -987,6 +991,21 @@ const GAME_TRUTH_REPLAY_V1_COLUMN_NAMES = [
   "Frozen_Collision_Status",
   "Frozen_Collision_Traffic_Estimate",
   "Frozen_Collision_Damage_Estimate",
+  "Exact_Actual_Starter_Window_Runs",
+  "Exact_Actual_Post_Starter_Runs",
+  "Exact_Phase_Lineage_Status",
+  "Frozen_Direction",
+  "Frozen_Operational_Decision",
+  "Frozen_Blocker",
+  "Frozen_Primary_Grade_Market_Line",
+  "Frozen_Primary_Grade_Market_Source",
+  "Frozen_Primary_Grade_Market_Status",
+  "Objective_Game_Truth_Grade",
+  "Objective_Phase_Mechanism_Proxy_Grade",
+  "Objective_Vehicle_Capture_Grade",
+  "Objective_Authorization_Blocker_Grade",
+  "Pregame_Causal_Detail_Status",
+  "Objective_Grade_Derivability_Status",
   "Replay_Status",
   "Settlement_TS",
 ] as const;
@@ -1296,13 +1315,13 @@ const ACTIVE_PITCHING_INVENTORY_REPLAY_SUMMARY_V1_COLUMN_NAMES = [
   "Replay_Status", "Replay_TS",
 ] as const;
 const STARTER_WINDOW_ERROR_V1_COLUMN_NAMES = [
-  "Date","Game_ID","Team_Side","Batting_Team","Opposing_Team","Opposing_Starter","Opposing_Starter_Role","Frozen_Packet_Snapshot_TS","Frozen_Expected_IP","Frozen_Effective_IP","Frozen_Starter_Quality","Frozen_Starter_Quality_Source","Frozen_Active_Offense_Center","Frozen_Traffic_Factor","Frozen_Damage_Factor","Frozen_Run_Multiplier","Projected_Starter_Base_Runs","Projected_Traffic_Runs","Projected_Damage_Runs","Frozen_Expected_Starter_Window_Runs","Actual_Starter_IP","Actual_Starter_Window_Runs","Allocation_Inclusive_Error","Allocation_Inclusive_Abs_Error","Workload_Normalized_Expected_Starter_Window_Runs","Workload_Normalized_Error","Workload_Normalized_Abs_Error","Workload_Shortfall_IP","Outcome_State","Run_Outcome_State","Workload_Outcome_State","Tail_4Plus","Tail_5Plus","Tail_6Plus","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Actual_Workload_Bucket","Pressure_Shape","Traffic_Damage_CoSign","Lineup_Status","Matchup_Profile_Status","Frozen_Workload_Failure_Probability_Proxy","Frozen_Whole_Game_Failure_Run_Cost_Proxy","Frozen_Failure_Proxy_Cohort","Frozen_Failure_Proxy_Observations","Frozen_Failure_Proxy_Failures","Frozen_Failure_Proxy_Status","Frozen_Probability_Status","Feature_Lineage_Status","Actual_Lineage_Status","Research_Status","Active_Input","Replay_TS",
+  "Date","Game_ID","Team_Side","Batting_Team","Opposing_Team","Opposing_Starter","Opposing_Starter_Role","Frozen_Packet_Snapshot_TS","Frozen_Expected_IP","Frozen_Effective_IP","Frozen_Starter_Quality","Frozen_Starter_Quality_Source","Frozen_Active_Offense_Center","Frozen_Traffic_Factor","Frozen_Damage_Factor","Frozen_Run_Multiplier","Projected_Starter_Base_Runs","Projected_Traffic_Runs","Projected_Damage_Runs","Frozen_Expected_Starter_Window_Runs","Actual_Starter_IP","Actual_Starter_Window_Runs","Allocation_Inclusive_Error","Allocation_Inclusive_Abs_Error","Workload_Normalized_Expected_Starter_Window_Runs","Workload_Normalized_Error","Workload_Normalized_Abs_Error","Material_Error_State","Workload_Shortfall_IP","Outcome_State","Run_Outcome_State","Workload_Outcome_State","Tail_4Plus","Tail_5Plus","Tail_6Plus","Quality_Bucket","Traffic_Bucket","Damage_Bucket","Offense_Bucket","Expected_Workload_Bucket","Actual_Workload_Bucket","Pressure_Shape","Traffic_Damage_CoSign","Lineup_Status","Matchup_Profile_Status","Frozen_Workload_Failure_Probability_Proxy","Frozen_Whole_Game_Failure_Run_Cost_Proxy","Frozen_Failure_Proxy_Cohort","Frozen_Failure_Proxy_Observations","Frozen_Failure_Proxy_Failures","Frozen_Failure_Proxy_Status","Frozen_Probability_Status","Feature_Lineage_Status","Actual_Lineage_Status","Research_Status","Active_Input","Replay_TS",
 ] as const;
 const STARTER_WINDOW_ERROR_SUMMARY_V1_COLUMN_NAMES = [
-  "Dimension","Cohort","N","Slate_N","Workload_Normalized_Signed_Bias","Workload_Normalized_MAE","Workload_Normalized_Median_AE","Workload_Normalized_RMSE","Allocation_Inclusive_Signed_Bias","Allocation_Inclusive_MAE","Run_Detonation_Frequency","Workload_Failure_Frequency","Mean_Runs_Conditional_On_Detonation","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Quiet_Window_False_Positive_Rate","Detonation_False_Negative_Rate","Bias_CI_Lower","Bias_CI_Upper","Uncertainty_Method","Interpretation_Status","Instrumentation_Status","Probability_Calibration_Status","Commissioning_Status","Notes","Replay_TS",
+  "Dimension","Cohort","N","Slate_N","Workload_Normalized_Signed_Bias","Workload_Normalized_MAE","Workload_Normalized_Median_AE","Workload_Normalized_RMSE","Allocation_Inclusive_Signed_Bias","Allocation_Inclusive_MAE","Run_Detonation_Frequency","Workload_Failure_Frequency","Mean_Runs_Conditional_On_Detonation","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Quiet_Window_False_Positive_Rate","Detonation_False_Negative_Rate","Bias_CI_Lower","Bias_CI_Upper","Material_Overprojection_Rate","Material_Underprojection_Rate","Observed_Survival_Rate","Detonation_Rate_CI_Lower","Detonation_Rate_CI_Upper","Survival_Rate_CI_Lower","Survival_Rate_CI_Upper","Conditional_Detonation_Severity_CI_Lower","Conditional_Detonation_Severity_CI_Upper","Feature_High_Minus_Low_Detonation_Difference","Feature_Contrast_CI_Lower","Feature_Contrast_CI_Upper","Stable_Separation_Status","Tail_Probability_Calibration_Status","Tail_Severity_Calibration_Status","Uncertainty_Method","Interpretation_Status","Instrumentation_Status","Probability_Calibration_Status","Commissioning_Status","Notes","Replay_TS",
 ] as const;
 const STARTER_WINDOW_FAILURE_BUCKETS_V1_COLUMN_NAMES = [
-  "Feature","Bucket","N","Run_Detonation_N","Run_Detonation_Frequency","Workload_Failure_N","Workload_Failure_Frequency","Mean_Expected_Runs","Mean_Workload_Normalized_Expected_Runs","Mean_Actual_Runs","Mean_Runs_Conditional_On_Detonation","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Expected_Survival_Rate","Observed_Survival_Rate","Expected_Failure_Rate","Observed_Failure_Rate","Probability_Metric_Status","Discrimination_Status","Instrumentation_Status","Bucket_Cutpoint_Source","Notes","Replay_TS",
+  "Feature","Bucket","N","Run_Detonation_N","Run_Detonation_Frequency","Workload_Failure_N","Workload_Failure_Frequency","Mean_Expected_Runs","Mean_Workload_Normalized_Expected_Runs","Mean_Actual_Runs","Mean_Runs_Conditional_On_Detonation","Tail_4Plus_Rate","Tail_5Plus_Rate","Tail_6Plus_Rate","Expected_Survival_Rate","Observed_Survival_Rate","Expected_Failure_Rate","Observed_Failure_Rate","Material_Overprojection_N","Material_Overprojection_Rate","Material_Underprojection_N","Material_Underprojection_Rate","Detonation_Rate_CI_Lower","Detonation_Rate_CI_Upper","Survival_Rate_CI_Lower","Survival_Rate_CI_Upper","Conditional_Detonation_Severity_CI_Lower","Conditional_Detonation_Severity_CI_Upper","Feature_High_Minus_Low_Detonation_Difference","Feature_Contrast_CI_Lower","Feature_Contrast_CI_Upper","Stable_Separation_Status","Probability_Metric_Status","Discrimination_Status","Instrumentation_Status","Bucket_Cutpoint_Source","Notes","Replay_TS",
 ] as const;
 const STARTER_WINDOW_PAIR_AUDIT_V1_COLUMN_NAMES = [
   "Date","Game_ID","Case_Type","Team_Side","Opposing_Starter","Frozen_Expected_Starter_Window_Runs","Actual_Starter_Window_Runs","Allocation_Inclusive_Error","Workload_Normalized_Expected_Starter_Window_Runs","Workload_Normalized_Error","Frozen_Expected_IP","Actual_Starter_IP","Outcome_State","Run_Outcome_State","Workload_Outcome_State","Pregame_Mechanism_Source","Pregame_Mechanism","Mechanism_Grade","Case_Interpretation","No_Outcome_Fitting_Status","Replay_TS",
@@ -7875,7 +7894,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "GAME_TRUTH_REPLAY_V1",
     description:
-      "One strictly frozen-packet postgame replay row per legitimate settled game. Its legacy phase fields inherit pitcher-charged R from Module 24 and are descriptive only, not exact on-mound phase inference; Module 32 is canonical for exact starter/post-starter phase analysis.",
+      "One strictly frozen-packet postgame replay row per legitimate settled game. Its legacy phase fields inherit pitcher-charged R from Module 24 and remain descriptive; the Exact_* and Objective_* fields are filled only from Module 32 current-pitcher reconstruction plus frozen packet evidence. No manual chat mechanism is backfilled.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(
@@ -7907,6 +7926,9 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         "Phase_Allocation_Error",
         "Frozen_Collision_Traffic_Estimate",
         "Frozen_Collision_Damage_Estimate",
+        "Exact_Actual_Starter_Window_Runs",
+        "Exact_Actual_Post_Starter_Runs",
+        "Frozen_Primary_Grade_Market_Line",
       ],
       "MODULE_24",
     ),

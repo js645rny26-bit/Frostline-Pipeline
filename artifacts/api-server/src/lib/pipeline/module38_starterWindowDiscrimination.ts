@@ -13,6 +13,8 @@ import {
   readRange, writeRange, WORKBOOK_ID,
 } from "../sheets/client.js";
 import { pregamePacketHistoryRange, PREGAME_PACKET_HISTORY_SHEET } from "./module20a_pregamePacket.js";
+import { GAME_TRUTH_REPLAY_HEADERS } from "./module24_postgameDiagnostics.js";
+import { gradeHardRockMlbFullGameTotal } from "./module14_settlementGrading.js";
 import { logger } from "../../lib/logger.js";
 
 export const STARTER_WINDOW_ERROR_SHEET = "STARTER_WINDOW_ERROR_V1";
@@ -21,7 +23,7 @@ export const STARTER_WINDOW_FAILURE_BUCKETS_SHEET = "STARTER_WINDOW_FAILURE_BUCK
 export const STARTER_WINDOW_PAIR_AUDIT_SHEET = "STARTER_WINDOW_PAIR_AUDIT_V1";
 export const STARTER_WINDOW_FEATURE_GOV_SHEET = "STARTER_WINDOW_FEATURE_GOV_V1";
 export const STARTER_WINDOW_REPLAY_SHEET = "STARTER_WINDOW_REPLAY_V1";
-export const STARTER_WINDOW_VERSION = "STARTER_WINDOW_DISCRIMINATION_V1_2026-09-20";
+export const STARTER_WINDOW_VERSION = "STARTER_WINDOW_DISCRIMINATION_V1_2026-09-21";
 export const STARTER_WINDOW_ACTIVE_INPUT = "NO" as const;
 export const STARTER_WINDOW_COMMISSIONING_STATUS = "RESEARCH_ONLY_NOT_COMMISSIONED" as const;
 export const STARTER_WINDOW_MIN_INTERPRETABLE_N = 100;
@@ -37,7 +39,7 @@ export const STARTER_WINDOW_ERROR_HEADERS = [
   "Projected_Damage_Runs", "Frozen_Expected_Starter_Window_Runs", "Actual_Starter_IP",
   "Actual_Starter_Window_Runs", "Allocation_Inclusive_Error", "Allocation_Inclusive_Abs_Error",
   "Workload_Normalized_Expected_Starter_Window_Runs", "Workload_Normalized_Error",
-  "Workload_Normalized_Abs_Error", "Workload_Shortfall_IP", "Outcome_State",
+  "Workload_Normalized_Abs_Error", "Material_Error_State", "Workload_Shortfall_IP", "Outcome_State",
   "Run_Outcome_State", "Workload_Outcome_State", "Tail_4Plus", "Tail_5Plus", "Tail_6Plus",
   "Quality_Bucket", "Traffic_Bucket", "Damage_Bucket", "Offense_Bucket",
   "Expected_Workload_Bucket", "Actual_Workload_Bucket", "Pressure_Shape",
@@ -57,6 +59,13 @@ export const STARTER_WINDOW_ERROR_SUMMARY_HEADERS = [
   "Mean_Runs_Conditional_On_Detonation", "Tail_4Plus_Rate",
   "Tail_5Plus_Rate", "Tail_6Plus_Rate", "Quiet_Window_False_Positive_Rate",
   "Detonation_False_Negative_Rate", "Bias_CI_Lower", "Bias_CI_Upper",
+  "Material_Overprojection_Rate", "Material_Underprojection_Rate", "Observed_Survival_Rate",
+  "Detonation_Rate_CI_Lower", "Detonation_Rate_CI_Upper",
+  "Survival_Rate_CI_Lower", "Survival_Rate_CI_Upper",
+  "Conditional_Detonation_Severity_CI_Lower", "Conditional_Detonation_Severity_CI_Upper",
+  "Feature_High_Minus_Low_Detonation_Difference",
+  "Feature_Contrast_CI_Lower", "Feature_Contrast_CI_Upper", "Stable_Separation_Status",
+  "Tail_Probability_Calibration_Status", "Tail_Severity_Calibration_Status",
   "Uncertainty_Method", "Interpretation_Status", "Instrumentation_Status",
   "Probability_Calibration_Status", "Commissioning_Status", "Notes", "Replay_TS",
 ] as const;
@@ -68,6 +77,13 @@ export const STARTER_WINDOW_FAILURE_BUCKETS_HEADERS = [
   "Mean_Runs_Conditional_On_Detonation", "Tail_4Plus_Rate",
   "Tail_5Plus_Rate", "Tail_6Plus_Rate", "Expected_Survival_Rate",
   "Observed_Survival_Rate", "Expected_Failure_Rate", "Observed_Failure_Rate",
+  "Material_Overprojection_N", "Material_Overprojection_Rate",
+  "Material_Underprojection_N", "Material_Underprojection_Rate",
+  "Detonation_Rate_CI_Lower", "Detonation_Rate_CI_Upper",
+  "Survival_Rate_CI_Lower", "Survival_Rate_CI_Upper",
+  "Conditional_Detonation_Severity_CI_Lower", "Conditional_Detonation_Severity_CI_Upper",
+  "Feature_High_Minus_Low_Detonation_Difference",
+  "Feature_Contrast_CI_Lower", "Feature_Contrast_CI_Upper", "Stable_Separation_Status",
   "Probability_Metric_Status", "Discrimination_Status", "Instrumentation_Status",
   "Bucket_Cutpoint_Source", "Notes", "Replay_TS",
 ] as const;
@@ -115,6 +131,7 @@ export interface StarterWindowObservation {
   projected_base: number; projected_traffic: number; projected_damage: number;
   expected_runs: number; normalized_expected_runs: number; actual_ip: number; actual_runs: number;
   error: number; abs_error: number; normalized_error: number; normalized_abs_error: number;
+  material_error_state: "OVERPROJECTED_2PLUS" | "UNDERPROJECTED_2PLUS" | "WITHIN_2_RUNS";
   workload_shortfall: number; outcome: OutcomeState; run_outcome: string; workload_outcome: string;
   lineup_status: string;
   matchup_status: string; quality_bucket: Bucket; traffic_bucket: Bucket;
@@ -211,6 +228,11 @@ export function parseStarterWindowObservations(
       const normalizedExpected=expected/raw.expected_ip!*actualIp!;
       const error=expected-actualRuns!; const normalizedError=normalizedExpected-actualRuns!;
       const shortfall=Math.max(0,raw.expected_ip!-actualIp!);
+      const materialErrorState = normalizedError >= 2
+        ? "OVERPROJECTED_2PLUS"
+        : normalizedError <= -2
+          ? "UNDERPROJECTED_2PLUS"
+          : "WITHIN_2_RUNS";
       const outcome: OutcomeState = actualRuns!>=4 || shortfall>=2 ? "FAILURE" : actualRuns!<=2 && actualIp!>=raw.expected_ip!-0.5 ? "SURVIVAL" : "MIXED";
       const runOutcome=actualRuns!>=4?"DETONATION":actualRuns!<=2?"QUIET":"MODERATE";
       const workloadOutcome=shortfall>=2?"MATERIALLY_SHORT":actualIp!>=raw.expected_ip!-0.5?"REACHED_OR_NEAR_EXPECTED":"MODERATELY_SHORT";
@@ -221,6 +243,7 @@ export function parseStarterWindowObservations(
         projected_base:round(base), projected_traffic:round(traffic), projected_damage:round(damage), expected_runs:round(expected),
         normalized_expected_runs:round(normalizedExpected), actual_ip:actualIp!, actual_runs:actualRuns!, error:round(error),
         abs_error:round(Math.abs(error)), normalized_error:round(normalizedError), normalized_abs_error:round(Math.abs(normalizedError)),
+        material_error_state:materialErrorState,
         workload_shortfall:round(shortfall), outcome, run_outcome:runOutcome, workload_outcome:workloadOutcome,
         quality_bucket:assignBuckets?bucket(raw.quality!,cp?.quality??null):"UNAVAILABLE",
         traffic_bucket:assignBuckets?bucket(raw.traffic_factor!,cp?.traffic??null):"UNAVAILABLE",
@@ -238,21 +261,63 @@ export function parseStarterWindowObservations(
 }
 
 function seeded(seed:number){return()=>{seed|=0;seed=(seed+0x6d2b79f5)|0;let t=Math.imul(seed^(seed>>>15),1|seed);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
-function slateBootstrap(rows: readonly StarterWindowObservation[]): [number|null,number|null] {
+function seedFor(label:string):number{return [...label].reduce((value,char)=>Math.imul(value^char.charCodeAt(0),16777619),38012026);}
+function slateBootstrapStat(
+  rows: readonly StarterWindowObservation[],
+  statistic:(sample:readonly StarterWindowObservation[])=>number|null,
+  label:string,
+  minimumEventN=0,
+): [number|null,number|null] {
   const dates=[...new Set(rows.map(r=>r.date))]; if(rows.length<STARTER_WINDOW_MIN_INTERPRETABLE_N||dates.length<5)return[null,null];
-  const groups=new Map(dates.map(d=>[d,rows.filter(r=>r.date===d)])); const rand=seeded(38012026); const vals:number[]=[];
-  for(let k=0;k<STARTER_WINDOW_BOOTSTRAP_REPLICATES;k++){const sample:StarterWindowObservation[]=[];for(let j=0;j<dates.length;j++) sample.push(...(groups.get(dates[Math.floor(rand()*dates.length)]!)??[])); const m=mean(sample.map(r=>r.normalized_error));if(m!==null)vals.push(m);}
+  if(minimumEventN>0&&rows.filter(r=>r.run_outcome==="DETONATION").length<minimumEventN)return[null,null];
+  const groups=new Map(dates.map(d=>[d,rows.filter(r=>r.date===d)])); const rand=seeded(seedFor(label)); const vals:number[]=[];
+  for(let k=0;k<STARTER_WINDOW_BOOTSTRAP_REPLICATES;k++){const sample:StarterWindowObservation[]=[];for(let j=0;j<dates.length;j++) sample.push(...(groups.get(dates[Math.floor(rand()*dates.length)]!)??[])); const value=statistic(sample);if(value!==null&&Number.isFinite(value))vals.push(value);}
   return [quantile(vals,.0041665),quantile(vals,.9958335)];
 }
 
+function rate(rows:readonly StarterWindowObservation[],predicate:(row:StarterWindowObservation)=>boolean):number {
+  return rows.filter(predicate).length/Math.max(rows.length,1);
+}
+
+function orderedBucket(row:StarterWindowObservation,dimension:string):Bucket|null {
+  if(dimension==="STARTER_QUALITY")return row.quality_bucket;
+  if(dimension==="TRAFFIC_MATCHUP")return row.traffic_bucket;
+  if(dimension==="OPPONENT_OFFENSE")return row.offense_bucket;
+  if(dimension==="EXPECTED_WORKLOAD")return row.expected_workload_bucket;
+  return null;
+}
+
+interface FeatureContrast { difference:number|null; lower:number|null; upper:number|null; status:string; }
+function featureContrast(rows:readonly StarterWindowObservation[],dimension:string):FeatureContrast {
+  if(!["STARTER_QUALITY","TRAFFIC_MATCHUP","OPPONENT_OFFENSE","EXPECTED_WORKLOAD"].includes(dimension))
+    return{difference:null,lower:null,upper:null,status:"NOT_ORDERED_FEATURE"};
+  const low=rows.filter(r=>orderedBucket(r,dimension)==="LOW"), high=rows.filter(r=>orderedBucket(r,dimension)==="HIGH");
+  if(low.length<STARTER_WINDOW_MIN_INTERPRETABLE_N||high.length<STARTER_WINDOW_MIN_INTERPRETABLE_N)
+    return{difference:null,lower:null,upper:null,status:"INSUFFICIENT_HIGH_LOW_SAMPLE"};
+  const statistic=(sample:readonly StarterWindowObservation[])=>{
+    const sampleLow=sample.filter(r=>orderedBucket(r,dimension)==="LOW"), sampleHigh=sample.filter(r=>orderedBucket(r,dimension)==="HIGH");
+    if(!sampleLow.length||!sampleHigh.length)return null;
+    return rate(sampleHigh,r=>r.run_outcome==="DETONATION")-rate(sampleLow,r=>r.run_outcome==="DETONATION");
+  };
+  const difference=statistic(rows); const [lower,upper]=slateBootstrapStat(rows,statistic,`contrast:${dimension}`);
+  const status=lower===null||upper===null?"INSUFFICIENT_CONTRAST_UNCERTAINTY":lower>0?"STABLE_POSITIVE_SEPARATION":upper<0?"STABLE_NEGATIVE_SEPARATION":"NO_STABLE_SEPARATION";
+  return{difference,lower,upper,status};
+}
+
 function metrics(rows: readonly StarterWindowObservation[]) {
-  const errors=rows.map(r=>r.normalized_error), rawErrors=rows.map(r=>r.error), detonations=rows.filter(r=>r.run_outcome==="DETONATION"); const [lo,hi]=slateBootstrap(rows);
+  const errors=rows.map(r=>r.normalized_error), rawErrors=rows.map(r=>r.error), detonations=rows.filter(r=>r.run_outcome==="DETONATION");
+  const [lo,hi]=slateBootstrapStat(rows,sample=>mean(sample.map(r=>r.normalized_error)),"bias");
+  const [detLo,detHi]=slateBootstrapStat(rows,sample=>rate(sample,r=>r.run_outcome==="DETONATION"),"detonation-rate");
+  const [survLo,survHi]=slateBootstrapStat(rows,sample=>rate(sample,r=>r.outcome==="SURVIVAL"),"survival-rate");
+  const [severityLo,severityHi]=slateBootstrapStat(rows,sample=>mean(sample.filter(r=>r.run_outcome==="DETONATION").map(r=>r.actual_runs)),"conditional-severity",15);
   const quietFp=rows.filter(r=>r.expected_runs>=4&&r.actual_runs<=2).length/Math.max(rows.length,1);
   const detFn=rows.filter(r=>r.expected_runs<4&&r.actual_runs>=4).length/Math.max(rows.length,1);
   return { n:rows.length, slates:new Set(rows.map(r=>r.date)).size, bias:mean(errors), mae:mean(errors.map(Math.abs)), med:median(errors.map(Math.abs)), rmse:Math.sqrt(mean(errors.map(e=>e*e))??0),
     rawBias:mean(rawErrors),rawMae:mean(rawErrors.map(Math.abs)),detonation:detonations.length/Math.max(rows.length,1),
     workloadFailure:rows.filter(r=>r.workload_outcome==="MATERIALLY_SHORT").length/Math.max(rows.length,1),
-    conditional:mean(detonations.map(r=>r.actual_runs)), t4:rows.filter(r=>r.actual_runs>=4).length/Math.max(rows.length,1), t5:rows.filter(r=>r.actual_runs>=5).length/Math.max(rows.length,1), t6:rows.filter(r=>r.actual_runs>=6).length/Math.max(rows.length,1), quietFp,detFn,lo,hi };
+    conditional:mean(detonations.map(r=>r.actual_runs)), t4:rows.filter(r=>r.actual_runs>=4).length/Math.max(rows.length,1), t5:rows.filter(r=>r.actual_runs>=5).length/Math.max(rows.length,1), t6:rows.filter(r=>r.actual_runs>=6).length/Math.max(rows.length,1), quietFp,detFn,lo,hi,
+    overRate:rate(rows,r=>r.material_error_state==="OVERPROJECTED_2PLUS"),underRate:rate(rows,r=>r.material_error_state==="UNDERPROJECTED_2PLUS"),survival:rate(rows,r=>r.outcome==="SURVIVAL"),
+    detLo,detHi,survLo,survHi,severityLo,severityHi };
 }
 
 function groupRows(rows: readonly StarterWindowObservation[]): Array<[string,string,StarterWindowObservation[],string]> {
@@ -272,12 +337,17 @@ function summaryRows(rows: readonly StarterWindowObservation[], ts:string): unkn
   const proxyStatus=rows.some(r=>r.failure_probability_proxy!==null)
     ? "WORKLOAD_PROXY_FROZEN_NOT_STARTER_SCORING_CALIBRATED"
     : "UNAVAILABLE_NO_FROZEN_FAILURE_PROXY";
-  return groupRows(rows).map(([dimension,cohort,group,instrument])=>{const m=metrics(group);const interpretable=group.length>=STARTER_WINDOW_MIN_INTERPRETABLE_N&&!instrument.startsWith("INSTRUMENTATION_");
-    return [dimension,cohort,m.n,m.slates,m.bias===null?"":round(m.bias),m.mae===null?"":round(m.mae),m.med===null?"":round(m.med),round(m.rmse),m.rawBias===null?"":round(m.rawBias),m.rawMae===null?"":round(m.rawMae),round(m.detonation),round(m.workloadFailure),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),round(m.quietFp),round(m.detFn),m.lo??"",m.hi??"",m.lo===null?"CI_UNAVAILABLE":"SLATE_DATE_BLOCK_BOOTSTRAP_5000_BONFERRONI_99.1667",interpretable?"INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,proxyStatus,STARTER_WINDOW_COMMISSIONING_STATUS,instrument==="INSTRUMENTATION_DEAD"?"A zero contribution is not evidence that damage is unimportant; the active channel is inert.":instrument==="INSTRUMENTATION_DEGENERATE"?"Frozen workload values do not support stable tertiles; no workload discrimination claim.":"Headline error is workload-normalized; allocation-inclusive error is retained separately. Frozen SSAT v2 fields are workload/whole-game proxies only.",ts];});
+  return groupRows(rows).map(([dimension,cohort,group,instrument])=>{const m=metrics(group);const contrast=featureContrast(rows,dimension);const interpretable=group.length>=STARTER_WINDOW_MIN_INTERPRETABLE_N&&!instrument.startsWith("INSTRUMENTATION_");
+    return [dimension,cohort,m.n,m.slates,m.bias===null?"":round(m.bias),m.mae===null?"":round(m.mae),m.med===null?"":round(m.med),round(m.rmse),m.rawBias===null?"":round(m.rawBias),m.rawMae===null?"":round(m.rawMae),round(m.detonation),round(m.workloadFailure),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),round(m.quietFp),round(m.detFn),m.lo??"",m.hi??"",
+      round(m.overRate),round(m.underRate),round(m.survival),m.detLo??"",m.detHi??"",m.survLo??"",m.survHi??"",m.severityLo??"",m.severityHi??"",contrast.difference===null?"":round(contrast.difference),contrast.lower??"",contrast.upper??"",contrast.status,
+      "UNAVAILABLE_NO_STARTER_SCORING_FAILURE_PROBABILITY","UNAVAILABLE_NO_EXPECTED_CONDITIONAL_STARTER_SEVERITY",
+      m.lo===null?"CI_UNAVAILABLE":"SLATE_DATE_BLOCK_BOOTSTRAP_5000_BONFERRONI_99.1667",interpretable?"INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,proxyStatus,STARTER_WINDOW_COMMISSIONING_STATUS,instrument==="INSTRUMENTATION_DEAD"?"A zero contribution is not evidence that damage is unimportant; the active channel is inert.":instrument==="INSTRUMENTATION_DEGENERATE"?"Frozen workload values do not support stable tertiles; no workload discrimination claim.":"Mean calibration, tail frequency, conditional severity, and high-minus-low discrimination are reported separately. Frozen SSAT v2 fields are workload/whole-game proxies only.",ts];});
 }
 
 function failureRows(rows: readonly StarterWindowObservation[], ts:string): unknown[][] {
-  return groupRows(rows).filter(([d])=>!["ACTUAL_WORKLOAD_POSTGAME","OUTCOME_STATE"].includes(d)).map(([feature,b,group,instrument])=>{const m=metrics(group);const survival=group.filter(r=>r.outcome==="SURVIVAL").length/Math.max(group.length,1);const detonationN=group.filter(r=>r.run_outcome==="DETONATION").length;const workloadFailureN=group.filter(r=>r.workload_outcome==="MATERIALLY_SHORT").length;const proxy=group.some(r=>r.failure_probability_proxy!==null);return [feature,b,m.n,detonationN,round(m.detonation),workloadFailureN,round(m.workloadFailure),round(mean(group.map(r=>r.expected_runs))??0),round(mean(group.map(r=>r.normalized_expected_runs))??0),round(mean(group.map(r=>r.actual_runs))??0),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),"",round(survival),"",round(m.detonation),proxy?"WORKLOAD_PROXY_FROZEN_NOT_STARTER_SCORING_CALIBRATED":"UNAVAILABLE_NO_FROZEN_FAILURE_PROXY",group.length>=STARTER_WINDOW_MIN_INTERPRETABLE_N&&!instrument.startsWith("INSTRUMENTATION_")?"DESCRIPTIVE_DISCRIMINATION_INTERPRETABLE":"DESCRIPTIVE_ONLY",instrument,feature==="OVERALL"?"N/A":`PREDICTOR_TERTILES_DERIVED_THROUGH_${STARTER_WINDOW_BUCKET_DERIVATION_THROUGH_DATE}`,instrument==="INSTRUMENTATION_DEAD"?"Cannot attribute a null effect to a frozen-neutral channel.":"Run detonation (4+ runs) is separated from workload failure (>=2 IP shortfall); SSAT v2 fields are proxy evidence only.",ts];});
+  return groupRows(rows).filter(([d])=>!["ACTUAL_WORKLOAD_POSTGAME","OUTCOME_STATE"].includes(d)).map(([feature,b,group,instrument])=>{const m=metrics(group);const survival=group.filter(r=>r.outcome==="SURVIVAL").length/Math.max(group.length,1);const detonationN=group.filter(r=>r.run_outcome==="DETONATION").length;const workloadFailureN=group.filter(r=>r.workload_outcome==="MATERIALLY_SHORT").length;const overN=group.filter(r=>r.material_error_state==="OVERPROJECTED_2PLUS").length;const underN=group.filter(r=>r.material_error_state==="UNDERPROJECTED_2PLUS").length;const proxy=group.some(r=>r.failure_probability_proxy!==null);const contrast=featureContrast(rows,feature);return [feature,b,m.n,detonationN,round(m.detonation),workloadFailureN,round(m.workloadFailure),round(mean(group.map(r=>r.expected_runs))??0),round(mean(group.map(r=>r.normalized_expected_runs))??0),round(mean(group.map(r=>r.actual_runs))??0),m.conditional===null?"":round(m.conditional),round(m.t4),round(m.t5),round(m.t6),"",round(survival),"",round(m.detonation),
+    overN,round(m.overRate),underN,round(m.underRate),m.detLo??"",m.detHi??"",m.survLo??"",m.survHi??"",m.severityLo??"",m.severityHi??"",contrast.difference===null?"":round(contrast.difference),contrast.lower??"",contrast.upper??"",contrast.status,
+    proxy?"WORKLOAD_PROXY_FROZEN_NOT_STARTER_SCORING_CALIBRATED":"UNAVAILABLE_NO_FROZEN_FAILURE_PROXY",contrast.status, instrument,feature==="OVERALL"?"N/A":`PREDICTOR_TERTILES_DERIVED_THROUGH_${STARTER_WINDOW_BUCKET_DERIVATION_THROUGH_DATE}`,instrument==="INSTRUMENTATION_DEAD"?"Cannot attribute a null effect to a frozen-neutral channel.":"Run detonation, survival, conditional severity, and material over/underprojection are separate outputs; no starter-scoring probability or severity target is manufactured.",ts];});
 }
 
 const CASES: Record<string,{type:string;source:string;mechanism:string;grade:string;interpretation:string}> = {
@@ -291,7 +361,7 @@ const CASES: Record<string,{type:string;source:string;mechanism:string;grade:str
   "20260919_ATL_HOU":{type:"CANCELLATION_CONTROL",source:"NO_VERIFIABLE_PREDECLARED_MECHANISM",mechanism:"",grade:"POSTHOC_ONLY",interpretation:"Accurate total hid opposing phase errors; no causal credit assigned."},
 };
 
-function observationRow(r:StarterWindowObservation,ts:string):unknown[]{const probabilityStatus=r.failure_probability_proxy===null?"UNAVAILABLE_NO_FROZEN_FAILURE_PROXY":"WORKLOAD_PROXY_FROZEN_NOT_STARTER_SCORING_CALIBRATED";return [r.date,r.game_id,r.side,r.batting_team,r.opposing_team,r.opposing_starter,r.opposing_role,r.snapshot_ts,r.expected_ip,r.effective_ip,r.quality,r.quality_source,r.offense_center,r.traffic_factor,r.damage_factor,r.run_multiplier,r.projected_base,r.projected_traffic,r.projected_damage,r.expected_runs,r.actual_ip,r.actual_runs,r.error,r.abs_error,r.normalized_expected_runs,r.normalized_error,r.normalized_abs_error,r.workload_shortfall,r.outcome,r.run_outcome,r.workload_outcome,r.actual_runs>=4?"TRUE":"FALSE",r.actual_runs>=5?"TRUE":"FALSE",r.actual_runs>=6?"TRUE":"FALSE",r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.actual_workload_bucket,r.pressure_shape,r.cosign,r.lineup_status,r.matchup_status,r.failure_probability_proxy??"",r.failure_run_cost_proxy??"",r.failure_proxy_cohort,r.failure_proxy_observations??"",r.failure_proxy_failures??"",r.failure_proxy_status,probabilityStatus,"FROZEN_PREGAME_PACKET_ONLY","MLB_STATSAPI_PBP_CURRENT_PITCHER_EXACT",STARTER_WINDOW_COMMISSIONING_STATUS,STARTER_WINDOW_ACTIVE_INPUT,ts];}
+function observationRow(r:StarterWindowObservation,ts:string):unknown[]{const probabilityStatus=r.failure_probability_proxy===null?"UNAVAILABLE_NO_FROZEN_FAILURE_PROXY":"WORKLOAD_PROXY_FROZEN_NOT_STARTER_SCORING_CALIBRATED";return [r.date,r.game_id,r.side,r.batting_team,r.opposing_team,r.opposing_starter,r.opposing_role,r.snapshot_ts,r.expected_ip,r.effective_ip,r.quality,r.quality_source,r.offense_center,r.traffic_factor,r.damage_factor,r.run_multiplier,r.projected_base,r.projected_traffic,r.projected_damage,r.expected_runs,r.actual_ip,r.actual_runs,r.error,r.abs_error,r.normalized_expected_runs,r.normalized_error,r.normalized_abs_error,r.material_error_state,r.workload_shortfall,r.outcome,r.run_outcome,r.workload_outcome,r.actual_runs>=4?"TRUE":"FALSE",r.actual_runs>=5?"TRUE":"FALSE",r.actual_runs>=6?"TRUE":"FALSE",r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.actual_workload_bucket,r.pressure_shape,r.cosign,r.lineup_status,r.matchup_status,r.failure_probability_proxy??"",r.failure_run_cost_proxy??"",r.failure_proxy_cohort,r.failure_proxy_observations??"",r.failure_proxy_failures??"",r.failure_proxy_status,probabilityStatus,"FROZEN_PREGAME_PACKET_ONLY","MLB_STATSAPI_PBP_CURRENT_PITCHER_EXACT",STARTER_WINDOW_COMMISSIONING_STATUS,STARTER_WINDOW_ACTIVE_INPUT,ts];}
 function replayRow(r:StarterWindowObservation,ts:string):unknown[]{return [r.date,r.game_id,r.side,r.snapshot_ts,r.opposing_starter,r.opposing_role,r.expected_runs,r.actual_runs,r.error,r.normalized_expected_runs,r.normalized_error,r.normalized_abs_error,r.outcome,r.run_outcome,r.workload_outcome,r.actual_ip,r.expected_ip,r.workload_shortfall,r.quality_bucket,r.traffic_bucket,r.damage_bucket,r.offense_bucket,r.expected_workload_bucket,r.pressure_shape,r.failure_probability_proxy??"",r.failure_run_cost_proxy??"",r.failure_proxy_cohort,r.failure_proxy_observations??"",r.failure_proxy_failures??"",r.failure_proxy_status,"EXACT_FROZEN_LINEAGE_RESEARCH_ONLY",STARTER_WINDOW_ACTIVE_INPUT,ts];}
 function pairRows(rows:readonly StarterWindowObservation[],ts:string):unknown[][]{return rows.filter(r=>CASES[r.game_id]).map(r=>{const c=CASES[r.game_id]!;return[r.date,r.game_id,c.type,r.side,r.opposing_starter,r.expected_runs,r.actual_runs,r.error,r.normalized_expected_runs,r.normalized_error,r.expected_ip,r.actual_ip,r.outcome,r.run_outcome,r.workload_outcome,c.source,c.mechanism,c.grade,c.interpretation,"NO_COEFFICIENT_TUNING_CASE_NOT_USED_AS_TARGET",ts];});}
 
@@ -316,19 +386,136 @@ function featureGovRows(rows:readonly StarterWindowObservation[],ts:string):unkn
   ];
 }
 
+const OBJECTIVE_CENTER_ERROR_RUNS = 3;
+const OBJECTIVE_PHASE_ERROR_RUNS = 2;
+
+interface ObjectivePhaseGrade {
+  grade:string;
+  lineage:string;
+}
+
+function objectivePhaseGrade(
+  expectedStarter:number|null,
+  expectedPost:number|null,
+  actualStarter:number|null,
+  actualPost:number|null,
+):ObjectivePhaseGrade {
+  if([expectedStarter,expectedPost,actualStarter,actualPost].some(value=>value===null))
+    return{grade:"PHASE_PROXY_UNGRADABLE",lineage:"EXACT_PHASE_OR_FROZEN_EXPECTATION_UNAVAILABLE"};
+  const starterError=Math.abs(expectedStarter!-actualStarter!);
+  const postError=Math.abs(expectedPost!-actualPost!);
+  const projectedDominant=expectedStarter!>expectedPost!?"STARTER":expectedPost!>expectedStarter!?"POST_STARTER":"BALANCED";
+  const actualDominant=actualStarter!>actualPost!?"STARTER":actualPost!>actualStarter!?"POST_STARTER":"BALANCED";
+  if(starterError<OBJECTIVE_PHASE_ERROR_RUNS&&postError<OBJECTIVE_PHASE_ERROR_RUNS&&projectedDominant===actualDominant)
+    return{grade:"PHASE_PROXY_MATCH",lineage:"EXACT_MLB_PBP_CURRENT_PITCHER"};
+  if(starterError<OBJECTIVE_PHASE_ERROR_RUNS||postError<OBJECTIVE_PHASE_ERROR_RUNS)
+    return{grade:"PHASE_PROXY_PARTIAL",lineage:"EXACT_MLB_PBP_CURRENT_PITCHER"};
+  return{grade:"PHASE_PROXY_MISS",lineage:"EXACT_MLB_PBP_CURRENT_PITCHER"};
+}
+
+function objectiveGameTruthGrade(totalAbsError:number|null,phaseGrade:string,allocationReversal:string):string {
+  if(totalAbsError===null||phaseGrade==="PHASE_PROXY_UNGRADABLE")return"GAME_TRUTH_PROXY_UNGRADABLE";
+  if(totalAbsError>=OBJECTIVE_CENTER_ERROR_RUNS)return"GAME_TRUTH_PROXY_MISS";
+  if(phaseGrade==="PHASE_PROXY_MATCH"&&allocationReversal==="FALSE")return"GAME_TRUTH_PROXY_MATCH";
+  return"GAME_TRUTH_PROXY_PARTIAL";
+}
+
+function objectiveVehicleCaptureGrade(
+  date:string,direction:string,line:number|null,source:string,status:string,actualTotal:number|null,phaseGrade:string,
+):string {
+  if(direction!=="OVER"&&direction!=="UNDER")return"UNGRADABLE_NO_FROZEN_DIRECTION";
+  if(line===null)return"UNGRADABLE_NO_LITERAL_EXECUTABLE_LINE";
+  const literalHardRock=/HARD[_ ]?ROCK/i.test(source)&&/LITERAL_EXECUTABLE|EXECUTABLE_OPERATOR_CAPTURED/i.test(status);
+  if(!literalHardRock)return"UNGRADABLE_REFERENCE_OR_UNVERIFIED_LINE";
+  const grade=gradeHardRockMlbFullGameTotal(direction,line,actualTotal);
+  if(grade.integrity_status!=="VALID_LITERAL_HALF_NUMBER")return grade.integrity_status;
+  if(grade.outcome==="WIN")return phaseGrade==="PHASE_PROXY_MATCH"?"VEHICLE_CAPTURE_CLEAN":"VEHICLE_CAPTURE_RIGHT_RESULT_MIXED_MECHANISM";
+  if(grade.outcome==="LOSS")return"VEHICLE_CAPTURE_MISS";
+  return `UNGRADABLE_${date}_${grade.outcome}`;
+}
+
+function objectiveAuthorizationGrade(decision:string,blocker:string,openerChainState:string):string {
+  const normalized=decision.toUpperCase();
+  if(normalized==="BET"||normalized==="CORE")return"AUTHORIZED_EXECUTION_RECORDED";
+  if(!normalized)return"AUTHORIZATION_STATE_UNAVAILABLE";
+  if(!blocker)return"PASS_BLOCKER_NOT_FROZEN";
+  if(/OPENER|BULK|CHAIN|UNRESOLVED.*STARTER|STARTER.*UNRESOLVED|ROLE/i.test(blocker)&&/UNCERTAIN|UNRESOLVED|OPENER|BULK/i.test(openerChainState))
+    return"PASS_BLOCKER_RELEVANCE_SUPPORTED_BY_FROZEN_ROLE_STATE";
+  if(/MONOTONICITY/i.test(blocker))return"POLICY_BLOCKER_NOT_CAUSALLY_GRADABLE";
+  return"PASS_DEFENSIBLE_INDETERMINATE";
+}
+
+/**
+ * Deepens the existing GAME_TRUTH_REPLAY_V1 table with objective grades from
+ * the frozen packet and Module 32 exact phase reconstruction. It deliberately
+ * does not reconstruct chat reasoning or treat an unplayed winner as a bad
+ * pass. Historical rows without the required frozen evidence stay explicit.
+ */
+export function applyObjectivePostmortemGrades(
+  gameTruthRows:unknown[][],
+  packetRows:unknown[][],
+  coverageRows:unknown[][],
+):unknown[][] {
+  if(gameTruthRows.length===0)return[];
+  const [gh=[],...gd]=gameTruthRows, gi=idx(gh);
+  const [ph=[],...pd]=packetRows, pi=idx(ph);
+  const packets=new Map<string,unknown[]>();
+  for(const row of pd){const game=text(val(row,pi,"Game_ID"));if(game&&text(val(row,pi,"Packet_Status"))==="FROZEN_PREGAME"&&packetBeforeFirstPitch(row,pi))packets.set(game,row);}
+  const [ch=[],...cd]=coverageRows, ci=idx(ch);
+  const coverage=new Map<string,unknown[]>();
+  for(const row of cd){const game=text(val(row,ci,"Game_ID"));if(game)coverage.set(game,row);}
+  const canonicalIndex=idx(GAME_TRUTH_REPLAY_HEADERS);
+  const set=(row:unknown[],name:string,value:unknown)=>{const position=canonicalIndex.get(name);if(position!==undefined)row[position]=value;};
+  const output=gd.map(raw=>{
+    const row=Array.from(GAME_TRUTH_REPLAY_HEADERS,header=>val(raw,gi,header)??"");
+    const game=text(row[canonicalIndex.get("Game_ID")!]); const packet=packets.get(game); const exact=coverage.get(game);
+    const actualTotal=num(row[canonicalIndex.get("Actual_Total")!]); const totalAbsError=num(row[canonicalIndex.get("Total_Abs_Error")!]);
+    const allocationReversal=text(row[canonicalIndex.get("Allocation_Sign_Reversal")!]);
+    if(!packet){set(row,"Objective_Game_Truth_Grade","GAME_TRUTH_PROXY_UNGRADABLE");set(row,"Objective_Phase_Mechanism_Proxy_Grade","PHASE_PROXY_UNGRADABLE");set(row,"Objective_Vehicle_Capture_Grade","UNGRADABLE_NO_FROZEN_PACKET");set(row,"Objective_Authorization_Blocker_Grade","AUTHORIZATION_STATE_UNAVAILABLE");set(row,"Pregame_Causal_Detail_Status","NOT_FROZEN_CAUSAL_DETAIL_UNAVAILABLE");set(row,"Objective_Grade_Derivability_Status","FROZEN_PACKET_UNAVAILABLE");return row;}
+    const starterAttack=num(val(packet,pi,"Starter_Attack_Runs"));
+    const trafficConversion=num(val(packet,pi,"Traffic_Conversion_Runs"));
+    const damageRuns=num(val(packet,pi,"HR_XBH_Damage_Runs"));
+    const bullpenContinuation=num(val(packet,pi,"Bullpen_Continuation_Runs"));
+    const runMultiplier=num(val(packet,pi,"Run_Multiplier"));
+    const expectedStarter=[starterAttack,trafficConversion,damageRuns,runMultiplier].every(value=>value!==null)
+      ? (starterAttack!+trafficConversion!+damageRuns!)*runMultiplier!
+      : null;
+    const expectedPost=bullpenContinuation!==null&&runMultiplier!==null
+      ? bullpenContinuation*runMultiplier
+      : null;
+    const phaseUsable=exact&&text(val(exact,ci,"Phase_Row_Usable"))==="TRUE";
+    const actualStarter=phaseUsable?num(val(exact!,ci,"Actual_Starter_Window_Runs")):null;
+    const actualPost=phaseUsable?num(val(exact!,ci,"Actual_Post_Starter_Runs")):null;
+    const phase=objectivePhaseGrade(expectedStarter,expectedPost,actualStarter,actualPost);
+    const direction=text(val(packet,pi,"Direction")).toUpperCase(); const decision=text(val(packet,pi,"Final_Decision")); const blocker=text(val(packet,pi,"Final_Blocker"));
+    const line=num(val(packet,pi,"Primary_Grade_Market_Line")); const source=text(val(packet,pi,"Primary_Grade_Market_Source")); const marketStatus=text(val(packet,pi,"Primary_Grade_Market_Status"));
+    const vehicle=objectiveVehicleCaptureGrade(text(val(packet,pi,"Date")),direction,line,source,marketStatus,actualTotal,phase.grade);
+    const authorization=objectiveAuthorizationGrade(decision,blocker,text(val(packet,pi,"Opener_Chain_State")));
+    set(row,"Exact_Actual_Starter_Window_Runs",actualStarter??"");set(row,"Exact_Actual_Post_Starter_Runs",actualPost??"");set(row,"Exact_Phase_Lineage_Status",phase.lineage);
+    set(row,"Frozen_Direction",direction);set(row,"Frozen_Operational_Decision",decision);set(row,"Frozen_Blocker",blocker);
+    set(row,"Frozen_Primary_Grade_Market_Line",line??"");set(row,"Frozen_Primary_Grade_Market_Source",source);set(row,"Frozen_Primary_Grade_Market_Status",marketStatus);
+    set(row,"Objective_Game_Truth_Grade",objectiveGameTruthGrade(totalAbsError,phase.grade,allocationReversal));set(row,"Objective_Phase_Mechanism_Proxy_Grade",phase.grade);set(row,"Objective_Vehicle_Capture_Grade",vehicle);set(row,"Objective_Authorization_Blocker_Grade",authorization);
+    set(row,"Pregame_Causal_Detail_Status","NOT_FROZEN_CAUSAL_DETAIL_UNAVAILABLE");
+    set(row,"Objective_Grade_Derivability_Status",`GAME_TRUTH=${phase.grade==="PHASE_PROXY_UNGRADABLE"?"PARTIAL_CENTER_ONLY":"DERIVED"};PHASE=${phase.lineage};VEHICLE=${vehicle.startsWith("UNGRADABLE")?"UNGRADABLE":"DERIVED"};AUTHORIZATION=${authorization}`);
+    return row;
+  });
+  return [Array.from(GAME_TRUTH_REPLAY_HEADERS),...output];
+}
+
 async function ensure(workbookId:string,sheets:Array<[string,number]>){const existing=new Set((await getSpreadsheetSheetProperties(workbookId)).map(s=>s.title));for(const [name] of sheets)if(!existing.has(name)){await addSheet(workbookId,name);existing.add(name);}await Promise.all(sheets.map(([name,n])=>expandSheetColumns(workbookId,name,n)));}
 async function optional(workbookId:string,range:string,warnings:string[]){try{return ((await readRange(workbookId,range)).values??[]) as unknown[][];}catch(e){warnings.push(`MISSING_STARTER_WINDOW_SOURCE:${range}:${e instanceof Error?e.message:String(e)}`);return[];}}
 
-export interface StarterWindowDiscriminationResult { status:"success"|"failure"; replay_timestamp_utc:string; eligible_side_rows:number; eligible_games:number; summary_rows_written:number; pair_rows_written:number; exact_lineage_pct:number; active_input:"NO"; commissioning_status:string; warnings:string[]; errors:string[]; }
+export interface StarterWindowDiscriminationResult { status:"success"|"failure"; replay_timestamp_utc:string; eligible_side_rows:number; eligible_games:number; summary_rows_written:number; pair_rows_written:number; objective_postmortem_rows_written?:number; exact_lineage_pct:number; active_input:"NO"; commissioning_status:string; warnings:string[]; errors:string[]; }
 
 export async function runStarterWindowDiscrimination(options:{workbookId?:string}={}):Promise<StarterWindowDiscriminationResult>{
   const workbookId=options.workbookId??WORKBOOK_ID, ts=new Date().toISOString(), warnings:string[]=[], errors:string[]=[];
   try{
-    const [packets,coverage]=await Promise.all([optional(workbookId,`${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}`,warnings),optional(workbookId,"BULLPEN_PHASE_COVERAGE_V1!A1:AZ10000",warnings)]);
+    const [packets,coverage,gameTruth]=await Promise.all([optional(workbookId,`${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}`,warnings),optional(workbookId,"BULLPEN_PHASE_COVERAGE_V1!A1:AZ10000",warnings),optional(workbookId,"GAME_TRUTH_REPLAY_V1!A1:ZZ10000",warnings)]);
     const cuts=deriveCutpoints(packets,coverage); const rows=parseStarterWindowObservations(packets,coverage,cuts,true);
     const sheets:Array<[string,number]>=[[STARTER_WINDOW_ERROR_SHEET,STARTER_WINDOW_ERROR_HEADERS.length],[STARTER_WINDOW_ERROR_SUMMARY_SHEET,STARTER_WINDOW_ERROR_SUMMARY_HEADERS.length],[STARTER_WINDOW_FAILURE_BUCKETS_SHEET,STARTER_WINDOW_FAILURE_BUCKETS_HEADERS.length],[STARTER_WINDOW_PAIR_AUDIT_SHEET,STARTER_WINDOW_PAIR_AUDIT_HEADERS.length],[STARTER_WINDOW_FEATURE_GOV_SHEET,STARTER_WINDOW_FEATURE_GOV_HEADERS.length],[STARTER_WINDOW_REPLAY_SHEET,STARTER_WINDOW_REPLAY_HEADERS.length]];
     await ensure(workbookId,sheets); await Promise.all(sheets.map(([name])=>clearRange(workbookId,`${name}!A1:AZ10000`)));
-    const summaries=summaryRows(rows,ts), pairs=pairRows(rows,ts);
+    const summaries=summaryRows(rows,ts), pairs=pairRows(rows,ts), objectivePostmortem=applyObjectivePostmortemGrades(gameTruth,packets,coverage);
+    await expandSheetColumns(workbookId,"GAME_TRUTH_REPLAY_V1",GAME_TRUTH_REPLAY_HEADERS.length);
     await Promise.all([
       writeRange(workbookId,`${STARTER_WINDOW_ERROR_SHEET}!A1`,[Array.from(STARTER_WINDOW_ERROR_HEADERS),...rows.map(r=>observationRow(r,ts))]),
       writeRange(workbookId,`${STARTER_WINDOW_ERROR_SUMMARY_SHEET}!A1`,[Array.from(STARTER_WINDOW_ERROR_SUMMARY_HEADERS),...summaries]),
@@ -336,8 +523,9 @@ export async function runStarterWindowDiscrimination(options:{workbookId?:string
       writeRange(workbookId,`${STARTER_WINDOW_PAIR_AUDIT_SHEET}!A1`,[Array.from(STARTER_WINDOW_PAIR_AUDIT_HEADERS),...pairs]),
       writeRange(workbookId,`${STARTER_WINDOW_FEATURE_GOV_SHEET}!A1`,[Array.from(STARTER_WINDOW_FEATURE_GOV_HEADERS),...featureGovRows(rows,ts)]),
       writeRange(workbookId,`${STARTER_WINDOW_REPLAY_SHEET}!A1`,[Array.from(STARTER_WINDOW_REPLAY_HEADERS),...rows.map(r=>replayRow(r,ts))]),
+      ...(objectivePostmortem.length>0?[writeRange(workbookId,"GAME_TRUTH_REPLAY_V1!A1",objectivePostmortem)]:[]),
     ]);
     logger.info({side_rows:rows.length,games:new Set(rows.map(r=>r.game_id)).size},"MODULE_38: starter-window discrimination audit written");
-    return{status:"success",replay_timestamp_utc:ts,eligible_side_rows:rows.length,eligible_games:new Set(rows.map(r=>r.game_id)).size,summary_rows_written:summaries.length,pair_rows_written:pairs.length,exact_lineage_pct:rows.length?100:0,active_input:"NO",commissioning_status:STARTER_WINDOW_COMMISSIONING_STATUS,warnings,errors};
+    return{status:"success",replay_timestamp_utc:ts,eligible_side_rows:rows.length,eligible_games:new Set(rows.map(r=>r.game_id)).size,summary_rows_written:summaries.length,pair_rows_written:pairs.length,objective_postmortem_rows_written:Math.max(0,objectivePostmortem.length-1),exact_lineage_pct:rows.length?100:0,active_input:"NO",commissioning_status:STARTER_WINDOW_COMMISSIONING_STATUS,warnings,errors};
   }catch(e){const m=e instanceof Error?e.message:String(e);errors.push(m);logger.error({err:m},"MODULE_38 failed");return{status:"failure",replay_timestamp_utc:ts,eligible_side_rows:0,eligible_games:0,summary_rows_written:0,pair_rows_written:0,exact_lineage_pct:0,active_input:"NO",commissioning_status:STARTER_WINDOW_COMMISSIONING_STATUS,warnings,errors};}
 }

@@ -140,3 +140,30 @@ observable.
 
 No Sept. 18 or later outcome may be used to tune a coefficient or change a
 sample floor.
+
+## September 20 discrimination follow-up
+
+September 20 is appended to these existing Module 37 supporting diagnostics;
+it does not create another module. The slate's high starter-window projection
+error is evaluated alongside the historical low mean bias, not substituted
+for it. A recent sign change therefore cannot authorize a blanket starter
+uplift or downlift. The commissioning question remains whether frozen
+pregame evidence can repeatedly separate starter survival from detonation.
+
+The supporting summaries now report mean calibration, material over- and
+underprojection rates, survival/detonation frequencies, conditional
+detonation severity, and slate-block bootstrap contrasts separately. A
+feature family receives `STABLE_*_SEPARATION` only when its predeclared
+high-versus-low detonation contrast excludes zero at the simultaneous
+99.1667% interval. Point estimates, a single slate, and cells below the frozen
+floor remain descriptive.
+
+`GAME_TRUTH_REPLAY_V1` is the existing full-rep postmortem surface. Schema v74
+adds exact Module 32 starter/post-starter outcomes and objective research-only
+grades for game truth, phase proxy, vehicle capture, and authorization/blocker
+state. These fields do not create a confidence score or decision consumer.
+Vehicle grading requires the prospectively frozen literal executable line;
+reference or proxy lines are never substituted. Passes remain
+`PASS_DEFENSIBLE_INDETERMINATE` unless a frozen blocker can be objectively
+matched to a frozen role/chain state. Chat-only causal explanations remain
+`NOT_FROZEN_CAUSAL_DETAIL_UNAVAILABLE` and are never backfilled.

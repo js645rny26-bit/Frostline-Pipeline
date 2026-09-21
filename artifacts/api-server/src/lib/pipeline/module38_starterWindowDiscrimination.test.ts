@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
 import {
-  deriveCutpoints, parseStarterWindowObservations,
+  applyObjectivePostmortemGrades, deriveCutpoints, parseStarterWindowObservations,
   STARTER_WINDOW_ACTIVE_INPUT, STARTER_WINDOW_COMMISSIONING_STATUS,
   STARTER_WINDOW_ERROR_HEADERS, STARTER_WINDOW_ERROR_SHEET,
   STARTER_WINDOW_ERROR_SUMMARY_HEADERS, STARTER_WINDOW_ERROR_SUMMARY_SHEET,
@@ -12,6 +12,7 @@ import {
   STARTER_WINDOW_FEATURE_GOV_HEADERS, STARTER_WINDOW_FEATURE_GOV_SHEET,
   STARTER_WINDOW_REPLAY_HEADERS, STARTER_WINDOW_REPLAY_SHEET,
 } from "./module38_starterWindowDiscrimination.js";
+import { GAME_TRUTH_REPLAY_HEADERS } from "./module24_postgameDiagnostics.js";
 import { WORKBOOK_SCHEMA, WORKBOOK_SCHEMA_VERSION } from "../workbook/workbookSchema.js";
 
 function row(headers: readonly string[], values: Record<string, unknown>): unknown[] {
@@ -21,6 +22,7 @@ function row(headers: readonly string[], values: Record<string, unknown>): unkno
 const coverageHeaders = [
   "Date","Game_ID","Phase_Row_Usable","Actual_Away_Offense_Starter_Window_Runs",
   "Actual_Home_Offense_Starter_Window_Runs","Actual_Away_Starter_IP","Actual_Home_Starter_IP",
+  "Actual_Starter_Window_Runs","Actual_Post_Starter_Runs",
 ];
 
 function packet(overrides: Record<string, unknown> = {}): unknown[] {
@@ -61,6 +63,7 @@ test("starter-window audit derives side expectations from frozen inputs and exac
   assert.equal(away.workload_outcome,"MATERIALLY_SHORT");
   assert.equal(away.normalized_expected_runs,2.42);
   assert.equal(away.normalized_error,-2.58);
+  assert.equal(away.material_error_state,"UNDERPROJECTED_2PLUS");
   assert.equal(away.projected_damage,0);
   assert.equal(away.damage_bucket,"INSTRUMENTATION_DEAD");
   assert.equal(away.failure_probability_proxy,0.42);
@@ -86,8 +89,8 @@ test("Module 38 governance is research-only", () => {
   assert.equal(STARTER_WINDOW_COMMISSIONING_STATUS,"RESEARCH_ONLY_NOT_COMMISSIONED");
 });
 
-test("schema v73 exposes exactly the six frozen Module 38 research sheets", () => {
-  assert.equal(WORKBOOK_SCHEMA_VERSION,73);
+test("schema v74 exposes exactly the six frozen Module 37 supporting research sheets", () => {
+  assert.equal(WORKBOOK_SCHEMA_VERSION,74);
   for (const [name,headers] of [
     [STARTER_WINDOW_ERROR_SHEET,STARTER_WINDOW_ERROR_HEADERS],
     [STARTER_WINDOW_ERROR_SUMMARY_SHEET,STARTER_WINDOW_ERROR_SUMMARY_HEADERS],
@@ -98,6 +101,43 @@ test("schema v73 exposes exactly the six frozen Module 38 research sheets", () =
   ] as const) {
     assert.deepEqual(WORKBOOK_SCHEMA.find(s=>s.name===name)?.columns.map(c=>c.name),Array.from(headers));
   }
+});
+
+test("objective postmortem grades every frozen game from exact phase evidence without inventing vehicle or causal detail", () => {
+  const frozen=packet({
+    Starter_Attack_Runs:6.4,
+    Traffic_Conversion_Runs:0,
+    HR_XBH_Damage_Runs:0,
+    Bullpen_Continuation_Runs:3.3,
+    Run_Multiplier:1,
+    Direction:"OVER",
+    Final_Decision:"NO_CORE",
+    Final_Blocker:"INSUFFICIENT_PROJECTION_SEPARATION",
+    Primary_Grade_Market_Line:"",
+    Primary_Grade_Market_Source:"HARD_ROCK_FLORIDA_REQUIRED",
+    Primary_Grade_Market_Status:"NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE",
+  });
+  const truth=row(GAME_TRUTH_REPLAY_HEADERS,{
+    Date:"2026-09-01",Game_ID:"20260901_AAA_BBB",Frozen_Projected_Total:9.25,
+    Actual_Total:10,Total_Abs_Error:0.75,Allocation_Sign_Reversal:"FALSE",
+    Replay_Status:"FROZEN_PACKET_AND_FINAL_VERIFIED",Settlement_TS:"2026-09-02T04:00:00.000Z",
+  });
+  const exact=row(coverageHeaders,{
+    Date:"2026-09-01",Game_ID:"20260901_AAA_BBB",Phase_Row_Usable:"TRUE",
+    Actual_Starter_Window_Runs:7,Actual_Post_Starter_Runs:3,
+  });
+  const graded=applyObjectivePostmortemGrades(
+    [Array.from(GAME_TRUTH_REPLAY_HEADERS),truth],
+    [Array.from(PREGAME_PACKET_HISTORY_HEADERS),frozen],
+    [coverageHeaders,exact],
+  );
+  const result=graded[1]!;
+  const at=(name:(typeof GAME_TRUTH_REPLAY_HEADERS)[number])=>result[GAME_TRUTH_REPLAY_HEADERS.indexOf(name)];
+  assert.equal(at("Objective_Game_Truth_Grade"),"GAME_TRUTH_PROXY_MATCH");
+  assert.equal(at("Objective_Phase_Mechanism_Proxy_Grade"),"PHASE_PROXY_MATCH");
+  assert.equal(at("Objective_Vehicle_Capture_Grade"),"UNGRADABLE_NO_LITERAL_EXECUTABLE_LINE");
+  assert.equal(at("Objective_Authorization_Blocker_Grade"),"PASS_DEFENSIBLE_INDETERMINATE");
+  assert.equal(at("Pregame_Causal_Detail_Status"),"NOT_FROZEN_CAUSAL_DETAIL_UNAVAILABLE");
 });
 
 test("active projection and board modules have no Module 38 consumer", () => {
