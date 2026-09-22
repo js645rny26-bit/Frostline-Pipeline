@@ -249,7 +249,7 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
   // Module 04c now follows the slate's team pages before workload and role
   // classification. MLB remains authoritative; a verified team-page starter
   // fills only a genuinely unresolved schedule slot.
-  const startingNineResult = await fetchStartingNine(date).catch((error: unknown) => {
+  const startingNineResult = await fetchStartingNine(date, manifest.games).catch((error: unknown) => {
     logger.warn({ err: error instanceof Error ? error.message : String(error) }, "Pipeline: Starting Nine pre-classification fetch failed");
     return null;
   });

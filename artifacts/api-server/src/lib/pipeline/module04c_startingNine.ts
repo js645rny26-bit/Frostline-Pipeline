@@ -16,7 +16,7 @@
 
 import { logger } from "../../lib/logger.js";
 import { SOURCE_MAPPINGS } from "./config.js";
-import { baseGameId } from "./module01_mlbStatsApi.js";
+import { baseGameId, type ScheduleGameData } from "./module01_mlbStatsApi.js";
 import type { SourceSnapshot } from "./module02_sourceSnapshots.js";
 
 const BASE_URL = "https://mlbstartingnine.com";
@@ -46,6 +46,8 @@ export interface StartingNineGame {
   away_abbr: string | null;
   home_abbr: string | null;
   venue: string;
+  /** Source event timestamp used only to bind same-team doubleheader cards. */
+  scheduled_first_pitch_utc?: string | null;
   lineup_status: "official" | "projected";
   /** Per-side source state retained for research provenance. */
   away_lineup_status?: "official" | "projected";
@@ -288,6 +290,7 @@ const STARTING_NINE_TEAM_SLUGS = buildStartingNineTeamSlugMap();
 
 interface LdJsonEvent {
   venue: string;
+  scheduledFirstPitchUtc: string | null;
   awayName: string;
   homeName: string;
   awayOfficial: boolean;
@@ -339,6 +342,7 @@ function parseLdJsonEvents(html: string): LdJsonEvent[] {
 
       events.push({
         venue,
+        scheduledFirstPitchUtc: typeof ev["startDate"] === "string" ? ev["startDate"] : null,
         awayName: matchup.away,
         homeName: matchup.home,
         awayOfficial: away.official,
@@ -390,6 +394,32 @@ function parseParkFactors(html: string): ParkFactors[] {
     });
   }
   return results;
+}
+
+/**
+ * Bind a Starting Nine slate card to an official game identity.
+ *
+ * A date/team key is sufficient for a normal game. For a doubleheader it is
+ * deliberately insufficient: the source event must expose a first-pitch time
+ * that matches exactly one MLB schedule game. Otherwise the base identity is
+ * retained and the downstream mapper continues to fail closed.
+ */
+export function resolveStartingNineGameId(
+  baseId: string,
+  scheduledFirstPitchUtc: string | null,
+  scheduleGames: readonly ScheduleGameData[],
+): string {
+  const candidates = scheduleGames.filter((game) => baseGameId(game.legacy_game_id) === baseId);
+  if (candidates.length === 1) return candidates[0]!.legacy_game_id;
+  if (candidates.length < 2 || !scheduledFirstPitchUtc) return baseId;
+
+  const sourceTime = Date.parse(scheduledFirstPitchUtc);
+  if (!Number.isFinite(sourceTime)) return baseId;
+  const exact = candidates.filter((game) => {
+    const scheduleTime = game.gameDateTime ? Date.parse(game.gameDateTime) : Number.NaN;
+    return Number.isFinite(scheduleTime) && scheduleTime === sourceTime;
+  });
+  return exact.length === 1 ? exact[0]!.legacy_game_id : baseId;
 }
 
 function emptySplitLine(): StartingNineSplitLine {
@@ -652,7 +682,10 @@ async function fetchStartingNineTeamPages(
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export async function fetchStartingNine(date: string): Promise<StartingNineResult> {
+export async function fetchStartingNine(
+  date: string,
+  scheduleGames: readonly ScheduleGameData[] = [],
+): Promise<StartingNineResult> {
   logger.info({ date }, "MODULE_04c: Fetching starting lineups from mlbstartingnine.com");
 
   const result: StartingNineResult = {
@@ -701,7 +734,10 @@ export async function fetchStartingNine(date: string): Promise<StartingNineResul
 
     const awayAbbr = resolveTeam(ev.awayName);
     const homeAbbr = resolveTeam(ev.homeName);
-    const gameId   = awayAbbr && homeAbbr ? buildGameId(date, awayAbbr, homeAbbr) : null;
+    const sourceBaseId = awayAbbr && homeAbbr ? buildGameId(date, awayAbbr, homeAbbr) : null;
+    const gameId = sourceBaseId
+      ? resolveStartingNineGameId(sourceBaseId, ev.scheduledFirstPitchUtc, scheduleGames)
+      : null;
     if (gameId) result.games_matched++;
 
     // Park factors: same index as event (unique blocks, page order)
@@ -726,6 +762,7 @@ export async function fetchStartingNine(date: string): Promise<StartingNineResul
       away_abbr:      awayAbbr,
       home_abbr:      homeAbbr,
       venue:          ev.venue,
+      scheduled_first_pitch_utc: ev.scheduledFirstPitchUtc,
       lineup_status:  lineupStatus,
       away_lineup_status: ev.awayOfficial ? "official" : "projected",
       home_lineup_status: ev.homeOfficial ? "official" : "projected",
@@ -902,7 +939,9 @@ export function buildStartingNineMap(
   for (const g of result.games) {
     if (!g.game_id) continue;
     const candidates = scheduleByBase.get(baseGameId(g.game_id));
-    if (candidates && candidates.length === 1) {
+    if (candidates?.includes(g.game_id)) {
+      map.set(g.game_id, g);
+    } else if (candidates && candidates.length === 1) {
       map.set(candidates[0]!, g);
     } else if (!candidates) {
       map.set(g.game_id, g);
