@@ -189,6 +189,20 @@ export function assignUniqueScheduleGameIds(games: readonly ScheduleGameData[]):
   return assignUniqueGameIds(games);
 }
 
+/**
+ * StatsAPI can retain a postponed game in the response for its original query
+ * date after MLB has reassigned the game's canonical officialDate. Frostline's
+ * slate identity and all downstream workbook date invariants are keyed to that
+ * canonical officialDate, so adjacent-date rows must fail closed here rather
+ * than reaching publication and contaminating the requested slate.
+ */
+export function selectRequestedOfficialDateGames(
+  games: readonly ScheduleGameData[],
+  requestedDate: string,
+): ScheduleGameData[] {
+  return games.filter((game) => game.officialDate === requestedDate);
+}
+
 export async function fetchMlbSchedule(dateStr: string): Promise<GameScheduleResult> {
   logger.info({ date: dateStr }, "MODULE_01: Fetching MLB schedule");
 
@@ -215,7 +229,26 @@ export async function fetchMlbSchedule(dateStr: string): Promise<GameScheduleRes
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const normalizedGames = assignUniqueScheduleGameIds(allGames.map((g: any) => normalizeGame(g)));
+    const normalizedResponseGames = allGames.map((g: any) => normalizeGame(g));
+    const excludedAdjacentDateGames = normalizedResponseGames.filter(
+      (game) => game.officialDate !== dateStr,
+    );
+    const normalizedGames = assignUniqueScheduleGameIds(
+      selectRequestedOfficialDateGames(normalizedResponseGames, dateStr),
+    );
+
+    if (excludedAdjacentDateGames.length > 0) {
+      logger.warn({
+        requested_date: dateStr,
+        excluded_games: excludedAdjacentDateGames.map((game) => ({
+          gamePk: game.gamePk,
+          game_id: game.legacy_game_id,
+          official_date: game.officialDate,
+          scheduled_utc: game.gameDateTime,
+          status: game.status.detailedState,
+        })),
+      }, "MODULE_01: Excluded games outside requested official date");
+    }
 
     logger.info({ count: normalizedGames.length }, "MODULE_01: Schedule fetched");
 

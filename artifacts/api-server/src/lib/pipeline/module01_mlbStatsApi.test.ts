@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   assignUniqueScheduleGameIds,
   baseGameId,
+  selectRequestedOfficialDateGames,
   type ScheduleGameData,
 } from "./module01_mlbStatsApi.js";
 import { buildStartingNineMap, resolveStartingNineGameId } from "./module04c_startingNine.js";
@@ -68,6 +69,32 @@ test("team-only lineup cards are withheld when a doubleheader makes them ambiguo
   };
   const map = buildStartingNineMap(result, ["20260817_STL_CIN__G1", "20260817_STL_CIN__G2"]);
   assert.equal(map.size, 0);
+});
+
+test("requested slate excludes a postponed game reassigned to an adjacent official date", () => {
+  const current = game(824000, null, "20260922_NYY_BOS");
+  current.officialDate = "2026-09-22";
+  current.gameDateTime = "2026-09-22T23:05:00Z";
+
+  const rescheduled = game(824785, null, "20260923_TOR_BAL");
+  rescheduled.officialDate = "2026-09-23";
+  rescheduled.gameDateTime = "2026-09-22T22:35:00Z";
+  rescheduled.status = {
+    abstractGameState: "Final",
+    detailedState: "Postponed",
+    codedGameState: "D",
+  };
+
+  const selected = selectRequestedOfficialDateGames([current, rescheduled], "2026-09-22");
+  assert.deepEqual(selected.map((entry) => entry.gamePk), [824000]);
+});
+
+test("requested slate fails closed when canonical officialDate is missing", () => {
+  const missingDate = game(824001, null, "00000000_NYY_BOS");
+  missingDate.officialDate = null;
+  missingDate.gameDateTime = "2026-09-22T23:05:00Z";
+
+  assert.deepEqual(selectRequestedOfficialDateGames([missingDate], "2026-09-22"), []);
 });
 
 test("timestamped doubleheader lineup cards bind to their exact official game", () => {
