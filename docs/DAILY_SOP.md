@@ -7,6 +7,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - A prospective publish is allowed only before scheduled first pitch. At or after first pitch, use an explicitly labeled replay or settlement surface.
 - A missing pregame freeze is an `AUDIT_GAP`; it is never reconstructed from current or final information.
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
+- `VEHICLE_LOG` remains the primary Module 17 settlement source. When the last legitimate run occurred before lock and no later publish created a vehicle row, Module 17 may fill only the postmortem publication gap from matching, timestamp-valid `DECISION_AUDIT_LOG` and `PREGAME_PACKET_HISTORY` pregame state. It never creates or rewrites a historical `VEHICLE_LOG` row.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
 
 **Schema v65 - updated 2026-09-15 - board authorization finalizes 30 minutes before first pitch; the independent pregame packet stays refreshable through legitimate pre-first-pitch runs and freezes only at first pitch. Settlement-only slate-size and operator postmortem audits are research-only and have no production consumer. Exact fields live in SCHEMA_REFERENCE.**

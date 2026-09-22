@@ -32,10 +32,17 @@ import {
 } from "./module14_settlementGrading.js";
 import { requiresHardRockFloridaMlbFullGameTotal } from "./marketLineNormalization.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
+import {
+  normalizePregamePacketHistoryRows,
+  pregamePacketHistoryRange,
+  PREGAME_PACKET_HISTORY_HEADERS,
+  PREGAME_PACKET_HISTORY_SHEET,
+} from "./module20a_pregamePacket.js";
 
 const VEHICLE_LOG_SHEET  = "VEHICLE_LOG";
 const POSTMORTEM_SHEET   = "VEHICLE_POSTMORTEM";
 const OUTCOMES_SHEET     = "SHADOW_OUTCOMES";
+const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
 export const VEHICLE_LOG_COLS = 17;
 const LOG_COLS           = VEHICLE_LOG_COLS;
 const POSTMORTEM_COLS    = 19;
@@ -108,6 +115,11 @@ export interface VehicleLogIntegrityResult {
   rows: unknown[][];
   rejected: Array<{ date: string; game_id: string; reason: string }>;
   warnings: string[];
+}
+
+export interface DecisionPacketFallbackResult {
+  rows: unknown[][];
+  rejected: Array<{ game_id: string; reason: string }>;
 }
 
 export interface PostmortemRow {
@@ -287,6 +299,168 @@ export function vehicleSnapshotKey(date: string, gameId: string, packetSnapshotT
 
 function rowString(row: unknown[], index: number): string {
   return String(row[index] ?? "").trim();
+}
+
+function tableHeaderIndex(rows: unknown[][]): Map<string, number> {
+  return new Map((rows[0] ?? []).map((value, index) => [String(value ?? "").trim(), index]));
+}
+
+function tableValue(row: unknown[], index: ReadonlyMap<string, number>, name: string): string {
+  const position = index.get(name);
+  return position === undefined ? "" : String(row[position] ?? "").trim();
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizedDecision(value: string): string {
+  return value.trim().toUpperCase().replace(/\s+/g, "_");
+}
+
+/**
+ * Recover a postmortem-only vehicle observation when the last legitimate
+ * pregame run occurred before board lock and therefore never entered
+ * VEHICLE_LOG. The fallback is admitted only when two independent prospective
+ * surfaces agree: the timestamp-validated DECISION_AUDIT_LOG model snapshot
+ * and the canonical PREGAME_PACKET_HISTORY packet. No settlement columns are
+ * read, and no row is written back to VEHICLE_LOG.
+ *
+ * VEHICLE_LOG remains authoritative whenever it exists. A market-line mismatch
+ * is not used to reject the packet because executable grading is independently
+ * governed by SHADOW_OUTCOMES and must fail closed when literal Hard Rock
+ * evidence is absent. Projection, direction, vehicle, teams, and timing must
+ * still reconcile exactly.
+ */
+export function selectVerifiedDecisionPacketFallbackRows(
+  date: string,
+  existingVehicleRows: unknown[][],
+  decisionAuditRows: unknown[][],
+  pregamePacketRows: unknown[][],
+): DecisionPacketFallbackResult {
+  const rows: unknown[][] = [];
+  const rejected: DecisionPacketFallbackResult["rejected"] = [];
+  const existingGameIds = new Set(existingVehicleRows.map((row) => rowString(row, L_GAME_ID)).filter(Boolean));
+  const auditIndex = tableHeaderIndex(decisionAuditRows);
+  const packetIndex = tableHeaderIndex(pregamePacketRows);
+
+  const requiredAuditHeaders = [
+    "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
+    "Audit_Status", "Frozen_Projected_Total", "Frozen_Model_Direction",
+    "Frozen_Model_Vehicle", "Frozen_Model_TS",
+  ];
+  const requiredPacketHeaders = [
+    "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
+    "Packet_Status", "Projection_Generated_TS", "Final_Decision_TS",
+    "Packet_Snapshot_TS", "Base_Projection", "Market_Line", "Direction",
+    "Vehicle", "Final_Decision", "Final_Blocker", "Confidence", "Variance",
+  ];
+  if (
+    requiredAuditHeaders.some((name) => !auditIndex.has(name))
+    || requiredPacketHeaders.some((name) => !packetIndex.has(name))
+  ) {
+    return { rows, rejected: [{ game_id: "", reason: "FALLBACK_SCHEMA_INCOMPLETE" }] };
+  }
+
+  const latestAuditByGame = new Map<string, { row: unknown[]; timestamp: number }>();
+  for (const row of decisionAuditRows.slice(1)) {
+    if (tableValue(row, auditIndex, "Date") !== date) continue;
+    const gameId = tableValue(row, auditIndex, "Game_ID");
+    if (!gameId || existingGameIds.has(gameId) || !gameIdDateMatchesDate(gameId, date)) continue;
+    const status = tableValue(row, auditIndex, "Audit_Status");
+    if (!new Set(["OPEN", "FROZEN", "SETTLED"]).has(status)) continue;
+    const firstPitchMs = Date.parse(tableValue(row, auditIndex, "Scheduled_First_Pitch"));
+    const modelTsMs = Date.parse(tableValue(row, auditIndex, "Frozen_Model_TS"));
+    if (!Number.isFinite(firstPitchMs) || !Number.isFinite(modelTsMs) || modelTsMs >= firstPitchMs) {
+      rejected.push({ game_id: gameId, reason: "DECISION_AUDIT_NOT_PROSPECTIVE" });
+      continue;
+    }
+    const existing = latestAuditByGame.get(gameId);
+    if (!existing || modelTsMs > existing.timestamp) latestAuditByGame.set(gameId, { row, timestamp: modelTsMs });
+  }
+
+  const latestPacketByGame = new Map<string, { row: unknown[]; timestamp: number }>();
+  for (const row of pregamePacketRows.slice(1)) {
+    if (tableValue(row, packetIndex, "Date") !== date) continue;
+    const gameId = tableValue(row, packetIndex, "Game_ID");
+    if (!gameId || existingGameIds.has(gameId) || !gameIdDateMatchesDate(gameId, date)) continue;
+    const status = tableValue(row, packetIndex, "Packet_Status");
+    if (status !== "OPEN_PROSPECTIVE" && status !== "FROZEN_PREGAME") continue;
+    const firstPitchMs = Date.parse(tableValue(row, packetIndex, "Scheduled_First_Pitch"));
+    const snapshotTsMs = Date.parse(tableValue(row, packetIndex, "Packet_Snapshot_TS"));
+    const projectionTsMs = Date.parse(tableValue(row, packetIndex, "Projection_Generated_TS"));
+    const decisionTsMs = Date.parse(tableValue(row, packetIndex, "Final_Decision_TS"));
+    if (
+      !Number.isFinite(firstPitchMs)
+      || !Number.isFinite(snapshotTsMs)
+      || !Number.isFinite(projectionTsMs)
+      || !Number.isFinite(decisionTsMs)
+      || snapshotTsMs >= firstPitchMs
+      || projectionTsMs >= firstPitchMs
+      || decisionTsMs >= firstPitchMs
+    ) {
+      rejected.push({ game_id: gameId, reason: "PREGAME_PACKET_NOT_PROSPECTIVE" });
+      continue;
+    }
+    const existing = latestPacketByGame.get(gameId);
+    if (!existing || snapshotTsMs > existing.timestamp) latestPacketByGame.set(gameId, { row, timestamp: snapshotTsMs });
+  }
+
+  for (const [gameId, audit] of latestAuditByGame) {
+    const packet = latestPacketByGame.get(gameId);
+    if (!packet) {
+      rejected.push({ game_id: gameId, reason: "MATCHING_PREGAME_PACKET_MISSING" });
+      continue;
+    }
+    const auditRow = audit.row;
+    const packetRow = packet.row;
+    const auditTotal = finiteNumber(tableValue(auditRow, auditIndex, "Frozen_Projected_Total"));
+    const packetTotal = finiteNumber(tableValue(packetRow, packetIndex, "Base_Projection"));
+    const auditDirection = tableValue(auditRow, auditIndex, "Frozen_Model_Direction");
+    const packetDirection = tableValue(packetRow, packetIndex, "Direction");
+    const auditVehicle = tableValue(auditRow, auditIndex, "Frozen_Model_Vehicle");
+    const packetVehicle = tableValue(packetRow, packetIndex, "Vehicle");
+    const fieldsAgree =
+      auditTotal !== null
+      && packetTotal !== null
+      && Math.abs(auditTotal - packetTotal) < 0.000001
+      && auditDirection === packetDirection
+      && auditVehicle === packetVehicle
+      && tableValue(auditRow, auditIndex, "Away_Team") === tableValue(packetRow, packetIndex, "Away_Team")
+      && tableValue(auditRow, auditIndex, "Home_Team") === tableValue(packetRow, packetIndex, "Home_Team")
+      && tableValue(auditRow, auditIndex, "Scheduled_First_Pitch")
+        === tableValue(packetRow, packetIndex, "Scheduled_First_Pitch");
+    const finalDecision = normalizedDecision(tableValue(packetRow, packetIndex, "Final_Decision"));
+    if (!fieldsAgree || (finalDecision !== "CORE" && finalDecision !== "NO_CORE")) {
+      rejected.push({ game_id: gameId, reason: "DECISION_PACKET_LINEAGE_MISMATCH" });
+      continue;
+    }
+
+    const packetSnapshotTs = tableValue(packetRow, packetIndex, "Packet_Snapshot_TS");
+    rows.push([
+      date,
+      gameId,
+      tableValue(packetRow, packetIndex, "Away_Team"),
+      tableValue(packetRow, packetIndex, "Home_Team"),
+      packetVehicle,
+      finiteNumber(tableValue(packetRow, packetIndex, "Market_Line")) ?? "",
+      packetDirection,
+      packetTotal,
+      finiteNumber(tableValue(packetRow, packetIndex, "Variance")) ?? "",
+      finalDecision,
+      tableValue(packetRow, packetIndex, "Final_Blocker"),
+      "",
+      finiteNumber(tableValue(packetRow, packetIndex, "Confidence")) ?? "",
+      packetSnapshotTs,
+      packetSnapshotTs,
+      vehicleSnapshotKey(date, gameId, packetSnapshotTs),
+      "CANONICAL_DECISION_PACKET_FALLBACK",
+    ]);
+  }
+
+  return { rows, rejected };
 }
 
 function hasCanonicalVehicleSnapshotKey(row: unknown[]): boolean {
@@ -571,9 +745,43 @@ export async function runPostmortem(
     return { ...empty("failure"), errors };
   }
 
-  if (vehicleRows.length === 0) {
-    return empty("success");
+  // A final pregame run can legitimately occur before board lock with no later
+  // publish. In that case VEHICLE_LOG has no row even though both the decision
+  // audit and canonical packet preserve matching, prospective model state.
+  // Recover only that verified pair for postmortem publication; never write it
+  // into VEHICLE_LOG and never inspect postgame audit fields.
+  try {
+    const [auditResponse, packetResponse] = await Promise.all([
+      readRange(wbId, `${DECISION_AUDIT_SHEET}!A1:BL5000`),
+      readRange(wbId, `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(5000)}`),
+    ]);
+    const normalizedPackets = normalizePregamePacketHistoryRows(
+      (packetResponse.values ?? []) as unknown[][],
+    );
+    const fallback = selectVerifiedDecisionPacketFallbackRows(
+      date,
+      vehicleRows,
+      (auditResponse.values ?? []) as unknown[][],
+      [Array.from(PREGAME_PACKET_HISTORY_HEADERS), ...normalizedPackets.rows],
+    );
+    if (fallback.rows.length > 0) {
+      vehicleRows.push(...fallback.rows as string[][]);
+      logger.info(
+        { games: fallback.rows.map((row) => String(row[L_GAME_ID] ?? "")) },
+        "MODULE_17: Verified decision/packet fallback rows admitted for postmortem only",
+      );
+    }
+    for (const rejection of fallback.rejected) {
+      logger.warn(rejection, "MODULE_17: Decision/packet postmortem fallback rejected");
+    }
+  } catch (err: unknown) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "MODULE_17: Decision/packet fallback unavailable; canonical VEHICLE_LOG rows remain authoritative",
+    );
   }
+
+  if (vehicleRows.length === 0) return empty("success");
 
   // ── Read SHADOW_OUTCOMES ──
   type OutcomeData = CanonicalOutcomeMarketGrade;

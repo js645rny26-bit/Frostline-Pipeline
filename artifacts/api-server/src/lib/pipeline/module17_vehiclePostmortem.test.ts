@@ -6,12 +6,14 @@ import {
   gradeTicket,
   isFinalizedVehiclePublication,
   postmortemRowToValues,
+  selectVerifiedDecisionPacketFallbackRows,
   selectNewImmutableVehicleRows,
   selectCanonicalVehicleRows,
   vehicleSnapshotKey,
   type PostmortemRow,
 } from "./module17_vehiclePostmortem.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
+import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
 
 test("vehicle postmortem preserves Over and Under pushes", () => {
   assert.deepEqual(gradeTicket("OVER", 9, 9), {
@@ -232,4 +234,105 @@ test("postmortem rows match the current 19-column workbook schema", () => {
   assert.equal(values[4], row.active_vehicle_label);
   assert.equal(values[8], row.packet_projected_total);
   assert.equal(values[18], row.graded_ts);
+});
+
+function rowFromHeaders(headers: readonly string[], fields: Record<string, unknown>): unknown[] {
+  return headers.map((header) => fields[header] ?? "");
+}
+
+const auditHeaders = [
+  "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
+  "Audit_Status", "Frozen_Projected_Total", "Frozen_Market_Line",
+  "Frozen_Model_Direction", "Frozen_Model_Vehicle", "Frozen_Model_Confidence",
+  "Frozen_Model_Blocker", "Frozen_Model_TS",
+];
+
+function fallbackAudit(overrides: Record<string, unknown> = {}): unknown[] {
+  return rowFromHeaders(auditHeaders, {
+    Date: "2026-09-21", Game_ID: "20260921_WSN_DET", Away_Team: "WSN", Home_Team: "DET",
+    Scheduled_First_Pitch: "2026-09-21T22:40:00.000Z", Audit_Status: "FROZEN",
+    Frozen_Projected_Total: 8.4, Frozen_Market_Line: 7.5, Frozen_Model_Direction: "OVER",
+    Frozen_Model_Vehicle: "GAME_TOTAL", Frozen_Model_Confidence: 0.4,
+    Frozen_Model_Blocker: "INSUFFICIENT_PROJECTION_SEPARATION",
+    Frozen_Model_TS: "2026-09-21T22:06:56.904Z", ...overrides,
+  });
+}
+
+function fallbackPacket(overrides: Record<string, unknown> = {}): unknown[] {
+  return rowFromHeaders(PREGAME_PACKET_HISTORY_HEADERS, {
+    Date: "2026-09-21", Game_ID: "20260921_WSN_DET", Away_Team: "WSN", Home_Team: "DET",
+    Scheduled_First_Pitch: "2026-09-21T22:40:00.000Z", Packet_Status: "FROZEN_PREGAME",
+    Projection_Generated_TS: "2026-09-21T22:06:56.904Z",
+    Final_Decision_TS: "2026-09-21T22:06:56.904Z",
+    Packet_Snapshot_TS: "2026-09-21T22:07:18.044Z", Base_Projection: 8.4,
+    Market_Line: 8.5, Direction: "OVER", Vehicle: "GAME_TOTAL", Final_Decision: "NO_CORE",
+    Final_Blocker: "INSUFFICIENT_PROJECTION_SEPARATION", Confidence: 0.4, Variance: 0.9,
+    ...overrides,
+  });
+}
+
+test("verified pre-lock decision and packet fill the postmortem gap without requiring market-line agreement", () => {
+  const parsed = selectVerifiedDecisionPacketFallbackRows(
+    "2026-09-21",
+    [],
+    [auditHeaders, fallbackAudit()],
+    [Array.from(PREGAME_PACKET_HISTORY_HEADERS), fallbackPacket()],
+  );
+  assert.deepEqual(parsed.rejected, []);
+  assert.equal(parsed.rows.length, 1);
+  assert.equal(parsed.rows[0]?.[1], "20260921_WSN_DET");
+  assert.equal(parsed.rows[0]?.[5], 8.5);
+  assert.equal(parsed.rows[0]?.[7], 8.4);
+  assert.equal(parsed.rows[0]?.[9], "NO_CORE");
+  assert.equal(parsed.rows[0]?.[16], "CANONICAL_DECISION_PACKET_FALLBACK");
+});
+
+test("an existing VEHICLE_LOG row always suppresses the postmortem fallback", () => {
+  const existing = [["2026-09-21", "20260921_WSN_DET"]];
+  const parsed = selectVerifiedDecisionPacketFallbackRows(
+    "2026-09-21",
+    existing,
+    [auditHeaders, fallbackAudit()],
+    [Array.from(PREGAME_PACKET_HISTORY_HEADERS), fallbackPacket()],
+  );
+  assert.deepEqual(parsed.rows, []);
+  assert.deepEqual(parsed.rejected, []);
+});
+
+test("post-first-pitch decision or packet evidence is rejected fail-closed", () => {
+  const lateAudit = selectVerifiedDecisionPacketFallbackRows(
+    "2026-09-21", [],
+    [auditHeaders, fallbackAudit({ Frozen_Model_TS: "2026-09-21T22:40:00.000Z" })],
+    [Array.from(PREGAME_PACKET_HISTORY_HEADERS), fallbackPacket()],
+  );
+  assert.deepEqual(lateAudit.rows, []);
+  assert.deepEqual(lateAudit.rejected, [{
+    game_id: "20260921_WSN_DET", reason: "DECISION_AUDIT_NOT_PROSPECTIVE",
+  }]);
+
+  const latePacket = selectVerifiedDecisionPacketFallbackRows(
+    "2026-09-21", [],
+    [auditHeaders, fallbackAudit()],
+    [Array.from(PREGAME_PACKET_HISTORY_HEADERS), fallbackPacket({
+      Packet_Snapshot_TS: "2026-09-21T22:40:00.000Z",
+    })],
+  );
+  assert.deepEqual(latePacket.rows, []);
+  assert.deepEqual(latePacket.rejected, [{
+    game_id: "20260921_WSN_DET", reason: "PREGAME_PACKET_NOT_PROSPECTIVE",
+  }, {
+    game_id: "20260921_WSN_DET", reason: "MATCHING_PREGAME_PACKET_MISSING",
+  }]);
+});
+
+test("decision and packet lineage disagreement cannot create a fallback row", () => {
+  const parsed = selectVerifiedDecisionPacketFallbackRows(
+    "2026-09-21", [],
+    [auditHeaders, fallbackAudit()],
+    [Array.from(PREGAME_PACKET_HISTORY_HEADERS), fallbackPacket({ Base_Projection: 8.41 })],
+  );
+  assert.deepEqual(parsed.rows, []);
+  assert.deepEqual(parsed.rejected, [{
+    game_id: "20260921_WSN_DET", reason: "DECISION_PACKET_LINEAGE_MISMATCH",
+  }]);
 });
