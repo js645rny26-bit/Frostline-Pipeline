@@ -813,22 +813,37 @@ export function applyStartingNineStarterFallbacks(
       teamAbbr: string,
       opponentAbbr: string,
     ): typeof game.awayProbablePitcher => {
-      if (current.id && current.fullName) return current;
       const page = pageByGameTeam.get(`${base}|${teamAbbr}`);
-      if (!page
-        || page.source_status === "REJECTED"
-        || page.opponent_abbr !== opponentAbbr
-        || page.team_side !== side
-        || page.starting_pitcher_identity_status !== "MLB_ID_VERIFIED"
-        || !page.starting_pitcher_id
-        || !page.starting_pitcher_name
-        || !page.starting_pitcher_hand) return current;
-      if (current.id && current.id !== page.starting_pitcher_id) {
+      const validPage = page
+        && page.source_status !== "REJECTED"
+        && page.opponent_abbr === opponentAbbr
+        && page.team_side === side
+        && page.starting_pitcher_identity_status === "MLB_ID_VERIFIED"
+        && page.starting_pitcher_id
+        && page.starting_pitcher_name
+        && page.starting_pitcher_hand
+        ? page
+        : null;
+      if (current.id && current.fullName) {
+        if (validPage && current.id !== validPage.starting_pitcher_id) {
+          warnings.push(
+            `${game.legacy_game_id} ${side}: verified Starting Nine starter `
+            + `${validPage.starting_pitcher_name} (${validPage.starting_pitcher_id}) conflicts with `
+            + `MLB probable ${current.fullName} (${current.id}); MLB retained`,
+          );
+        }
+        return current;
+      }
+      if (!validPage) return current;
+      const pagePitcherId = validPage.starting_pitcher_id!;
+      const pagePitcherName = validPage.starting_pitcher_name!;
+      const pagePitcherHand = validPage.starting_pitcher_hand!;
+      if (current.id && current.id !== pagePitcherId) {
         warnings.push(`${game.legacy_game_id} ${side}: partial MLB identity conflicts with Starting Nine; fallback withheld`);
         return current;
       }
       if (current.fullName
-        && normalizePersonName(current.fullName) !== normalizePersonName(page.starting_pitcher_name)) {
+        && normalizePersonName(current.fullName) !== normalizePersonName(pagePitcherName)) {
         warnings.push(`${game.legacy_game_id} ${side}: partial MLB name conflicts with Starting Nine; fallback withheld`);
         return current;
       }
@@ -836,19 +851,19 @@ export function applyStartingNineStarterFallbacks(
         game_id: game.legacy_game_id,
         team_abbr: teamAbbr,
         team_side: side,
-        pitcher_id: page.starting_pitcher_id,
-        pitcher_name: page.starting_pitcher_name,
-        pitcher_hand: page.starting_pitcher_hand,
-        source_url: page.source_url,
-        observed_ts_utc: page.observed_ts_utc,
+        pitcher_id: pagePitcherId,
+        pitcher_name: pagePitcherName,
+        pitcher_hand: pagePitcherHand,
+        source_url: validPage.source_url,
+        observed_ts_utc: validPage.observed_ts_utc,
       });
       return {
-        id: page.starting_pitcher_id,
-        fullName: page.starting_pitcher_name,
-        hand: page.starting_pitcher_hand,
+        id: pagePitcherId,
+        fullName: pagePitcherName,
+        hand: pagePitcherHand,
         source: "MLB_STARTING_NINE_TEAM_PAGE",
-        sourceObservedTs: page.observed_ts_utc,
-        sourceUrl: page.source_url,
+        sourceObservedTs: validPage.observed_ts_utc,
+        sourceUrl: validPage.source_url,
       };
     };
 

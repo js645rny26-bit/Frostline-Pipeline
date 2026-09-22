@@ -407,6 +407,7 @@ export async function repairWorkbookSchemaReference(
         "v68 (2026-09-18): Patch B adds lineup-state provenance, sample-adequacy governance, deterministic identity hygiene, cumulative-history reconciliation, and hold-state sentinels while all damage mapping remains uncommissioned.",
         "v69 (2026-09-19): Module 36 adds the prospective research-only Active Pitching Inventory, separating named starter/opener, pregame source-supported bulk/swing identity when available, and true generic bullpen exposure. Availability and history alone remain roster-history-only; historical chains cannot be reconstructed from postgame order; active projections remain unchanged.",
         "v70 (2026-09-20): Module 37 starter-window support adds a settlement-only discrimination audit using immutable pregame packets and exact play-by-play current-pitcher run attribution by batting side. It separates mean calibration from survival/failure-tail discrimination, marks unavailable probabilities and dead damage instrumentation explicitly, and has no active consumer.",
+        "v75 (2026-09-22): Module 03 repairs the existing active starter-role/workload chain. Listed probable starters are no longer relabeled OPENER/BULK from recent pitch-count magnitude; D-1 prior starts independently estimate numeric workload. No sheet or coefficient was added, and frozen packets remain immutable.",
     ],
     [
       "Workbook_Purpose",

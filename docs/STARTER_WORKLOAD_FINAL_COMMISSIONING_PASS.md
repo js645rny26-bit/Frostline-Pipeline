@@ -1,5 +1,20 @@
 # Starter Workload repair — final commissioning pass
 
+## 2026-09-22 production lineage repair
+
+Schema v75 commissions the unchanged `PITCHER_SPECIFIC_WORKLOAD_CANDIDATE_V1`
+formula inside the existing Module 03 workload slot after the historical
+prospective replay reached 262 conventional starters (candidate MAE 1.031,
+legacy MAE 1.165; paired Wilcoxon p=0.008245). The trigger was a separate,
+direct production defect: Module 03 inferred `OPENER`/`BULK` from recent pitch
+magnitude and then manufactured 1.2/3.0 IP from that inferred label.
+
+The repair does not tune a coefficient. Source assignment now owns role truth;
+D-1 prior starts own numeric workload. Existing frozen packets and the Module
+30 legacy comparison remain immutable. Explicit opener/bulk assignment still
+requires a genuine pregame role source; roster plausibility or low pitch count
+is insufficient.
+
 Candidate base: `0bde8e3`
 
 Commissioning state: **HOLD — FIRST LIVE SHADOW SETTLED; CONVENTIONAL DISCRIMINATION NOT YET INTERPRETABLE**

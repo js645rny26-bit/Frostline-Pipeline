@@ -5,7 +5,8 @@
 
 import { logger } from "../../lib/logger.js";
 import type { GameScheduleResult } from "./module01_mlbStatsApi.js";
-import type { WorkloadResult } from "./module02_pitcherWorkload.js";
+import type { PitcherWorkloadData, WorkloadResult } from "./module02_pitcherWorkload.js";
+import { estimatePitcherSpecificWorkload } from "./module03_numericWorkload.js";
 
 export interface PitcherClassificationData {
   player_id: number | null;
@@ -39,10 +40,12 @@ function classifySinglePitcher(
   pitcherId: number | null,
   pitcherName: string | null,
   hand: string | null,
-  workloadData: { status?: string; rolling_stats?: { l30?: { appearances?: number; avg_pitches_per_appearance?: number } }; recent_games_count?: number } | undefined,
+  workloadData: PitcherWorkloadData | undefined,
   identitySource: "MLB_STATS_API" | "MLB_STARTING_NINE_TEAM_PAGE" | undefined,
   identitySourceObservedTs: string | null | undefined,
   identitySourceUrl: string | null | undefined,
+  gameDate: string,
+  dataThroughDate: string,
 ): PitcherClassificationData {
   if (!pitcherId || !pitcherName) {
     return {
@@ -83,65 +86,35 @@ function classifySinglePitcher(
     };
   }
 
-  // active_wide_window: 30-day window was empty but 60-day had data — genuine IL-return signal.
-  if (workloadData.status === "active_wide_window") {
-    const l30 = workloadData.rolling_stats?.l30;
-    const avgPitches = l30?.avg_pitches_per_appearance ?? 85;
-    const appearances = l30?.appearances ?? 0;
-    const expectedPitches = avgPitches > 0 ? Math.min(avgPitches + 10, 100) : 85;
-    const expectedInnings = parseFloat((expectedPitches / 15).toFixed(1));
-    return {
-      player_id: pitcherId,
-      name: pitcherName,
-      hand,
-      role: "CONVENTIONAL_STARTER",
-      role_confidence: "medium",
-      workload_flags: ["RETURNING_FROM_IL"],
-      expected_pitches: expectedPitches,
-      expected_innings: expectedInnings,
-      reasoning: `No pitches in last 30 days but active in 60-day window (${appearances} appearances); probable IL returnee`,
-      identity_source: identitySource ?? "MLB_STATS_API",
-      identity_source_observed_ts: identitySourceObservedTs ?? null,
-      identity_source_url: identitySourceUrl ?? null,
-    };
-  }
-
   const l30 = workloadData.rolling_stats?.l30;
-  const avgPitches = l30?.avg_pitches_per_appearance ?? 0;
   const appearances = l30?.appearances ?? 0;
   const recentGames = workloadData.recent_games_count ?? 0;
 
   const flags: string[] = [];
-  let role = "CONVENTIONAL_STARTER";
-  let confidence = "high";
-  let reasoning = "Probable pitcher with recent workload data";
-
-  // Opener heuristic: very low avg pitch count suggests opener role
-  if (avgPitches > 0 && avgPitches < 40) {
-    role = "OPENER";
-    confidence = "medium";
-    reasoning = `Low avg pitch count (${avgPitches}) suggests opener role`;
-  }
-  // Bulk heuristic: moderate pitch count
-  else if (avgPitches >= 40 && avgPitches < 65) {
-    role = "BULK";
-    confidence = "medium";
-    reasoning = `Moderate avg pitch count (${avgPitches}) suggests bulk/piggyback role`;
-  }
-  // Standard starter
-  else if (avgPitches >= 65 || appearances > 0) {
-    role = "CONVENTIONAL_STARTER";
-    confidence = appearances > 2 ? "high" : "medium";
-    reasoning = `Typical starter workload pattern (${avgPitches} avg pitches, ${appearances} recent appearances)`;
-  }
+  const role = "CONVENTIONAL_STARTER";
+  const confidence = identitySource === "MLB_STARTING_NINE_TEAM_PAGE" ? "medium" : "high";
 
   // Workload flags
   if (recentGames < 3 && appearances > 0) {
     flags.push("RESTRICTED_WORKLOAD");
   }
+  if (workloadData.status === "active_wide_window") {
+    flags.push("RETURNING_FROM_IL");
+  }
 
-  const expectedPitches = role === "OPENER" ? 25 : role === "BULK" ? 55 : 92;
-  const expectedInnings = role === "OPENER" ? 1.2 : role === "BULK" ? 3.0 : 6.0;
+  // Role truth and numeric workload are intentionally independent. A pitcher
+  // named in the probable-starter slot is a starter assignment; low recent
+  // pitch volume alone is not evidence that today's plan is OPENER or BULK.
+  // The already-frozen D-1 workload estimator supplies the numeric innings
+  // and pitches from prior starts without changing the assignment label.
+  const workloadEstimate = estimatePitcherSpecificWorkload(
+    role,
+    workloadData.status === "active_wide_window" ? 85 : 92,
+    workloadData.status === "active_wide_window" ? 5.5 : 6,
+    gameDate,
+    dataThroughDate,
+    workloadData,
+  );
 
   return {
     player_id: pitcherId,
@@ -150,9 +123,11 @@ function classifySinglePitcher(
     role,
     role_confidence: confidence,
     workload_flags: flags,
-    expected_pitches: expectedPitches,
-    expected_innings: expectedInnings,
-    reasoning,
+    expected_pitches: workloadEstimate.expected_pitches,
+    expected_innings: workloadEstimate.expected_innings,
+    reasoning:
+      `Listed probable starter; role is not inferred from pitch-count magnitude. `
+      + `Independent workload: ${workloadEstimate.notes}`,
     identity_source: identitySource ?? "MLB_STATS_API",
     identity_source_observed_ts: identitySourceObservedTs ?? null,
     identity_source_url: identitySourceUrl ?? null,
@@ -179,6 +154,8 @@ export function classifyPitcherRoles(
       game.awayProbablePitcher.source,
       game.awayProbablePitcher.sourceObservedTs,
       game.awayProbablePitcher.sourceUrl,
+      game.officialDate ?? manifest.date,
+      workload.data_through_date,
     );
     const homePitcher = classifySinglePitcher(
       game.homeProbablePitcher.id,
@@ -188,6 +165,8 @@ export function classifyPitcherRoles(
       game.homeProbablePitcher.source,
       game.homeProbablePitcher.sourceObservedTs,
       game.homeProbablePitcher.sourceUrl,
+      game.officialDate ?? manifest.date,
+      workload.data_through_date,
     );
 
     if (awayPitcher.role === "UNRESOLVED") unresolved++;

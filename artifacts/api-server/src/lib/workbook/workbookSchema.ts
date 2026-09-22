@@ -240,8 +240,13 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      GAME_TRUTH_REPLAY postmortem surfaces with material-error states,
  *      slate-block tail/discrimination intervals, and objective all-game
  *      truth/phase/vehicle/authorization grades. No active consumer exists.
+ *  v75 (2026-09-22): repairs the existing active starter-role/workload path.
+ *      A listed probable starter is no longer relabeled OPENER/BULK from
+ *      recent pitch-count magnitude; D-1 prior starts independently estimate
+ *      numeric workload. No sheet or column is added and no coefficient is
+ *      tuned from outcomes.
  */
-export const WORKBOOK_SCHEMA_VERSION = 74;
+export const WORKBOOK_SCHEMA_VERSION = 75;
 
 export interface ColumnDef {
   name: string;

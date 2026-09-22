@@ -158,6 +158,7 @@ test("MLB starter authority is never overwritten and ambiguous doubleheaders fai
   const authoritative = applyStartingNineStarterFallbacks(manifest(scheduleGame(undefined, true)), result());
   assert.equal(authoritative.applied.length, 0);
   assert.equal(authoritative.manifest.games[0]!.homeProbablePitcher.fullName, "MLB Named Starter");
+  assert.match(authoritative.warnings.join(" "), /conflicts with MLB probable/i);
 
   const g1 = scheduleGame("20260920_SFG_LAD__G1");
   const g2 = { ...scheduleGame("20260920_SFG_LAD__G2"), gamePk: 999002, gameNumber: 2 };

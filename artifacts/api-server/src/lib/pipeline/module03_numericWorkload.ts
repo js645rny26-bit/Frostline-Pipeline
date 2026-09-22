@@ -1,9 +1,10 @@
 /**
- * Module 03 numeric starter-workload candidate.
+ * Module 03 numeric starter-workload estimator.
  *
- * This is deliberately narrower than role classification.  Role remains a
- * descriptive label; official cutoff-safe MLB game-log evidence estimates the
- * workload.  Role supplies only the prior, bounds, and missing-data fallback.
+ * This is deliberately separate from role classification. Official cutoff-
+ * safe MLB game-log evidence estimates workload; a listed starter cannot be
+ * relabeled OPENER/BULK merely because recent pitch volume was low. Explicit
+ * source-supported atypical roles may still supply a prior/bound in future.
  */
 
 import type {

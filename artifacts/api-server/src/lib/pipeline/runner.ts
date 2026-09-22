@@ -1216,10 +1216,9 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     logger.warn({ warning }, "Full pipeline: Module 20b operator evidence warning");
   }
 
-  // Module 02g is a frozen, price-blind workload description for later
-  // allocation replay. It receives the same pregame-safe game-log snapshot
-  // used by role classification, but is not passed into Module 09 or board
-  // authorization and therefore cannot alter today's active Expected_IP.
+  // Module 02g freezes the source lineage for the same D-1 pitcher-specific
+  // workload now consumed by Module 03. It has no independent adjustment and
+  // is not passed into Module 09 or authorization as a second workload vote.
   const workloadStatesByGame = buildWorkloadGameStates(
     slate.games,
     slate.workload,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { GameScheduleResult } from "./module01_mlbStatsApi.js";
 import type { PitcherWorkloadData, WorkloadResult } from "./module02_pitcherWorkload.js";
+import { buildWorkloadState } from "./module02g_workloadState.js";
 import { classifyPitcherRoles } from "./module03_pitcherClassification.js";
 
 function pitcher(playerId: number, status: string, innings: number[], pitches: number[]): PitcherWorkloadData {
@@ -54,7 +55,7 @@ const manifest: GameScheduleResult = {
   }],
 };
 
-test("Module 03 preserves the active legacy workload while the candidate remains shadow-only", () => {
+test("Module 03 keeps listed-starter role truth separate from pitcher-specific workload", () => {
   const workload: WorkloadResult = {
     retrieval_timestamp_utc: "2026-09-09T12:00:00.000Z",
     retrieval_source: "mlb_stats_api",
@@ -68,11 +69,54 @@ test("Module 03 preserves the active legacy workload while the candidate remains
 
   const result = classifyPitcherRoles(manifest, workload).games[0]!;
   assert.equal(result.away_pitcher.role, "CONVENTIONAL_STARTER");
-  assert.equal(result.away_pitcher.expected_innings, 6);
-  assert.equal(result.away_pitcher.expected_pitches, 92);
-  assert.doesNotMatch(result.away_pitcher.reasoning, /PITCHER_SPECIFIC/);
+  assert.equal(result.away_pitcher.expected_innings, 4.15);
+  assert.equal(result.away_pitcher.expected_pitches, 63);
+  assert.match(result.away_pitcher.reasoning, /role is not inferred from pitch-count magnitude/i);
   assert.ok(!result.away_pitcher.workload_flags.includes("PITCHER_SPECIFIC_WORKLOAD"));
   assert.equal(result.home_pitcher.expected_innings, 5.5);
   assert.equal(result.home_pitcher.expected_pitches, 85);
   assert.deepEqual(result.home_pitcher.workload_flags, ["NO_RECENT_DATA"]);
+});
+
+test("Module 03 never manufactures OPENER or BULK from low recent pitch magnitude", () => {
+  const workload: WorkloadResult = {
+    retrieval_timestamp_utc: "2026-09-09T12:00:00.000Z",
+    retrieval_source: "mlb_stats_api",
+    data_through_date: "2026-09-08",
+    status: "success",
+    pitchers: [
+      pitcher(10, "active", [2, 2.333, 2.667], [30, 35, 39]),
+      pitcher(20, "active", [3.667, 4, 4.333], [50, 55, 60]),
+    ],
+  };
+
+  const result = classifyPitcherRoles(manifest, workload).games[0]!;
+  assert.equal(result.away_pitcher.role, "CONVENTIONAL_STARTER");
+  assert.equal(result.home_pitcher.role, "CONVENTIONAL_STARTER");
+  assert.notEqual(result.away_pitcher.expected_innings, 1.2);
+  assert.notEqual(result.home_pitcher.expected_innings, 3);
+  assert.match(result.away_pitcher.reasoning, /Independent workload/);
+  assert.match(result.home_pitcher.reasoning, /Independent workload/);
+});
+
+test("Module 02g freezes the commissioned workload lineage without estimating it twice", () => {
+  const evidence = pitcher(10, "active", [5, 4.667, 4.333, 4, 3.667], [75, 70, 67, 64, 60]);
+  const workload: WorkloadResult = {
+    retrieval_timestamp_utc: "2026-09-09T12:00:00.000Z",
+    retrieval_source: "mlb_stats_api",
+    data_through_date: "2026-09-08",
+    status: "success",
+    pitchers: [evidence, pitcher(20, "no_games_in_window", [], [])],
+  };
+  const active = classifyPitcherRoles(manifest, workload).games[0]!.away_pitcher;
+  const lineage = buildWorkloadState(
+    active.role,
+    active.expected_innings,
+    active.expected_pitches,
+    manifest.date,
+    workload.data_through_date,
+    evidence,
+  );
+  assert.equal(lineage.projected_ip_shadow, active.expected_innings);
+  assert.equal(lineage.projected_pitches_shadow, active.expected_pitches);
 });

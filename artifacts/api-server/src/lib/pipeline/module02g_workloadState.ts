@@ -1,9 +1,10 @@
 /**
- * Module 02g: pitcher-specific workload commissioning shadow.
+ * Module 02g: pitcher-specific workload lineage surface.
  *
- * The active Module 03 workload remains unchanged. This object independently
- * freezes the candidate estimate and its source evidence so a prospective
- * settlement can adjudicate it without changing a projection or decision.
+ * Module 03 now consumes the same frozen v1 estimator after role truth and
+ * workload were decoupled. This object independently freezes the estimator's
+ * source evidence for prospective settlement; it does not apply a second
+ * round of shrinkage to the already-estimated active workload.
  */
 
 import type { PitcherWorkloadData, WorkloadResult } from "./module02_pitcherWorkload.js";
@@ -78,7 +79,23 @@ function recentLoadState(pitchCount: number | null): string {
   return "NORMAL_RECENT_WORKLOAD";
 }
 
-/** Build one candidate without mutating or replacing active Expected_IP. */
+function commissionedRolePrior(
+  role: string,
+  activeExpectedIp: number,
+  activeExpectedPitches: number,
+  workload: PitcherWorkloadData | undefined,
+): { innings: number; pitches: number } {
+  if (role === "OPENER") return { innings: 1.2, pitches: 25 };
+  if (role === "BULK" || role === "PIGGYBACK_SECONDARY") return { innings: 3, pitches: 55 };
+  if (!workload || workload.status === "fetch_error" || workload.status === "no_games_in_window") {
+    return { innings: activeExpectedIp, pitches: activeExpectedPitches };
+  }
+  return workload.status === "active_wide_window"
+    ? { innings: 5.5, pitches: 85 }
+    : { innings: 6, pitches: 92 };
+}
+
+/** Build one lineage record without mutating active Expected_IP. */
 export function buildWorkloadState(
   role: string,
   activeExpectedIp: number | null,
@@ -94,10 +111,16 @@ export function buildWorkloadState(
     || !Number.isFinite(activeExpectedPitches)
   ) return unavailable(role, dataThroughDate);
 
+  const prior = commissionedRolePrior(
+    role,
+    activeExpectedIp,
+    activeExpectedPitches,
+    workload,
+  );
   const estimate = estimatePitcherSpecificWorkload(
     role,
-    activeExpectedPitches,
-    activeExpectedIp,
+    prior.pitches,
+    prior.innings,
     gameDate,
     dataThroughDate,
     workload,

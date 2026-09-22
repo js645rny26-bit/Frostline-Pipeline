@@ -225,6 +225,18 @@ audit separates signed center bias from absolute and tail discrimination. It
 cannot change a projection, confidence, market, vehicle, or authorization;
 `Active_Input=NO` is a commissioning sentinel.
 
+## Active starter role and workload
+
+Schema v75 repairs the existing Module 03 input path without adding a module
+or workbook surface. A pitcher named in the probable-starter slot remains a
+starter assignment; low recent pitch volume no longer manufactures an
+`OPENER` or `BULK` role. Numeric workload is estimated independently from up
+to five cutoff-safe D-1 MLB starts using the already-frozen workload-v1
+formula. Missing history falls back explicitly. Module 09 still consumes the
+same `Expected_IP` contract and transfers exactly the remaining innings to the
+bullpen; only the source truth behind that field changed. Historical frozen
+packets retain their original role and workload values.
+
 ### SSAT family interpretation
 
 `STARTER_SURVIVAL_DIFFERENTIATION_AUDIT` tests whether v2 has earned separate
