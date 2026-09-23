@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  classifyPostmortemOutcomeAvailability,
   groupContiguousVehicleLogUpdates,
   gradePostmortemTicket,
   gradeTicket,
@@ -67,6 +68,22 @@ test("published vehicle rows remain byte-for-byte immutable on later refresh", (
   assert.deepEqual(published, snapshot);
   assert.equal(result.protectedRows, 1);
   assert.deepEqual(result.newRows, []);
+});
+
+test("postponed games are terminal skips while ordinary missing outcomes remain integrity gaps", () => {
+  const terminal = new Set(["20260922_TOR_BAL", "20260923_TOR_BAL"]);
+  assert.equal(
+    classifyPostmortemOutcomeAvailability("20260922_TOR_BAL", false, terminal),
+    "TERMINAL_NO_OUTCOME",
+  );
+  assert.equal(
+    classifyPostmortemOutcomeAvailability("20260922_OAK_CLE", false, terminal),
+    "MISSING",
+  );
+  assert.equal(
+    classifyPostmortemOutcomeAvailability("20260922_TOR_BAL", true, terminal),
+    "AVAILABLE",
+  );
 });
 
 const canonicalMarket = (overrides: Partial<Parameters<typeof gradePostmortemTicket>[2]> = {}) => ({

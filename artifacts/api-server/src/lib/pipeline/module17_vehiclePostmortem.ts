@@ -164,6 +164,16 @@ export interface PostmortemResult {
   errors: string[];
 }
 
+export function classifyPostmortemOutcomeAvailability(
+  gameId: string,
+  hasOfficialOutcome: boolean,
+  terminalNoOutcomeGameIds: ReadonlySet<string>,
+): "AVAILABLE" | "TERMINAL_NO_OUTCOME" | "MISSING" {
+  if (hasOfficialOutcome) return "AVAILABLE";
+  if (terminalNoOutcomeGameIds.has(gameId)) return "TERMINAL_NO_OUTCOME";
+  return "MISSING";
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function gradeTicket(
@@ -706,11 +716,16 @@ export async function logVehicles(
 
 export async function runPostmortem(
   date: string,
-  options: { workbookId?: string; writeSheets?: boolean } = {},
+  options: {
+    workbookId?: string;
+    writeSheets?: boolean;
+    terminalNoOutcomeGameIds?: readonly string[];
+  } = {},
 ): Promise<PostmortemResult> {
   const ts    = new Date().toISOString();
   const wbId  = options.workbookId ?? WORKBOOK_ID;
   const write = options.writeSheets ?? false;
+  const terminalNoOutcomeGameIds = new Set(options.terminalNoOutcomeGameIds ?? []);
   const errors: string[] = [];
 
   const empty = (status: PostmortemResult["status"]): PostmortemResult => ({
@@ -836,7 +851,17 @@ export async function runPostmortem(
   for (const r of vehicleRows) {
     const gameId  = r[L_GAME_ID] ?? "";
     const outcome = outcomesMap.get(gameId);
-    if (!outcome) { noOutcome++; continue; }
+    if (!outcome) {
+      if (classifyPostmortemOutcomeAvailability(gameId, false, terminalNoOutcomeGameIds) === "TERMINAL_NO_OUTCOME") {
+        logger.warn(
+          { game_id: gameId },
+          "MODULE_17: Source-confirmed postponed/rescheduled game preserved without postmortem grading",
+        );
+        continue;
+      }
+      noOutcome++;
+      continue;
+    }
 
     // Idempotency — skip already-graded rows
     const legacyMarketLine = r[L_MARKET_LINE] ? parseFloat(r[L_MARKET_LINE]) : null;

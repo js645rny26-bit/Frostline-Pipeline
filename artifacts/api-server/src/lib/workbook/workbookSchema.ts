@@ -9763,7 +9763,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         width: 225,
         filledBy: "MODULE_20",
         readOnly: true,
-        description: "PENDING_SETTLEMENT | SETTLED | NOT_GRADABLE_PREGAME_AUDIT_GAP | MISSING_OFFICIAL_OUTCOME | HISTORICAL_OUTCOME_GAP. A decision record may not disappear from grading silently.",
+        description: "PENDING_SETTLEMENT | SETTLED | NOT_GRADABLE_PREGAME_AUDIT_GAP | NOT_GRADABLE_POSTPONED | MISSING_OFFICIAL_OUTCOME | HISTORICAL_OUTCOME_GAP. A decision record may not disappear from grading silently.",
         exampleValue: "SETTLED",
       },
       {

@@ -542,16 +542,23 @@ export interface SettlementResult {
   games_skipped: number;
   games_no_actual: number;
   games_provenance_incomplete: number;
+  /** Source-confirmed postponed/rescheduled identities skipped without grading. */
+  terminal_no_outcome_game_ids: string[];
   rows: SettlementRow[];
   warnings: string[];
   errors: string[];
 }
 
-interface MlbGame {
+export interface MlbGame {
   gamePk?: number;
   officialDate?: string;
   gameNumber?: number;
-  status?: { abstractGameState?: string };
+  status?: {
+    abstractGameState?: string;
+    codedGameState?: string;
+    detailedState?: string;
+    statusCode?: string;
+  };
   teams?: {
     away?: { score?: number; team?: { name?: string } };
     home?: { score?: number; team?: { name?: string } };
@@ -564,6 +571,11 @@ interface FinalGame {
   actual_home_runs: number;
   actual_total: number;
   provenance: GamePitcherProvenance;
+}
+
+interface SettlementSchedule {
+  finalGames: Map<string, FinalGame>;
+  terminalNoOutcomeGameIds: Set<string>;
 }
 
 /** An official final paired with the same canonical identity fields as a packet. */
@@ -644,15 +656,63 @@ export function indexFinalGamesByCanonicalGameId(
   return indexed;
 }
 
-async function fetchFinalGames(date: string, warnings: string[]): Promise<Map<string, FinalGame>> {
+function isSourceConfirmedTerminalNoOutcome(game: MlbGame): boolean {
+  const detailedState = String(game.status?.detailedState ?? "").trim().toUpperCase();
+  const statusCode = String(game.status?.statusCode ?? "").trim().toUpperCase();
+  return detailedState === "POSTPONED" || statusCode === "DR";
+}
+
+/**
+ * Index both the requested-date identity and MLB's official-date identity for
+ * a source-confirmed postponement/reschedule. The requested-date alias matches
+ * the frozen record that existed before postponement; the official-date alias
+ * catches stale rows created by the old cross-date schedule bug. Neither alias
+ * is an outcome and neither is reconstructed from a final score.
+ */
+export function indexTerminalNoOutcomeGameIds(
+  requestedDate: string,
+  games: readonly MlbGame[],
+): Set<string> {
+  const candidates = games.flatMap((game) => {
+    const away = teamNameToAbbr(game.teams?.away?.team?.name ?? "");
+    const home = teamNameToAbbr(game.teams?.home?.team?.name ?? "");
+    if (!away || !home || !game.gamePk) return [];
+    return [{
+      gamePk: game.gamePk,
+      gameNumber: Number.isInteger(game.gameNumber) ? game.gameNumber! : null,
+      away,
+      home,
+      officialDate: game.officialDate ?? requestedDate,
+      terminal: isSourceConfirmedTerminalNoOutcome(game),
+    }];
+  });
+
+  const official = assignUniqueGameIds(candidates.map((game) => ({
+    ...game,
+    legacy_game_id: `${game.officialDate.replace(/-/g, "")}_${game.away}_${game.home}`,
+  })));
+  const requested = assignUniqueGameIds(candidates.map((game) => ({
+    ...game,
+    legacy_game_id: `${requestedDate.replace(/-/g, "")}_${game.away}_${game.home}`,
+  })));
+  const ids = new Set<string>();
+  for (const game of [...official, ...requested]) {
+    if (game.terminal) ids.add(game.legacy_game_id);
+  }
+  return ids;
+}
+
+async function fetchSettlementSchedule(date: string, warnings: string[]): Promise<SettlementSchedule> {
   const schedule = await fetchJson(
     `${MLB_API}/schedule?sportId=1&date=${date}&gameType=R&hydrate=linescore`,
   ) as { dates?: Array<{ games?: MlbGame[] }> };
 
+  const scheduleGames = (schedule.dates ?? []).flatMap((day) => day.games ?? []);
+  const terminalNoOutcomeGameIds = indexTerminalNoOutcomeGameIds(date, scheduleGames);
   const finals: Array<Omit<FinalGameIdentityCandidate, "provenance">> = [];
-  for (const day of schedule.dates ?? []) {
-    for (const game of day.games ?? []) {
+  for (const game of scheduleGames) {
       if (game.status?.abstractGameState !== "Final") continue;
+      if (isSourceConfirmedTerminalNoOutcome(game)) continue;
       const awayScore = game.teams?.away?.score;
       const homeScore = game.teams?.home?.score;
       const away = teamNameToAbbr(game.teams?.away?.team?.name ?? "");
@@ -667,7 +727,6 @@ async function fetchFinalGames(date: string, warnings: string[]): Promise<Map<st
         actual_home_runs: homeScore,
         actual_total: awayScore + homeScore,
       });
-    }
   }
 
   const resolved = await Promise.all(finals.map(async (game) => {
@@ -681,7 +740,10 @@ async function fetchFinalGames(date: string, warnings: string[]): Promise<Map<st
     }
   }));
 
-  return indexFinalGamesByCanonicalGameId(resolved, warnings);
+  return {
+    finalGames: indexFinalGamesByCanonicalGameId(resolved, warnings),
+    terminalNoOutcomeGameIds,
+  };
 }
 
 export function settlementRowToValues(row: SettlementRow): unknown[] {
@@ -1509,6 +1571,7 @@ function failedResult(date: string, ts: string, errors: string[]): SettlementRes
     status: "failure", settle_date: date, settlement_timestamp_utc: ts,
     games_found: 0, games_settled: 0, games_updated: 0, games_skipped: 0,
     games_no_actual: 0, games_provenance_incomplete: 0,
+    terminal_no_outcome_game_ids: [],
     rows: [], warnings: [], errors,
   };
 }
@@ -1682,9 +1745,9 @@ export async function runShadowSettlement(
     return { ...failedResult(date, ts, errors), games_found: gamesFound };
   }
 
-  let finalGames: Map<string, FinalGame>;
+  let settlementSchedule: SettlementSchedule;
   try {
-    finalGames = await fetchFinalGames(date, warnings);
+    settlementSchedule = await fetchSettlementSchedule(date, warnings);
   } catch (error: unknown) {
     errors.push(`MLB API actuals fetch failed for ${date}: ${error instanceof Error ? error.message : String(error)}`);
     return { ...failedResult(date, ts, errors), games_found: gamesFound };
@@ -1699,8 +1762,13 @@ export async function runShadowSettlement(
 
   for (const history of historyRows) {
     const gameId = history[H_GAME_ID] ?? "";
-    const final = finalGames.get(gameId);
+    const final = settlementSchedule.finalGames.get(gameId);
     if (!final) {
+      if (settlementSchedule.terminalNoOutcomeGameIds.has(gameId)) {
+        skipped++;
+        warnings.push(`OFFICIAL_GAME_POSTPONED_OR_RESCHEDULED: ${gameId} preserved without outcome grading`);
+        continue;
+      }
       noActual++;
       continue;
     }
@@ -1867,6 +1935,7 @@ export async function runShadowSettlement(
     games_found: gamesFound, games_settled: settled, games_updated: updated,
     games_skipped: skipped, games_no_actual: noActual,
     games_provenance_incomplete: provenanceIncomplete,
+    terminal_no_outcome_game_ids: [...settlementSchedule.terminalNoOutcomeGameIds].sort(),
     rows: processed, warnings, errors,
   };
 }

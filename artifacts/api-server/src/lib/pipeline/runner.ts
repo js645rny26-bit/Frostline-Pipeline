@@ -1686,6 +1686,7 @@ export async function runDailySettlement(
         games_skipped: 0,
         games_no_actual: 0,
         games_provenance_incomplete: 0,
+        terminal_no_outcome_game_ids: [],
         rows: [],
         warnings: [],
         errors: [msg],
@@ -1733,7 +1734,10 @@ export async function runDailySettlement(
     return { status: "failure", report_timestamp_utc: new Date().toISOString(), eligible_games: 0, summaries: [], replay_rows: [], errors: [msg] };
   });
 
-  const decision_audit = await settleDecisionAuditLog(date, settlement.rows, { workbookId }).catch(
+  const decision_audit = await settleDecisionAuditLog(date, settlement.rows, {
+    workbookId,
+    terminalNoOutcomeGameIds: settlement.terminal_no_outcome_game_ids,
+  }).catch(
     (err: unknown): DecisionAuditWriteResult => {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`decision_audit: ${msg}`);
@@ -1989,6 +1993,7 @@ export async function runDailySettlement(
   const vehicle_postmortem = await runPostmortem(date, {
     workbookId,
     writeSheets: true,
+    terminalNoOutcomeGameIds: settlement.terminal_no_outcome_game_ids,
   }).catch((err: unknown): PostmortemResult => {
     const msg = err instanceof Error ? err.message : String(err);
     errors.push(`vehicle_postmortem: ${msg}`);

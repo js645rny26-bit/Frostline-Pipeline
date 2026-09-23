@@ -8,6 +8,7 @@ import {
   collisionCalibrationValues,
   frozenProjectionReplayValues,
   indexFinalGamesByCanonicalGameId,
+  indexTerminalNoOutcomeGameIds,
   normalizeOutcomeValues,
   parseLowCenterProspectiveSnapshots,
   parseCollisionProspectiveSnapshots,
@@ -30,6 +31,39 @@ import { parseGamePitcherProvenance } from "./module14_pitcherProvenance.js";
 import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
 
 const vehicle = { market_line: 8.5, direction: "OVER", projected_total: 9.11 };
+
+test("source-confirmed postponed games expose requested-date and official-date terminal aliases", () => {
+  const ids = indexTerminalNoOutcomeGameIds("2026-09-22", [{
+    gamePk: 824785,
+    officialDate: "2026-09-23",
+    gameNumber: 1,
+    status: {
+      abstractGameState: "Final",
+      codedGameState: "D",
+      detailedState: "Postponed",
+      statusCode: "DR",
+    },
+    teams: {
+      away: { team: { name: "Toronto Blue Jays" } },
+      home: { team: { name: "Baltimore Orioles" } },
+    },
+  }]);
+
+  assert.deepEqual([...ids].sort(), ["20260922_TOR_BAL", "20260923_TOR_BAL"]);
+});
+
+test("an ordinary non-final game is not silently classified as a terminal skip", () => {
+  const ids = indexTerminalNoOutcomeGameIds("2026-09-22", [{
+    gamePk: 999999,
+    officialDate: "2026-09-22",
+    status: { abstractGameState: "Preview", detailedState: "Scheduled", statusCode: "S" },
+    teams: {
+      away: { team: { name: "Toronto Blue Jays" } },
+      home: { team: { name: "Baltimore Orioles" } },
+    },
+  }]);
+  assert.deepEqual([...ids], []);
+});
 
 test("settlement binds doubleheader finals to canonical G1/G2 packet identities", () => {
   const provenance = parseGamePitcherProvenance(null);

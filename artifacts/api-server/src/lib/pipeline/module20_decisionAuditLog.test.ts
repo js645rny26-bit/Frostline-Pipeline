@@ -326,6 +326,40 @@ test("an explicit pregame audit gap is warning-only while a missing official out
   assert.match(missingMessages.errors[0] ?? "", /MISSING_OFFICIAL_OUTCOME/);
 });
 
+test("source-confirmed postponements are terminal non-gradable warnings without rewriting frozen evidence", () => {
+  const requestedDate = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-09-22",
+    game_id: "20260922_TOR_BAL",
+    lock_status: "LOCKED_IN",
+  }), pregame({
+    date: "2026-09-22",
+    game_id: "20260923_TOR_BAL",
+    lock_status: "LOCKED_IN",
+  })], TS1);
+  const frozenTotals = requestedDate.rows.map((row) => row[C.FROZEN_TOTAL]);
+  const marked = markDecisionAuditOutcomeGaps(
+    requestedDate.rows,
+    "2026-09-22",
+    new Set(),
+    new Set(["20260922_TOR_BAL", "20260923_TOR_BAL"]),
+  );
+  const messages = classifyDecisionAuditOutcomeGapMessages("2026-09-22", marked);
+
+  assert.equal(marked.terminalNoOutcomeGaps, 2);
+  assert.equal(marked.missingOutcomeGaps, 0);
+  assert.deepEqual(messages.errors, []);
+  assert.match(messages.warnings[0] ?? "", /DECISION_AUDIT_TERMINAL_NO_OUTCOME/);
+  assert.deepEqual(
+    marked.rows.map((row) => row[C.SETTLEMENT_STATUS]),
+    ["NOT_GRADABLE_POSTPONED", "NOT_GRADABLE_POSTPONED"],
+  );
+  assert.deepEqual(
+    marked.rows.map((row) => row[C.SETTLEMENT_GAP_REASON]),
+    ["OFFICIAL_GAME_POSTPONED_OR_RESCHEDULED", "OFFICIAL_GAME_POSTPONED_OR_RESCHEDULED"],
+  );
+  assert.deepEqual(marked.rows.map((row) => row[C.FROZEN_TOTAL]), frozenTotals);
+});
+
 test("settlement rerun is idempotent and cannot rewrite frozen reasoning", () => {
   const pre = upsertDecisionAuditPregameRows([], [pregame({ lock_status: "LOCKED_IN" })], TS1);
   const first = settleDecisionAuditRows(pre.rows, [outcome()], TS3);

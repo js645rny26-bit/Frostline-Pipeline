@@ -93,8 +93,10 @@ export type DecisionAuditOutcomeGapResult = {
   rows: unknown[][];
   outcomeGaps: number;
   auditGapOutcomeGaps: number;
+  terminalNoOutcomeGaps: number;
   missingOutcomeGaps: number;
   auditGapReasons: string[];
+  terminalNoOutcomeReasons: string[];
   missingOutcomeReasons: string[];
   reasons: string[];
 };
@@ -862,19 +864,35 @@ export function markDecisionAuditOutcomeGaps(
   existingRows: unknown[][],
   date: string,
   outcomeKeys: ReadonlySet<string>,
+  terminalNoOutcomeGameIds: ReadonlySet<string> = new Set(),
 ): DecisionAuditOutcomeGapResult {
   const rows = existingRows.map(padRow);
   const reasons: string[] = [];
   const auditGapReasons: string[] = [];
+  const terminalNoOutcomeReasons: string[] = [];
   const missingOutcomeReasons: string[] = [];
   let outcomeGaps = 0;
   let auditGapOutcomeGaps = 0;
+  let terminalNoOutcomeGaps = 0;
   let missingOutcomeGaps = 0;
   for (const row of rows) {
     if (String(row[DECISION_AUDIT_INDEX.DATE] ?? "") !== date) continue;
     if (String(row[DECISION_AUDIT_INDEX.GRADED_TS] ?? "").trim()) continue;
     const key = rowKey(row[DECISION_AUDIT_INDEX.DATE], row[DECISION_AUDIT_INDEX.GAME_ID]);
     if (outcomeKeys.has(key)) continue;
+    const gameId = String(row[DECISION_AUDIT_INDEX.GAME_ID] ?? "");
+    if (terminalNoOutcomeGameIds.has(gameId)) {
+      const status = "NOT_GRADABLE_POSTPONED";
+      const reason = "OFFICIAL_GAME_POSTPONED_OR_RESCHEDULED";
+      row[DECISION_AUDIT_INDEX.SETTLEMENT_STATUS] = status;
+      row[DECISION_AUDIT_INDEX.SETTLEMENT_GAP_REASON] = reason;
+      outcomeGaps++;
+      terminalNoOutcomeGaps++;
+      const formattedReason = `${gameId}:${status}:${reason}`;
+      reasons.push(formattedReason);
+      terminalNoOutcomeReasons.push(formattedReason);
+      continue;
+    }
     const isAuditGap = row[DECISION_AUDIT_INDEX.AUDIT_STATUS] === "AUDIT_GAP";
     const status = isAuditGap
       ? "NOT_GRADABLE_PREGAME_AUDIT_GAP"
@@ -898,8 +916,10 @@ export function markDecisionAuditOutcomeGaps(
     rows,
     outcomeGaps,
     auditGapOutcomeGaps,
+    terminalNoOutcomeGaps,
     missingOutcomeGaps,
     auditGapReasons,
+    terminalNoOutcomeReasons,
     missingOutcomeReasons,
     reasons,
   };
@@ -913,12 +933,16 @@ export function markDecisionAuditOutcomeGaps(
 export function classifyDecisionAuditOutcomeGapMessages(
   date: string,
   gaps: Pick<DecisionAuditOutcomeGapResult,
-    "auditGapOutcomeGaps" | "missingOutcomeGaps" | "auditGapReasons" | "missingOutcomeReasons">,
+    "auditGapOutcomeGaps" | "terminalNoOutcomeGaps" | "missingOutcomeGaps"
+    | "auditGapReasons" | "terminalNoOutcomeReasons" | "missingOutcomeReasons">,
 ): { warnings: string[]; errors: string[] } {
   const warnings: string[] = [];
   const errors: string[] = [];
   if (gaps.auditGapOutcomeGaps > 0) {
     warnings.push(`DECISION_AUDIT_AUDIT_GAPS: ${gaps.auditGapReasons.join(", ")}`);
+  }
+  if (gaps.terminalNoOutcomeGaps > 0) {
+    warnings.push(`DECISION_AUDIT_TERMINAL_NO_OUTCOME: ${gaps.terminalNoOutcomeReasons.join(", ")}`);
   }
   if (gaps.missingOutcomeGaps > 0) {
     const message = `DECISION_AUDIT_OUTCOME_GAPS: ${gaps.missingOutcomeReasons.join(", ")}`;
@@ -1066,7 +1090,7 @@ export async function logDecisionAuditPregame(
 export async function settleDecisionAuditLog(
   date: string,
   outcomes: SettlementRow[],
-  options: { workbookId?: string } = {},
+  options: { workbookId?: string; terminalNoOutcomeGameIds?: readonly string[] } = {},
 ): Promise<DecisionAuditWriteResult> {
   const workbookId = options.workbookId ?? WORKBOOK_ID;
   const warnings: string[] = [];
@@ -1087,7 +1111,12 @@ export async function settleDecisionAuditLog(
     const missingClassification = classifyMissingDecisionAuditRows(date, unmatched);
     warnings.push(...missingClassification.warnings);
     errors.push(...missingClassification.errors);
-    const gapMarked = markDecisionAuditOutcomeGaps(mutation.rows, date, expectedKeys);
+    const gapMarked = markDecisionAuditOutcomeGaps(
+      mutation.rows,
+      date,
+      expectedKeys,
+      new Set(options.terminalNoOutcomeGameIds ?? []),
+    );
     const gapMessages = classifyDecisionAuditOutcomeGapMessages(date, gapMarked);
     warnings.push(...gapMessages.warnings);
     errors.push(...gapMessages.errors);
