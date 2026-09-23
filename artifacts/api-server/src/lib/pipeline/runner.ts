@@ -1598,7 +1598,25 @@ export interface DailySettlementResult {
   errors: string[];
 }
 
-/** The settlement endpoint is successful only when every module completed. */
+/**
+ * Research-only modules are reported as warnings when they fail, but they do
+ * not invalidate completed immutable settlement writes. Every operational or
+ * settlement-integrity module remains fail-closed.
+ */
+export function aggregateDailySettlementStatus(
+  moduleStatuses: ReadonlyArray<{ status: string }>,
+): DailySettlementResult["status"] {
+  const blocking = moduleStatuses.filter((module) => (
+    module.status !== "success" && module.status !== "warning"
+  ));
+  if (blocking.length === 0) return "success";
+  if (blocking.length === moduleStatuses.length && blocking.every((module) => module.status === "failure")) {
+    return "failure";
+  }
+  return "partial_failure";
+}
+
+/** The settlement endpoint is successful only when every blocking module completed. */
 export function dailySettlementHttpStatus(
   status: DailySettlementResult["status"],
 ): 200 | 500 {
@@ -2059,7 +2077,10 @@ export async function runDailySettlement(
   const passed_winners      = survival_replay.core_thesis_correct;
   const total_eligible_settled = survival_replay.total_eligible_settled;
 
-  // Overall status is fail-closed: every module must report success.
+  // Operational and settlement-integrity modules remain fail-closed. The
+  // explicitly research-only modules below retain a visible warning status,
+  // but their tab/read failure cannot relabel completed immutable settlement
+  // work as an HTTP 500.
   const module_statuses = [
     { module: "MODULE_20A_PACKET_FINALIZATION", status: packet_finalization.status },
     { module: "MODULE_20B_FULL_LADDER_FREEZE", status: full_ladder_sync.status },
@@ -2115,12 +2136,7 @@ export async function runDailySettlement(
   warnings.push(...shadow_truth_direction.errors.map((message) => `shadow_truth_direction: ${message}`));
   warnings.push(...bvh_projection_replay.warnings.map((message) => `bvh_projection_replay: ${message}`));
 
-  const failedCount = module_statuses.filter((module) => module.status === "failure").length;
-  const incompleteCount = module_statuses.filter((module) => module.status !== "success").length;
-  const overallStatus: DailySettlementResult["status"] =
-    incompleteCount === 0 ? "success"
-    : failedCount === module_statuses.length ? "failure"
-    : "partial_failure";
+  const overallStatus = aggregateDailySettlementStatus(module_statuses);
 
   logger.info(
     {
