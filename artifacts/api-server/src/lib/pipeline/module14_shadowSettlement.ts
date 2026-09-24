@@ -109,6 +109,44 @@ const H_AWAY_SRC = 9;
 const H_HOME_SRC = 10;
 const H_PARK_SRC = 21;
 
+/**
+ * A schedule can become a doubleheader after an earlier prospective publish
+ * already wrote the unsuffixed date/team identity. Preserve that historical
+ * row in SHADOW_HISTORY, but do not settle it as a third game once the same
+ * date/matchup has explicit G1 and G2 snapshots. The suffixed rows are the
+ * only identities that can bind unambiguously to MLB's two official finals.
+ */
+export function excludeSupersededUnsuffixedDoubleheaderSnapshots(
+  rows: readonly string[][],
+): { rows: string[][]; excludedGameIds: string[] } {
+  const gameNumbersByBase = new Map<string, Set<number>>();
+  for (const row of rows) {
+    const gameId = String(row[H_GAME_ID] ?? "");
+    const match = gameId.match(/^(.*)__G(\d+)$/);
+    if (!match) continue;
+    const base = match[1]!;
+    const gameNumber = Number.parseInt(match[2]!, 10);
+    const gameNumbers = gameNumbersByBase.get(base) ?? new Set<number>();
+    gameNumbers.add(gameNumber);
+    gameNumbersByBase.set(base, gameNumbers);
+  }
+
+  const canonicalDoubleheaderBases = new Set(
+    [...gameNumbersByBase.entries()]
+      .filter(([, gameNumbers]) => gameNumbers.has(1) && gameNumbers.has(2))
+      .map(([base]) => base),
+  );
+  const excludedGameIds: string[] = [];
+  const selectedRows = rows.filter((row) => {
+    const gameId = String(row[H_GAME_ID] ?? "");
+    if (!canonicalDoubleheaderBases.has(gameId)) return true;
+    excludedGameIds.push(gameId);
+    return false;
+  });
+
+  return { rows: selectedRows, excludedGameIds: [...new Set(excludedGameIds)].sort() };
+}
+
 // PREGAME_PACKET_HISTORY is the canonical freeze boundary. Resolve names from
 // its exported schema rather than duplicating fragile column numbers here.
 const PACKET_INDEX = Object.fromEntries(
@@ -1595,7 +1633,15 @@ export async function runShadowSettlement(
       if ((row[H_DATE] ?? "") !== date || !(row[H_GAME_ID] ?? "")) continue;
       latestByGame.set(row[H_GAME_ID]!, row);
     }
-    historyRows = [...latestByGame.values()];
+    const canonicalHistory = excludeSupersededUnsuffixedDoubleheaderSnapshots(
+      [...latestByGame.values()],
+    );
+    historyRows = canonicalHistory.rows;
+    for (const gameId of canonicalHistory.excludedGameIds) {
+      warnings.push(
+        `SUPERSEDED_UNSUFFIXED_DOUBLEHEADER_SNAPSHOT_EXCLUDED: ${gameId} preserved in SHADOW_HISTORY; canonical G1/G2 snapshots govern settlement`,
+      );
+    }
   } catch (error: unknown) {
     errors.push(`SHADOW_HISTORY read failed: ${error instanceof Error ? error.message : String(error)}`);
     return failedResult(date, ts, errors);

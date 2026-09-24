@@ -6,6 +6,7 @@ import {
   OUTCOMES_HEADER,
   classifyFrozenVehicleGap,
   collisionCalibrationValues,
+  excludeSupersededUnsuffixedDoubleheaderSnapshots,
   frozenProjectionReplayValues,
   indexFinalGamesByCanonicalGameId,
   indexTerminalNoOutcomeGameIds,
@@ -31,6 +32,37 @@ import { parseGamePitcherProvenance } from "./module14_pitcherProvenance.js";
 import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
 
 const vehicle = { market_line: 8.5, direction: "OVER", projected_total: 9.11 };
+
+test("settlement excludes a superseded unsuffixed snapshot when canonical G1 and G2 history exists", () => {
+  const base = ["2026-09-23", "20260923_TOR_BAL", "TOR", "BAL"];
+  const gameOne = ["2026-09-23", "20260923_TOR_BAL__G1", "TOR", "BAL"];
+  const gameTwo = ["2026-09-23", "20260923_TOR_BAL__G2", "TOR", "BAL"];
+  const ordinary = ["2026-09-23", "20260923_WSN_DET", "WSN", "DET"];
+
+  const selected = excludeSupersededUnsuffixedDoubleheaderSnapshots([
+    base,
+    gameOne,
+    gameTwo,
+    ordinary,
+  ]);
+
+  assert.deepEqual(selected.excludedGameIds, ["20260923_TOR_BAL"]);
+  assert.deepEqual(selected.rows.map((row) => row[1]), [
+    "20260923_TOR_BAL__G1",
+    "20260923_TOR_BAL__G2",
+    "20260923_WSN_DET",
+  ]);
+});
+
+test("settlement does not discard an unsuffixed snapshot without a complete canonical doubleheader pair", () => {
+  const base = ["2026-09-23", "20260923_TOR_BAL", "TOR", "BAL"];
+  const gameOne = ["2026-09-23", "20260923_TOR_BAL__G1", "TOR", "BAL"];
+
+  const selected = excludeSupersededUnsuffixedDoubleheaderSnapshots([base, gameOne]);
+
+  assert.deepEqual(selected.excludedGameIds, []);
+  assert.deepEqual(selected.rows, [base, gameOne]);
+});
 
 test("source-confirmed postponed games expose requested-date and official-date terminal aliases", () => {
   const ids = indexTerminalNoOutcomeGameIds("2026-09-22", [{
