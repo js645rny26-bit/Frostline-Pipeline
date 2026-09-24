@@ -261,7 +261,7 @@ export function packetToRecord(
     direction,
     direction_source: lineSelection.line === null
       ? "PREGAME_PACKET_HISTORY.DIRECTION_UPSTREAM_AUDIT_ONLY"
-      : "MODULE_11_DIRECTION_RULE_APPLIED_TO_LITERAL_EXECUTABLE_LINE",
+      : "MODULE_11_DIRECTION_RULE_APPLIED_TO_LITERAL_REFERENCE_LINE",
     confidence: numeric(field(row, index, "Confidence")),
     line: lineSelection.line,
     line_source: lineSelection.source,

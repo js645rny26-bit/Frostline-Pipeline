@@ -164,6 +164,7 @@ test("literal reference evidence supplies the prospective shadow grading line", 
   assert.equal(candidate?.line, 8.5);
   assert.equal(candidate?.record_status, "OPEN_PROSPECTIVE");
   assert.equal(candidate?.line_status, "LITERAL_REFERENCE_STANDING_BENCHMARK");
+  assert.equal(candidate?.direction_source, "MODULE_11_DIRECTION_RULE_APPLIED_TO_LITERAL_REFERENCE_LINE");
 });
 
 test("September 16 former NO_CALL-style cases can retain their proven upstream directions", () => {
