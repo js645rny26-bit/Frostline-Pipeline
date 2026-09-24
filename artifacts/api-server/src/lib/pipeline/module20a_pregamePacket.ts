@@ -74,7 +74,9 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Base_Projection",
   // `Market_Line` remains a backwards-compatible mechanical/query line. The
   // explicit Primary_Grade fields below own settlement grading and preserve
-  // literal reference/executable evidence; none are price-blind inputs.
+  // literal reference/executable evidence; none are price-blind inputs. The
+  // reference snapshot is the standing research/postmortem benchmark, while
+  // executable evidence remains specific to an operator-supplied wager state.
   "Market_Line",
   "Market_Snapshot_Status",
   "Reference_Market_Line",
@@ -90,9 +92,9 @@ export const PREGAME_PACKET_HISTORY_HEADERS = [
   "Reference_Market_Quote_Count",
   "Reference_Market_Normalization_Status",
   "Reference_Market_Capture_Alignment_Status",
-  // Literal reference evidence remains authoritative for reference/historical
-  // analysis only. It cannot replace the active Hard Rock executable line.
-  // Any lower-half representation remains separately visible and synthetic.
+  // Literal reference evidence owns standing research/historical grading.
+  // Executable Hard Rock evidence remains separate and opportunistic. Any
+  // lower-half representation remains separately visible and synthetic.
   "Reference_Market_Over_Price",
   "Reference_Market_Under_Price",
   "Reference_Market_Convention",
@@ -615,9 +617,7 @@ export function buildPregamePacketInputs(
     const referenceMarketLine = capturedLiteralReference.literal_total;
     const syntheticNormalizedReferenceLine = referenceEvidence?.total
       ?? boardSyntheticReferenceLine;
-    const packetMarketLine = operatorMarketLine
-      ?? referenceMarketLine
-      ?? syntheticNormalizedReferenceLine;
+    const packetMarketLine = referenceMarketLine ?? syntheticNormalizedReferenceLine;
     const referenceRepresentationStatus = referenceMarketLine === null
       ? syntheticNormalizedReferenceLine === null
         ? "REFERENCE_MARKET_UNAVAILABLE"
@@ -671,12 +671,14 @@ export function buildPregamePacketInputs(
       : executableEvidenceField === undefined
         ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
         : "PARTIAL_LITERAL_EXECUTABLE_HARD_ROCK_EVIDENCE_NO_LINE";
-    const primaryMarketSource = operatorMarketLine === undefined
-      ? "HARD_ROCK_FLORIDA_REQUIRED"
-      : "LITERAL_EXECUTABLE_HARD_ROCK";
-    const primaryMarketStatus = operatorMarketLine === undefined
-      ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
-      : "LITERAL_EXECUTABLE";
+    const primaryMarketSource = referenceMarketLine === null
+      ? "REFERENCE_MARKET_UNAVAILABLE"
+      : referenceMarketSource || "REFERENCE_MARKET";
+    const primaryMarketStatus = referenceMarketLine !== null
+      ? "LITERAL_REFERENCE_STANDING_BENCHMARK"
+      : syntheticNormalizedReferenceLine !== null
+        ? "SYNTHETIC_NORMALIZED_REFERENCE_NOT_GRADEABLE"
+        : "REFERENCE_MARKET_UNAVAILABLE";
     const awayLineupOverride = operatorValue(operator, "AWAY_LINEUP");
     const homeLineupOverride = operatorValue(operator, "HOME_LINEUP");
     const awayLineupStatus = awayLineupOverride
@@ -773,7 +775,7 @@ export function buildPregamePacketInputs(
       executableMarketTs,
       executableMarketQuotedTs,
       executableMarketStatus,
-      blank(operatorMarketLine),
+      blank(referenceMarketLine),
       primaryMarketSource,
       primaryMarketStatus,
       boardRow.direction,

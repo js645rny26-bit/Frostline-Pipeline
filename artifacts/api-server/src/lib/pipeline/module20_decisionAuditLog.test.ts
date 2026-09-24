@@ -541,7 +541,7 @@ test("decision audit cannot settle from reference when literal Hard Rock line is
   assert.equal(row[C.SETTLEMENT_GAP_REASON], "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
 });
 
-test("decision audit cannot revive a stale post-policy reference-only PUSH", () => {
+test("decision audit grades the standing reference benchmark without requiring Hard Rock", () => {
   const pre = upsertDecisionAuditPregameRows([], [pregame({
     date: "2026-09-11",
     game_id: "20260911_COL_DET",
@@ -563,10 +563,10 @@ test("decision audit cannot revive a stale post-policy reference-only PUSH", () 
     primary_directional_result: "PUSH",
   })], "2026-09-12T05:30:00.000Z");
   const row = settled.rows[0]!;
-  assert.equal(row[C.MODEL_TRUTH_GRADE], "NOT_GRADABLE");
-  assert.equal(row[C.TICKET_RESULT], "PENDING");
-  assert.equal(row[C.SETTLEMENT_STATUS], "MARKET_LINEAGE_FAILURE");
-  assert.equal(row[C.SETTLEMENT_GAP_REASON], "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
+  assert.equal(row[C.MODEL_TRUTH_GRADE], "PUSH");
+  assert.equal(row[C.TICKET_RESULT], "PUSH");
+  assert.equal(row[C.SETTLEMENT_STATUS], "SETTLED");
+  assert.equal(row[C.SETTLEMENT_GAP_REASON], "");
 });
 
 test("decision audit treats impossible stored Hard Rock 8.0 as integrity failure, not PUSH", () => {

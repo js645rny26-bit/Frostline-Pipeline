@@ -30,7 +30,6 @@ import {
   gradeDirectionalOutcome,
   gradeHardRockMlbFullGameTotal,
 } from "./module14_settlementGrading.js";
-import { requiresHardRockFloridaMlbFullGameTotal } from "./marketLineNormalization.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
 import {
   normalizePregamePacketHistoryRows,
@@ -236,30 +235,27 @@ export interface CanonicalOutcomeMarketGrade {
 }
 
 /**
- * Select the market object used by the coded ticket/postmortem report.
- * Current Hard Rock packets must use the canonical literal executable pair;
- * reference-only historical rows retain their pre-existing generic semantics.
+ * Select the market object used by the coded ticket/postmortem report. The
+ * literal reference snapshot is the standing research benchmark. A captured
+ * Hard Rock line remains a distinct execution object for that specific wager.
  */
 export function gradePostmortemTicket(
   direction: string,
   legacyVehicleLine: number | null,
   outcome: CanonicalOutcomeMarketGrade,
-  date = "",
+  _date = "",
 ): {
   market_line: number | null;
   market_status: string;
   thesis_correct: boolean | "PUSH" | null;
   ticket_result: "COVERED" | "MISSED" | "PUSH" | "NO_BET";
 } {
-  const hardRockRequiredByPolicy = requiresHardRockFloridaMlbFullGameTotal(date);
   const hardRockRequiredButUnavailable = outcome.primary_market_status
-    === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
-    || (hardRockRequiredByPolicy && outcome.executable_market_line === null);
-  const hardRockClaim = hardRockRequiredByPolicy
-    || outcome.primary_market_provenance === "LITERAL_EXECUTABLE"
+    === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE";
+  const hardRockClaim = outcome.primary_market_provenance === "LITERAL_EXECUTABLE"
     || outcome.primary_market_status === "LITERAL_EXECUTABLE"
     || outcome.primary_market_status === "EXECUTABLE_OPERATOR_CAPTURED"
-    || /HARD[_ ]?ROCK/i.test(`${outcome.executable_market_source} ${outcome.primary_market_source}`);
+    || /HARD[_ ]?ROCK/i.test(outcome.primary_market_source);
 
   if (hardRockRequiredButUnavailable) {
     return {
@@ -270,9 +266,7 @@ export function gradePostmortemTicket(
     };
   }
   if (hardRockClaim) {
-    const hardRockLine = hardRockRequiredByPolicy
-      ? outcome.executable_market_line
-      : outcome.primary_market_line ?? outcome.executable_market_line;
+    const hardRockLine = outcome.primary_market_line ?? outcome.executable_market_line;
     const grade = gradeHardRockMlbFullGameTotal(
       direction,
       hardRockLine,
@@ -296,10 +290,11 @@ export function gradePostmortemTicket(
     };
   }
 
+  const referenceLine = outcome.primary_market_line ?? legacyVehicleLine;
   return {
-    market_line: legacyVehicleLine,
-    market_status: "LEGACY_OR_NON_HARD_ROCK_MARKET",
-    ...gradeTicket(direction, legacyVehicleLine, outcome.actual_total),
+    market_line: referenceLine,
+    market_status: "REFERENCE_MARKET_STANDING_BENCHMARK",
+    ...gradeTicket(direction, referenceLine, outcome.actual_total),
   };
 }
 

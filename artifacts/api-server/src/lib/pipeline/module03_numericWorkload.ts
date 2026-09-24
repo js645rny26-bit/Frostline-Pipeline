@@ -86,11 +86,15 @@ function relevantAppearances(
   role: string,
   appearances: readonly PitcherGameLogAppearance[],
 ): PitcherGameLogAppearance[] {
-  const starts = appearances.filter((appearance) => appearance.games_started > 0);
-  // Preserve the already-commissioned workload-state semantics: a scheduled
-  // conventional starter is assessed from previous starts. Planned opener or
-  // bulk usage can legitimately include non-start appearances.
-  return (role === "CONVENTIONAL_STARTER" && starts.length > 0 ? starts : appearances)
+  const starterScale = appearances.filter((appearance) =>
+    appearance.games_started > 0
+    // MLB's start flag describes batting-order entry, not workload scale.
+    // Preserve source-observed multi-inning follower work rather than erasing
+    // it when that pitcher is subsequently listed as a conventional starter.
+    || appearance.innings >= 3
+    || (appearance.pitch_count ?? 0) >= 45,
+  );
+  return (role === "CONVENTIONAL_STARTER" && starterScale.length > 0 ? starterScale : appearances)
     .slice(0, NUMERIC_WORKLOAD_RECENCY_WEIGHTS.length);
 }
 
@@ -141,8 +145,11 @@ export function estimatePitcherSpecificWorkload(
 
   const n = relevant.length;
   const historyWeight = Math.min(n / NUMERIC_WORKLOAD_RECENCY_WEIGHTS.length, 1);
-  const latest = relevant[0];
-  const daysRest = daysBetween(latest?.date, gameDate);
+  // Rest is determined by the latest pitching appearance of any role. The
+  // workload window above remains role/scale filtered, but relief or bulk work
+  // still consumes real rest.
+  const latestAppearance = admissible[0];
+  const daysRest = daysBetween(latestAppearance?.date, gameDate);
   const rest = restState(daysRest);
   const expectedInnings = clampByRole(
     rolePriorInnings * (1 - historyWeight)

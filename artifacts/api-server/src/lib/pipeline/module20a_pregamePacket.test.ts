@@ -211,8 +211,9 @@ test("an executable market overlay changes only market provenance, never price-b
   assert.equal(executable[0]?.values[index.Executable_Market_Source], "HARD_ROCK");
   assert.equal(executable[0]?.values[index.Executable_Market_Quoted_TS], "2026-08-24T22:43:00.000Z");
   assert.equal(executable[0]?.values[index.Executable_Market_Status], "LITERAL_EXECUTABLE_HARD_ROCK_CAPTURED");
-  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Line], 10.5);
-  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Status], "LITERAL_EXECUTABLE");
+  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Line], "");
+  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Source], "REFERENCE_MARKET_UNAVAILABLE");
+  assert.equal(executable[0]?.values[index.Primary_Grade_Market_Status], "SYNTHETIC_NORMALIZED_REFERENCE_NOT_GRADEABLE");
 
   const partial = buildPregamePacketInputs(
     summary,
@@ -240,8 +241,8 @@ test("an executable market overlay changes only market provenance, never price-b
   assert.equal(partial[0]?.values[index.Executable_Market_Quoted_TS], "2026-08-24T22:40:00.000Z");
   assert.equal(partial[0]?.values[index.Executable_Market_Status], "PARTIAL_LITERAL_EXECUTABLE_HARD_ROCK_EVIDENCE_NO_LINE");
   assert.equal(partial[0]?.values[index.Primary_Grade_Market_Line], "");
-  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Source], "HARD_ROCK_FLORIDA_REQUIRED");
-  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Status], "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
+  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Source], "REFERENCE_MARKET_UNAVAILABLE");
+  assert.equal(partial[0]?.values[index.Primary_Grade_Market_Status], "SYNTHETIC_NORMALIZED_REFERENCE_NOT_GRADEABLE");
 });
 
 test("a whole-number Florida Hard Rock full-game total fails packet materialization closed", () => {
@@ -276,7 +277,7 @@ test("a whole-number Florida Hard Rock full-game total fails packet materializat
   assert.throws(() => build("not-a-number"), /HARD_ROCK_FULL_GAME_TOTAL_LINE_INTEGRITY_FAILURE/);
 });
 
-test("a literal reference remains preserved but cannot replace a missing Hard Rock executable line", () => {
+test("a literal reference remains the standing research benchmark without Hard Rock", () => {
   const summary = [{
     date: "2026-09-12", game_id: "20260912_AAA_BBB", away_team: "AAA", home_team: "BBB",
     projected_away_runs: 4, projected_home_runs: 4.5, projected_total_runs: 8.5,
@@ -303,9 +304,9 @@ test("a literal reference remains preserved but cannot replace a missing Hard Ro
   assert.equal(packet.values[index.Reference_Market_Source], "MLB_STARTING_NINE_CARD");
   assert.equal(packet.values[index.Synthetic_Normalized_Reference_Line], 7.5);
   assert.equal(packet.values[index.Executable_Market_Line], "");
-  assert.equal(packet.values[index.Primary_Grade_Market_Line], "");
-  assert.equal(packet.values[index.Primary_Grade_Market_Source], "HARD_ROCK_FLORIDA_REQUIRED");
-  assert.equal(packet.values[index.Primary_Grade_Market_Status], "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
+  assert.equal(packet.values[index.Primary_Grade_Market_Line], 8);
+  assert.equal(packet.values[index.Primary_Grade_Market_Source], "MLB_STARTING_NINE_CARD");
+  assert.equal(packet.values[index.Primary_Grade_Market_Status], "LITERAL_REFERENCE_STANDING_BENCHMARK");
 });
 
 test("a packet freezes automated-reference capture metadata beside literal executable evidence", () => {
@@ -372,6 +373,9 @@ test("a packet freezes automated-reference capture metadata beside literal execu
   assert.equal(packet.values[index.Synthetic_Normalized_Reference_Line], 9.5);
   assert.equal(packet.values[index.Executable_Market_Line], 9.5);
   assert.equal(packet.values[index.Executable_Market_Source], "Hard Rock NJ");
+  assert.equal(packet.values[index.Primary_Grade_Market_Line], 10);
+  assert.equal(packet.values[index.Primary_Grade_Market_Source], "MLB_STARTING_NINE_CARD");
+  assert.equal(packet.values[index.Primary_Grade_Market_Status], "LITERAL_REFERENCE_STANDING_BENCHMARK");
   assert.equal(packet.values[index.Base_Projection], 8.5);
 
   const mismatchedBoard = [{
@@ -872,6 +876,6 @@ test("packet contract preserves market and dependent shadow fields as explicit c
 test("packet schema and read range expand together for frozen moderation fields", () => {
   const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === "PREGAME_PACKET_HISTORY");
   assert.deepEqual(schema?.columns.map((column) => column.name), PREGAME_PACKET_HISTORY_HEADERS);
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 75);
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 76);
   assert.equal(pregamePacketHistoryRange(5000), "A1:JL5000");
 });

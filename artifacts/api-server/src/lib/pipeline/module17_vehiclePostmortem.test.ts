@@ -124,7 +124,7 @@ test("coded postmortem cannot substitute a reference when Hard Rock is unavailab
   });
 });
 
-test("post-policy postmortem cannot revive a stale reference-only COL-DET PUSH", () => {
+test("postmortem uses the standing reference benchmark when no execution line is primary", () => {
   assert.deepEqual(gradePostmortemTicket("OVER", 8, canonicalMarket({
     executable_market_line: null,
     executable_market_source: "",
@@ -134,10 +134,10 @@ test("post-policy postmortem cannot revive a stale reference-only COL-DET PUSH",
     primary_directional_result: "PUSH",
     primary_market_provenance: "LITERAL_REFERENCE",
   }), "2026-09-11"), {
-    market_line: null,
-    market_status: "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE",
-    thesis_correct: null,
-    ticket_result: "NO_BET",
+    market_line: 8,
+    market_status: "REFERENCE_MARKET_STANDING_BENCHMARK",
+    thesis_correct: "PUSH",
+    ticket_result: "PUSH",
   });
 });
 
@@ -152,7 +152,7 @@ test("pre-policy historical whole-number postmortem retains legitimate PUSH sema
     primary_market_provenance: "LITERAL_REFERENCE",
   }), "2026-09-05"), {
     market_line: 8,
-    market_status: "LEGACY_OR_NON_HARD_ROCK_MARKET",
+    market_status: "REFERENCE_MARKET_STANDING_BENCHMARK",
     thesis_correct: "PUSH",
     ticket_result: "PUSH",
   });

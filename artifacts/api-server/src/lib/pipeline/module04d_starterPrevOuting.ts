@@ -1,7 +1,7 @@
 /**
  * Module 04d: Starter Previous Outing
  * For each probable starting pitcher on today's slate:
- *   1. Fetch their MLB Stats API game log → find the most recent regular-season start
+ *   1. Fetch their MLB Stats API game log → find the most recent regular-season appearance
  *      (gamePk, date, IP, pitch count)
  *   2. Fetch Baseball Savant /gf?game_pk=X → extract pitch array → compute innings
  *      pitched per inning and derive a stress flag
@@ -72,14 +72,51 @@ function makeSummary(outing: Omit<StarterOuting, "summary">): string {
 
 // ─── Step 1: MLB Stats API game log → find last regular-season start ──────────
 
-interface GameLogEntry {
+export interface GameLogEntry {
   date:     string;
   gamePk:   number;
   ip:       string;
   pitches:  number;
 }
 
-async function fetchLastStart(pitcherId: number, beforeDate: string): Promise<GameLogEntry | null> {
+interface RawGameLogSplit {
+  date?: string;
+  gameType?: string;
+  game?: { gamePk?: number };
+  stat?: { inningsPitched?: string; numberOfPitches?: number; gamesStarted?: number };
+}
+
+/**
+ * Workload freshness follows the pitcher's latest appearance, not merely the
+ * latest game in which MLB credited a start. A scheduled starter can have
+ * worked as a bulk follower in the interim; ignoring that outing fabricates
+ * rest and pitch-history state (the Sept. 23 Pecko defect).
+ */
+export function selectLatestPreviousPitchingAppearance(
+  splits: readonly RawGameLogSplit[],
+  beforeDate: string,
+): GameLogEntry | null {
+  const last = splits
+    .filter((split) =>
+      split.gameType === "R"
+      && split.date !== undefined
+      && split.date < beforeDate
+      && split.game?.gamePk !== undefined,
+    )
+    .sort((left, right) =>
+      (right.date ?? "").localeCompare(left.date ?? "")
+      || (right.game?.gamePk ?? 0) - (left.game?.gamePk ?? 0),
+    )[0];
+  if (!last?.date || !last.game?.gamePk) return null;
+  return {
+    date: last.date,
+    gamePk: last.game.gamePk,
+    ip: String(last.stat?.inningsPitched ?? "0.0"),
+    pitches: last.stat?.numberOfPitches ?? 0,
+  };
+}
+
+async function fetchLastAppearance(pitcherId: number, beforeDate: string): Promise<GameLogEntry | null> {
   const season = beforeDate.slice(0, 4);
   const url    = `${MLB_API}/people/${pitcherId}/stats?stats=gameLog&group=pitching&season=${season}`;
 
@@ -93,36 +130,13 @@ async function fetchLastStart(pitcherId: number, beforeDate: string): Promise<Ga
 
     const json = await res.json() as {
       stats?: Array<{
-        splits?: Array<{
-          date?: string;
-          gameType?: string;   // NOTE: lives at split level, NOT under game.*
-          game?: { gamePk?: number };
-          stat?: { inningsPitched?: string; numberOfPitches?: number; gamesStarted?: number };
-        }>;
+        splits?: RawGameLogSplit[];
       }>;
     };
 
     const splits = json.stats?.[0]?.splits ?? [];
 
-    // Filter to regular-season starts before today, sorted newest-first
-    const starts = splits
-      .filter((s) =>
-        s.gameType === "R" &&
-        (s.stat?.gamesStarted ?? 0) >= 1 &&
-        s.date !== undefined &&
-        s.date < beforeDate,
-      )
-      .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
-
-    const last = starts[0];
-    if (!last?.game?.gamePk || !last.date) return null;
-
-    return {
-      date:    last.date,
-      gamePk:  last.game.gamePk,
-      ip:      String(last.stat?.inningsPitched ?? "0.0"),
-      pitches: last.stat?.numberOfPitches ?? 0,
-    };
+    return selectLatestPreviousPitchingAppearance(splits, beforeDate);
   } catch (err: unknown) {
     logger.debug({ pitcherId, err: err instanceof Error ? err.message : String(err) }, "MODULE_04d: game log fetch failed");
     return null;
@@ -178,22 +192,22 @@ async function resolveOuting(
   pitcherName: string,
   today:       string,
 ): Promise<StarterOuting | null> {
-  const lastStart = await fetchLastStart(pitcherId, today);
-  if (!lastStart) return null;
+  const lastAppearance = await fetchLastAppearance(pitcherId, today);
+  if (!lastAppearance) return null;
 
   // Enrich with Baseball Savant (non-blocking; falls back to MLB game log pitch count)
-  const { pitchCount: savantPitches } = await fetchSavantPitcher(lastStart.gamePk, pitcherId);
+  const { pitchCount: savantPitches } = await fetchSavantPitcher(lastAppearance.gamePk, pitcherId);
 
-  const { display: ipDisplay, decimal: ipDecimal } = parseIPDisplay(lastStart.ip);
-  const pitchCount = savantPitches ?? lastStart.pitches;
-  const daysRest   = daysBetween(lastStart.date, today);
+  const { display: ipDisplay, decimal: ipDecimal } = parseIPDisplay(lastAppearance.ip);
+  const pitchCount = savantPitches ?? lastAppearance.pitches;
+  const daysRest   = daysBetween(lastAppearance.date, today);
   const flag       = stressFlag(ipDecimal, pitchCount, daysRest);
 
   const outing: Omit<StarterOuting, "summary"> = {
     pitcher_id:   pitcherId,
     pitcher_name: pitcherName,
-    game_pk:      lastStart.gamePk,
-    outing_date:  lastStart.date,
+    game_pk:      lastAppearance.gamePk,
+    outing_date:  lastAppearance.date,
     ip_display:   ipDisplay,
     ip_decimal:   ipDecimal,
     pitch_count:  pitchCount,
@@ -244,7 +258,7 @@ export async function fetchStarterPrevOutings(
         result.outings.set(id, s.value);
         result.fetched++;
       } else {
-        const reason = s.status === "rejected" ? String(s.reason) : "no last start found";
+        const reason = s.status === "rejected" ? String(s.reason) : "no prior appearance found";
         result.errors.push(`pitcher ${id}: ${reason}`);
       }
     }

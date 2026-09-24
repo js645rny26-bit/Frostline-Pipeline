@@ -317,7 +317,7 @@ const ENTRIES: ModelInputCatalogEntry[] = [
   {
     recordType: "INPUT", id: "STARTER_WORKLOAD", label: "Starter role and expected workload",
     layer: "BASEBALL_MODEL", outputClass: "ACTIVE_INPUT", operationalStatus: "ACTIVE",
-    definition: "Source assignment determines starter role; up to five D-1 prior starts independently estimate pitches/innings and therefore the starter and inherited bullpen windows.",
+    definition: "Source assignment determines starter role; up to five D-1 starter-scale appearances (credited starts or multi-inning/high-pitch bulk work) independently estimate pitches/innings, while the latest pitching appearance owns rest state.",
     statisticalWindow: "Up to five prior MLB starts through slate date minus one, normalized 0.50/0.30/0.20/0.10/0.05 recency weights, sample shrinkage, and explicit rest state",
     gameWindow: "STARTER_WINDOW -> BULLPEN_WINDOW", primarySource: "SOURCE_MLB_SCHEDULE + SOURCE_MLB_STARTER_WORKLOAD", fallbackSource: "Listed-starter prior 6.0 IP/92 pitches; missing-evidence prior 5.5/85; no pitch-magnitude role inference",
     refreshCadence: "EVERY_PREGAME_RUN", freshnessEvidence: "DAILY_MATCHUPS L:O + PREGAME_PACKET_HISTORY Away/Home_Expected_IP",

@@ -569,7 +569,7 @@ test("pre-policy v54 literal whole-number reference fallback preserves below, ab
   assert.equal(push.market_grade_notes, "WHOLE_NUMBER_REFERENCE_PUSH_PRESERVED");
 });
 
-test("post-policy stale reference-only packet is ungradeable rather than replaying a PUSH", () => {
+test("reference-only packet remains the standing research benchmark regardless of date", () => {
   const index = Object.fromEntries(
     PREGAME_PACKET_HISTORY_HEADERS.map((name, position) => [name, position]),
   ) as Record<(typeof PREGAME_PACKET_HISTORY_HEADERS)[number], number>;
@@ -592,12 +592,11 @@ test("post-policy stale reference-only packet is ungradeable rather than replayi
 
   const snapshot = parseFrozenPacketMarketSnapshots([packet], "2026-09-11")
     .get("20260911_COL_DET");
-  assert.equal(snapshot?.hard_rock_required, true);
   const grade = resolveSettlementMarketGrade(9.66, 8, snapshot, undefined);
-  assert.equal(grade.primary_grade_market_line, null);
-  assert.equal(grade.primary_market_grade_status, "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE");
-  assert.equal(grade.primary_market_provenance, "HARD_ROCK_EXECUTABLE_UNAVAILABLE");
-  assert.equal(grade.primary_directional_result, "NO_BET");
+  assert.equal(grade.primary_grade_market_line, 8);
+  assert.equal(grade.primary_market_grade_status, "LITERAL_REFERENCE");
+  assert.equal(grade.primary_market_provenance, "LITERAL_REFERENCE");
+  assert.equal(grade.primary_directional_result, "PUSH");
   assert.equal(grade.reference_directional_result, "PUSH");
 });
 
@@ -657,10 +656,10 @@ test("v54 synthetic normalized reference is never executable or a fallback gradi
   const priorOutcome = Array(OUTCOMES_HEADER.length).fill("");
   priorOutcome[OUTCOMES_HEADER.indexOf("Primary_Grade_Market_Source")] = "STALE_SYNTHETIC_SOURCE";
   const grade = resolveSettlementMarketGrade(8.75, 8, snapshot, priorOutcome);
-  assert.equal(grade.primary_market_provenance, "HARD_ROCK_EXECUTABLE_UNAVAILABLE");
+  assert.equal(grade.primary_market_provenance, "SYNTHETIC_NORMALIZED_REFERENCE");
   assert.equal(grade.primary_directional_result, "NO_BET");
   assert.equal(grade.executable_market_line, null);
-  assert.equal(grade.primary_grade_market_source, "HARD_ROCK_FLORIDA_REQUIRED");
+  assert.equal(grade.primary_grade_market_source, "");
 });
 
 test("a literal half-number market cannot produce a push", () => {

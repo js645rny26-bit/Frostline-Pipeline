@@ -54,6 +54,38 @@ test("Module 03 workload candidate shrinks a one-appearance sample and never bec
   assert.equal(result.expected_pitches, 82);
 });
 
+test("conventional workload preserves recent starter-scale bulk work and uses the latest appearance for rest", () => {
+  const result = estimatePitcherSpecificWorkload(
+    "CONVENTIONAL_STARTER", 92, 6, "2026-09-23", "2026-09-22",
+    workload([
+      appearance("2026-09-17", 5.667, 71, false),
+      appearance("2026-09-11", 5.667, 75, false),
+      appearance("2026-09-05", 4.333, 81, true),
+      appearance("2026-08-30", 5, 83, true),
+      appearance("2026-08-25", 4.333, 88, true),
+    ]),
+  );
+  assert.equal(result.relevant_appearances, 5);
+  assert.equal(result.days_rest, 6);
+  assert.equal(result.rest_state, "STANDARD_REST");
+  assert.equal(result.expected_innings, 5.32);
+  assert.equal(result.expected_pitches, 76);
+});
+
+test("a short relief appearance affects rest without masquerading as starter-scale workload", () => {
+  const result = estimatePitcherSpecificWorkload(
+    "CONVENTIONAL_STARTER", 92, 6, "2026-09-23", "2026-09-22",
+    workload([
+      appearance("2026-09-21", 1, 14, false),
+      appearance("2026-09-17", 5.667, 90, true),
+      appearance("2026-09-11", 5.333, 84, true),
+    ]),
+  );
+  assert.equal(result.relevant_appearances, 2);
+  assert.equal(result.days_rest, 2);
+  assert.equal(result.rest_state, "SHORT_REST");
+});
+
 test("Module 03 workload candidate enforces D-1 and falls back explicitly when no admissible history remains", () => {
   const result = estimatePitcherSpecificWorkload(
     "CONVENTIONAL_STARTER", 92, 6, "2026-09-09", "2026-09-08",

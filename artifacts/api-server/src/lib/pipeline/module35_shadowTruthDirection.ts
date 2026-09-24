@@ -172,22 +172,25 @@ interface LiteralLineSelection {
 }
 
 export function selectLiteralShadowLine(packet: Record<string, unknown>): LiteralLineSelection {
-  const executable = numeric(packet.Executable_Market_Line);
-  if (executable !== null && text(packet.Executable_Market_Status) === "LITERAL_EXECUTABLE_HARD_ROCK_CAPTURED") {
+  const reference = numeric(packet.Reference_Market_Line);
+  if (reference !== null && text(packet.Reference_Market_Representation_Status) === "LITERAL_REFERENCE") {
     return {
-      line: executable,
-      source: text(packet.Executable_Market_Source) || "LITERAL_EXECUTABLE_HARD_ROCK",
-      status: "LITERAL_EXECUTABLE_HARD_ROCK",
+      line: reference,
+      source: text(packet.Reference_Market_Source) || "REFERENCE_MARKET",
+      status: "LITERAL_REFERENCE_STANDING_BENCHMARK",
     };
   }
-  const literalReferenceAvailable = numeric(packet.Reference_Market_Line) !== null
-    && text(packet.Reference_Market_Representation_Status) === "LITERAL_REFERENCE";
+  const executableAvailable = numeric(packet.Executable_Market_Line) !== null
+    && text(packet.Executable_Market_Status) === "LITERAL_EXECUTABLE_HARD_ROCK_CAPTURED";
+  const syntheticReferenceAvailable = numeric(packet.Synthetic_Normalized_Reference_Line) !== null;
   return {
     line: null,
     source: "",
-    status: literalReferenceAvailable
-      ? "MISSING_EXECUTABLE_LINE_REFERENCE_NOT_SUBSTITUTED"
-      : "MISSING_LITERAL_EXECUTABLE_LINE",
+    status: syntheticReferenceAvailable
+      ? "SYNTHETIC_NORMALIZED_REFERENCE_NOT_GRADEABLE"
+      : executableAvailable
+        ? "MISSING_REFERENCE_MARKET_EXECUTABLE_NOT_SUBSTITUTED"
+        : "MISSING_LITERAL_REFERENCE_LINE",
   };
 }
 
@@ -214,10 +217,9 @@ export function packetToRecord(
   const packet = packetObject(row, index);
   const lineSelection = selectLiteralShadowLine(packet);
   const frozenTotal = numeric(field(row, index, "Base_Projection"));
-  // When executable evidence exists, apply the same Module 11 direction rule
-  // to that literal frozen line. When it does not, preserve any already-stored
-  // upstream direction for audit visibility but leave the row ungradable; a
-  // reference/proxy line is never substituted as the grading line.
+  // Apply the same Module 11 direction rule to the literal frozen reference
+  // line. Executable evidence remains a separate wager object and never
+  // replaces the standing research benchmark.
   const upstreamDirection = normalizeDirection(field(row, index, "Direction"));
   const direction = lineSelection.line === null
     ? upstreamDirection
@@ -238,8 +240,8 @@ export function packetToRecord(
       ? "UNGRADABLE_NO_AUTHORITATIVE_FORCED_DIRECTION"
       : packetStatus;
   const notes = [
-    lineSelection.status === "MISSING_EXECUTABLE_LINE_REFERENCE_NOT_SUBSTITUTED"
-      ? "A literal reference line exists but is not substituted for missing executable Hard Rock evidence; settlement remains UNGRADABLE."
+    lineSelection.status === "MISSING_REFERENCE_MARKET_EXECUTABLE_NOT_SUBSTITUTED"
+      ? "A literal executable line exists but is not substituted for the missing standing reference benchmark."
       : "",
     missingDirection ? "Existing Module 11 direction rule has no preference at an exact projection/line tie; no tie-break was invented." : "",
     "Research-only; no projection, vehicle, stake, BET/PASS, NO_CALL, or authorization consumer.",

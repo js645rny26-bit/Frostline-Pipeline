@@ -281,17 +281,31 @@ state, environment identity, and every shadow companion then available
 This packet is provenance infrastructure only. It cannot change the active
 projection, authorization, vehicle selection, or market interpretation.
 
-### Executable full-game total convention
+### Reference and executable full-game totals
 
-Reference-market totals use Frostline's half-number representation: an integer
-reference source is normalized down one half-run (`10 -> 9.5`, `7 -> 6.5`),
-while unsupported fractions fail closed rather than being rounded into an
-invented market. A literal pregame Hard Rock quote supplied through
+The literal reference-market snapshot is the standing research and postmortem
+benchmark. Whole-number reference totals retain push semantics. Frostline also
+preserves its historical lower-half representation (`10 -> 9.5`, `7 -> 6.5`)
+as an explicitly synthetic/mechanical field; it is not substituted for the
+literal research grade. A literal pregame Hard Rock quote supplied through
 `OPERATOR_EVIDENCE_OVERLAY`, however, is stored exactly as supplied, along with
 its explicit price, source, and quote timestamp when provided. It is never
 normalized, converted, inferred, or synthesized from a reference-market row.
-This distinction is market provenance only—never an input to the baseball
-projection. Frozen packets and historical grades are never rewritten.
+It is used only for the specific execution/vehicle decision in which it was
+supplied and is not required for nightly settlement, replay, or regression.
+Reference directional accuracy must never be described as proof that Frostline
+beat the executable market. This distinction is market provenance only—never
+an input to the baseball projection. Frozen packets and historical grades are
+never rewritten.
+
+Sept. 23 governance checkpoint: the standing reference-market directional
+record was 8-8 (50.0%) across 16 settled games, or 8-7 (53.3%) when the
+starter-unresolved `TOR_BAL_G2` observation is excluded. A separate manual,
+opportunistic 13-game Hard Rock spot-check was 5-8 (Overs 3-6, Unders 2-2),
+with `CIN_ATL` and `CHW_KCR` grading differently from the reference market.
+This is evidence that the two market objects are not interchangeable; it is
+not a permanent Hard Rock calibration corpus or proof of executable-market
+performance.
 
 ### Pre-registered separation gate audit
 

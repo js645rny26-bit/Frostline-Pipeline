@@ -29,7 +29,6 @@ import type { NormalizedGame } from "./module06_normalization.js";
 import type { StatcastPreviewResult } from "./module02e_statcastPreview.js";
 import type { SettlementRow } from "./module14_shadowSettlement.js";
 import { gradeHardRockMlbFullGameTotal } from "./module14_settlementGrading.js";
-import { requiresHardRockFloridaMlbFullGameTotal } from "./marketLineNormalization.js";
 import { isAtOrAfterFirstPitch } from "./module00_temporalFirewall.js";
 import {
   classifyPostmortemMechanism,
@@ -352,7 +351,7 @@ function decisionAuditMarketContext(
   frozenLine: number | null,
   outcome: SettlementRow,
   vehicle: unknown,
-  date: string,
+  _date: string,
 ): DecisionAuditMarketContext {
   const normalizedVehicle = String(vehicle ?? "").trim().toUpperCase();
   const isFullGameTotal = normalizedVehicle === "GAME_TOTAL" || normalizedVehicle.includes("FULL_GAME");
@@ -361,26 +360,25 @@ function decisionAuditMarketContext(
   }
   const primaryStatus = String(outcome.primary_market_grade_status ?? "").trim();
   const primarySource = String(outcome.primary_grade_market_source ?? "").trim();
-  const executableSource = String(outcome.executable_market_source ?? "").trim();
   const primaryProvenance = String(outcome.primary_market_provenance ?? "").trim();
-  const hardRockRequiredByPolicy = requiresHardRockFloridaMlbFullGameTotal(date);
-  const hardRockRequiredButUnavailable = primaryStatus === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
-    || (hardRockRequiredByPolicy && outcome.executable_market_line === null);
-  const hardRockClaim = hardRockRequiredByPolicy
-    || hardRockRequiredButUnavailable
+  const hardRockRequiredButUnavailable = primaryStatus === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE";
+  const hardRockClaim = hardRockRequiredButUnavailable
     || primaryStatus === "LITERAL_EXECUTABLE"
     || primaryStatus === "EXECUTABLE_OPERATOR_CAPTURED"
     || primaryStatus === "MARKET_LINE_INTEGRITY_FAILURE"
     || primaryProvenance === "LITERAL_EXECUTABLE"
     || primaryProvenance === "DATA_LINEAGE_FAILURE"
-    || /HARD[_ ]?ROCK/i.test(`${primarySource} ${executableSource}`);
+    || /HARD[_ ]?ROCK/i.test(primarySource);
 
   if (!hardRockClaim) {
-    return { line: frozenLine, hard_rock: false, settlement_status: "SETTLED", gap_reason: "" };
+    return {
+      line: outcome.primary_grade_market_line ?? frozenLine,
+      hard_rock: false,
+      settlement_status: "SETTLED",
+      gap_reason: "",
+    };
   }
-  const line = hardRockRequiredByPolicy
-    ? outcome.executable_market_line ?? null
-    : outcome.primary_grade_market_line ?? outcome.executable_market_line ?? null;
+  const line = outcome.primary_grade_market_line ?? outcome.executable_market_line ?? null;
   const integrity = gradeHardRockMlbFullGameTotal("OVER", line, outcome.actual_total).integrity_status;
   if (hardRockRequiredButUnavailable || integrity === "MISSING_LITERAL_EXECUTABLE_LINE") {
     return {

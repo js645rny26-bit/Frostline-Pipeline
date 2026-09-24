@@ -245,8 +245,14 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      recent pitch-count magnitude; D-1 prior starts independently estimate
  *      numeric workload. No sheet or column is added and no coefficient is
  *      tuned from outcomes.
+ *  v76 (2026-09-24): restores the literal reference snapshot as the standing
+ *      research/postmortem grading benchmark while retaining optional literal
+ *      Hard Rock evidence as a distinct execution object. Starter workload
+ *      freshness now admits source-observed starter-scale bulk appearances
+ *      and derives rest from the latest pitching appearance. No new sheet,
+ *      projection coefficient, or authorization rule is added.
  */
-export const WORKBOOK_SCHEMA_VERSION = 75;
+export const WORKBOOK_SCHEMA_VERSION = 76;
 
 export interface ColumnDef {
   name: string;
@@ -1889,6 +1895,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         type: "string",
         width: 110,
         filledBy: "MODULE_08",
+        description: "Most recent cutoff-safe regular-season pitching appearance, including a bulk/follower outing.",
         exampleValue: "2026-07-18",
       },
       {
@@ -1934,6 +1941,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         type: "string",
         width: 110,
         filledBy: "MODULE_08",
+        description: "Most recent cutoff-safe regular-season pitching appearance, including a bulk/follower outing.",
         exampleValue: "2026-07-17",
       },
       {
@@ -7702,7 +7710,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         format: "0.0",
         filledBy: "MODULE_14",
         readOnly: true,
-        description: "Executable operator line when available; otherwise explicitly falls back to reference market.",
+        description: "Literal reference-market snapshot used for standing research/postmortem grading; executable operator evidence remains separate.",
       },
       {
         name: "Primary_Grade_Market_Source",
@@ -7719,7 +7727,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         width: 215,
         filledBy: "MODULE_14",
         readOnly: true,
-        description: "EXECUTABLE_OPERATOR_CAPTURED, REFERENCE_ONLY_FALLBACK, or MISSING_MARKET.",
+        description: "LITERAL_REFERENCE_STANDING_BENCHMARK or an explicit missing/synthetic-reference status; legacy frozen statuses remain unchanged.",
       },
       {
         name: "Primary_Directional_Result",

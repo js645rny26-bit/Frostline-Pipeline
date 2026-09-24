@@ -64,7 +64,7 @@ const O_FROZEN_ERROR = 13;
 const O_FROZEN_ABS = 14;
 const O_FROZEN_SOURCE = 15;
 const O_FROZEN_PUBLISHED_TOTAL = 12;
-const O_PRIMARY_GRADE_MARKET_LINE = 39;
+const O_REFERENCE_MARKET_LINE = 33;
 
 // VEHICLE_LOG column indices (0-based)
 // Date | Game_ID | Away_Team | Home_Team | Vehicle_Type | Market_Line | Direction |
@@ -90,6 +90,14 @@ const FIXED_TIERS = [
   { label: "2.50–2.99", edge_min: 2.50, edge_max: 3.00 },
   { label: "3.00+",     edge_min: 3.00, edge_max: Infinity },
 ] as const;
+
+/** Standing research cohorts use the frozen reference observation. */
+export function selectStandingResearchMarketLine(
+  frozenReferenceLine: number,
+  legacyVehicleLine: number,
+): number {
+  return Number.isFinite(frozenReferenceLine) ? frozenReferenceLine : legacyVehicleLine;
+}
 
 // ─── Sheet headers ────────────────────────────────────────────────────────────
 
@@ -521,17 +529,15 @@ async function joinVehicleOutcomes(wbId: string): Promise<{ joined: JoinedGame[]
       const absE   = parseFloat(row[O_ABS]    ?? "");
       if (!Number.isFinite(actual)) continue;
 
-      // A frozen executable operator line is the primary directional grade.
-      // Historical rows without that evidence deliberately retain their
-      // vehicle/reference values as an explicit fallback.
+      // The consistently available frozen reference market is the standing
+      // research/regression benchmark. A literal executable line is a distinct
+      // opportunistic execution object and never replaces this cohort line.
       const frozenPublished = parseFloat(row[O_FROZEN_PUBLISHED_TOTAL] ?? "");
-      const primaryMarketLine = parseFloat(row[O_PRIMARY_GRADE_MARKET_LINE] ?? "");
+      const referenceMarketLine = parseFloat(row[O_REFERENCE_MARKET_LINE] ?? "");
       const projected_total = Number.isFinite(frozenPublished)
         ? frozenPublished
         : vehicle.projected_total;
-      const market_line = Number.isFinite(primaryMarketLine)
-        ? primaryMarketLine
-        : vehicle.market_line;
+      const market_line = selectStandingResearchMarketLine(referenceMarketLine, vehicle.market_line);
       const direction = projected_total > market_line
         ? "OVER" as const
         : projected_total < market_line ? "UNDER" as const : vehicle.direction;

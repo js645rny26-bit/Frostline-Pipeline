@@ -48,8 +48,8 @@ function outcome(gameId = "20260917_BOS_TEX", actualTotal = 8): SettlementRow {
   };
 }
 
-test("Module 35 keeps its two research surfaces through schema v75", () => {
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 75);
+test("Module 35 keeps its two research surfaces through schema v76", () => {
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 76);
   for (const [sheet, headers] of [
     ["SHADOW_TRUTH_DIRECTION_V1", SHADOW_TRUTH_DIRECTION_HEADERS],
     ["SHADOW_TRUTH_SUMMARY_V1", SHADOW_TRUTH_SUMMARY_HEADERS],
@@ -68,20 +68,20 @@ test("NO_CALL remains operational while the shadow direction is independently pr
   assert.equal(row.direction, "UNDER");
 });
 
-test("literal executable line wins; reference and synthetic lines are never substituted", () => {
+test("literal reference is the standing benchmark and executable evidence stays separate", () => {
   assert.deepEqual(selectLiteralShadowLine({
     Executable_Market_Line: 8.5,
     Executable_Market_Status: "LITERAL_EXECUTABLE_HARD_ROCK_CAPTURED",
     Executable_Market_Source: "HARD_ROCK",
     Reference_Market_Line: 8,
     Reference_Market_Representation_Status: "LITERAL_REFERENCE",
-  }), { line: 8.5, source: "HARD_ROCK", status: "LITERAL_EXECUTABLE_HARD_ROCK" });
+  }), { line: 8, source: "REFERENCE_MARKET", status: "LITERAL_REFERENCE_STANDING_BENCHMARK" });
   assert.deepEqual(selectLiteralShadowLine({
     Reference_Market_Line: 8,
     Reference_Market_Source: "MLB_STARTING_NINE_CARD",
     Reference_Market_Representation_Status: "LITERAL_REFERENCE",
     Synthetic_Normalized_Reference_Line: 7.5,
-  }), { line: null, source: "", status: "MISSING_EXECUTABLE_LINE_REFERENCE_NOT_SUBSTITUTED" });
+  }), { line: 8, source: "MLB_STARTING_NINE_CARD", status: "LITERAL_REFERENCE_STANDING_BENCHMARK" });
   assert.equal(selectLiteralShadowLine({ Synthetic_Normalized_Reference_Line: 7.5 }).line, null);
 });
 
@@ -147,7 +147,7 @@ test("a frozen packet cannot create a missing shadow direction after first pitch
   assert.equal(packetToRecord(row, index, "2026-09-18T05:00:00Z"), null);
 });
 
-test("missing executable evidence preserves the upstream opinion but cannot become a graded line", () => {
+test("literal reference evidence supplies the prospective shadow grading line", () => {
   const headers = [
     "Date", "Game_ID", "Packet_Status", "Scheduled_First_Pitch", "Packet_Snapshot_TS",
     "Core_Packet_Status", "Final_Decision", "Base_Projection", "Direction",
@@ -161,9 +161,9 @@ test("missing executable evidence preserves the upstream opinion but cannot beco
   ];
   const candidate = packetToRecord(row, index, "2026-09-17T21:00:00Z");
   assert.equal(candidate?.direction, "UNDER");
-  assert.equal(candidate?.line, null);
-  assert.equal(candidate?.record_status, "UNGRADABLE_MISSING_LITERAL_LINE");
-  assert.equal(candidate?.line_status, "MISSING_EXECUTABLE_LINE_REFERENCE_NOT_SUBSTITUTED");
+  assert.equal(candidate?.line, 8.5);
+  assert.equal(candidate?.record_status, "OPEN_PROSPECTIVE");
+  assert.equal(candidate?.line_status, "LITERAL_REFERENCE_STANDING_BENCHMARK");
 });
 
 test("September 16 former NO_CALL-style cases can retain their proven upstream directions", () => {

@@ -32,6 +32,9 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
   is different: preserve its exact line and price, plus its explicit source
   and quote timestamp when provided. Never normalize, infer, or synthesize an
   executable Hard Rock quote from a reference-market value.
+- The literal reference snapshot remains the standing nightly research and
+  postmortem benchmark. Hard Rock capture is optional and execution-specific;
+  its absence is not a pipeline-completeness or research-grading failure.
 - That input is authoritative only for the named field. The packet records it
   and marks the game for fresh review; it does not silently change projection
   coefficients, BET/PASS, vehicle choice, or unrelated fields.

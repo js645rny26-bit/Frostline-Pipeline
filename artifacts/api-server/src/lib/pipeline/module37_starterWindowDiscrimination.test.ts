@@ -89,8 +89,8 @@ test("Module 37 starter-window discrimination support is research-only", () => {
   assert.equal(STARTER_WINDOW_COMMISSIONING_STATUS,"RESEARCH_ONLY_NOT_COMMISSIONED");
 });
 
-test("schema v75 exposes exactly the six frozen Module 37 supporting research sheets", () => {
-  assert.equal(WORKBOOK_SCHEMA_VERSION,75);
+test("schema v76 exposes exactly the six frozen Module 37 supporting research sheets", () => {
+  assert.equal(WORKBOOK_SCHEMA_VERSION,76);
   for (const [name,headers] of [
     [STARTER_WINDOW_ERROR_SHEET,STARTER_WINDOW_ERROR_HEADERS],
     [STARTER_WINDOW_ERROR_SUMMARY_SHEET,STARTER_WINDOW_ERROR_SUMMARY_HEADERS],

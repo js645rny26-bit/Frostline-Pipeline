@@ -10,7 +10,7 @@ direct production defect: Module 03 inferred `OPENER`/`BULK` from recent pitch
 magnitude and then manufactured 1.2/3.0 IP from that inferred label.
 
 The repair does not tune a coefficient. Source assignment now owns role truth;
-D-1 prior starts own numeric workload. Existing frozen packets and the Module
+D-1 starter-scale appearances own numeric workload. Existing frozen packets and the Module
 30 legacy comparison remain immutable. Explicit opener/bulk assignment still
 requires a genuine pregame role source; roster plausibility or low pitch count
 is insufficient.
@@ -29,7 +29,7 @@ The candidate is `PITCHER_SPECIFIC_WORKLOAD_CANDIDATE_V1` in `module03_numericWo
 
 1. Admit only official MLB Stats API game-log appearances satisfying both `appearance.date < gameDate` and `appearance.date <= dataThroughDate`. The acquisition path supplies D-1; the estimator enforces it again.
 2. Sort newest first and use no more than five appearances.
-3. For `CONVENTIONAL_STARTER`, use previous starts when any exist. For `OPENER`, `BULK`, and `PIGGYBACK_SECONDARY`, use prior appearances because non-start usage is relevant to those roles.
+3. For `CONVENTIONAL_STARTER`, use credited starts plus source-observed starter-scale bulk appearances (at least 3 IP or 45 pitches); use the latest appearance of any role for rest. For `OPENER`, `BULK`, and `PIGGYBACK_SECONDARY`, use prior appearances because non-start usage is relevant to those roles.
 4. Compute separate weighted recent IP and pitch-count means with weights `0.50 / 0.30 / 0.20 / 0.10 / 0.05`, normalized over the appearances actually present.
 5. Use `history_weight = min(n / 5, 1)`. One appearance is therefore 20% history and 80% prior; five appearances earn full history weight. One appearance is the minimum usable sample, but it can never become an unshrunk single-start estimate.
 6. Estimate innings as `role_or_return_prior_IP * (1-history_weight) + weighted_recent_IP * history_weight + rest_adjustment`.

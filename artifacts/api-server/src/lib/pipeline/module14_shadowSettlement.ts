@@ -24,7 +24,6 @@ import {
 } from "./module20a_pregamePacket.js";
 import { assignUniqueGameIds } from "./module01_mlbStatsApi.js";
 import { gradeHardRockMlbFullGameTotal } from "./module14_settlementGrading.js";
-import { requiresHardRockFloridaMlbFullGameTotal } from "./marketLineNormalization.js";
 import type { PostmortemEventEvidence } from "./module21_postmortemMechanism.js";
 
 const MLB_API = "https://statsapi.mlb.com/api/v1";
@@ -333,8 +332,6 @@ export interface FrozenPacketMarketSnapshot {
   primary_grade_market_line: number | null;
   primary_grade_market_source: string;
   primary_grade_market_status: string;
-  /** True for packets governed by the active Florida Hard Rock FGT policy. */
-  hard_rock_required?: boolean;
   packet_snapshot_ts: string;
   freeze_ts: string;
 }
@@ -473,7 +470,6 @@ export function parseFrozenPacketMarketSnapshots(
         ? primaryMarketStatus
         : primaryMarketStatus
           || (hasExecutable ? "EXECUTABLE_OPERATOR_CAPTURED" : "REFERENCE_ONLY_FALLBACK"),
-      hard_rock_required: requiresHardRockFloridaMlbFullGameTotal(date),
       packet_snapshot_ts: packetSnapshotTs,
       freeze_ts: starterName(row[P_FREEZE_TS]),
     });
@@ -990,26 +986,21 @@ export function resolveSettlementMarketGrade(
   const executableMarketTs = packet !== undefined
     ? packet.executable_market_ts
     : starterName(existing?.[O_EXECUTABLE_MARKET_TS]);
-  // A v54 packet with synthetic-only reference evidence must remain
-  // ungradeable rather than falling through to a fabricated half-number line.
-  const hardRockRequiredByPolicy = packet?.hard_rock_required === true;
+  // A packet with synthetic-only reference evidence remains ungradeable rather
+  // than falling through to a fabricated half-number line. The literal
+  // reference snapshot is the standing research benchmark; executable capture
+  // is a separate, opportunistic wager object.
   const primaryMarketLine = packet !== undefined
-    ? hardRockRequiredByPolicy
-      ? executableMarketLine
-      : packet.primary_grade_market_line
+    ? packet.primary_grade_market_line
     : executableMarketLine ?? referenceMarketLine;
   const primaryMarketSource = packet !== undefined
-    ? hardRockRequiredByPolicy
-      ? executableMarketSource || "HARD_ROCK_FLORIDA_REQUIRED"
-      : packet.primary_grade_market_source
+    ? packet.primary_grade_market_source
     : starterName(existing?.[O_PRIMARY_MARKET_SOURCE])
       || (executableMarketLine === null
         ? referenceMarketLine === null ? "" : "FROZEN_REFERENCE_MARKET"
         : "MANUAL_OPERATOR_HARD_ROCK");
   const primaryMarketStatus = packet !== undefined
-    ? hardRockRequiredByPolicy && executableMarketLine === null
-      ? "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
-      : packet.primary_grade_market_status
+    ? packet.primary_grade_market_status
     : starterName(existing?.[O_PRIMARY_MARKET_STATUS])
       || (executableMarketLine === null
         ? referenceMarketLine === null ? "MISSING_MARKET" : "REFERENCE_ONLY_FALLBACK"
@@ -1026,14 +1017,14 @@ export function resolveSettlementMarketGrade(
     ?? directionForProjection(frozenProjection, primaryMarketLine);
   const referenceDirection = preservedDirection
     ?? directionForProjection(frozenProjection, referenceMarketLine);
-  const hardRockSourceClaim = [executableMarketSource, primaryMarketSource]
-    .some((value) => /HARD[_ ]?ROCK/i.test(value));
-  const hardRockExecutionClaim = hardRockRequiredByPolicy
-    || hardRockSourceClaim
+  // Executable evidence may coexist with a reference-primary packet. Only the
+  // primary object's own source/status can turn research grading into an
+  // execution grade; the mere presence of an opportunistic quote cannot.
+  const hardRockSourceClaim = /HARD[_ ]?ROCK/i.test(primaryMarketSource);
+  const hardRockExecutionClaim = hardRockSourceClaim
     || primaryMarketStatus === "LITERAL_EXECUTABLE"
     || primaryMarketStatus === "EXECUTABLE_OPERATOR_CAPTURED";
-  const hardRockRequiredButUnavailable = primaryMarketStatus === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE"
-    || (hardRockRequiredByPolicy && executableMarketLine === null);
+  const hardRockRequiredButUnavailable = primaryMarketStatus === "NO_LITERAL_EXECUTABLE_HARD_ROCK_LINE";
   const hardRockGrade = hardRockExecutionClaim
     ? gradeHardRockMlbFullGameTotal(primaryDirection, primaryMarketLine, actualTotal)
     : null;
