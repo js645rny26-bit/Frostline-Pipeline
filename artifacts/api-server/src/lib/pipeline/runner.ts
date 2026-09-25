@@ -67,7 +67,7 @@ import {
   writeBatterDamageMaturity,
   writeDamageLineupShadow,
 } from "./module02k_batterDamageHistory.js";
-import { persistSourceSnapshot } from "./module02_sourceSnapshots.js";
+import { persistSourceSnapshot, persistSourceSnapshots } from "./module02_sourceSnapshots.js";
 import { fetchTeamRunRates } from "./module05c_teamRunRates.js";
 import { trackLineMovement } from "./module05d_oddsHistory.js";
 import { fetchMarketOddsWithFallback, buildOddsMap } from "./module05c_startingNineScraper.js";
@@ -434,11 +434,18 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
     startingNineResult?.team_pages ?? [],
     mutableIds,
   );
-  for (const sourceSnapshot of mutableTeamPageSnapshots) {
-    const snapshotWrite = await persistSourceSnapshot(sourceSnapshot, workbookId).catch((error: unknown) => ({
-      status: "failure" as const,
-      errors: [error instanceof Error ? error.message : String(error)],
-    }));
+  const teamPageSnapshotWrites = await persistSourceSnapshots(
+    mutableTeamPageSnapshots,
+    workbookId,
+  ).catch((error: unknown) => mutableTeamPageSnapshots.map(() => ({
+    status: "failure" as const,
+    snapshot_id: "",
+    metadata_written: false,
+    raw_chunks_written: 0,
+    errors: [error instanceof Error ? error.message : String(error)],
+  })));
+  mutableTeamPageSnapshots.forEach((sourceSnapshot, index) => {
+    const snapshotWrite = teamPageSnapshotWrites[index];
     if (snapshotWrite.status !== "success") {
       const detail = snapshotWrite.errors.join("; ") || "raw team-page response was not retained";
       allErrors.push({
@@ -451,7 +458,7 @@ export async function runFullPipeline(dateStr?: string, workbookId = WORKBOOK_ID
         "Full pipeline: Starting Nine team-page source chronology was not retained",
       );
     }
-  }
+  });
 
   // Module 04b + 04c: Bullpen usage and Starting Nine — fetch in parallel, both non-blocking
   const slateTeamIds = Array.from(

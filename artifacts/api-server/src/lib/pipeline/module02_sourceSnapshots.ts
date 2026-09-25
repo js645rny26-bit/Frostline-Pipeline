@@ -35,6 +35,8 @@ export const SOURCE_RAW_SNAPSHOT_HEADERS = [
 
 /** Stay below the Google Sheets per-cell character limit with headroom. */
 export const RAW_SNAPSHOT_CHUNK_CHARS = 30_000;
+/** Bound raw append payloads while keeping write count independent of source count. */
+export const RAW_SNAPSHOT_ROWS_PER_APPEND = 50;
 
 export type SourceAvailability = "CURRENT" | "PARTIAL" | "UNAVAILABLE" | "SCHEMA_DRIFT";
 
@@ -67,6 +69,13 @@ export interface SourceSnapshotWriteResult {
   metadata_written: boolean;
   raw_chunks_written: number;
   errors: string[];
+}
+
+export interface SourceSnapshotPersistenceDependencies {
+  ensureSheets(workbookId: string): Promise<void>;
+  readStoredMetadata(workbookId: string): Promise<unknown[][]>;
+  appendRawRows(workbookId: string, rows: unknown[][]): Promise<void>;
+  appendMetadataRows(workbookId: string, rows: unknown[][]): Promise<void>;
 }
 
 export function sha256(raw: string): string {
@@ -125,12 +134,141 @@ export function sourceSnapshotMetadataMatchesStoredRow(
     String(row[15] ?? "") === snapshot.notes;
 }
 
-async function alreadyStored(workbookId: string, snapshot: MaterializedSourceSnapshot): Promise<boolean> {
-  const raw = (await readRange(workbookId, `${SOURCE_ACQUISITION_LOG_SHEET}!A2:P5000`)).values ?? [];
-  // Identical bytes may be reacquired under materially different cutoff or
-  // availability evidence. Deduplicate only when both bytes and governing
-  // metadata match; otherwise append the new acquisition state.
-  return raw.some((row) => sourceSnapshotMetadataMatchesStoredRow(snapshot, row));
+function metadataRow(snapshot: MaterializedSourceSnapshot): unknown[] {
+  return [
+    snapshot.snapshot_id, snapshot.canonical_source_id, snapshot.request_url,
+    snapshot.fetch_timestamp_utc, snapshot.data_through_date,
+    snapshot.raw_response_sha256, snapshot.raw_response_bytes, snapshot.row_count,
+    snapshot.expected_columns.join(","), snapshot.observed_columns.join(","),
+    snapshot.mlbam_coverage, snapshot.parser_version, snapshot.source_status,
+    snapshot.fallback_used, "STORED", snapshot.notes,
+  ];
+}
+
+function snapshotMetadataKey(snapshot: MaterializedSourceSnapshot): string {
+  return JSON.stringify([
+    snapshot.canonical_source_id,
+    snapshot.data_through_date,
+    snapshot.raw_response_sha256,
+    snapshot.parser_version,
+    snapshot.source_status,
+    snapshot.fallback_used,
+    snapshot.notes,
+  ]);
+}
+
+const defaultPersistenceDependencies: SourceSnapshotPersistenceDependencies = {
+  async ensureSheets(workbookId) {
+    await Promise.all([
+      ensureSheet(workbookId, SOURCE_ACQUISITION_LOG_SHEET, SOURCE_ACQUISITION_LOG_HEADERS),
+      ensureSheet(workbookId, SOURCE_RAW_SNAPSHOT_SHEET, SOURCE_RAW_SNAPSHOT_HEADERS),
+    ]);
+  },
+  async readStoredMetadata(workbookId) {
+    return (await readRange(workbookId, `${SOURCE_ACQUISITION_LOG_SHEET}!A2:P5000`)).values ?? [];
+  },
+  async appendRawRows(workbookId, rows) {
+    await appendRange(workbookId, `${SOURCE_RAW_SNAPSHOT_SHEET}!A:D`, rows);
+  },
+  async appendMetadataRows(workbookId, rows) {
+    await appendRange(workbookId, `${SOURCE_ACQUISITION_LOG_SHEET}!A:P`, rows);
+  },
+};
+
+/**
+ * Persists a slate's source responses with one sheet-preparation pass and one
+ * acquisition-log read. This prevents per-source metadata reads from
+ * exhausting the Google Sheets per-user read quota on full MLB slates.
+ */
+export async function persistSourceSnapshots(
+  sources: readonly SourceSnapshot[],
+  workbookId = WORKBOOK_ID,
+  dependencies: SourceSnapshotPersistenceDependencies = defaultPersistenceDependencies,
+): Promise<SourceSnapshotWriteResult[]> {
+  const snapshots = sources.map(materializeSourceSnapshot);
+  const results = snapshots.map<SourceSnapshotWriteResult>((snapshot) => ({
+    status: "success",
+    snapshot_id: snapshot.snapshot_id,
+    metadata_written: false,
+    raw_chunks_written: 0,
+    errors: [],
+  }));
+  if (snapshots.length === 0) return results;
+
+  let storedRows: unknown[][];
+  try {
+    await dependencies.ensureSheets(workbookId);
+    storedRows = await dependencies.readStoredMetadata(workbookId);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    for (const result of results) {
+      result.status = "failure";
+      result.errors.push(message);
+    }
+    logger.warn({ sources: sources.length, error: message }, "SOURCE_ACQUISITION: batch preparation failed");
+    return results;
+  }
+
+  const planned = new Map<string, { snapshot: MaterializedSourceSnapshot; resultIndexes: number[] }>();
+  snapshots.forEach((snapshot, index) => {
+    if (storedRows.some((row) => sourceSnapshotMetadataMatchesStoredRow(snapshot, row))) return;
+    const key = snapshotMetadataKey(snapshot);
+    const existing = planned.get(key);
+    if (existing) existing.resultIndexes.push(index);
+    else planned.set(key, { snapshot, resultIndexes: [index] });
+  });
+  if (planned.size === 0) return results;
+
+  const rawRows: Array<{ row: unknown[]; resultIndexes: number[] }> = [];
+  for (const entry of planned.values()) {
+    const chunks = splitRawSnapshot(entry.snapshot.raw_response);
+    chunks.forEach((chunk, index) => {
+      rawRows.push({
+        row: [entry.snapshot.snapshot_id, index + 1, chunks.length, chunk],
+        resultIndexes: entry.resultIndexes,
+      });
+    });
+  }
+
+  try {
+    for (let offset = 0; offset < rawRows.length; offset += RAW_SNAPSHOT_ROWS_PER_APPEND) {
+      const batch = rawRows.slice(offset, offset + RAW_SNAPSHOT_ROWS_PER_APPEND);
+      await dependencies.appendRawRows(workbookId, batch.map((item) => item.row));
+      for (const item of batch) {
+        for (const index of item.resultIndexes) results[index].raw_chunks_written += 1;
+      }
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    for (const entry of planned.values()) {
+      for (const index of entry.resultIndexes) {
+        results[index].status = results[index].raw_chunks_written > 0 ? "partial" : "failure";
+        results[index].errors.push(message);
+      }
+    }
+    logger.warn({ sources: planned.size, error: message }, "SOURCE_ACQUISITION: batched raw retention failed");
+    return results;
+  }
+
+  try {
+    await dependencies.appendMetadataRows(
+      workbookId,
+      Array.from(planned.values(), (entry) => metadataRow(entry.snapshot)),
+    );
+    for (const entry of planned.values()) {
+      for (const index of entry.resultIndexes) results[index].metadata_written = true;
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    for (const entry of planned.values()) {
+      for (const index of entry.resultIndexes) {
+        results[index].status = results[index].raw_chunks_written > 0 ? "partial" : "failure";
+        results[index].errors.push(message);
+      }
+    }
+    logger.warn({ sources: planned.size, error: message }, "SOURCE_ACQUISITION: batched metadata retention failed");
+  }
+  return results;
 }
 
 /**
@@ -142,44 +280,5 @@ export async function persistSourceSnapshot(
   source: SourceSnapshot,
   workbookId = WORKBOOK_ID,
 ): Promise<SourceSnapshotWriteResult> {
-  const snapshot = materializeSourceSnapshot(source);
-  const result: SourceSnapshotWriteResult = {
-    status: "success", snapshot_id: snapshot.snapshot_id, metadata_written: false,
-    raw_chunks_written: 0, errors: [],
-  };
-  try {
-    await Promise.all([
-      ensureSheet(workbookId, SOURCE_ACQUISITION_LOG_SHEET, SOURCE_ACQUISITION_LOG_HEADERS),
-      ensureSheet(workbookId, SOURCE_RAW_SNAPSHOT_SHEET, SOURCE_RAW_SNAPSHOT_HEADERS),
-    ]);
-    if (await alreadyStored(workbookId, snapshot)) return result;
-
-    const chunks = splitRawSnapshot(snapshot.raw_response);
-    // Retain source bytes before declaring the metadata record stored.  A
-    // source whose raw response could not be retained is an evidence gap,
-    // never an apparently complete source-log entry.
-    if (chunks.length > 0) {
-      await appendRange(
-        workbookId,
-        `${SOURCE_RAW_SNAPSHOT_SHEET}!A:D`,
-        chunks.map((chunk, index) => [snapshot.snapshot_id, index + 1, chunks.length, chunk]),
-      );
-      result.raw_chunks_written = chunks.length;
-    }
-    await appendRange(workbookId, `${SOURCE_ACQUISITION_LOG_SHEET}!A:P`, [[
-      snapshot.snapshot_id, snapshot.canonical_source_id, snapshot.request_url,
-      snapshot.fetch_timestamp_utc, snapshot.data_through_date,
-      snapshot.raw_response_sha256, snapshot.raw_response_bytes, snapshot.row_count,
-      snapshot.expected_columns.join(","), snapshot.observed_columns.join(","),
-      snapshot.mlbam_coverage, snapshot.parser_version, snapshot.source_status,
-      snapshot.fallback_used, "STORED", snapshot.notes,
-    ]]);
-    result.metadata_written = true;
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    result.errors.push(message);
-    result.status = result.metadata_written ? "partial" : "failure";
-    logger.warn({ source: source.canonical_source_id, snapshot_id: snapshot.snapshot_id, error: message }, "SOURCE_ACQUISITION: source retention failed");
-  }
-  return result;
+  return (await persistSourceSnapshots([source], workbookId))[0];
 }
