@@ -185,44 +185,88 @@ export interface Module12Result {
   errors: Array<{ module: string; error: string; timestamp: string }>;
 }
 
-async function ensureHeaders(workbookId: string): Promise<void> {
+export interface RunLogHeaderDependencies {
+  readRange: typeof readRange;
+  writeRange: typeof writeRange;
+  addSheet: typeof addSheet;
+  expandSheetColumns: typeof expandSheetColumns;
+}
+
+export type RunLogHeaderStatus = "VERIFIED" | "REPAIRED" | "CREATED" | "SKIPPED_READ_QUOTA";
+
+const DEFAULT_RUN_LOG_HEADER_DEPENDENCIES: RunLogHeaderDependencies = {
+  readRange,
+  writeRange,
+  addSheet,
+  expandSheetColumns,
+};
+
+function isSheetsReadQuotaError(message: string): boolean {
+  return message.includes("429")
+    && message.includes("RESOURCE_EXHAUSTED")
+    && message.includes("Read requests");
+}
+
+export async function ensureRunLogHeaders(
+  workbookId: string,
+  dependencies: RunLogHeaderDependencies = DEFAULT_RUN_LOG_HEADER_DEPENDENCIES,
+): Promise<RunLogHeaderStatus> {
   // Try to read the header row. If it fails with "Unable to parse range", the
   // sheet tab doesn't exist yet — create it, then write headers. If the row
   // exists but is outdated (wrong count OR any header out of position), rewrite
-  // the full header row in place — data rows are unaffected.
+  // the full header row in place — data rows are unaffected. A read-quota 429
+  // at this final archival stage is different: the append itself is still an
+  // independently validated write, so skip only the redundant header read and
+  // let the append fail closed if RUN_LOG is genuinely unavailable.
   let sheetExists = true;
+  let existingHeader: unknown[] = [];
   try {
-    const existing = await readRange(workbookId, `${RUN_LOG_SHEET}!A1:AZ1`);
-    const headerRow = (existing.values?.[0] ?? []).map((c) => String(c ?? "").trim());
-    // All 38 headers must match in order — count-and-last-only check can miss renames.
-    const upToDate =
-      headerRow.length >= RUN_LOG_HEADERS.length &&
-      RUN_LOG_HEADERS.every((expected, idx) => headerRow[idx] === expected);
-
-    if (!upToDate) {
-      await writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [Array.from(RUN_LOG_HEADERS)]);
-      logger.info("MODULE_12: RUN_LOG headers written/refreshed");
-    }
+    const existing = await dependencies.readRange(workbookId, `${RUN_LOG_SHEET}!A1:AZ1`);
+    existingHeader = existing.values?.[0] ?? [];
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("Unable to parse range") || msg.includes("400")) {
+    if (isSheetsReadQuotaError(msg)) {
+      logger.warn(
+        "MODULE_12: RUN_LOG header verification skipped after Sheets read-quota exhaustion; append remains fail-closed",
+      );
+      return "SKIPPED_READ_QUOTA";
+    } else if (msg.includes("Unable to parse range") || msg.includes("400")) {
       sheetExists = false;
     } else {
       throw err; // unexpected error — surface it
     }
   }
 
-  if (!sheetExists) {
-    logger.info("MODULE_12: RUN_LOG sheet not found — creating it");
-    await addSheet(workbookId, RUN_LOG_SHEET);
-    await writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [Array.from(RUN_LOG_HEADERS)]);
-    logger.info("MODULE_12: RUN_LOG sheet created with headers");
+  if (sheetExists) {
+    const headerRow = existingHeader.map((c) => String(c ?? "").trim());
+    // Every header must match in order — count-and-last-only checks can miss renames.
+    const upToDate =
+      headerRow.length >= RUN_LOG_HEADERS.length &&
+      RUN_LOG_HEADERS.every((expected, idx) => headerRow[idx] === expected);
+
+    if (upToDate) return "VERIFIED";
+
+    // Only a legacy/outdated header needs a metadata lookup and possible grid
+    // expansion. Avoid spending another Sheets read on every ordinary run.
+    // Quota or write failures here remain blocking because a known schema
+    // mismatch cannot safely receive another archival row.
+    await dependencies.expandSheetColumns(workbookId, RUN_LOG_SHEET, RUN_LOG_HEADERS.length);
+    await dependencies.writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [Array.from(RUN_LOG_HEADERS)]);
+    logger.info("MODULE_12: RUN_LOG headers written/refreshed");
+    return "REPAIRED";
   }
 
-  // Schema v27 appends scope fields beyond the legacy 38-column RUN_LOG.
-  // Expand first so an old commissioning workbook never silently truncates
-  // the scope record that explains a partial slate.
-  await expandSheetColumns(workbookId, RUN_LOG_SHEET, RUN_LOG_HEADERS.length);
+  if (!sheetExists) {
+    logger.info("MODULE_12: RUN_LOG sheet not found — creating it");
+    await dependencies.addSheet(workbookId, RUN_LOG_SHEET);
+    await dependencies.writeRange(workbookId, `${RUN_LOG_SHEET}!A1`, [Array.from(RUN_LOG_HEADERS)]);
+    logger.info("MODULE_12: RUN_LOG sheet created with headers");
+    return "CREATED";
+  }
+
+  // The branches above are exhaustive, but retain an explicit return for
+  // future refactors that add another existence state.
+  return "VERIFIED";
 }
 
 export async function archiveRunBundle(
@@ -335,7 +379,7 @@ export async function archiveRunBundle(
   ];
 
   try {
-    await ensureHeaders(workbookId);
+    await ensureRunLogHeaders(workbookId);
     await appendRange(workbookId, `${RUN_LOG_SHEET}!A:A`, [row]);
 
     const rowContent = row.join(",");
