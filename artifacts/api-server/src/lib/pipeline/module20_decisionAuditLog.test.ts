@@ -254,6 +254,31 @@ test("Sept. 25 ledger materializes three evidence classes while preserving model
       .sort(),
     evidence.records.map((record) => record.game_id).sort(),
   );
+
+  // Google Sheets reads numeric cells back as strings. That transport-level
+  // representation change must not trigger a canonical regrade or a false
+  // frozen model/outcome mutation.
+  const sheetRoundTrip = settled.rows.map((row) => row.map((value) => (
+    typeof value === "number" ? String(value) : value
+  )));
+  const rematerialized = materializeCanonicalHumanTruthRows(
+    sheetRoundTrip,
+    evidence,
+    chatEvidence,
+    "2026-09-26T14:00:00.000Z",
+    evidencePath,
+    chatEvidencePath,
+  );
+  assert.equal(rematerialized.summary.status, "PASS");
+  assert.deepEqual(rematerialized.summary.canonical_regrade_game_ids, []);
+  assert.equal(
+    rematerialized.summary.changed_game_ids.filter((gameId) => evidence.records.some((record) => record.game_id === gameId)).length,
+    0,
+  );
+  for (const evidenceRow of rematerialized.summary.row_evidence) {
+    assert.deepEqual(evidenceRow.model_after, evidenceRow.model_before);
+    assert.deepEqual(evidenceRow.outcome_after, evidenceRow.outcome_before);
+  }
 });
 
 test("canonical manual settlement fails closed when the preserved hash is corrupted", () => {

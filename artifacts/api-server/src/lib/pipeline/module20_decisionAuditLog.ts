@@ -496,14 +496,18 @@ function round1(value: number): number {
   return Number.parseFloat(value.toFixed(1));
 }
 
+function snapshotNumber(value: unknown): number | "" {
+  return numberOrNull(value) ?? "";
+}
+
 function modelEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
   return {
-    Frozen_Projected_Away_Runs: row[DECISION_AUDIT_INDEX.FROZEN_AWAY] ?? "",
-    Frozen_Projected_Home_Runs: row[DECISION_AUDIT_INDEX.FROZEN_HOME] ?? "",
-    Frozen_Projected_Total: row[DECISION_AUDIT_INDEX.FROZEN_TOTAL] ?? "",
+    Frozen_Projected_Away_Runs: snapshotNumber(row[DECISION_AUDIT_INDEX.FROZEN_AWAY]),
+    Frozen_Projected_Home_Runs: snapshotNumber(row[DECISION_AUDIT_INDEX.FROZEN_HOME]),
+    Frozen_Projected_Total: snapshotNumber(row[DECISION_AUDIT_INDEX.FROZEN_TOTAL]),
     Frozen_Model_Direction: row[DECISION_AUDIT_INDEX.FROZEN_DIRECTION] ?? "",
     Frozen_Model_Vehicle: row[DECISION_AUDIT_INDEX.FROZEN_VEHICLE] ?? "",
-    Frozen_Model_Confidence: row[DECISION_AUDIT_INDEX.FROZEN_CONFIDENCE] ?? "",
+    Frozen_Model_Confidence: snapshotNumber(row[DECISION_AUDIT_INDEX.FROZEN_CONFIDENCE]),
     Frozen_Model_Blocker: row[DECISION_AUDIT_INDEX.FROZEN_BLOCKER] ?? "",
     Frozen_Model_TS: row[DECISION_AUDIT_INDEX.FROZEN_TS] ?? "",
   };
@@ -511,17 +515,17 @@ function modelEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
 
 function outcomeEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
   return {
-    Actual_Away_Runs: row[DECISION_AUDIT_INDEX.ACTUAL_AWAY] ?? "",
-    Actual_Home_Runs: row[DECISION_AUDIT_INDEX.ACTUAL_HOME] ?? "",
-    Actual_Total: row[DECISION_AUDIT_INDEX.ACTUAL_TOTAL] ?? "",
+    Actual_Away_Runs: snapshotNumber(row[DECISION_AUDIT_INDEX.ACTUAL_AWAY]),
+    Actual_Home_Runs: snapshotNumber(row[DECISION_AUDIT_INDEX.ACTUAL_HOME]),
+    Actual_Total: snapshotNumber(row[DECISION_AUDIT_INDEX.ACTUAL_TOTAL]),
     Ticket_Result: row[DECISION_AUDIT_INDEX.TICKET_RESULT] ?? "",
     Settlement_TS: row[DECISION_AUDIT_INDEX.SETTLEMENT_TS] ?? "",
     Model_Truth_Grade: row[DECISION_AUDIT_INDEX.MODEL_TRUTH_GRADE] ?? "",
-    Model_Allocation_Error: row[DECISION_AUDIT_INDEX.MODEL_ALLOCATION_ERROR] ?? "",
-    Model_Total_Error: row[DECISION_AUDIT_INDEX.MODEL_TOTAL_ERROR] ?? "",
-    Model_Away_Run_Error: row[DECISION_AUDIT_INDEX.MODEL_AWAY_ERROR] ?? "",
-    Model_Home_Run_Error: row[DECISION_AUDIT_INDEX.MODEL_HOME_ERROR] ?? "",
-    Model_Margin_Error: row[DECISION_AUDIT_INDEX.MODEL_MARGIN_ERROR] ?? "",
+    Model_Allocation_Error: snapshotNumber(row[DECISION_AUDIT_INDEX.MODEL_ALLOCATION_ERROR]),
+    Model_Total_Error: snapshotNumber(row[DECISION_AUDIT_INDEX.MODEL_TOTAL_ERROR]),
+    Model_Away_Run_Error: snapshotNumber(row[DECISION_AUDIT_INDEX.MODEL_AWAY_ERROR]),
+    Model_Home_Run_Error: snapshotNumber(row[DECISION_AUDIT_INDEX.MODEL_HOME_ERROR]),
+    Model_Margin_Error: snapshotNumber(row[DECISION_AUDIT_INDEX.MODEL_MARGIN_ERROR]),
     Actual_Winner: row[DECISION_AUDIT_INDEX.ACTUAL_WINNER] ?? "",
     Model_Winner_Result: row[DECISION_AUDIT_INDEX.MODEL_WINNER_RESULT] ?? "",
     Settlement_Status: row[DECISION_AUDIT_INDEX.SETTLEMENT_STATUS] ?? "",
@@ -532,9 +536,9 @@ function outcomeEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
 function humanEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
   return {
     Manual_Game_Truth: row[DECISION_AUDIT_INDEX.MANUAL_TRUTH] ?? "",
-    Manual_Away_Run_View: row[DECISION_AUDIT_INDEX.MANUAL_AWAY] ?? "",
-    Manual_Home_Run_View: row[DECISION_AUDIT_INDEX.MANUAL_HOME] ?? "",
-    Manual_Total_View: row[DECISION_AUDIT_INDEX.MANUAL_TOTAL] ?? "",
+    Manual_Away_Run_View: snapshotNumber(row[DECISION_AUDIT_INDEX.MANUAL_AWAY]),
+    Manual_Home_Run_View: snapshotNumber(row[DECISION_AUDIT_INDEX.MANUAL_HOME]),
+    Manual_Total_View: snapshotNumber(row[DECISION_AUDIT_INDEX.MANUAL_TOTAL]),
     Failure_or_Survival_Mechanism: row[DECISION_AUDIT_INDEX.MECHANISM] ?? "",
     Freeze_TS: row[DECISION_AUDIT_INDEX.FREEZE_TS] ?? "",
     Manual_Overlay_TS: row[DECISION_AUDIT_INDEX.MANUAL_TS] ?? "",
@@ -548,7 +552,7 @@ function humanEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
     Market_Exposure_Provenance: row[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_PROVENANCE] ?? "",
     Canonical_Freeze_Run_ID: row[DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID] ?? "",
     Human_Record_Hash: row[DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH] ?? "",
-    Distribution_Total_Mean_At_Human_Read: row[DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN] ?? "",
+    Distribution_Total_Mean_At_Human_Read: snapshotNumber(row[DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN]),
     Human_Truth_Evidence_Status: row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS] ?? "",
     Mechanism_Specificity_Flag: row[DECISION_AUDIT_INDEX.MECHANISM_SPECIFICITY_FLAG] ?? "",
     Mechanism_Entity_Reference: row[DECISION_AUDIT_INDEX.MECHANISM_ENTITY_REFERENCE] ?? "",
@@ -558,9 +562,9 @@ function humanEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
 
 function canonicalGradeSnapshot(row: unknown[]): Record<string, unknown> {
   return {
-    Manual_Away_Run_View: row[DECISION_AUDIT_INDEX.MANUAL_AWAY] ?? "",
-    Manual_Home_Run_View: row[DECISION_AUDIT_INDEX.MANUAL_HOME] ?? "",
-    Manual_Total_View: row[DECISION_AUDIT_INDEX.MANUAL_TOTAL] ?? "",
+    Manual_Away_Run_View: snapshotNumber(row[DECISION_AUDIT_INDEX.MANUAL_AWAY]),
+    Manual_Home_Run_View: snapshotNumber(row[DECISION_AUDIT_INDEX.MANUAL_HOME]),
+    Manual_Total_View: snapshotNumber(row[DECISION_AUDIT_INDEX.MANUAL_TOTAL]),
     Failure_or_Survival_Mechanism: row[DECISION_AUDIT_INDEX.MECHANISM] ?? "",
     Freeze_TS: row[DECISION_AUDIT_INDEX.FREEZE_TS] ?? "",
     Human_Truth_Version: row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_VERSION] ?? "",
@@ -573,7 +577,7 @@ function canonicalGradeSnapshot(row: unknown[]): Record<string, unknown> {
     Market_Exposure_Provenance: row[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_PROVENANCE] ?? "",
     Canonical_Freeze_Run_ID: row[DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID] ?? "",
     Human_Record_Hash: row[DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH] ?? "",
-    Distribution_Total_Mean_At_Human_Read: row[DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN] ?? "",
+    Distribution_Total_Mean_At_Human_Read: snapshotNumber(row[DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN]),
   };
 }
 
