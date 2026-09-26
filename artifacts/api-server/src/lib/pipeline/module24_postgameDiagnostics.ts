@@ -14,6 +14,7 @@ import {
   expandSheetColumns,
   getSpreadsheetSheetProperties,
   readRange,
+  readRanges,
   writeRange,
   WORKBOOK_ID,
 } from "../sheets/client.js";
@@ -2168,16 +2169,6 @@ function replaceByKey(
   return rows;
 }
 
-async function readDataRows(
-  workbookId: string,
-  sheet: string,
-  rangeEnd: string,
-): Promise<unknown[][]> {
-  const response = await readRange(workbookId, `${sheet}!A1:${rangeEnd}10000`);
-  const raw = (response.values ?? []) as unknown[][];
-  return raw.length > 0 ? raw.slice(1) : [];
-}
-
 function isMissingSheetError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /unable to parse range|\b400\b|sheet\s+"?[^"]+"?\s+not found/i.test(
@@ -2185,16 +2176,50 @@ function isMissingSheetError(error: unknown): boolean {
   );
 }
 
-async function readOptionalDataRows(
+interface OptionalRangeSpec {
+  range: string;
+  dataRowsOnly?: boolean;
+}
+
+interface OptionalRangeResult {
+  values: unknown[][];
+  missing: boolean;
+}
+
+/**
+ * Normal operation uses one values.batchGet request. If an older workbook is
+ * genuinely missing an optional sheet, isolate that condition with sequential
+ * reads so one absent range cannot discard the other available evidence.
+ */
+async function readOptionalRanges(
   workbookId: string,
-  sheet: string,
-  rangeEnd: string,
-): Promise<unknown[][]> {
+  specs: readonly OptionalRangeSpec[],
+): Promise<OptionalRangeResult[]> {
   try {
-    return await readDataRows(workbookId, sheet, rangeEnd);
+    const batch = await readRanges(workbookId, specs.map((spec) => spec.range));
+    return batch.map((response, index) => ({
+      values: specs[index]!.dataRowsOnly
+        ? (((response.values ?? []) as unknown[][]).slice(1))
+        : ((response.values ?? []) as unknown[][]),
+      missing: false,
+    }));
   } catch (error: unknown) {
-    if (isMissingSheetError(error)) return [];
-    throw error;
+    if (!isMissingSheetError(error)) throw error;
+    const results: OptionalRangeResult[] = [];
+    for (const spec of specs) {
+      try {
+        const response = await readRange(workbookId, spec.range);
+        const values = (response.values ?? []) as unknown[][];
+        results.push({
+          values: spec.dataRowsOnly ? values.slice(1) : values,
+          missing: false,
+        });
+      } catch (rangeError: unknown) {
+        if (!isMissingSheetError(rangeError)) throw rangeError;
+        results.push({ values: [], missing: true });
+      }
+    }
+    return results;
   }
 }
 
@@ -2232,29 +2257,20 @@ export async function runPostgameDiagnostics(
     // A settlement must remain safe for an older date that predates either
     // ledger. Missing history is an explicit ineligible state, never a reason
     // to manufacture a packet or fail the whole completed-date settlement.
-    let packetRaw: unknown[][] = [];
-    try {
-      packetRaw = ((
-        await readRange(
-          workbookId,
-          `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}`,
-        )
-      ).values ?? []) as unknown[][];
-    } catch (error: unknown) {
-      if (!isMissingSheetError(error)) throw error;
+    const [packetHistory, ladderAudit] = await readOptionalRanges(workbookId, [
+      { range: `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(10000)}` },
+      { range: `${FULL_LADDER_AUDIT_SHEET}!A1:X10000` },
+    ]);
+    const packetRaw = packetHistory!.values;
+    if (packetHistory!.missing) {
       warnings.push(
         `MISSING_PREGAME_PACKET_HISTORY: ${date} cannot receive Module 24 diagnostics`,
       );
     }
     const packetByGame = parseFrozenPacketDiagnostics(packetRaw, date);
 
-    let ladderRaw: unknown[][] = [];
-    try {
-      ladderRaw = ((
-        await readRange(workbookId, `${FULL_LADDER_AUDIT_SHEET}!A1:X10000`)
-      ).values ?? []) as unknown[][];
-    } catch (error: unknown) {
-      if (!isMissingSheetError(error)) throw error;
+    const ladderRaw = ladderAudit!.values;
+    if (ladderAudit!.missing) {
       warnings.push(
         `MISSING_FULL_LADDER_AUDIT: ${date} has no manual ladder ledger to settle`,
       );
@@ -2351,6 +2367,15 @@ export async function runPostgameDiagnostics(
       }
     }
 
+    const existingReads = await readOptionalRanges(workbookId, [
+      { range: `${ALLOCATION_SHEET}!A1:AB10000`, dataRowsOnly: true },
+      { range: `${STARTER_SHEET}!A1:AZ10000`, dataRowsOnly: true },
+      { range: `${TIMING_SHEET}!A1:AZ10000`, dataRowsOnly: true },
+      { range: `${CONVERSION_SHEET}!A1:AZ10000`, dataRowsOnly: true },
+      { range: `${GAME_TRUTH_REPLAY_SHEET}!A1:AZ10000`, dataRowsOnly: true },
+      { range: `${LADDER_SETTLEMENT_SHEET}!A1:T10000`, dataRowsOnly: true },
+      { range: `${OUTCOMES_SHEET}!A1:AW10000`, dataRowsOnly: true },
+    ]);
     const [
       existingAllocation,
       existingStarter,
@@ -2359,15 +2384,7 @@ export async function runPostgameDiagnostics(
       existingGameTruth,
       existingLadderSettlement,
       allSettledOutcomes,
-    ] = await Promise.all([
-      readOptionalDataRows(workbookId, ALLOCATION_SHEET, "AB"),
-      readOptionalDataRows(workbookId, STARTER_SHEET, "AZ"),
-      readOptionalDataRows(workbookId, TIMING_SHEET, "AZ"),
-      readOptionalDataRows(workbookId, CONVERSION_SHEET, "AZ"),
-      readOptionalDataRows(workbookId, GAME_TRUTH_REPLAY_SHEET, "AZ"),
-      readOptionalDataRows(workbookId, LADDER_SETTLEMENT_SHEET, "T"),
-      readOptionalDataRows(workbookId, OUTCOMES_SHEET, "AW"),
-    ]);
+    ] = existingReads.map((result) => result.values);
     await writeUpsertedRows(
       workbookId,
       ALLOCATION_SHEET,

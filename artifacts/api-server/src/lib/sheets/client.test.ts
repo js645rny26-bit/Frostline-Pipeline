@@ -6,6 +6,7 @@ import {
   resetSheetsTransportForTest,
   selectSheetsBackend,
   readRange,
+  readRanges,
   writeRange,
 } from "./client.js";
 
@@ -129,6 +130,53 @@ test("Google Sheets transport retries a quota-exhausted read", async () => {
     else process.env.FROSTLINE_GOOGLE_ACCESS_TOKEN = originalToken;
     if (originalRetry === undefined) delete process.env.FROSTLINE_GOOGLE_SHEETS_429_RETRY_MS;
     else process.env.FROSTLINE_GOOGLE_SHEETS_429_RETRY_MS = originalRetry;
+    resetSheetsTransportForTest();
+  }
+});
+
+test("readRanges uses one quota-safe batchGet and preserves positional empty ranges", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalBackend = process.env.FROSTLINE_SHEETS_BACKEND;
+  const originalCredentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const originalToken = process.env.FROSTLINE_GOOGLE_ACCESS_TOKEN;
+  const requestedUrls: string[] = [];
+
+  try {
+    process.env.FROSTLINE_SHEETS_BACKEND = "google";
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = "/tmp/frostline-test-adc.json";
+    process.env.FROSTLINE_GOOGLE_ACCESS_TOKEN = "short-lived-test-token";
+    resetSheetsTransportForTest();
+
+    globalThis.fetch = async (input) => {
+      requestedUrls.push(String(input));
+      return new Response(JSON.stringify({
+        valueRanges: [
+          { range: "ONE!A1:B2", values: [["one"]] },
+          { range: "TWO!A1:B2" },
+          { range: "THREE!A1:B2", values: [["three"]] },
+        ],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await readRanges(isolatedWorkbook, ["ONE!A1:B2", "TWO!A1:B2", "THREE!A1:B2"]);
+    assert.equal(requestedUrls.length, 1);
+    assert.match(requestedUrls[0]!, /values:batchGet\?majorDimension=ROWS&ranges=ONE!A1%3AB2&ranges=TWO!A1%3AB2&ranges=THREE!A1%3AB2$/);
+    assert.deepEqual(result, [
+      { range: "ONE!A1:B2", values: [["one"]] },
+      { range: "TWO!A1:B2" },
+      { range: "THREE!A1:B2", values: [["three"]] },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalBackend === undefined) delete process.env.FROSTLINE_SHEETS_BACKEND;
+    else process.env.FROSTLINE_SHEETS_BACKEND = originalBackend;
+    if (originalCredentials === undefined) delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    else process.env.GOOGLE_APPLICATION_CREDENTIALS = originalCredentials;
+    if (originalToken === undefined) delete process.env.FROSTLINE_GOOGLE_ACCESS_TOKEN;
+    else process.env.FROSTLINE_GOOGLE_ACCESS_TOKEN = originalToken;
     resetSheetsTransportForTest();
   }
 });

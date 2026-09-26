@@ -286,6 +286,22 @@ export async function readRange(workbookId: string, range: string): Promise<Shee
   return sheetsRequest(`/v4/spreadsheets/${workbookId}/values/${encodeURIComponent(range)}`) as Promise<SheetValues>;
 }
 
+/**
+ * Reads several ranges with one Sheets values.batchGet request. Results stay
+ * positionally aligned with the requested ranges, including empty ranges.
+ * This is the quota-safe path for settlement modules that need a coherent
+ * workbook snapshot across several research ledgers.
+ */
+export async function readRanges(workbookId: string, ranges: readonly string[]): Promise<SheetValues[]> {
+  if (ranges.length === 0) return [];
+  const query = ranges.map((range) => `ranges=${encodeURIComponent(range)}`).join("&");
+  const response = await sheetsRequest(
+    `/v4/spreadsheets/${workbookId}/values:batchGet?majorDimension=ROWS&${query}`,
+  ) as { valueRanges?: SheetValues[] };
+  const valueRanges = response.valueRanges ?? [];
+  return ranges.map((_range, index) => valueRanges[index] ?? {});
+}
+
 /** Returns the stable numeric IDs needed by Sheets batchUpdate grid ranges. */
 export async function getSpreadsheetSheetProperties(
   workbookId: string,
