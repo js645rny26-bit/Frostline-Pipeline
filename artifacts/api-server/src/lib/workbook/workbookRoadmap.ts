@@ -595,11 +595,11 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     timing:
       "Pregame update/freeze on publish; settlement append later (Module 20)",
     purpose:
-      "Model state, manual overlay, reasoning source, authorization, result, and independent grading.",
+      "Model state, manual overlay, canonical human-truth provenance, reasoning source, authorization, result, and independent grading.",
     boardRelationship:
-      "Consumes the authoritative decision; tracks why it was authorized or passed.",
+      "Consumes the authoritative decision; tracks why it was authorized or passed. Canonical human truth has no projection or decision consumer.",
     readNote:
-      "OPEN fields may update; frozen pregame fields must not change after lock.",
+      "OPEN fields may update; frozen pregame fields must not change after lock. Canonical manual grading requires a reconciled P50/allocation/freeze/hash gate.",
   },
 
   {

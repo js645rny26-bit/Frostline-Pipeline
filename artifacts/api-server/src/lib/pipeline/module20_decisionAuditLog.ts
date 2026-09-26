@@ -34,9 +34,15 @@ import {
   classifyPostmortemMechanism,
   formatPostmortemMechanism,
 } from "./module21_postmortemMechanism.js";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import {
+  canonicalTruthRecordHash,
+  type CanonicalTruthRecord,
+} from "./module20b_predictionContract.js";
 
 export const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
-export const DECISION_AUDIT_COLS = 64;
+export const DECISION_AUDIT_COLS = 75;
 /** August 10 is the first live slate whose pregame publish includes Module 20. */
 export const DECISION_AUDIT_REQUIRED_FROM_DATE = "2026-08-10";
 
@@ -67,6 +73,11 @@ export const DECISION_AUDIT_HEADER = [
   "Actual_Winner", "Model_Winner_Result", "Manual_Winner_Result",
   "Freeze_TS",
   "Settlement_Status", "Settlement_Gap_Reason",
+  "Human_Truth_Version", "Human_Freeze_Status", "Primary_Carrier",
+  "Primary_Phase", "Primary_Mechanism_Code", "Secondary_Mechanism_Code",
+  "Market_Exposure_Status", "Market_Exposure_Provenance",
+  "Canonical_Freeze_Run_ID", "Human_Record_Hash",
+  "Distribution_Total_Mean_At_Human_Read",
 ] as const;
 
 export type DecisionAuditStatus = "OPEN" | "FROZEN" | "SETTLED" | "AUDIT_GAP";
@@ -181,6 +192,17 @@ export const DECISION_AUDIT_INDEX = {
   FREEZE_TS: 61,
   SETTLEMENT_STATUS: 62,
   SETTLEMENT_GAP_REASON: 63,
+  HUMAN_TRUTH_VERSION: 64,
+  HUMAN_FREEZE_STATUS: 65,
+  PRIMARY_CARRIER: 66,
+  PRIMARY_PHASE: 67,
+  PRIMARY_MECHANISM_CODE: 68,
+  SECONDARY_MECHANISM_CODE: 69,
+  MARKET_EXPOSURE_STATUS: 70,
+  MARKET_EXPOSURE_PROVENANCE: 71,
+  CANONICAL_FREEZE_RUN_ID: 72,
+  HUMAN_RECORD_HASH: 73,
+  DISTRIBUTION_TOTAL_MEAN: 74,
 } as const;
 
 export interface DecisionAuditPregameInput {
@@ -219,6 +241,58 @@ export interface DecisionAuditWriteResult {
   outcome_gaps: number;
   warnings: string[];
   errors: string[];
+  human_truth_materialization?: CanonicalHumanTruthMaterializationSummary;
+}
+
+export interface CanonicalHumanTruthEvidenceRecord extends CanonicalTruthRecord {
+  market_exposure_provenance: string;
+}
+
+export interface CanonicalHumanTruthEvidenceFile {
+  evidence_version: string;
+  date: string;
+  capture_status: string;
+  canonical_snapshot_timestamp: string;
+  canonical_pipeline_run_id: string;
+  capture_policy: {
+    excluded_started_games: string[];
+    excluded_started_game_status: string;
+  };
+  records: CanonicalHumanTruthEvidenceRecord[];
+}
+
+export interface CanonicalHumanTruthRowEvidence {
+  game_id: string;
+  model_before: Record<string, unknown>;
+  model_after: Record<string, unknown>;
+  human_before: Record<string, unknown>;
+  human_after: Record<string, unknown>;
+}
+
+export interface CanonicalHumanTruthMaterializationSummary {
+  status: "NOT_APPLICABLE" | "PASS" | "FAIL";
+  source_path: string;
+  canonical_snapshot_timestamp: string;
+  canonical_pipeline_run_id: string;
+  manual_overlay_ts: string;
+  records_found: number;
+  records_updated: number;
+  records_unchanged: number;
+  changed_game_ids: string[];
+  excluded_noncanonical_game_ids: string[];
+  row_evidence: CanonicalHumanTruthRowEvidence[];
+  errors: string[];
+}
+
+interface CanonicalHumanTruthMaterializationResult {
+  rows: unknown[][];
+  summary: CanonicalHumanTruthMaterializationSummary;
+}
+
+export interface CanonicalManualTruthGateResult {
+  status: "PASS" | "NOT_CANONICAL" | "FAIL";
+  reason: string;
+  direction: "OVER" | "UNDER" | "NONE";
 }
 
 interface RowMutationResult {
@@ -345,6 +419,282 @@ interface DecisionAuditMarketContext {
   hard_rock: boolean;
   settlement_status: "SETTLED" | "MARKET_LINEAGE_FAILURE";
   gap_reason: string;
+}
+
+const SEPT25_HUMAN_TRUTH_DATE = "2026-09-25";
+const SEPT25_HUMAN_TRUTH_EVIDENCE_PATH = "docs/evidence/HUMAN_GAME_TRUTH_2026-09-25_RUN_240.json";
+const SEPT25_CANONICAL_GAME_IDS = [
+  "20260925_PIT_DET",
+  "20260925_TBR_PHI",
+  "20260925_CIN_TOR",
+  "20260925_ATL_MIA",
+  "20260925_NYM_WSN",
+  "20260925_COL_CHW",
+  "20260925_STL_MIL",
+  "20260925_TEX_MIN",
+] as const;
+const SEPT25_EXCLUDED_GAME_IDS = ["20260925_BAL_NYY__G1", "20260925_CHC_BOS__G2"] as const;
+
+function round1(value: number): number {
+  return Number.parseFloat(value.toFixed(1));
+}
+
+function modelEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
+  return {
+    Frozen_Projected_Away_Runs: row[DECISION_AUDIT_INDEX.FROZEN_AWAY] ?? "",
+    Frozen_Projected_Home_Runs: row[DECISION_AUDIT_INDEX.FROZEN_HOME] ?? "",
+    Frozen_Projected_Total: row[DECISION_AUDIT_INDEX.FROZEN_TOTAL] ?? "",
+    Frozen_Model_Direction: row[DECISION_AUDIT_INDEX.FROZEN_DIRECTION] ?? "",
+    Frozen_Model_Vehicle: row[DECISION_AUDIT_INDEX.FROZEN_VEHICLE] ?? "",
+    Frozen_Model_Confidence: row[DECISION_AUDIT_INDEX.FROZEN_CONFIDENCE] ?? "",
+    Frozen_Model_Blocker: row[DECISION_AUDIT_INDEX.FROZEN_BLOCKER] ?? "",
+    Frozen_Model_TS: row[DECISION_AUDIT_INDEX.FROZEN_TS] ?? "",
+  };
+}
+
+function humanEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
+  return {
+    Manual_Game_Truth: row[DECISION_AUDIT_INDEX.MANUAL_TRUTH] ?? "",
+    Manual_Away_Run_View: row[DECISION_AUDIT_INDEX.MANUAL_AWAY] ?? "",
+    Manual_Home_Run_View: row[DECISION_AUDIT_INDEX.MANUAL_HOME] ?? "",
+    Manual_Total_View: row[DECISION_AUDIT_INDEX.MANUAL_TOTAL] ?? "",
+    Failure_or_Survival_Mechanism: row[DECISION_AUDIT_INDEX.MECHANISM] ?? "",
+    Freeze_TS: row[DECISION_AUDIT_INDEX.FREEZE_TS] ?? "",
+    Manual_Overlay_TS: row[DECISION_AUDIT_INDEX.MANUAL_TS] ?? "",
+    Human_Truth_Version: row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_VERSION] ?? "",
+    Human_Freeze_Status: row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] ?? "",
+    Primary_Carrier: row[DECISION_AUDIT_INDEX.PRIMARY_CARRIER] ?? "",
+    Primary_Phase: row[DECISION_AUDIT_INDEX.PRIMARY_PHASE] ?? "",
+    Primary_Mechanism_Code: row[DECISION_AUDIT_INDEX.PRIMARY_MECHANISM_CODE] ?? "",
+    Secondary_Mechanism_Code: row[DECISION_AUDIT_INDEX.SECONDARY_MECHANISM_CODE] ?? "",
+    Market_Exposure_Status: row[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS] ?? "",
+    Market_Exposure_Provenance: row[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_PROVENANCE] ?? "",
+    Canonical_Freeze_Run_ID: row[DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID] ?? "",
+    Human_Record_Hash: row[DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH] ?? "",
+    Distribution_Total_Mean_At_Human_Read: row[DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN] ?? "",
+  };
+}
+
+function canonicalRecordWithoutHash(record: CanonicalHumanTruthEvidenceRecord): Omit<CanonicalTruthRecord, "record_hash"> {
+  return {
+    total_p50: record.total_p50,
+    total_mean: record.total_mean,
+    away_allocation: record.away_allocation,
+    home_allocation: record.home_allocation,
+    primary_carrier: record.primary_carrier,
+    primary_phase: record.primary_phase,
+    primary_mechanism_code: record.primary_mechanism_code,
+    secondary_mechanism_code: record.secondary_mechanism_code,
+    primary_mechanism_text: String(record.primary_mechanism_text ?? "").trim(),
+    market_exposure_status: record.market_exposure_status,
+    date: record.date,
+    game_id: record.game_id,
+    human_truth_version: record.human_truth_version,
+    truth_version: record.truth_version,
+    truth_ready_gate: record.truth_ready_gate,
+    truth_ready_ts: record.truth_ready_ts,
+    canonical_freeze_ts: record.canonical_freeze_ts,
+    canonical_freeze_run_id: record.canonical_freeze_run_id,
+    human_freeze_status: record.human_freeze_status,
+    allocation_margin: record.allocation_margin,
+    reason_for_refreeze: record.reason_for_refreeze,
+    previous_record_hash: record.previous_record_hash,
+  };
+}
+
+function reconstructedCanonicalRecord(row: unknown[]): Omit<CanonicalTruthRecord, "record_hash"> | null {
+  const total = numberOrNull(row[DECISION_AUDIT_INDEX.MANUAL_TOTAL]);
+  const mean = numberOrNull(row[DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN]);
+  const away = numberOrNull(row[DECISION_AUDIT_INDEX.MANUAL_AWAY]);
+  const home = numberOrNull(row[DECISION_AUDIT_INDEX.MANUAL_HOME]);
+  if (total === null || mean === null || away === null || home === null) return null;
+  const freezeTs = String(row[DECISION_AUDIT_INDEX.FREEZE_TS] ?? "").trim();
+  return {
+    total_p50: total,
+    total_mean: mean,
+    away_allocation: away,
+    home_allocation: home,
+    primary_carrier: String(row[DECISION_AUDIT_INDEX.PRIMARY_CARRIER] ?? "") as CanonicalTruthRecord["primary_carrier"],
+    primary_phase: String(row[DECISION_AUDIT_INDEX.PRIMARY_PHASE] ?? "") as CanonicalTruthRecord["primary_phase"],
+    primary_mechanism_code: String(row[DECISION_AUDIT_INDEX.PRIMARY_MECHANISM_CODE] ?? "") as CanonicalTruthRecord["primary_mechanism_code"],
+    secondary_mechanism_code: String(row[DECISION_AUDIT_INDEX.SECONDARY_MECHANISM_CODE] ?? "") as CanonicalTruthRecord["secondary_mechanism_code"],
+    primary_mechanism_text: String(row[DECISION_AUDIT_INDEX.MECHANISM] ?? "").trim(),
+    market_exposure_status: String(row[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS] ?? "") as CanonicalTruthRecord["market_exposure_status"],
+    date: String(row[DECISION_AUDIT_INDEX.DATE] ?? ""),
+    game_id: String(row[DECISION_AUDIT_INDEX.GAME_ID] ?? ""),
+    human_truth_version: String(row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_VERSION] ?? ""),
+    truth_version: "V1",
+    truth_ready_gate: "PASS",
+    truth_ready_ts: freezeTs,
+    canonical_freeze_ts: freezeTs,
+    canonical_freeze_run_id: String(row[DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID] ?? ""),
+    human_freeze_status: String(row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] ?? "") as CanonicalTruthRecord["human_freeze_status"],
+    allocation_margin: round1(home - away),
+    reason_for_refreeze: "",
+    previous_record_hash: "",
+  };
+}
+
+function canonicalMetadataClaimed(row: unknown[]): boolean {
+  return [
+    DECISION_AUDIT_INDEX.HUMAN_TRUTH_VERSION,
+    DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS,
+    DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID,
+    DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH,
+  ].some((index) => String(row[index] ?? "").trim() !== "");
+}
+
+export function evaluateCanonicalManualTruthGate(row: unknown[]): CanonicalManualTruthGateResult {
+  if (!canonicalMetadataClaimed(row)) return { status: "NOT_CANONICAL", reason: "LEGACY_MANUAL_OVERLAY", direction: "NONE" };
+  if (String(row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] ?? "") !== "CANONICAL_TRUTH_FREEZE") {
+    return { status: "FAIL", reason: "HUMAN_FREEZE_STATUS_NOT_CANONICAL", direction: "NONE" };
+  }
+  const record = reconstructedCanonicalRecord(row);
+  if (!record) return { status: "FAIL", reason: "CANONICAL_NUMERIC_FIELDS_MISSING", direction: "NONE" };
+  if (Math.abs(record.away_allocation + record.home_allocation - record.total_p50) > 1e-9) {
+    return { status: "FAIL", reason: "CANONICAL_ALLOCATION_IDENTITY_FAILURE", direction: "NONE" };
+  }
+  if (!record.canonical_freeze_ts) return { status: "FAIL", reason: "CANONICAL_FREEZE_TS_MISSING", direction: "NONE" };
+  const storedHash = String(row[DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH] ?? "").trim();
+  if (!storedHash || canonicalTruthRecordHash(record) !== storedHash) {
+    return { status: "FAIL", reason: "CANONICAL_RECORD_HASH_MISMATCH", direction: "NONE" };
+  }
+  const provenance = String(row[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_PROVENANCE] ?? "").trim();
+  if (record.market_exposure_status === "PRICE_BLIND" && provenance !== "PRICE_BLIND_AT_FREEZE") {
+    return { status: "FAIL", reason: "PRICE_BLIND_PROVENANCE_MISMATCH", direction: "NONE" };
+  }
+  if (record.market_exposure_status === "MARKET_EXPOSED" && provenance !== "MARKET_EXPOSED") {
+    return { status: "FAIL", reason: "MARKET_EXPOSED_PROVENANCE_MISMATCH", direction: "NONE" };
+  }
+  const line = numberOrNull(row[DECISION_AUDIT_INDEX.FROZEN_LINE]);
+  const direction = line === null || record.total_p50 === line
+    ? "NONE"
+    : record.total_p50 > line ? "OVER" : "UNDER";
+  return { status: "PASS", reason: "CANONICAL_RECORD_HASH_VERIFIED", direction };
+}
+
+export function materializeCanonicalHumanTruthRows(
+  existingRows: unknown[][],
+  evidence: CanonicalHumanTruthEvidenceFile,
+  overlayTs: string,
+  sourcePath = SEPT25_HUMAN_TRUTH_EVIDENCE_PATH,
+): CanonicalHumanTruthMaterializationResult {
+  const rows = existingRows.map(padRow);
+  const errors: string[] = [];
+  const rowEvidence: CanonicalHumanTruthRowEvidence[] = [];
+  const changedGameIds: string[] = [];
+  const expectedCanonical = new Set<string>(SEPT25_CANONICAL_GAME_IDS);
+  const expectedExcluded = new Set<string>(SEPT25_EXCLUDED_GAME_IDS);
+  const records = Array.isArray(evidence.records) ? evidence.records : [];
+  if (evidence.date !== SEPT25_HUMAN_TRUTH_DATE) errors.push(`EVIDENCE_DATE_MISMATCH:${evidence.date}`);
+  if (evidence.canonical_snapshot_timestamp !== "2026-09-25T22:12:21.985Z") {
+    errors.push(`CANONICAL_SNAPSHOT_MISMATCH:${evidence.canonical_snapshot_timestamp}`);
+  }
+  if (evidence.canonical_pipeline_run_id !== "RUN_20260925221200303") {
+    errors.push(`CANONICAL_RUN_ID_MISMATCH:${evidence.canonical_pipeline_run_id}`);
+  }
+  if (records.length !== 8) errors.push(`CANONICAL_RECORD_COUNT:${records.length}`);
+  const recordIds = new Set(records.map((record) => record.game_id));
+  for (const gameId of expectedCanonical) if (!recordIds.has(gameId)) errors.push(`CANONICAL_RECORD_MISSING:${gameId}`);
+  for (const gameId of recordIds) if (!expectedCanonical.has(gameId)) errors.push(`UNEXPECTED_CANONICAL_RECORD:${gameId}`);
+  const excluded = new Set(evidence.capture_policy?.excluded_started_games ?? []);
+  for (const gameId of expectedExcluded) if (!excluded.has(gameId)) errors.push(`EXCLUDED_RECORD_MISSING:${gameId}`);
+
+  const index = new Map(rows.map((row, position) => [
+    rowKey(row[DECISION_AUDIT_INDEX.DATE], row[DECISION_AUDIT_INDEX.GAME_ID]), position,
+  ]));
+
+  for (const record of records) {
+    const computedHash = canonicalTruthRecordHash(canonicalRecordWithoutHash(record));
+    if (computedHash !== record.record_hash) errors.push(`EVIDENCE_HASH_MISMATCH:${record.game_id}`);
+    if (record.canonical_freeze_ts !== evidence.canonical_snapshot_timestamp) errors.push(`FREEZE_TS_MISMATCH:${record.game_id}`);
+    if (record.canonical_freeze_run_id !== evidence.canonical_pipeline_run_id) errors.push(`FREEZE_RUN_ID_MISMATCH:${record.game_id}`);
+    if (Math.abs(record.away_allocation + record.home_allocation - record.total_p50) > 1e-9) {
+      errors.push(`ALLOCATION_IDENTITY_FAILURE:${record.game_id}`);
+    }
+    const position = index.get(rowKey(evidence.date, record.game_id));
+    if (position === undefined) {
+      errors.push(`DECISION_AUDIT_ROW_MISSING:${record.game_id}`);
+      continue;
+    }
+    const before = padRow(rows[position]!);
+    const after = [...before];
+    const modelBefore = modelEvidenceSnapshot(before);
+    after[DECISION_AUDIT_INDEX.MANUAL_TRUTH] = `${record.primary_carrier}|${record.primary_phase}|${record.primary_mechanism_code}`;
+    after[DECISION_AUDIT_INDEX.MANUAL_AWAY] = record.away_allocation;
+    after[DECISION_AUDIT_INDEX.MANUAL_HOME] = record.home_allocation;
+    after[DECISION_AUDIT_INDEX.MANUAL_TOTAL] = record.total_p50;
+    after[DECISION_AUDIT_INDEX.MECHANISM] = record.primary_mechanism_text;
+    after[DECISION_AUDIT_INDEX.FREEZE_TS] = record.canonical_freeze_ts;
+    after[DECISION_AUDIT_INDEX.HUMAN_TRUTH_VERSION] = record.human_truth_version;
+    after[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] = record.human_freeze_status;
+    after[DECISION_AUDIT_INDEX.PRIMARY_CARRIER] = record.primary_carrier;
+    after[DECISION_AUDIT_INDEX.PRIMARY_PHASE] = record.primary_phase;
+    after[DECISION_AUDIT_INDEX.PRIMARY_MECHANISM_CODE] = record.primary_mechanism_code;
+    after[DECISION_AUDIT_INDEX.SECONDARY_MECHANISM_CODE] = record.secondary_mechanism_code;
+    after[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS] = record.market_exposure_status;
+    after[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_PROVENANCE] = record.market_exposure_provenance;
+    after[DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID] = record.canonical_freeze_run_id;
+    after[DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH] = record.record_hash;
+    after[DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN] = record.total_mean ?? "";
+    const humanBefore = humanEvidenceSnapshot(before);
+    const targetHuman = humanEvidenceSnapshot(after);
+    const unchanged = Object.entries(targetHuman)
+      .filter(([key]) => key !== "Manual_Overlay_TS")
+      .every(([key, value]) => humanBefore[key] === value)
+      && String(before[DECISION_AUDIT_INDEX.MANUAL_TS] ?? "").trim() !== "";
+    if (!unchanged) {
+      after[DECISION_AUDIT_INDEX.MANUAL_TS] = overlayTs;
+      changedGameIds.push(record.game_id);
+    }
+    if (JSON.stringify(modelEvidenceSnapshot(after)) !== JSON.stringify(modelBefore)) {
+      errors.push(`MODEL_FIELD_MUTATION:${record.game_id}`);
+    }
+    rows[position] = after;
+    rowEvidence.push({
+      game_id: record.game_id,
+      model_before: modelBefore,
+      model_after: modelEvidenceSnapshot(after),
+      human_before: humanBefore,
+      human_after: humanEvidenceSnapshot(after),
+    });
+  }
+
+  for (const gameId of expectedExcluded) {
+    const position = index.get(rowKey(evidence.date, gameId));
+    if (position === undefined) {
+      errors.push(`EXCLUDED_DECISION_AUDIT_ROW_MISSING:${gameId}`);
+      continue;
+    }
+    const row = rows[position]!;
+    if (String(row[DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH] ?? "").trim()
+      || String(row[DECISION_AUDIT_INDEX.MANUAL_TOTAL] ?? "").trim()
+      || String(row[DECISION_AUDIT_INDEX.MANUAL_AWAY] ?? "").trim()
+      || String(row[DECISION_AUDIT_INDEX.MANUAL_HOME] ?? "").trim()) {
+      errors.push(`EXCLUDED_ROW_CANONICALIZED:${gameId}`);
+    }
+    row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] = evidence.capture_policy.excluded_started_game_status;
+  }
+
+  const summary: CanonicalHumanTruthMaterializationSummary = {
+    status: errors.length === 0 ? "PASS" : "FAIL",
+    source_path: sourcePath,
+    canonical_snapshot_timestamp: evidence.canonical_snapshot_timestamp,
+    canonical_pipeline_run_id: evidence.canonical_pipeline_run_id,
+    manual_overlay_ts: overlayTs,
+    records_found: rowEvidence.length,
+    records_updated: changedGameIds.length,
+    records_unchanged: rowEvidence.length - changedGameIds.length,
+    changed_game_ids: changedGameIds,
+    excluded_noncanonical_game_ids: [...SEPT25_EXCLUDED_GAME_IDS],
+    row_evidence: rowEvidence,
+    errors,
+  };
+  return { rows: errors.length === 0 ? rows : existingRows.map(padRow), summary };
+}
+
+export async function loadCanonicalHumanTruthEvidenceFile(path: string): Promise<CanonicalHumanTruthEvidenceFile> {
+  return JSON.parse(await readFile(path, "utf8")) as CanonicalHumanTruthEvidenceFile;
 }
 
 function decisionAuditMarketContext(
@@ -656,6 +1006,7 @@ export function settleDecisionAuditRows(
   existingRows: unknown[][],
   outcomes: SettlementRow[],
   ts: string,
+  options: { forceCanonicalManualRegradeGameIds?: ReadonlySet<string> } = {},
 ): RowMutationResult {
   const deduped = dedupeRows(existingRows);
   const rows = deduped.rows;
@@ -670,7 +1021,8 @@ export function settleDecisionAuditRows(
     const position = index.get(rowKey(outcome.date, outcome.game_id));
     if (position === undefined) continue;
     const current = padRow(rows[position]!);
-    if (String(current[DECISION_AUDIT_INDEX.GRADED_TS] ?? "").trim()) {
+    const forceCanonicalManualRegrade = options.forceCanonicalManualRegradeGameIds?.has(outcome.game_id) ?? false;
+    if (String(current[DECISION_AUDIT_INDEX.GRADED_TS] ?? "").trim() && !forceCanonicalManualRegrade) {
       rowsSettled++;
       continue;
     }
@@ -689,8 +1041,15 @@ export function settleDecisionAuditRows(
       marketContext,
       outcome.actual_total,
     );
-    const manualTruth = isAuditGap ? "NOT_GRADABLE" : gradeAuditMarketTruth(
-      manualDirection(current[DECISION_AUDIT_INDEX.MANUAL_TRUTH]),
+    const canonicalManualGate = evaluateCanonicalManualTruthGate(current);
+    const canonicalClaimed = canonicalManualGate.status !== "NOT_CANONICAL";
+    const canonicalManualEligible = canonicalManualGate.status === "PASS";
+    const manualEligible = !canonicalClaimed || canonicalManualEligible;
+    const manualGradeDirection = canonicalManualEligible
+      ? canonicalManualGate.direction
+      : manualDirection(current[DECISION_AUDIT_INDEX.MANUAL_TRUTH]);
+    const manualTruth = isAuditGap || !manualEligible ? "NOT_GRADABLE" : gradeAuditMarketTruth(
+      manualGradeDirection,
       marketContext,
       outcome.actual_total,
     );
@@ -700,7 +1059,7 @@ export function settleDecisionAuditRows(
       outcome.actual_away_runs,
       outcome.actual_home_runs,
     );
-    const manualAllocationError = isAuditGap ? null : allocationError(
+    const manualAllocationError = isAuditGap || !manualEligible ? null : allocationError(
       numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_AWAY]),
       numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_HOME]),
       outcome.actual_away_runs,
@@ -718,6 +1077,11 @@ export function settleDecisionAuditRows(
       : null;
     const diagnosis = isAuditGap
       ? { mechanism: "PREGAME_FREEZE_MISSING", lesson: "AUDIT_GAP: no prospective snapshot existed before first pitch." }
+      : canonicalManualEligible
+        ? {
+          mechanism: String(current[DECISION_AUDIT_INDEX.MECHANISM] ?? "").trim(),
+          lesson: "Canonical human truth graded only after its preserved hash and allocation identity passed validation.",
+        }
       : evidenceClassification
         ? {
           mechanism: formatPostmortemMechanism(evidenceClassification),
@@ -752,9 +1116,9 @@ export function settleDecisionAuditRows(
     const modelAway = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_AWAY]);
     const modelHome = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_HOME]);
     const modelTotal = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_TOTAL]);
-    const manualAway = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_AWAY]);
-    const manualHome = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_HOME]);
-    const manualTotal = isAuditGap ? null : numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_TOTAL]);
+    const manualAway = isAuditGap || !manualEligible ? null : numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_AWAY]);
+    const manualHome = isAuditGap || !manualEligible ? null : numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_HOME]);
+    const manualTotal = isAuditGap || !manualEligible ? null : numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_TOTAL]);
     current[DECISION_AUDIT_INDEX.MODEL_TOTAL_ERROR] = signedError(modelTotal, outcome.actual_total) ?? "";
     current[DECISION_AUDIT_INDEX.MANUAL_TOTAL_ERROR] = signedError(manualTotal, outcome.actual_total) ?? "";
     current[DECISION_AUDIT_INDEX.MODEL_AWAY_ERROR] = signedError(modelAway, outcome.actual_away_runs) ?? "";
@@ -973,6 +1337,10 @@ async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
       [DECISION_AUDIT_INDEX.TICKET_RESULT, [...AUDIT_TICKET_RESULTS]],
       [DECISION_AUDIT_INDEX.ALLOCATION_WINNER, [...ALLOCATION_WINNERS]],
       [DECISION_AUDIT_INDEX.AUTHORIZATION_GRADE, [...AUTHORIZATION_GRADES]],
+      [DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS, ["CANONICAL_TRUTH_FREEZE", "CHAT_RECORDED_HUMAN_TRUTH_NO_CANONICAL_PREGAME_FREEZE"]],
+      [DECISION_AUDIT_INDEX.PRIMARY_CARRIER, ["AWAY", "HOME", "BALANCED"]],
+      [DECISION_AUDIT_INDEX.PRIMARY_PHASE, ["STARTER", "BULLPEN", "MIXED", "SUPPRESSION"]],
+      [DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS, ["PRICE_BLIND", "MARKET_EXPOSED"]],
     ] as Array<[number, string[]]>;
     const analysisColor = SECTION_COLORS.ANALYSIS;
     await batchUpdate(workbookId, [
@@ -1016,11 +1384,51 @@ async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
         },
       })),
     ]);
+  } else {
+    const schema = WORKBOOK_SCHEMA.find((sheet) => sheet.name === DECISION_AUDIT_SHEET);
+    const widths = schema?.columns.slice(64).map((column) => column.width ?? 150)
+      ?? Array(DECISION_AUDIT_COLS - 64).fill(150);
+    const analysisColor = SECTION_COLORS.ANALYSIS;
+    const validations = [
+      [DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS, ["CANONICAL_TRUTH_FREEZE", "CHAT_RECORDED_HUMAN_TRUTH_NO_CANONICAL_PREGAME_FREEZE"]],
+      [DECISION_AUDIT_INDEX.PRIMARY_CARRIER, ["AWAY", "HOME", "BALANCED"]],
+      [DECISION_AUDIT_INDEX.PRIMARY_PHASE, ["STARTER", "BULLPEN", "MIXED", "SUPPRESSION"]],
+      [DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS, ["PRICE_BLIND", "MARKET_EXPOSED"]],
+    ] as Array<[number, string[]]>;
+    await batchUpdate(workbookId, [
+      {
+        repeatCell: {
+          range: { sheetId: property.sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 64, endColumnIndex: DECISION_AUDIT_COLS },
+          cell: { userEnteredFormat: { backgroundColor: analysisColor, textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE", wrapStrategy: "CLIP" } },
+          fields: "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)",
+        },
+      },
+      {
+        repeatCell: {
+          range: { sheetId: property.sheetId, startRowIndex: 1, endRowIndex: 1000, startColumnIndex: 64, endColumnIndex: DECISION_AUDIT_COLS },
+          cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.96, blue: 0.82 } } },
+          fields: "userEnteredFormat.backgroundColor",
+        },
+      },
+      ...widths.map((pixelSize, offset) => ({
+        updateDimensionProperties: {
+          range: { sheetId: property!.sheetId, dimension: "COLUMNS", startIndex: 64 + offset, endIndex: 65 + offset },
+          properties: { pixelSize },
+          fields: "pixelSize",
+        },
+      })),
+      ...validations.map(([columnIndex, values]) => ({
+        setDataValidation: {
+          range: { sheetId: property!.sheetId, startRowIndex: 1, endRowIndex: 1000, startColumnIndex: columnIndex, endColumnIndex: columnIndex + 1 },
+          rule: { condition: { type: "ONE_OF_LIST", values: values.map((value) => ({ userEnteredValue: value })) }, strict: true, showCustomUi: true },
+        },
+      })),
+    ]);
   }
 }
 
 async function readAuditRows(workbookId: string): Promise<unknown[][]> {
-  const response = await readRange(workbookId, `${DECISION_AUDIT_SHEET}!A1:BL5000`);
+  const response = await readRange(workbookId, `${DECISION_AUDIT_SHEET}!A1:BW5000`);
   return ((response.values ?? []) as unknown[][]).slice(1);
 }
 
@@ -1088,15 +1496,82 @@ export async function logDecisionAuditPregame(
 export async function settleDecisionAuditLog(
   date: string,
   outcomes: SettlementRow[],
-  options: { workbookId?: string; terminalNoOutcomeGameIds?: readonly string[] } = {},
+  options: {
+    workbookId?: string;
+    terminalNoOutcomeGameIds?: readonly string[];
+    canonicalHumanTruthEvidencePath?: string;
+    canonicalHumanTruthEvidence?: CanonicalHumanTruthEvidenceFile;
+  } = {},
 ): Promise<DecisionAuditWriteResult> {
   const workbookId = options.workbookId ?? WORKBOOK_ID;
   const warnings: string[] = [];
   const errors: string[] = [];
   try {
     await ensureDecisionAuditSheet(workbookId);
-    const existing = await readAuditRows(workbookId);
-    const mutation = settleDecisionAuditRows(existing, outcomes, new Date().toISOString());
+    const existingBeforeMaterialization = await readAuditRows(workbookId);
+    let existing = existingBeforeMaterialization;
+    let humanTruthMaterialization: CanonicalHumanTruthMaterializationSummary | undefined;
+    let forceCanonicalManualRegradeGameIds: ReadonlySet<string> = new Set();
+    if (date === SEPT25_HUMAN_TRUTH_DATE) {
+      let sourcePath = options.canonicalHumanTruthEvidencePath
+        ?? resolve(process.cwd(), SEPT25_HUMAN_TRUTH_EVIDENCE_PATH);
+      try {
+        let evidence = options.canonicalHumanTruthEvidence;
+        if (!evidence && options.canonicalHumanTruthEvidencePath) {
+          evidence = await loadCanonicalHumanTruthEvidenceFile(sourcePath);
+        }
+        if (!evidence) {
+          const candidates = [
+            resolve(process.cwd(), SEPT25_HUMAN_TRUTH_EVIDENCE_PATH),
+            resolve(process.cwd(), "..", "..", SEPT25_HUMAN_TRUTH_EVIDENCE_PATH),
+          ];
+          let lastError: unknown;
+          for (const candidate of candidates) {
+            try {
+              evidence = await loadCanonicalHumanTruthEvidenceFile(candidate);
+              sourcePath = candidate;
+              break;
+            } catch (error: unknown) {
+              lastError = error;
+            }
+          }
+          if (!evidence) throw lastError ?? new Error("Canonical human truth evidence file not found");
+        }
+        const materialized = materializeCanonicalHumanTruthRows(
+          existing,
+          evidence,
+          new Date().toISOString(),
+          sourcePath,
+        );
+        humanTruthMaterialization = materialized.summary;
+        if (materialized.summary.status === "PASS") {
+          existing = materialized.rows;
+          forceCanonicalManualRegradeGameIds = new Set(materialized.summary.changed_game_ids);
+        } else {
+          errors.push(...materialized.summary.errors.map((message) => `HUMAN_TRUTH_MATERIALIZATION:${message}`));
+        }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(`HUMAN_TRUTH_MATERIALIZATION:${message}`);
+        humanTruthMaterialization = {
+          status: "FAIL",
+          source_path: sourcePath,
+          canonical_snapshot_timestamp: "",
+          canonical_pipeline_run_id: "",
+          manual_overlay_ts: "",
+          records_found: 0,
+          records_updated: 0,
+          records_unchanged: 0,
+          changed_game_ids: [],
+          excluded_noncanonical_game_ids: [...SEPT25_EXCLUDED_GAME_IDS],
+          row_evidence: [],
+          errors: [message],
+        };
+      }
+    }
+    const mutation = settleDecisionAuditRows(existing, outcomes, new Date().toISOString(), {
+      forceCanonicalManualRegradeGameIds,
+    });
     const expectedKeys = new Set(outcomes.map((outcome) => rowKey(outcome.date, outcome.game_id)));
     const existingKeys = new Set(existing.map((row) => rowKey(
       row[DECISION_AUDIT_INDEX.DATE],
@@ -1126,12 +1601,13 @@ export async function settleDecisionAuditLog(
         `PREGAME_FREEZE_MISSING: ${mutation.auditGaps} settled game(s) have AUDIT_GAP provenance and remain NOT_GRADABLE`,
       );
     }
-    await writeAuditRows(workbookId, gapMarked.rows, existing.length);
+    await writeAuditRows(workbookId, gapMarked.rows, existingBeforeMaterialization.length);
     return {
       status: errors.length === 0 ? "success" : "partial", phase: "settlement", date,
       rows_written: 0, rows_updated: mutation.rowsUpdated,
       rows_frozen: 0, rows_settled: mutation.rowsSettled,
       duplicates_removed: mutation.duplicatesRemoved, audit_gaps: mutation.auditGaps, outcome_gaps: gapMarked.outcomeGaps, warnings, errors,
+      human_truth_materialization: humanTruthMaterialization,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

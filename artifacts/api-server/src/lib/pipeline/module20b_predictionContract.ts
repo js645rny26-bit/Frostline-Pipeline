@@ -317,7 +317,7 @@ function sameHumanTruth(left: CanonicalHumanInput, right: CanonicalHumanInput): 
   return JSON.stringify(immutableHumanPayload(left)) === JSON.stringify(immutableHumanPayload(right));
 }
 
-function recordHash(record: Omit<CanonicalTruthRecord, "record_hash">): string {
+export function canonicalTruthRecordHash(record: Omit<CanonicalTruthRecord, "record_hash">): string {
   return createHash("sha256").update(JSON.stringify(record)).digest("hex");
 }
 
@@ -393,7 +393,7 @@ export function freezeCanonicalTruth(request: CanonicalFreezeRequest): Canonical
     reason_for_refreeze: latest ? text(request.reason_for_refreeze) : "",
     previous_record_hash: latest?.record_hash ?? "",
   };
-  const frozen: CanonicalTruthRecord = { ...withoutHash, record_hash: recordHash(withoutHash) };
+  const frozen: CanonicalTruthRecord = { ...withoutHash, record_hash: canonicalTruthRecordHash(withoutHash) };
   return {
     status: "CANONICAL_TRUTH_FROZEN", gate, validation_errors: [],
     records: [...existing, frozen], frozen_record: frozen,

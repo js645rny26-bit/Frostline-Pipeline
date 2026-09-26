@@ -48,8 +48,8 @@ function outcome(gameId = "20260917_BOS_TEX", actualTotal = 8): SettlementRow {
   };
 }
 
-test("Module 35 keeps its two research surfaces through schema v76", () => {
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 76);
+test("Module 35 keeps its two research surfaces through schema v77", () => {
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 77);
   for (const [sheet, headers] of [
     ["SHADOW_TRUTH_DIRECTION_V1", SHADOW_TRUTH_DIRECTION_HEADERS],
     ["SHADOW_TRUTH_SUMMARY_V1", SHADOW_TRUTH_SUMMARY_HEADERS],

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   DECISION_AUDIT_COLS,
   DECISION_AUDIT_HEADER,
@@ -8,9 +10,12 @@ import {
   classifyDecisionAuditOutcomeGapMessages,
   classifyMissingDecisionAuditRows,
   markDecisionAuditOutcomeGaps,
+  evaluateCanonicalManualTruthGate,
   gradeAuditTruth,
+  materializeCanonicalHumanTruthRows,
   settleDecisionAuditRows,
   upsertDecisionAuditPregameRows,
+  type CanonicalHumanTruthEvidenceFile,
   type DecisionAuditPregameInput,
 } from "./module20_decisionAuditLog.js";
 import type { SettlementRow } from "./module14_shadowSettlement.js";
@@ -84,9 +89,9 @@ function outcome(overrides: Partial<SettlementRow> = {}): SettlementRow {
   };
 }
 
-test("decision audit schema has the exact 64-column settlement-completeness contract", () => {
+test("decision audit schema has the exact 75-column settlement and canonical-human contract", () => {
   assert.equal(DECISION_AUDIT_HEADER.length, DECISION_AUDIT_COLS);
-  assert.equal(DECISION_AUDIT_COLS, 64);
+  assert.equal(DECISION_AUDIT_COLS, 75);
   assert.equal(DECISION_AUDIT_HEADER[0], "Date");
   assert.equal(DECISION_AUDIT_HEADER[49], "Graded_TS");
   assert.equal(DECISION_AUDIT_HEADER[50], "Model_Total_Error");
@@ -94,6 +99,127 @@ test("decision audit schema has the exact 64-column settlement-completeness cont
   assert.equal(DECISION_AUDIT_HEADER[61], "Freeze_TS");
   assert.equal(DECISION_AUDIT_HEADER[62], "Settlement_Status");
   assert.equal(DECISION_AUDIT_HEADER[63], "Settlement_Gap_Reason");
+  assert.equal(DECISION_AUDIT_HEADER[64], "Human_Truth_Version");
+  assert.equal(DECISION_AUDIT_HEADER[73], "Human_Record_Hash");
+  assert.equal(DECISION_AUDIT_HEADER[74], "Distribution_Total_Mean_At_Human_Read");
+});
+
+test("Sept. 25 canonical evidence materializes exactly eight rows without changing model fields", () => {
+  const evidencePath = fileURLToPath(new URL("../../../../../docs/evidence/HUMAN_GAME_TRUTH_2026-09-25_RUN_240.json", import.meta.url));
+  const evidence = JSON.parse(readFileSync(evidencePath, "utf8")) as CanonicalHumanTruthEvidenceFile;
+  const games = [
+    ["20260925_BAL_NYY__G1", "BAL", "NYY", 8.15],
+    ["20260925_PIT_DET", "PIT", "DET", 9.81],
+    ["20260925_TBR_PHI", "TBR", "PHI", 7.44],
+    ["20260925_CIN_TOR", "CIN", "TOR", 9.13],
+    ["20260925_ATL_MIA", "ATL", "MIA", 8.29],
+    ["20260925_CHC_BOS__G2", "CHC", "BOS", 8.02],
+    ["20260925_NYM_WSN", "NYM", "WSN", 8.88],
+    ["20260925_COL_CHW", "COL", "CHW", 8.74],
+    ["20260925_STL_MIL", "STL", "MIL", 9.04],
+    ["20260925_TEX_MIN", "TEX", "MIN", 7.14],
+  ] as const;
+  const inputs = games.map(([gameId, away, home, total]) => pregame({
+    date: "2026-09-25",
+    game_id: gameId,
+    away_team: away,
+    home_team: home,
+    scheduled_first_pitch: "2026-09-26T00:10:00.000Z",
+    lock_status: "LOCKED_IN",
+    projected_away_runs: Number.parseFloat((total / 2).toFixed(2)),
+    projected_home_runs: Number.parseFloat((total - total / 2).toFixed(2)),
+    projected_total: total,
+    market_line: 8.5,
+  }));
+  const pre = upsertDecisionAuditPregameRows([], inputs, "2026-09-25T21:00:00.000Z");
+  const modelBefore = new Map(pre.rows.map((row) => [String(row[C.GAME_ID]), row.slice(C.FROZEN_AWAY, C.FROZEN_TS + 1)]));
+  const overlayTs = "2026-09-26T12:34:56.789Z";
+  const materialized = materializeCanonicalHumanTruthRows(pre.rows, evidence, overlayTs, evidencePath);
+
+  assert.equal(materialized.summary.status, "PASS");
+  assert.equal(materialized.summary.records_found, 8);
+  assert.equal(materialized.summary.records_updated, 8);
+  assert.deepEqual(materialized.summary.excluded_noncanonical_game_ids, [
+    "20260925_BAL_NYY__G1", "20260925_CHC_BOS__G2",
+  ]);
+
+  for (const record of evidence.records) {
+    const row = materialized.rows.find((candidate) => candidate[C.GAME_ID] === record.game_id)!;
+    assert.deepEqual(row.slice(C.FROZEN_AWAY, C.FROZEN_TS + 1), modelBefore.get(record.game_id));
+    assert.equal(row[C.MANUAL_AWAY], record.away_allocation);
+    assert.equal(row[C.MANUAL_HOME], record.home_allocation);
+    assert.equal(row[C.MANUAL_TOTAL], record.total_p50);
+    assert.equal(row[C.FREEZE_TS], evidence.canonical_snapshot_timestamp);
+    assert.equal(row[C.MANUAL_TS], overlayTs);
+    assert.equal(row[C.HUMAN_RECORD_HASH], record.record_hash);
+    assert.equal(evaluateCanonicalManualTruthGate(row).status, "PASS");
+  }
+
+  const cin = materialized.rows.find((row) => row[C.GAME_ID] === "20260925_CIN_TOR")!;
+  assert.equal(cin[C.FROZEN_TOTAL], 9.13);
+  assert.equal(cin[C.MANUAL_TOTAL], 9.4);
+  assert.equal(cin[C.DISTRIBUTION_TOTAL_MEAN], 9.38);
+
+  for (const gameId of ["20260925_BAL_NYY__G1", "20260925_CHC_BOS__G2"]) {
+    const row = materialized.rows.find((candidate) => candidate[C.GAME_ID] === gameId)!;
+    assert.equal(row[C.HUMAN_FREEZE_STATUS], "CHAT_RECORDED_HUMAN_TRUTH_NO_CANONICAL_PREGAME_FREEZE");
+    assert.equal(row[C.HUMAN_RECORD_HASH], "");
+    assert.equal(row[C.MANUAL_TOTAL], "");
+    assert.equal(evaluateCanonicalManualTruthGate(row).status, "FAIL");
+  }
+
+  const outcomes = evidence.records.map((record, index) => outcome({
+    date: "2026-09-25",
+    game_id: record.game_id,
+    actual_away_runs: 3 + (index % 2),
+    actual_home_runs: 4,
+    actual_total: 7 + (index % 2),
+  }));
+  const settled = settleDecisionAuditRows(materialized.rows, outcomes, "2026-09-26T13:00:00.000Z", {
+    forceCanonicalManualRegradeGameIds: new Set(materialized.summary.changed_game_ids),
+  });
+  for (const record of evidence.records) {
+    const row = settled.rows.find((candidate) => candidate[C.GAME_ID] === record.game_id)!;
+    assert.notEqual(row[C.MANUAL_TOTAL_ERROR], "");
+    assert.notEqual(row[C.MANUAL_ALLOCATION_ERROR], "");
+    assert.equal(row[C.MECHANISM], record.primary_mechanism_text);
+    assert.equal(evaluateCanonicalManualTruthGate(row).status, "PASS");
+  }
+});
+
+test("canonical manual settlement fails closed when the preserved hash is corrupted", () => {
+  const pre = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-09-25",
+    game_id: "20260925_PIT_DET",
+    scheduled_first_pitch: "2026-09-25T22:40:00.000Z",
+    lock_status: "LOCKED_IN",
+  })], "2026-09-25T21:00:00.000Z");
+  const row = pre.rows[0]!;
+  row[C.MANUAL_AWAY] = 4.5;
+  row[C.MANUAL_HOME] = 4.8;
+  row[C.MANUAL_TOTAL] = 9.3;
+  row[C.MECHANISM] = "Frozen mechanism";
+  row[C.FREEZE_TS] = "2026-09-25T22:12:21.985Z";
+  row[C.HUMAN_TRUTH_VERSION] = "HUMAN_GAME_TRUTH_V1_TEST_ONLY";
+  row[C.HUMAN_FREEZE_STATUS] = "CANONICAL_TRUTH_FREEZE";
+  row[C.PRIMARY_CARRIER] = "HOME";
+  row[C.PRIMARY_PHASE] = "STARTER";
+  row[C.PRIMARY_MECHANISM_CODE] = "TWO_SIDED_CONTACT";
+  row[C.SECONDARY_MECHANISM_CODE] = "BULLPEN_SUPPRESSION";
+  row[C.MARKET_EXPOSURE_STATUS] = "MARKET_EXPOSED";
+  row[C.MARKET_EXPOSURE_PROVENANCE] = "MARKET_EXPOSED";
+  row[C.CANONICAL_FREEZE_RUN_ID] = "RUN_20260925221200303";
+  row[C.DISTRIBUTION_TOTAL_MEAN] = 9.88;
+  row[C.HUMAN_RECORD_HASH] = "corrupted";
+  assert.equal(evaluateCanonicalManualTruthGate(row).reason, "CANONICAL_RECORD_HASH_MISMATCH");
+
+  const settled = settleDecisionAuditRows(pre.rows, [outcome({
+    date: "2026-09-25",
+    game_id: "20260925_PIT_DET",
+  })], "2026-09-26T13:00:00.000Z");
+  assert.equal(settled.rows[0]![C.MANUAL_TRUTH_GRADE], "NOT_GRADABLE");
+  assert.equal(settled.rows[0]![C.MANUAL_TOTAL_ERROR], "");
+  assert.equal(settled.rows[0]![C.MANUAL_ALLOCATION_ERROR], "");
 });
 
 test("pregame replay is idempotent by Date + Game_ID with zero duplicates", () => {

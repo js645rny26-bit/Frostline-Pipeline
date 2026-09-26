@@ -197,8 +197,8 @@ test("Module 36 governance sentinels cannot authorize an active projection", () 
   assert.equal(ACTIVE_PITCHING_INVENTORY_MAPPING_STATUS, "SHADOW_ONLY_NOT_COMMISSIONED");
 });
 
-test("Module 36 keeps its four research surfaces through schema v76", () => {
-  assert.equal(WORKBOOK_SCHEMA_VERSION, 76);
+test("Module 36 keeps its four research surfaces through schema v77", () => {
+  assert.equal(WORKBOOK_SCHEMA_VERSION, 77);
   for (const [sheet, headers] of [
     ["ACTIVE_PITCHING_INVENTORY_V1", ACTIVE_PITCHING_INVENTORY_HEADERS],
     ["ACTIVE_PITCHING_INVENTORY_SUMMARY_V1", ACTIVE_PITCHING_INVENTORY_SUMMARY_HEADERS],
