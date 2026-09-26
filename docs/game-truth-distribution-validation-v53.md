@@ -82,6 +82,15 @@ rules are:
 | Lineup talent completeness | Mean candidate | Rejected as shape | Talent matters; batting-order position does not. |
 | Humidity/barometric pressure | Fold into broad environment physics | Rejected standalone | Do not create separate dispersion coefficients. |
 
+### Named blow-up regression case
+
+`20260925_TEX_MIN` is retained as a named test case for the
+`STARTER_GAME_TO_GAME_BLOW_UP_PROPENSITY` candidate.  It asks whether prior-only,
+pregame-frozen traffic/damage volatility would allocate enough mass to an elite
+starter's failure branch without moving the center solely because the realized
+game later detonated.  The case is evidence for test coverage, not a coefficient
+target, and may not be used to derive its own feature value.
+
 ## Prospective replay design
 
 1. Freeze every candidate feature before first pitch with source, timestamp,
