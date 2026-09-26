@@ -45,6 +45,7 @@ output from leaving stale metric rows below the new range.
 | PIT shape | 10 non-randomized count-PIT bins and an Anderson-Darling uniform diagnostic | A U shape means underdispersion; a dome means overdispersion; a slope suggests center bias. No non-rejection is a calibration certificate. |
 | Decision-region score | `Threshold_Weighted_CRPS_6_5_TO_11_5` | Mean Brier score across coherent half-run cutoffs 6.5 through 11.5. Ordinary CRPS remains whole-distribution scoring. |
 | Reliability | `GAME_TRUTH_DIST_CORP_V2` | Isotonic/PAV groups, no arbitrary fixed bins; Brier MCB and slate-block bootstrap frequency intervals. It does not recalibrate any probability. |
+| Outcome-region calibration | `GAME_TRUTH_DIST_SUMMARY_V2` `OUTCOME_BUCKET_CALIBRATION` rows | Mean modeled mass versus empirical frequency for `<=6`, `7-10`, and `11+` runs. The three modeled masses and three observed frequencies each reconcile to one. |
 | Comparator uncertainty | `GAME_TRUTH_DIST_PAIRS_V2` | Paired CRPS/log/twCRPS deltas with full-slate-date block bootstrap CIs. HLN-DM is a secondary one-step cross-check and is unavailable for nested pairs. |
 | Coherence | PMF and line reconciliation statuses | Valid nonnegative PMF, nondecreasing CDF, and exact half-line `P(Over k)=1-F(floor(k))` reconciliation are required per PMF. |
 

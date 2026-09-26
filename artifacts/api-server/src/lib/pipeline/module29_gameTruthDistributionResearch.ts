@@ -67,6 +67,11 @@ export const MIN_PRIOR_SETTLED_GAMES_V2 = 100;
 export const STANDARD_TOTAL_LINES = [6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5] as const;
 export const POSTED_REGION_HALF_TOTAL_LINES = [6.5, 7.5, 8.5, 9.5, 10.5, 11.5] as const;
 export const BLOCK_BOOTSTRAP_REPLICATES = 1000;
+export const GAME_TRUTH_DISTRIBUTION_LINES_READ_LIMIT = 20_000;
+
+export function gameTruthDistributionLinesReadRange(): string {
+  return `${GAME_TRUTH_DISTRIBUTION_LINES_SHEET}!A1:Q${GAME_TRUTH_DISTRIBUTION_LINES_READ_LIMIT}`;
+}
 
 export const GAME_TRUTH_DISTRIBUTION_HEADERS = [
   "Date",
@@ -922,6 +927,110 @@ function pitRows(
   });
 }
 
+/**
+ * Compare modeled probability mass with realized frequency in the three
+ * predeclared run environments used by commissioning review. The 10.5 line is
+ * the coherent PMF boundary for 11+ runs, so the middle bucket is the residual
+ * probability between <=6 and >=11. This is summary-only research evidence;
+ * it does not alter any PMF, center, projection, or decision.
+ */
+function outcomeBucketCalibrationRows(
+  rows: unknown[][],
+  lineRows: unknown[][],
+  model: Comparator,
+  replayTimestamp: string,
+): unknown[][] {
+  const distributionModelIndex = GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Model");
+  const distributionDateIndex = GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Date");
+  const distributionGameIndex = GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Game_ID");
+  const distributionSnapshotIndex = GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Frozen_Packet_Snapshot_TS");
+  const actualIndex = GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("Actual_Total");
+  const lowProbabilityIndex = GAME_TRUTH_DISTRIBUTION_HEADERS.indexOf("P_Total_LE_6");
+
+  const lineModelIndex = GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Model");
+  const lineDateIndex = GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Date");
+  const lineGameIndex = GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Game_ID");
+  const lineSnapshotIndex = GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Frozen_Packet_Snapshot_TS");
+  const lineValueIndex = GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Standard_Total_Line");
+  const overProbabilityIndex = GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Over_Probability");
+  const lineStatusIndex = GAME_TRUTH_DISTRIBUTION_LINES_HEADERS.indexOf("Research_Status");
+
+  const key = (date: unknown, gameId: unknown, snapshotTs: unknown): string =>
+    `${packetKey(text(date), text(gameId), text(snapshotTs))}|${model}`;
+  const highProbabilityByObservation = new Map<string, number>();
+  for (const row of lineRows) {
+    if (
+      text(row[lineModelIndex]) !== model
+      || Number(row[lineValueIndex]) !== 10.5
+      || text(row[lineStatusIndex]) !== "WALK_FORWARD_ELIGIBLE"
+    ) continue;
+    const probability = Number(row[overProbabilityIndex]);
+    if (!Number.isFinite(probability)) continue;
+    highProbabilityByObservation.set(
+      key(row[lineDateIndex], row[lineGameIndex], row[lineSnapshotIndex]),
+      probability,
+    );
+  }
+
+  const observations: Array<{
+    actual: number;
+    low_probability: number;
+    middle_probability: number;
+    high_probability: number;
+  }> = [];
+  for (const row of rows) {
+    if (text(row[distributionModelIndex]) !== model) continue;
+    const actual = Number(row[actualIndex]);
+    const lowProbability = Number(row[lowProbabilityIndex]);
+    const highProbability = highProbabilityByObservation.get(
+      key(row[distributionDateIndex], row[distributionGameIndex], row[distributionSnapshotIndex]),
+    );
+    if (!Number.isFinite(actual) || !Number.isFinite(lowProbability) || highProbability === undefined) continue;
+    observations.push({
+      actual,
+      low_probability: lowProbability,
+      middle_probability: Math.max(0, 1 - lowProbability - highProbability),
+      high_probability: highProbability,
+    });
+  }
+
+  const buckets = [
+    {
+      label: "LE_6",
+      probability: (observation: (typeof observations)[number]) => observation.low_probability,
+      occurred: (observation: (typeof observations)[number]) => observation.actual <= 6,
+    },
+    {
+      label: "7_TO_10",
+      probability: (observation: (typeof observations)[number]) => observation.middle_probability,
+      occurred: (observation: (typeof observations)[number]) => observation.actual >= 7 && observation.actual <= 10,
+    },
+    {
+      label: "GE_11",
+      probability: (observation: (typeof observations)[number]) => observation.high_probability,
+      occurred: (observation: (typeof observations)[number]) => observation.actual >= 11,
+    },
+  ] as const;
+
+  return buckets.map((bucket) => [
+    "ALL_WALK_FORWARD",
+    model,
+    "OUTCOME_BUCKET_CALIBRATION",
+    bucket.label,
+    observations.length,
+    mean(observations.map(bucket.probability)) ?? "",
+    "",
+    observations.length === 0
+      ? ""
+      : round(observations.filter(bucket.occurred).length / observations.length),
+    "",
+    "",
+    "",
+    "RESEARCH_ONLY_NO_PROMOTION",
+    replayTimestamp,
+  ]);
+}
+
 export function buildGameTruthDistributionSummary(rows: unknown[][], lineRows: unknown[][], replayTimestamp: string): unknown[][] {
   const eligible = scoredRows(rows);
   const currentSampleStatus = sampleSizeStatus(eligible.length / Math.max(1, uniqueModels(eligible).length));
@@ -944,6 +1053,7 @@ export function buildGameTruthDistributionSummary(rows: unknown[][], lineRows: u
     summary.push(coverageSummaryRow(eligible, model, 50, replayTimestamp));
     summary.push(coverageSummaryRow(eligible, model, 80, replayTimestamp));
     summary.push(coverageSummaryRow(eligible, model, 90, replayTimestamp));
+    summary.push(...outcomeBucketCalibrationRows(eligible, lineRows, model, replayTimestamp));
     summary.push(...pitRows(eligible, model, "Nonrandomized_Count_PIT", "NONRANDOMIZED_COUNT_PIT_BIN", replayTimestamp));
     summary.push(...pitRows(eligible, model, "Deterministic_Randomized_PIT", "RANDOMIZED_PIT_BIN_SECONDARY", replayTimestamp));
   }
@@ -1455,7 +1565,7 @@ export async function runGameTruthDistributionResearch(
       readOptionalSheet(workbookId, "GAME_TRUTH_REPLAY_V1!A1:AZ10000", warnings),
       readOptionalSheet(workbookId, "ALLOCATION_SETTLEMENT_DIAGNOSTICS!A1:AB10000", warnings),
       readOptionalOutputSheet(workbookId, `${GAME_TRUTH_DISTRIBUTION_RESEARCH_SHEET}!A1:AZ10000`),
-      readOptionalOutputSheet(workbookId, `${GAME_TRUTH_DISTRIBUTION_LINES_SHEET}!A1:AZ10000`),
+      readOptionalOutputSheet(workbookId, gameTruthDistributionLinesReadRange()),
       readOptionalOutputSheet(workbookId, `${GAME_TRUTH_SLATE_DIAGNOSTICS_SHEET}!A1:AZ10000`),
     ]);
     const packets = parseFrozenDistributionBenchmarkPackets(packetRows);

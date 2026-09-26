@@ -786,7 +786,7 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     stage: "REPLAY",
     timing: "Rebuilt with direct-total distribution research during daily settlement (Module 29)",
     purpose:
-      "Non-randomized count-PIT, secondary deterministic randomized-PIT, proper-score, directional interval-escape, threshold-weighted CRPS, and standard-line Brier summaries, plus sample-size constraints and the recorded no-promotion protocol.",
+      "Non-randomized count-PIT, secondary deterministic randomized-PIT, proper-score, directional interval-escape, threshold-weighted CRPS, empirical-versus-modeled <=6 / 7-10 / 11+ outcome frequencies, and standard-line Brier summaries, plus sample-size constraints and the recorded no-promotion protocol.",
     boardRelationship:
       "Research-only. This is calibration evidence, not a coefficient or distribution-model selection rule.",
     readNote:

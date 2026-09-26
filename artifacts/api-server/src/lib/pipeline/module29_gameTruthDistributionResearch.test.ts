@@ -16,6 +16,7 @@ import {
   GAME_TRUTH_DISTRIBUTION_CORP_HEADERS,
   GAME_TRUTH_DISTRIBUTION_FEATURE_GOVERNANCE_HEADERS,
   GAME_TRUTH_DISTRIBUTION_LINES_HEADERS,
+  gameTruthDistributionLinesReadRange,
   GAME_TRUTH_DISTRIBUTION_PAIRS_HEADERS,
   gameTruthDistributionFeatureGovernanceRows,
   mergeGameTruthDistributionCorpus,
@@ -65,6 +66,10 @@ function observationsWithTraining(): DistributionBenchmarkObservation[] {
 function distributionMean(distribution: { pmf: number[] }): number {
   return distribution.pmf.reduce((sum, probability, total) => sum + total * probability, 0);
 }
+
+test("Module 29 rereads the complete persisted line-probability corpus beyond 10,000 rows", () => {
+  assert.equal(gameTruthDistributionLinesReadRange(), "GAME_TRUTH_DIST_LINES_V2!A1:Q20000");
+});
 
 test("mean-parameterized hurdle NB preserves frozen center even with an observed zero rate", () => {
   const distribution = buildHurdleNegativeBinomialDistribution(8, 0.18, 0.1, 25);
@@ -185,6 +190,14 @@ test("distribution rows expose count-correct PIT, posted-region twCRPS, and dire
   assert.ok(summary.some((row) => row[2] === "RANDOMIZED_PIT_BIN_SECONDARY"));
   assert.ok(summary.some((row) => row[2] === "ANDERSON_DARLING_UNIFORM_DIAGNOSTIC"));
   assert.ok(summary.some((row) => row[2] === "INTERVAL_COVERAGE_90"));
+  const bucketRows = summary.filter((row) => row[2] === "OUTCOME_BUCKET_CALIBRATION");
+  assert.equal(bucketRows.length, 15);
+  for (const model of ["CMP", "EMPIRICAL_RESIDUAL", "HURDLE_NB", "NB", "POISSON"]) {
+    const modelBuckets = bucketRows.filter((row) => row[1] === model);
+    assert.deepEqual(modelBuckets.map((row) => row[3]), ["LE_6", "7_TO_10", "GE_11"]);
+    assert.ok(Math.abs(modelBuckets.reduce((sum, row) => sum + Number(row[5]), 0) - 1) < 1e-5);
+    assert.ok(Math.abs(modelBuckets.reduce((sum, row) => sum + Number(row[7]), 0) - 1) < 1e-5);
+  }
   assert.ok(summary.some((row) => row[2] === "PREDECLARED_DECISION"));
   assert.ok(pairs.some((row) => row[1] === "CRPS"));
   assert.equal(pairs[0]?.length, GAME_TRUTH_DISTRIBUTION_PAIRS_HEADERS.length);

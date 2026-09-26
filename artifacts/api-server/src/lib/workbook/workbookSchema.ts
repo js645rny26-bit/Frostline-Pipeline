@@ -8148,7 +8148,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "GAME_TRUTH_DIST_SUMMARY_V2",
     description:
-      "Walk-forward distribution diagnostics: proper scores, deterministic randomized-PIT bins, directional interval escapes, standard-line Brier evidence, and the predeclared no-promotion decision protocol.",
+      "Walk-forward distribution diagnostics: proper scores, count-PIT bins, directional interval escapes, empirical-versus-modeled <=6 / 7-10 / 11+ outcome frequencies, standard-line Brier evidence, and the predeclared no-promotion decision protocol.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: diagnosticColumns(
