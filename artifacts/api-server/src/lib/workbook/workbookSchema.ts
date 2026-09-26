@@ -255,8 +255,12 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      canonical human-truth provenance needed to preserve and hash-validate
  *      the eight Sept. 25 Prediction Contract records. No new sheet, active
  *      projection input, decision input, or authorization rule is added.
+ *  v78 (2026-09-26): distinguishes canonical research freezes, un-hashed
+ *      pregame chat evidence, and post-opportunity chat evidence in the same
+ *      DECISION_AUDIT_LOG. Optional mechanism-specificity/entity metadata is
+ *      preserved for research only; no active consumer is added.
  */
-export const WORKBOOK_SCHEMA_VERSION = 77;
+export const WORKBOOK_SCHEMA_VERSION = 78;
 
 export interface ColumnDef {
   name: string;
@@ -9898,6 +9902,46 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         description: "Distribution mean preserved from the same human-read snapshot; it does not replace Human Total P50.",
         exampleValue: "9.38",
+      },
+      {
+        name: "Human_Truth_Evidence_Status",
+        index: 75,
+        type: "string",
+        width: 275,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "CANONICAL_RESEARCH_FREEZE | CHAT_RECORDED_PREGAME_UNHASHED | CHAT_RECORDED_HUMAN_TRUTH. Only the canonical class is settlement-gradeable.",
+        exampleValue: "CANONICAL_RESEARCH_FREEZE",
+      },
+      {
+        name: "Mechanism_Specificity_Flag",
+        index: 76,
+        type: "string",
+        width: 265,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "Research-only observability flag preserved from the source evidence; it does not rewrite the frozen mechanism.",
+        exampleValue: "LOW_SPECIFICITY_STARTER_REFERENT",
+      },
+      {
+        name: "Mechanism_Entity_Reference",
+        index: 77,
+        type: "string",
+        width: 390,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "Optional entity metadata stored separately from the frozen mechanism text.",
+        exampleValue: "Away_Starter=Brandon Pfaadt; Home_Starter=Casey Mize",
+      },
+      {
+        name: "Entity_Reference_Status",
+        index: 78,
+        type: "string",
+        width: 390,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "Provenance status for optional entity metadata; posthoc metadata never becomes part of the frozen claim.",
+        exampleValue: "POSTHOC_METADATA_ONLY_NOT_PART_OF_FROZEN_MECHANISM",
       },
     ],
   },

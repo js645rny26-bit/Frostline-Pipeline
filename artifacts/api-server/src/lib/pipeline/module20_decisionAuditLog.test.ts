@@ -16,6 +16,7 @@ import {
   settleDecisionAuditRows,
   upsertDecisionAuditPregameRows,
   type CanonicalHumanTruthEvidenceFile,
+  type ChatRecordedHumanTruthEvidenceFile,
   type DecisionAuditPregameInput,
 } from "./module20_decisionAuditLog.js";
 import type { SettlementRow } from "./module14_shadowSettlement.js";
@@ -89,9 +90,9 @@ function outcome(overrides: Partial<SettlementRow> = {}): SettlementRow {
   };
 }
 
-test("decision audit schema has the exact 75-column settlement and canonical-human contract", () => {
+test("decision audit schema has the exact 79-column settlement and three-class human-evidence contract", () => {
   assert.equal(DECISION_AUDIT_HEADER.length, DECISION_AUDIT_COLS);
-  assert.equal(DECISION_AUDIT_COLS, 75);
+  assert.equal(DECISION_AUDIT_COLS, 79);
   assert.equal(DECISION_AUDIT_HEADER[0], "Date");
   assert.equal(DECISION_AUDIT_HEADER[49], "Graded_TS");
   assert.equal(DECISION_AUDIT_HEADER[50], "Model_Total_Error");
@@ -102,13 +103,20 @@ test("decision audit schema has the exact 75-column settlement and canonical-hum
   assert.equal(DECISION_AUDIT_HEADER[64], "Human_Truth_Version");
   assert.equal(DECISION_AUDIT_HEADER[73], "Human_Record_Hash");
   assert.equal(DECISION_AUDIT_HEADER[74], "Distribution_Total_Mean_At_Human_Read");
+  assert.equal(DECISION_AUDIT_HEADER[75], "Human_Truth_Evidence_Status");
+  assert.equal(DECISION_AUDIT_HEADER[76], "Mechanism_Specificity_Flag");
+  assert.equal(DECISION_AUDIT_HEADER[77], "Mechanism_Entity_Reference");
+  assert.equal(DECISION_AUDIT_HEADER[78], "Entity_Reference_Status");
 });
 
-test("Sept. 25 canonical evidence materializes exactly eight rows without changing model fields", () => {
+test("Sept. 25 ledger materializes three evidence classes while preserving model/outcome truth", () => {
   const evidencePath = fileURLToPath(new URL("../../../../../docs/evidence/HUMAN_GAME_TRUTH_2026-09-25_RUN_240.json", import.meta.url));
+  const chatEvidencePath = fileURLToPath(new URL("../../../../../docs/evidence/HUMAN_GAME_TRUTH_2026-09-25_CHAT_RECORDED.json", import.meta.url));
   const evidence = JSON.parse(readFileSync(evidencePath, "utf8")) as CanonicalHumanTruthEvidenceFile;
+  const chatEvidence = JSON.parse(readFileSync(chatEvidencePath, "utf8")) as ChatRecordedHumanTruthEvidenceFile;
   const games = [
     ["20260925_BAL_NYY__G1", "BAL", "NYY", 8.15],
+    ["20260925_CHC_BOS__G1", "CHC", "BOS", 8.21],
     ["20260925_PIT_DET", "PIT", "DET", 9.81],
     ["20260925_TBR_PHI", "TBR", "PHI", 7.44],
     ["20260925_CIN_TOR", "CIN", "TOR", 9.13],
@@ -118,6 +126,12 @@ test("Sept. 25 canonical evidence materializes exactly eight rows without changi
     ["20260925_COL_CHW", "COL", "CHW", 8.74],
     ["20260925_STL_MIL", "STL", "MIL", 9.04],
     ["20260925_TEX_MIN", "TEX", "MIN", 7.14],
+    ["20260925_ARI_SDP", "ARI", "SDP", 8.03],
+    ["20260925_LAA_SEA", "LAA", "SEA", 7.31],
+    ["20260925_LAD_SFG", "LAD", "SFG", 8.37],
+    ["20260925_HOU_OAK", "HOU", "OAK", 9.22],
+    ["20260925_BAL_NYY__G2", "BAL", "NYY", 8.18],
+    ["20260925_CLE_KCR", "CLE", "KCR", 8.41],
   ] as const;
   const inputs = games.map(([gameId, away, home, total]) => pregame({
     date: "2026-09-25",
@@ -134,13 +148,27 @@ test("Sept. 25 canonical evidence materializes exactly eight rows without changi
   const pre = upsertDecisionAuditPregameRows([], inputs, "2026-09-25T21:00:00.000Z");
   const modelBefore = new Map(pre.rows.map((row) => [String(row[C.GAME_ID]), row.slice(C.FROZEN_AWAY, C.FROZEN_TS + 1)]));
   const overlayTs = "2026-09-26T12:34:56.789Z";
-  const materialized = materializeCanonicalHumanTruthRows(pre.rows, evidence, overlayTs, evidencePath);
+  const materialized = materializeCanonicalHumanTruthRows(
+    pre.rows,
+    evidence,
+    chatEvidence,
+    overlayTs,
+    evidencePath,
+    chatEvidencePath,
+  );
 
   assert.equal(materialized.summary.status, "PASS");
-  assert.equal(materialized.summary.records_found, 8);
-  assert.equal(materialized.summary.records_updated, 8);
+  assert.equal(materialized.summary.records_found, 14);
+  assert.equal(materialized.summary.canonical_records_found, 8);
+  assert.equal(materialized.summary.chat_pregame_records_found, 4);
+  assert.equal(materialized.summary.chat_post_opportunity_records_found, 2);
+  assert.equal(materialized.summary.records_updated, 14);
+  assert.equal(materialized.summary.row_evidence.length, 17);
   assert.deepEqual(materialized.summary.excluded_noncanonical_game_ids, [
     "20260925_BAL_NYY__G1", "20260925_CHC_BOS__G2",
+  ]);
+  assert.deepEqual(materialized.summary.no_human_truth_game_ids, [
+    "20260925_CHC_BOS__G1", "20260925_BAL_NYY__G2", "20260925_CLE_KCR",
   ]);
 
   for (const record of evidence.records) {
@@ -152,6 +180,7 @@ test("Sept. 25 canonical evidence materializes exactly eight rows without changi
     assert.equal(row[C.FREEZE_TS], evidence.canonical_snapshot_timestamp);
     assert.equal(row[C.MANUAL_TS], overlayTs);
     assert.equal(row[C.HUMAN_RECORD_HASH], record.record_hash);
+    assert.equal(row[C.HUMAN_TRUTH_EVIDENCE_STATUS], "CANONICAL_RESEARCH_FREEZE");
     assert.equal(evaluateCanonicalManualTruthGate(row).status, "PASS");
   }
 
@@ -160,15 +189,42 @@ test("Sept. 25 canonical evidence materializes exactly eight rows without changi
   assert.equal(cin[C.MANUAL_TOTAL], 9.4);
   assert.equal(cin[C.DISTRIBUTION_TOTAL_MEAN], 9.38);
 
-  for (const gameId of ["20260925_BAL_NYY__G1", "20260925_CHC_BOS__G2"]) {
-    const row = materialized.rows.find((candidate) => candidate[C.GAME_ID] === gameId)!;
-    assert.equal(row[C.HUMAN_FREEZE_STATUS], "CHAT_RECORDED_HUMAN_TRUTH_NO_CANONICAL_PREGAME_FREEZE");
+  for (const record of chatEvidence.records) {
+    const row = materialized.rows.find((candidate) => candidate[C.GAME_ID] === record.game_id)!;
+    assert.deepEqual(row.slice(C.FROZEN_AWAY, C.FROZEN_TS + 1), modelBefore.get(record.game_id));
+    assert.equal(row[C.MANUAL_AWAY], record.away_allocation);
+    assert.equal(row[C.MANUAL_HOME], record.home_allocation);
+    assert.equal(row[C.MANUAL_TOTAL], record.total_p50);
+    assert.equal(row[C.MECHANISM], record.primary_mechanism_text);
+    assert.equal(row[C.HUMAN_FREEZE_STATUS], "NO_CANONICAL_PREGAME_FREEZE");
+    assert.equal(row[C.HUMAN_TRUTH_EVIDENCE_STATUS], record.human_truth_evidence_status);
+    assert.equal(row[C.FREEZE_TS], "");
+    assert.equal(row[C.CANONICAL_FREEZE_RUN_ID], "");
     assert.equal(row[C.HUMAN_RECORD_HASH], "");
-    assert.equal(row[C.MANUAL_TOTAL], "");
-    assert.equal(evaluateCanonicalManualTruthGate(row).status, "FAIL");
+    assert.equal(row[C.MANUAL_TS], overlayTs);
+    assert.ok(Math.abs(Number(row[C.MANUAL_AWAY]) + Number(row[C.MANUAL_HOME]) - Number(row[C.MANUAL_TOTAL])) < 1e-9);
+    assert.equal(evaluateCanonicalManualTruthGate(row).status, "NONCANONICAL_RESEARCH");
   }
 
-  const outcomes = evidence.records.map((record, index) => outcome({
+  const ari = materialized.rows.find((row) => row[C.GAME_ID] === "20260925_ARI_SDP")!;
+  assert.equal(ari[C.PRIMARY_CARRIER], "AWAY");
+  assert.equal(ari[C.MECHANISM_SPECIFICITY_FLAG], "LOW_SPECIFICITY_STARTER_REFERENT");
+  assert.equal(ari[C.MECHANISM_ENTITY_REFERENCE], "Away_Starter=Brandon Pfaadt; Home_Starter=Casey Mize");
+  assert.equal(ari[C.ENTITY_REFERENCE_STATUS], "POSTHOC_METADATA_ONLY_NOT_PART_OF_FROZEN_MECHANISM");
+
+  for (const gameId of chatEvidence.no_human_truth_game_ids) {
+    const row = materialized.rows.find((candidate) => candidate[C.GAME_ID] === gameId)!;
+    assert.equal(row[C.MANUAL_TOTAL], "");
+    assert.equal(row[C.HUMAN_FREEZE_STATUS], "");
+    assert.equal(row[C.HUMAN_TRUTH_EVIDENCE_STATUS], "");
+  }
+
+  for (const evidenceRow of materialized.summary.row_evidence) {
+    assert.deepEqual(evidenceRow.model_after, evidenceRow.model_before);
+    assert.deepEqual(evidenceRow.outcome_after, evidenceRow.outcome_before);
+  }
+
+  const outcomes = [...evidence.records, ...chatEvidence.records].map((record, index) => outcome({
     date: "2026-09-25",
     game_id: record.game_id,
     actual_away_runs: 3 + (index % 2),
@@ -176,7 +232,7 @@ test("Sept. 25 canonical evidence materializes exactly eight rows without changi
     actual_total: 7 + (index % 2),
   }));
   const settled = settleDecisionAuditRows(materialized.rows, outcomes, "2026-09-26T13:00:00.000Z", {
-    forceCanonicalManualRegradeGameIds: new Set(materialized.summary.changed_game_ids),
+    forceCanonicalManualRegradeGameIds: new Set(materialized.summary.canonical_regrade_game_ids),
   });
   for (const record of evidence.records) {
     const row = settled.rows.find((candidate) => candidate[C.GAME_ID] === record.game_id)!;
@@ -185,6 +241,19 @@ test("Sept. 25 canonical evidence materializes exactly eight rows without changi
     assert.equal(row[C.MECHANISM], record.primary_mechanism_text);
     assert.equal(evaluateCanonicalManualTruthGate(row).status, "PASS");
   }
+  for (const record of chatEvidence.records) {
+    const row = settled.rows.find((candidate) => candidate[C.GAME_ID] === record.game_id)!;
+    assert.equal(row[C.MANUAL_TRUTH_GRADE], "NOT_GRADABLE");
+    assert.equal(row[C.MANUAL_TOTAL_ERROR], "");
+    assert.equal(row[C.MANUAL_ALLOCATION_ERROR], "");
+  }
+  assert.deepEqual(
+    materialized.rows
+      .filter((row) => row[C.HUMAN_FREEZE_STATUS] === "CANONICAL_TRUTH_FREEZE")
+      .map((row) => row[C.GAME_ID])
+      .sort(),
+    evidence.records.map((record) => record.game_id).sort(),
+  );
 });
 
 test("canonical manual settlement fails closed when the preserved hash is corrupted", () => {
@@ -202,6 +271,7 @@ test("canonical manual settlement fails closed when the preserved hash is corrup
   row[C.FREEZE_TS] = "2026-09-25T22:12:21.985Z";
   row[C.HUMAN_TRUTH_VERSION] = "HUMAN_GAME_TRUTH_V1_TEST_ONLY";
   row[C.HUMAN_FREEZE_STATUS] = "CANONICAL_TRUTH_FREEZE";
+  row[C.HUMAN_TRUTH_EVIDENCE_STATUS] = "CANONICAL_RESEARCH_FREEZE";
   row[C.PRIMARY_CARRIER] = "HOME";
   row[C.PRIMARY_PHASE] = "STARTER";
   row[C.PRIMARY_MECHANISM_CODE] = "TWO_SIDED_CONTACT";

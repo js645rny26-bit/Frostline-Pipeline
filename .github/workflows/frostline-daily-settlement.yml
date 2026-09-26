@@ -234,12 +234,29 @@ jobs:
           if (process.env.SETTLEMENT_DATE === "2026-09-25") {
             const humanTruth = decisionAudit.human_truth_materialization ?? {};
             if (humanTruth.status !== "PASS") failures.push(`human_truth_materialization.status: ${humanTruth.status ?? "missing"}`);
-            if (humanTruth.records_found !== 8) failures.push(`human_truth_materialization.records_found: ${humanTruth.records_found ?? "missing"}`);
-            if ((humanTruth.records_updated ?? 0) + (humanTruth.records_unchanged ?? 0) !== 8) {
-              failures.push("human_truth_materialization did not reconcile exactly eight canonical rows");
+            if (humanTruth.records_found !== 14) failures.push(`human_truth_materialization.records_found: ${humanTruth.records_found ?? "missing"}`);
+            if (humanTruth.canonical_records_found !== 8) failures.push(`human_truth_materialization.canonical_records_found: ${humanTruth.canonical_records_found ?? "missing"}`);
+            if (humanTruth.chat_pregame_records_found !== 4) failures.push(`human_truth_materialization.chat_pregame_records_found: ${humanTruth.chat_pregame_records_found ?? "missing"}`);
+            if (humanTruth.chat_post_opportunity_records_found !== 2) failures.push(`human_truth_materialization.chat_post_opportunity_records_found: ${humanTruth.chat_post_opportunity_records_found ?? "missing"}`);
+            if ((humanTruth.records_updated ?? 0) + (humanTruth.records_unchanged ?? 0) !== 14) {
+              failures.push("human_truth_materialization did not reconcile exactly fourteen human-evidence rows");
             }
-            if (!Array.isArray(humanTruth.row_evidence) || humanTruth.row_evidence.length !== 8) {
-              failures.push("human_truth_materialization.row_evidence must contain eight before/after records");
+            if (!Array.isArray(humanTruth.row_evidence) || humanTruth.row_evidence.length !== 17) {
+              failures.push("human_truth_materialization.row_evidence must contain all seventeen Sept. 25 before/after records");
+            } else {
+              for (const evidence of humanTruth.row_evidence) {
+                if (JSON.stringify(evidence.model_before) !== JSON.stringify(evidence.model_after)) {
+                  failures.push(`human_truth_materialization model mutation: ${evidence.game_id ?? "unknown"}`);
+                }
+                if (JSON.stringify(evidence.outcome_before) !== JSON.stringify(evidence.outcome_after)) {
+                  failures.push(`human_truth_materialization outcome mutation: ${evidence.game_id ?? "unknown"}`);
+                }
+              }
+            }
+            const noHumanTruth = humanTruth.no_human_truth_game_ids ?? [];
+            const expectedNoHumanTruth = ["20260925_CHC_BOS__G1", "20260925_BAL_NYY__G2", "20260925_CLE_KCR"];
+            if (JSON.stringify([...noHumanTruth].sort()) !== JSON.stringify([...expectedNoHumanTruth].sort())) {
+              failures.push(`human_truth_materialization.no_human_truth_game_ids: ${JSON.stringify(noHumanTruth)}`);
             }
             if (Array.isArray(humanTruth.errors) && humanTruth.errors.length > 0) {
               failures.push(`human_truth_materialization.errors: ${JSON.stringify(humanTruth.errors)}`);

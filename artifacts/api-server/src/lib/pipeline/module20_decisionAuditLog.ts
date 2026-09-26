@@ -42,7 +42,7 @@ import {
 } from "./module20b_predictionContract.js";
 
 export const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
-export const DECISION_AUDIT_COLS = 75;
+export const DECISION_AUDIT_COLS = 79;
 /** August 10 is the first live slate whose pregame publish includes Module 20. */
 export const DECISION_AUDIT_REQUIRED_FROM_DATE = "2026-08-10";
 
@@ -78,6 +78,8 @@ export const DECISION_AUDIT_HEADER = [
   "Market_Exposure_Status", "Market_Exposure_Provenance",
   "Canonical_Freeze_Run_ID", "Human_Record_Hash",
   "Distribution_Total_Mean_At_Human_Read",
+  "Human_Truth_Evidence_Status", "Mechanism_Specificity_Flag",
+  "Mechanism_Entity_Reference", "Entity_Reference_Status",
 ] as const;
 
 export type DecisionAuditStatus = "OPEN" | "FROZEN" | "SETTLED" | "AUDIT_GAP";
@@ -203,6 +205,10 @@ export const DECISION_AUDIT_INDEX = {
   CANONICAL_FREEZE_RUN_ID: 72,
   HUMAN_RECORD_HASH: 73,
   DISTRIBUTION_TOTAL_MEAN: 74,
+  HUMAN_TRUTH_EVIDENCE_STATUS: 75,
+  MECHANISM_SPECIFICITY_FLAG: 76,
+  MECHANISM_ENTITY_REFERENCE: 77,
+  ENTITY_REFERENCE_STATUS: 78,
 } as const;
 
 export interface DecisionAuditPregameInput {
@@ -261,10 +267,47 @@ export interface CanonicalHumanTruthEvidenceFile {
   records: CanonicalHumanTruthEvidenceRecord[];
 }
 
+export interface ChatRecordedHumanTruthEvidenceRecord {
+  evidence_class: "B" | "C";
+  game_id: string;
+  total_p50: number;
+  total_mean: number;
+  away_allocation: number;
+  home_allocation: number;
+  primary_carrier: "AWAY" | "HOME" | "BALANCED";
+  primary_phase: "STARTER" | "BULLPEN" | "MIXED" | "SUPPRESSION";
+  primary_mechanism_code: string;
+  secondary_mechanism_code: string;
+  primary_mechanism_text: string;
+  market_exposure_status: "PRICE_BLIND" | "MARKET_EXPOSED";
+  market_exposure_provenance: string;
+  human_truth_version: string;
+  human_truth_evidence_status: "CHAT_RECORDED_PREGAME_UNHASHED" | "CHAT_RECORDED_HUMAN_TRUTH";
+  human_freeze_status: "NO_CANONICAL_PREGAME_FREEZE";
+  allocation_margin: number;
+  mechanism_specificity_flag: string;
+  mechanism_entity_reference: string;
+  entity_reference_status: string;
+  canonical_freeze_ts: "";
+  canonical_freeze_run_id: "";
+  record_hash: "";
+}
+
+export interface ChatRecordedHumanTruthEvidenceFile {
+  evidence_version: string;
+  date: string;
+  source_provenance: string;
+  records: ChatRecordedHumanTruthEvidenceRecord[];
+  no_human_truth_game_ids: string[];
+}
+
 export interface CanonicalHumanTruthRowEvidence {
   game_id: string;
+  evidence_class: "A" | "B" | "C" | "NONE";
   model_before: Record<string, unknown>;
   model_after: Record<string, unknown>;
+  outcome_before: Record<string, unknown>;
+  outcome_after: Record<string, unknown>;
   human_before: Record<string, unknown>;
   human_after: Record<string, unknown>;
 }
@@ -272,14 +315,20 @@ export interface CanonicalHumanTruthRowEvidence {
 export interface CanonicalHumanTruthMaterializationSummary {
   status: "NOT_APPLICABLE" | "PASS" | "FAIL";
   source_path: string;
+  chat_source_path: string;
   canonical_snapshot_timestamp: string;
   canonical_pipeline_run_id: string;
   manual_overlay_ts: string;
   records_found: number;
+  canonical_records_found: number;
+  chat_pregame_records_found: number;
+  chat_post_opportunity_records_found: number;
   records_updated: number;
   records_unchanged: number;
   changed_game_ids: string[];
+  canonical_regrade_game_ids: string[];
   excluded_noncanonical_game_ids: string[];
+  no_human_truth_game_ids: string[];
   row_evidence: CanonicalHumanTruthRowEvidence[];
   errors: string[];
 }
@@ -290,7 +339,7 @@ interface CanonicalHumanTruthMaterializationResult {
 }
 
 export interface CanonicalManualTruthGateResult {
-  status: "PASS" | "NOT_CANONICAL" | "FAIL";
+  status: "PASS" | "NOT_CANONICAL" | "NONCANONICAL_RESEARCH" | "FAIL";
   reason: string;
   direction: "OVER" | "UNDER" | "NONE";
 }
@@ -423,6 +472,7 @@ interface DecisionAuditMarketContext {
 
 const SEPT25_HUMAN_TRUTH_DATE = "2026-09-25";
 const SEPT25_HUMAN_TRUTH_EVIDENCE_PATH = "docs/evidence/HUMAN_GAME_TRUTH_2026-09-25_RUN_240.json";
+const SEPT25_CHAT_TRUTH_EVIDENCE_PATH = "docs/evidence/HUMAN_GAME_TRUTH_2026-09-25_CHAT_RECORDED.json";
 const SEPT25_CANONICAL_GAME_IDS = [
   "20260925_PIT_DET",
   "20260925_TBR_PHI",
@@ -433,7 +483,14 @@ const SEPT25_CANONICAL_GAME_IDS = [
   "20260925_STL_MIL",
   "20260925_TEX_MIN",
 ] as const;
-const SEPT25_EXCLUDED_GAME_IDS = ["20260925_BAL_NYY__G1", "20260925_CHC_BOS__G2"] as const;
+const SEPT25_CHAT_PREGAME_GAME_IDS = [
+  "20260925_ARI_SDP",
+  "20260925_LAA_SEA",
+  "20260925_LAD_SFG",
+  "20260925_HOU_OAK",
+] as const;
+const SEPT25_POST_OPPORTUNITY_GAME_IDS = ["20260925_BAL_NYY__G1", "20260925_CHC_BOS__G2"] as const;
+const SEPT25_NO_HUMAN_TRUTH_GAME_IDS = ["20260925_CHC_BOS__G1", "20260925_BAL_NYY__G2", "20260925_CLE_KCR"] as const;
 
 function round1(value: number): number {
   return Number.parseFloat(value.toFixed(1));
@@ -452,6 +509,26 @@ function modelEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
   };
 }
 
+function outcomeEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
+  return {
+    Actual_Away_Runs: row[DECISION_AUDIT_INDEX.ACTUAL_AWAY] ?? "",
+    Actual_Home_Runs: row[DECISION_AUDIT_INDEX.ACTUAL_HOME] ?? "",
+    Actual_Total: row[DECISION_AUDIT_INDEX.ACTUAL_TOTAL] ?? "",
+    Ticket_Result: row[DECISION_AUDIT_INDEX.TICKET_RESULT] ?? "",
+    Settlement_TS: row[DECISION_AUDIT_INDEX.SETTLEMENT_TS] ?? "",
+    Model_Truth_Grade: row[DECISION_AUDIT_INDEX.MODEL_TRUTH_GRADE] ?? "",
+    Model_Allocation_Error: row[DECISION_AUDIT_INDEX.MODEL_ALLOCATION_ERROR] ?? "",
+    Model_Total_Error: row[DECISION_AUDIT_INDEX.MODEL_TOTAL_ERROR] ?? "",
+    Model_Away_Run_Error: row[DECISION_AUDIT_INDEX.MODEL_AWAY_ERROR] ?? "",
+    Model_Home_Run_Error: row[DECISION_AUDIT_INDEX.MODEL_HOME_ERROR] ?? "",
+    Model_Margin_Error: row[DECISION_AUDIT_INDEX.MODEL_MARGIN_ERROR] ?? "",
+    Actual_Winner: row[DECISION_AUDIT_INDEX.ACTUAL_WINNER] ?? "",
+    Model_Winner_Result: row[DECISION_AUDIT_INDEX.MODEL_WINNER_RESULT] ?? "",
+    Settlement_Status: row[DECISION_AUDIT_INDEX.SETTLEMENT_STATUS] ?? "",
+    Settlement_Gap_Reason: row[DECISION_AUDIT_INDEX.SETTLEMENT_GAP_REASON] ?? "",
+  };
+}
+
 function humanEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
   return {
     Manual_Game_Truth: row[DECISION_AUDIT_INDEX.MANUAL_TRUTH] ?? "",
@@ -461,6 +538,31 @@ function humanEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
     Failure_or_Survival_Mechanism: row[DECISION_AUDIT_INDEX.MECHANISM] ?? "",
     Freeze_TS: row[DECISION_AUDIT_INDEX.FREEZE_TS] ?? "",
     Manual_Overlay_TS: row[DECISION_AUDIT_INDEX.MANUAL_TS] ?? "",
+    Human_Truth_Version: row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_VERSION] ?? "",
+    Human_Freeze_Status: row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] ?? "",
+    Primary_Carrier: row[DECISION_AUDIT_INDEX.PRIMARY_CARRIER] ?? "",
+    Primary_Phase: row[DECISION_AUDIT_INDEX.PRIMARY_PHASE] ?? "",
+    Primary_Mechanism_Code: row[DECISION_AUDIT_INDEX.PRIMARY_MECHANISM_CODE] ?? "",
+    Secondary_Mechanism_Code: row[DECISION_AUDIT_INDEX.SECONDARY_MECHANISM_CODE] ?? "",
+    Market_Exposure_Status: row[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS] ?? "",
+    Market_Exposure_Provenance: row[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_PROVENANCE] ?? "",
+    Canonical_Freeze_Run_ID: row[DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID] ?? "",
+    Human_Record_Hash: row[DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH] ?? "",
+    Distribution_Total_Mean_At_Human_Read: row[DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN] ?? "",
+    Human_Truth_Evidence_Status: row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS] ?? "",
+    Mechanism_Specificity_Flag: row[DECISION_AUDIT_INDEX.MECHANISM_SPECIFICITY_FLAG] ?? "",
+    Mechanism_Entity_Reference: row[DECISION_AUDIT_INDEX.MECHANISM_ENTITY_REFERENCE] ?? "",
+    Entity_Reference_Status: row[DECISION_AUDIT_INDEX.ENTITY_REFERENCE_STATUS] ?? "",
+  };
+}
+
+function canonicalGradeSnapshot(row: unknown[]): Record<string, unknown> {
+  return {
+    Manual_Away_Run_View: row[DECISION_AUDIT_INDEX.MANUAL_AWAY] ?? "",
+    Manual_Home_Run_View: row[DECISION_AUDIT_INDEX.MANUAL_HOME] ?? "",
+    Manual_Total_View: row[DECISION_AUDIT_INDEX.MANUAL_TOTAL] ?? "",
+    Failure_or_Survival_Mechanism: row[DECISION_AUDIT_INDEX.MECHANISM] ?? "",
+    Freeze_TS: row[DECISION_AUDIT_INDEX.FREEZE_TS] ?? "",
     Human_Truth_Version: row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_VERSION] ?? "",
     Human_Freeze_Status: row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] ?? "",
     Primary_Carrier: row[DECISION_AUDIT_INDEX.PRIMARY_CARRIER] ?? "",
@@ -541,11 +643,19 @@ function canonicalMetadataClaimed(row: unknown[]): boolean {
     DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS,
     DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID,
     DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH,
+    DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS,
   ].some((index) => String(row[index] ?? "").trim() !== "");
 }
 
 export function evaluateCanonicalManualTruthGate(row: unknown[]): CanonicalManualTruthGateResult {
   if (!canonicalMetadataClaimed(row)) return { status: "NOT_CANONICAL", reason: "LEGACY_MANUAL_OVERLAY", direction: "NONE" };
+  const evidenceStatus = String(row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS] ?? "").trim();
+  if (evidenceStatus === "CHAT_RECORDED_PREGAME_UNHASHED" || evidenceStatus === "CHAT_RECORDED_HUMAN_TRUTH") {
+    return { status: "NONCANONICAL_RESEARCH", reason: evidenceStatus, direction: "NONE" };
+  }
+  if (evidenceStatus !== "CANONICAL_RESEARCH_FREEZE") {
+    return { status: "FAIL", reason: "HUMAN_TRUTH_EVIDENCE_STATUS_INVALID", direction: "NONE" };
+  }
   if (String(row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] ?? "") !== "CANONICAL_TRUTH_FREEZE") {
     return { status: "FAIL", reason: "HUMAN_FREEZE_STATUS_NOT_CANONICAL", direction: "NONE" };
   }
@@ -576,16 +686,22 @@ export function evaluateCanonicalManualTruthGate(row: unknown[]): CanonicalManua
 export function materializeCanonicalHumanTruthRows(
   existingRows: unknown[][],
   evidence: CanonicalHumanTruthEvidenceFile,
+  chatEvidence: ChatRecordedHumanTruthEvidenceFile,
   overlayTs: string,
   sourcePath = SEPT25_HUMAN_TRUTH_EVIDENCE_PATH,
+  chatSourcePath = SEPT25_CHAT_TRUTH_EVIDENCE_PATH,
 ): CanonicalHumanTruthMaterializationResult {
   const rows = existingRows.map(padRow);
   const errors: string[] = [];
   const rowEvidence: CanonicalHumanTruthRowEvidence[] = [];
   const changedGameIds: string[] = [];
+  const canonicalRegradeGameIds: string[] = [];
   const expectedCanonical = new Set<string>(SEPT25_CANONICAL_GAME_IDS);
-  const expectedExcluded = new Set<string>(SEPT25_EXCLUDED_GAME_IDS);
+  const expectedChatPregame = new Set<string>(SEPT25_CHAT_PREGAME_GAME_IDS);
+  const expectedPostOpportunity = new Set<string>(SEPT25_POST_OPPORTUNITY_GAME_IDS);
+  const expectedNoHumanTruth = new Set<string>(SEPT25_NO_HUMAN_TRUTH_GAME_IDS);
   const records = Array.isArray(evidence.records) ? evidence.records : [];
+  const chatRecords = Array.isArray(chatEvidence.records) ? chatEvidence.records : [];
   if (evidence.date !== SEPT25_HUMAN_TRUTH_DATE) errors.push(`EVIDENCE_DATE_MISMATCH:${evidence.date}`);
   if (evidence.canonical_snapshot_timestamp !== "2026-09-25T22:12:21.985Z") {
     errors.push(`CANONICAL_SNAPSHOT_MISMATCH:${evidence.canonical_snapshot_timestamp}`);
@@ -598,7 +714,18 @@ export function materializeCanonicalHumanTruthRows(
   for (const gameId of expectedCanonical) if (!recordIds.has(gameId)) errors.push(`CANONICAL_RECORD_MISSING:${gameId}`);
   for (const gameId of recordIds) if (!expectedCanonical.has(gameId)) errors.push(`UNEXPECTED_CANONICAL_RECORD:${gameId}`);
   const excluded = new Set(evidence.capture_policy?.excluded_started_games ?? []);
-  for (const gameId of expectedExcluded) if (!excluded.has(gameId)) errors.push(`EXCLUDED_RECORD_MISSING:${gameId}`);
+  for (const gameId of expectedPostOpportunity) if (!excluded.has(gameId)) errors.push(`EXCLUDED_RECORD_MISSING:${gameId}`);
+  if (chatEvidence.date !== SEPT25_HUMAN_TRUTH_DATE) errors.push(`CHAT_EVIDENCE_DATE_MISMATCH:${chatEvidence.date}`);
+  if (chatRecords.length !== 6) errors.push(`CHAT_RECORD_COUNT:${chatRecords.length}`);
+  const chatPregameIds = new Set(chatRecords.filter((record) => record.evidence_class === "B").map((record) => record.game_id));
+  const postOpportunityIds = new Set(chatRecords.filter((record) => record.evidence_class === "C").map((record) => record.game_id));
+  for (const gameId of expectedChatPregame) if (!chatPregameIds.has(gameId)) errors.push(`CHAT_PREGAME_RECORD_MISSING:${gameId}`);
+  for (const gameId of chatPregameIds) if (!expectedChatPregame.has(gameId)) errors.push(`UNEXPECTED_CHAT_PREGAME_RECORD:${gameId}`);
+  for (const gameId of expectedPostOpportunity) if (!postOpportunityIds.has(gameId)) errors.push(`POST_OPPORTUNITY_RECORD_MISSING:${gameId}`);
+  for (const gameId of postOpportunityIds) if (!expectedPostOpportunity.has(gameId)) errors.push(`UNEXPECTED_POST_OPPORTUNITY_RECORD:${gameId}`);
+  const noHumanTruthIds = new Set(chatEvidence.no_human_truth_game_ids ?? []);
+  for (const gameId of expectedNoHumanTruth) if (!noHumanTruthIds.has(gameId)) errors.push(`NO_HUMAN_TRUTH_RECORD_MISSING:${gameId}`);
+  for (const gameId of noHumanTruthIds) if (!expectedNoHumanTruth.has(gameId)) errors.push(`UNEXPECTED_NO_HUMAN_TRUTH_RECORD:${gameId}`);
 
   const index = new Map(rows.map((row, position) => [
     rowKey(row[DECISION_AUDIT_INDEX.DATE], row[DECISION_AUDIT_INDEX.GAME_ID]), position,
@@ -620,6 +747,8 @@ export function materializeCanonicalHumanTruthRows(
     const before = padRow(rows[position]!);
     const after = [...before];
     const modelBefore = modelEvidenceSnapshot(before);
+    const outcomeBefore = outcomeEvidenceSnapshot(before);
+    const gradeBefore = canonicalGradeSnapshot(before);
     after[DECISION_AUDIT_INDEX.MANUAL_TRUTH] = `${record.primary_carrier}|${record.primary_phase}|${record.primary_mechanism_code}`;
     after[DECISION_AUDIT_INDEX.MANUAL_AWAY] = record.away_allocation;
     after[DECISION_AUDIT_INDEX.MANUAL_HOME] = record.home_allocation;
@@ -637,6 +766,91 @@ export function materializeCanonicalHumanTruthRows(
     after[DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID] = record.canonical_freeze_run_id;
     after[DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH] = record.record_hash;
     after[DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN] = record.total_mean ?? "";
+    after[DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS] = "CANONICAL_RESEARCH_FREEZE";
+    after[DECISION_AUDIT_INDEX.MECHANISM_SPECIFICITY_FLAG] = "";
+    after[DECISION_AUDIT_INDEX.MECHANISM_ENTITY_REFERENCE] = "";
+    after[DECISION_AUDIT_INDEX.ENTITY_REFERENCE_STATUS] = "";
+    const humanBefore = humanEvidenceSnapshot(before);
+    const targetHuman = humanEvidenceSnapshot(after);
+    const unchanged = Object.entries(targetHuman)
+      .filter(([key]) => key !== "Manual_Overlay_TS")
+      .every(([key, value]) => humanBefore[key] === value)
+      && String(before[DECISION_AUDIT_INDEX.MANUAL_TS] ?? "").trim() !== "";
+    if (!unchanged) {
+      after[DECISION_AUDIT_INDEX.MANUAL_TS] = overlayTs;
+      changedGameIds.push(record.game_id);
+    }
+    if (JSON.stringify(gradeBefore) !== JSON.stringify(canonicalGradeSnapshot(after))) {
+      canonicalRegradeGameIds.push(record.game_id);
+    }
+    if (JSON.stringify(modelEvidenceSnapshot(after)) !== JSON.stringify(modelBefore)) {
+      errors.push(`MODEL_FIELD_MUTATION:${record.game_id}`);
+    }
+    if (JSON.stringify(outcomeEvidenceSnapshot(after)) !== JSON.stringify(outcomeBefore)) {
+      errors.push(`OUTCOME_FIELD_MUTATION:${record.game_id}`);
+    }
+    rows[position] = after;
+    rowEvidence.push({
+      game_id: record.game_id,
+      evidence_class: "A",
+      model_before: modelBefore,
+      model_after: modelEvidenceSnapshot(after),
+      outcome_before: outcomeBefore,
+      outcome_after: outcomeEvidenceSnapshot(after),
+      human_before: humanBefore,
+      human_after: humanEvidenceSnapshot(after),
+    });
+  }
+
+  for (const record of chatRecords) {
+    const expectedEvidenceStatus = record.evidence_class === "B"
+      ? "CHAT_RECORDED_PREGAME_UNHASHED"
+      : "CHAT_RECORDED_HUMAN_TRUTH";
+    if (record.human_truth_evidence_status !== expectedEvidenceStatus) {
+      errors.push(`CHAT_EVIDENCE_STATUS_MISMATCH:${record.game_id}`);
+    }
+    if (record.human_freeze_status !== "NO_CANONICAL_PREGAME_FREEZE") {
+      errors.push(`CHAT_FREEZE_STATUS_MISMATCH:${record.game_id}`);
+    }
+    if (record.canonical_freeze_ts || record.canonical_freeze_run_id || record.record_hash) {
+      errors.push(`CHAT_CANONICAL_METADATA_FORBIDDEN:${record.game_id}`);
+    }
+    if (Math.abs(record.away_allocation + record.home_allocation - record.total_p50) > 1e-9) {
+      errors.push(`CHAT_ALLOCATION_IDENTITY_FAILURE:${record.game_id}`);
+    }
+    if (Math.abs((record.home_allocation - record.away_allocation) - record.allocation_margin) > 1e-9) {
+      errors.push(`CHAT_ALLOCATION_MARGIN_FAILURE:${record.game_id}`);
+    }
+    const position = index.get(rowKey(chatEvidence.date, record.game_id));
+    if (position === undefined) {
+      errors.push(`CHAT_DECISION_AUDIT_ROW_MISSING:${record.game_id}`);
+      continue;
+    }
+    const before = padRow(rows[position]!);
+    const after = [...before];
+    const modelBefore = modelEvidenceSnapshot(before);
+    const outcomeBefore = outcomeEvidenceSnapshot(before);
+    after[DECISION_AUDIT_INDEX.MANUAL_TRUTH] = `${record.primary_carrier}|${record.primary_phase}|${record.primary_mechanism_code}`;
+    after[DECISION_AUDIT_INDEX.MANUAL_AWAY] = record.away_allocation;
+    after[DECISION_AUDIT_INDEX.MANUAL_HOME] = record.home_allocation;
+    after[DECISION_AUDIT_INDEX.MANUAL_TOTAL] = record.total_p50;
+    after[DECISION_AUDIT_INDEX.MECHANISM] = record.primary_mechanism_text;
+    after[DECISION_AUDIT_INDEX.FREEZE_TS] = "";
+    after[DECISION_AUDIT_INDEX.HUMAN_TRUTH_VERSION] = record.human_truth_version;
+    after[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] = record.human_freeze_status;
+    after[DECISION_AUDIT_INDEX.PRIMARY_CARRIER] = record.primary_carrier;
+    after[DECISION_AUDIT_INDEX.PRIMARY_PHASE] = record.primary_phase;
+    after[DECISION_AUDIT_INDEX.PRIMARY_MECHANISM_CODE] = record.primary_mechanism_code;
+    after[DECISION_AUDIT_INDEX.SECONDARY_MECHANISM_CODE] = record.secondary_mechanism_code;
+    after[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS] = record.market_exposure_status;
+    after[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_PROVENANCE] = record.market_exposure_provenance;
+    after[DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID] = "";
+    after[DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH] = "";
+    after[DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN] = record.total_mean;
+    after[DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS] = record.human_truth_evidence_status;
+    after[DECISION_AUDIT_INDEX.MECHANISM_SPECIFICITY_FLAG] = record.mechanism_specificity_flag;
+    after[DECISION_AUDIT_INDEX.MECHANISM_ENTITY_REFERENCE] = record.mechanism_entity_reference;
+    after[DECISION_AUDIT_INDEX.ENTITY_REFERENCE_STATUS] = record.entity_reference_status;
     const humanBefore = humanEvidenceSnapshot(before);
     const targetHuman = humanEvidenceSnapshot(after);
     const unchanged = Object.entries(targetHuman)
@@ -650,43 +864,82 @@ export function materializeCanonicalHumanTruthRows(
     if (JSON.stringify(modelEvidenceSnapshot(after)) !== JSON.stringify(modelBefore)) {
       errors.push(`MODEL_FIELD_MUTATION:${record.game_id}`);
     }
+    if (JSON.stringify(outcomeEvidenceSnapshot(after)) !== JSON.stringify(outcomeBefore)) {
+      errors.push(`OUTCOME_FIELD_MUTATION:${record.game_id}`);
+    }
     rows[position] = after;
     rowEvidence.push({
       game_id: record.game_id,
+      evidence_class: record.evidence_class,
       model_before: modelBefore,
       model_after: modelEvidenceSnapshot(after),
+      outcome_before: outcomeBefore,
+      outcome_after: outcomeEvidenceSnapshot(after),
       human_before: humanBefore,
       human_after: humanEvidenceSnapshot(after),
     });
   }
 
-  for (const gameId of expectedExcluded) {
-    const position = index.get(rowKey(evidence.date, gameId));
+  for (const gameId of expectedNoHumanTruth) {
+    const position = index.get(rowKey(chatEvidence.date, gameId));
     if (position === undefined) {
-      errors.push(`EXCLUDED_DECISION_AUDIT_ROW_MISSING:${gameId}`);
+      errors.push(`NO_HUMAN_TRUTH_DECISION_AUDIT_ROW_MISSING:${gameId}`);
       continue;
     }
     const row = rows[position]!;
-    if (String(row[DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH] ?? "").trim()
-      || String(row[DECISION_AUDIT_INDEX.MANUAL_TOTAL] ?? "").trim()
-      || String(row[DECISION_AUDIT_INDEX.MANUAL_AWAY] ?? "").trim()
-      || String(row[DECISION_AUDIT_INDEX.MANUAL_HOME] ?? "").trim()) {
-      errors.push(`EXCLUDED_ROW_CANONICALIZED:${gameId}`);
+    const forbidden = [
+      DECISION_AUDIT_INDEX.MANUAL_TRUTH,
+      DECISION_AUDIT_INDEX.MANUAL_AWAY,
+      DECISION_AUDIT_INDEX.MANUAL_HOME,
+      DECISION_AUDIT_INDEX.MANUAL_TOTAL,
+      DECISION_AUDIT_INDEX.HUMAN_TRUTH_VERSION,
+      DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS,
+      DECISION_AUDIT_INDEX.PRIMARY_CARRIER,
+      DECISION_AUDIT_INDEX.PRIMARY_PHASE,
+      DECISION_AUDIT_INDEX.PRIMARY_MECHANISM_CODE,
+      DECISION_AUDIT_INDEX.SECONDARY_MECHANISM_CODE,
+      DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS,
+      DECISION_AUDIT_INDEX.MARKET_EXPOSURE_PROVENANCE,
+      DECISION_AUDIT_INDEX.CANONICAL_FREEZE_RUN_ID,
+      DECISION_AUDIT_INDEX.HUMAN_RECORD_HASH,
+      DECISION_AUDIT_INDEX.DISTRIBUTION_TOTAL_MEAN,
+      DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS,
+      DECISION_AUDIT_INDEX.MECHANISM_SPECIFICITY_FLAG,
+      DECISION_AUDIT_INDEX.MECHANISM_ENTITY_REFERENCE,
+      DECISION_AUDIT_INDEX.ENTITY_REFERENCE_STATUS,
+    ];
+    if (forbidden.some((column) => String(row[column] ?? "").trim() !== "")) {
+      errors.push(`NO_HUMAN_TRUTH_ROW_POPULATED:${gameId}`);
     }
-    row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] = evidence.capture_policy.excluded_started_game_status;
+    rowEvidence.push({
+      game_id: gameId,
+      evidence_class: "NONE",
+      model_before: modelEvidenceSnapshot(row),
+      model_after: modelEvidenceSnapshot(row),
+      outcome_before: outcomeEvidenceSnapshot(row),
+      outcome_after: outcomeEvidenceSnapshot(row),
+      human_before: humanEvidenceSnapshot(row),
+      human_after: humanEvidenceSnapshot(row),
+    });
   }
 
   const summary: CanonicalHumanTruthMaterializationSummary = {
     status: errors.length === 0 ? "PASS" : "FAIL",
     source_path: sourcePath,
+    chat_source_path: chatSourcePath,
     canonical_snapshot_timestamp: evidence.canonical_snapshot_timestamp,
     canonical_pipeline_run_id: evidence.canonical_pipeline_run_id,
     manual_overlay_ts: overlayTs,
-    records_found: rowEvidence.length,
+    records_found: rowEvidence.filter((row) => row.evidence_class !== "NONE").length,
+    canonical_records_found: rowEvidence.filter((row) => row.evidence_class === "A").length,
+    chat_pregame_records_found: rowEvidence.filter((row) => row.evidence_class === "B").length,
+    chat_post_opportunity_records_found: rowEvidence.filter((row) => row.evidence_class === "C").length,
     records_updated: changedGameIds.length,
-    records_unchanged: rowEvidence.length - changedGameIds.length,
+    records_unchanged: records.length + chatRecords.length - changedGameIds.length,
     changed_game_ids: changedGameIds,
-    excluded_noncanonical_game_ids: [...SEPT25_EXCLUDED_GAME_IDS],
+    canonical_regrade_game_ids: canonicalRegradeGameIds,
+    excluded_noncanonical_game_ids: [...SEPT25_POST_OPPORTUNITY_GAME_IDS],
+    no_human_truth_game_ids: [...SEPT25_NO_HUMAN_TRUTH_GAME_IDS],
     row_evidence: rowEvidence,
     errors,
   };
@@ -695,6 +948,10 @@ export function materializeCanonicalHumanTruthRows(
 
 export async function loadCanonicalHumanTruthEvidenceFile(path: string): Promise<CanonicalHumanTruthEvidenceFile> {
   return JSON.parse(await readFile(path, "utf8")) as CanonicalHumanTruthEvidenceFile;
+}
+
+export async function loadChatRecordedHumanTruthEvidenceFile(path: string): Promise<ChatRecordedHumanTruthEvidenceFile> {
+  return JSON.parse(await readFile(path, "utf8")) as ChatRecordedHumanTruthEvidenceFile;
 }
 
 function decisionAuditMarketContext(
@@ -1337,7 +1594,8 @@ async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
       [DECISION_AUDIT_INDEX.TICKET_RESULT, [...AUDIT_TICKET_RESULTS]],
       [DECISION_AUDIT_INDEX.ALLOCATION_WINNER, [...ALLOCATION_WINNERS]],
       [DECISION_AUDIT_INDEX.AUTHORIZATION_GRADE, [...AUTHORIZATION_GRADES]],
-      [DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS, ["CANONICAL_TRUTH_FREEZE", "CHAT_RECORDED_HUMAN_TRUTH_NO_CANONICAL_PREGAME_FREEZE"]],
+      [DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS, ["CANONICAL_TRUTH_FREEZE", "NO_CANONICAL_PREGAME_FREEZE"]],
+      [DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS, ["CANONICAL_RESEARCH_FREEZE", "CHAT_RECORDED_PREGAME_UNHASHED", "CHAT_RECORDED_HUMAN_TRUTH"]],
       [DECISION_AUDIT_INDEX.PRIMARY_CARRIER, ["AWAY", "HOME", "BALANCED"]],
       [DECISION_AUDIT_INDEX.PRIMARY_PHASE, ["STARTER", "BULLPEN", "MIXED", "SUPPRESSION"]],
       [DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS, ["PRICE_BLIND", "MARKET_EXPOSED"]],
@@ -1390,7 +1648,8 @@ async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
       ?? Array(DECISION_AUDIT_COLS - 64).fill(150);
     const analysisColor = SECTION_COLORS.ANALYSIS;
     const validations = [
-      [DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS, ["CANONICAL_TRUTH_FREEZE", "CHAT_RECORDED_HUMAN_TRUTH_NO_CANONICAL_PREGAME_FREEZE"]],
+      [DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS, ["CANONICAL_TRUTH_FREEZE", "NO_CANONICAL_PREGAME_FREEZE"]],
+      [DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS, ["CANONICAL_RESEARCH_FREEZE", "CHAT_RECORDED_PREGAME_UNHASHED", "CHAT_RECORDED_HUMAN_TRUTH"]],
       [DECISION_AUDIT_INDEX.PRIMARY_CARRIER, ["AWAY", "HOME", "BALANCED"]],
       [DECISION_AUDIT_INDEX.PRIMARY_PHASE, ["STARTER", "BULLPEN", "MIXED", "SUPPRESSION"]],
       [DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS, ["PRICE_BLIND", "MARKET_EXPOSED"]],
@@ -1428,7 +1687,7 @@ async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
 }
 
 async function readAuditRows(workbookId: string): Promise<unknown[][]> {
-  const response = await readRange(workbookId, `${DECISION_AUDIT_SHEET}!A1:BW5000`);
+  const response = await readRange(workbookId, `${DECISION_AUDIT_SHEET}!A1:CA5000`);
   return ((response.values ?? []) as unknown[][]).slice(1);
 }
 
@@ -1501,6 +1760,8 @@ export async function settleDecisionAuditLog(
     terminalNoOutcomeGameIds?: readonly string[];
     canonicalHumanTruthEvidencePath?: string;
     canonicalHumanTruthEvidence?: CanonicalHumanTruthEvidenceFile;
+    chatRecordedHumanTruthEvidencePath?: string;
+    chatRecordedHumanTruthEvidence?: ChatRecordedHumanTruthEvidenceFile;
   } = {},
 ): Promise<DecisionAuditWriteResult> {
   const workbookId = options.workbookId ?? WORKBOOK_ID;
@@ -1515,8 +1776,11 @@ export async function settleDecisionAuditLog(
     if (date === SEPT25_HUMAN_TRUTH_DATE) {
       let sourcePath = options.canonicalHumanTruthEvidencePath
         ?? resolve(process.cwd(), SEPT25_HUMAN_TRUTH_EVIDENCE_PATH);
+      let chatSourcePath = options.chatRecordedHumanTruthEvidencePath
+        ?? resolve(process.cwd(), SEPT25_CHAT_TRUTH_EVIDENCE_PATH);
       try {
         let evidence = options.canonicalHumanTruthEvidence;
+        let chatEvidence = options.chatRecordedHumanTruthEvidence;
         if (!evidence && options.canonicalHumanTruthEvidencePath) {
           evidence = await loadCanonicalHumanTruthEvidenceFile(sourcePath);
         }
@@ -1537,16 +1801,38 @@ export async function settleDecisionAuditLog(
           }
           if (!evidence) throw lastError ?? new Error("Canonical human truth evidence file not found");
         }
+        if (!chatEvidence && options.chatRecordedHumanTruthEvidencePath) {
+          chatEvidence = await loadChatRecordedHumanTruthEvidenceFile(chatSourcePath);
+        }
+        if (!chatEvidence) {
+          const candidates = [
+            resolve(process.cwd(), SEPT25_CHAT_TRUTH_EVIDENCE_PATH),
+            resolve(process.cwd(), "..", "..", SEPT25_CHAT_TRUTH_EVIDENCE_PATH),
+          ];
+          let lastError: unknown;
+          for (const candidate of candidates) {
+            try {
+              chatEvidence = await loadChatRecordedHumanTruthEvidenceFile(candidate);
+              chatSourcePath = candidate;
+              break;
+            } catch (error: unknown) {
+              lastError = error;
+            }
+          }
+          if (!chatEvidence) throw lastError ?? new Error("Chat-recorded human truth evidence file not found");
+        }
         const materialized = materializeCanonicalHumanTruthRows(
           existing,
           evidence,
+          chatEvidence,
           new Date().toISOString(),
           sourcePath,
+          chatSourcePath,
         );
         humanTruthMaterialization = materialized.summary;
         if (materialized.summary.status === "PASS") {
           existing = materialized.rows;
-          forceCanonicalManualRegradeGameIds = new Set(materialized.summary.changed_game_ids);
+          forceCanonicalManualRegradeGameIds = new Set(materialized.summary.canonical_regrade_game_ids);
         } else {
           errors.push(...materialized.summary.errors.map((message) => `HUMAN_TRUTH_MATERIALIZATION:${message}`));
         }
@@ -1556,14 +1842,20 @@ export async function settleDecisionAuditLog(
         humanTruthMaterialization = {
           status: "FAIL",
           source_path: sourcePath,
+          chat_source_path: chatSourcePath,
           canonical_snapshot_timestamp: "",
           canonical_pipeline_run_id: "",
           manual_overlay_ts: "",
           records_found: 0,
+          canonical_records_found: 0,
+          chat_pregame_records_found: 0,
+          chat_post_opportunity_records_found: 0,
           records_updated: 0,
           records_unchanged: 0,
           changed_game_ids: [],
-          excluded_noncanonical_game_ids: [...SEPT25_EXCLUDED_GAME_IDS],
+          canonical_regrade_game_ids: [],
+          excluded_noncanonical_game_ids: [...SEPT25_POST_OPPORTUNITY_GAME_IDS],
+          no_human_truth_game_ids: [...SEPT25_NO_HUMAN_TRUTH_GAME_IDS],
           row_evidence: [],
           errors: [message],
         };
@@ -1593,6 +1885,34 @@ export async function settleDecisionAuditLog(
     const gapMessages = classifyDecisionAuditOutcomeGapMessages(date, gapMarked);
     warnings.push(...gapMessages.warnings);
     errors.push(...gapMessages.errors);
+    if (humanTruthMaterialization?.status === "PASS") {
+      const finalRows = new Map(gapMarked.rows.map((row) => [
+        String(row[DECISION_AUDIT_INDEX.GAME_ID] ?? ""),
+        row,
+      ]));
+      for (const evidenceRow of humanTruthMaterialization.row_evidence) {
+        const finalRow = finalRows.get(evidenceRow.game_id);
+        if (!finalRow) {
+          const message = `FINAL_EVIDENCE_ROW_MISSING:${evidenceRow.game_id}`;
+          humanTruthMaterialization.errors.push(message);
+          errors.push(`HUMAN_TRUTH_MATERIALIZATION:${message}`);
+          continue;
+        }
+        evidenceRow.model_after = modelEvidenceSnapshot(finalRow);
+        evidenceRow.outcome_after = outcomeEvidenceSnapshot(finalRow);
+        if (JSON.stringify(evidenceRow.model_before) !== JSON.stringify(evidenceRow.model_after)) {
+          const message = `FINAL_MODEL_FIELD_MUTATION:${evidenceRow.game_id}`;
+          humanTruthMaterialization.errors.push(message);
+          errors.push(`HUMAN_TRUTH_MATERIALIZATION:${message}`);
+        }
+        if (JSON.stringify(evidenceRow.outcome_before) !== JSON.stringify(evidenceRow.outcome_after)) {
+          const message = `FINAL_OUTCOME_FIELD_MUTATION:${evidenceRow.game_id}`;
+          humanTruthMaterialization.errors.push(message);
+          errors.push(`HUMAN_TRUTH_MATERIALIZATION:${message}`);
+        }
+      }
+      if (humanTruthMaterialization.errors.length > 0) humanTruthMaterialization.status = "FAIL";
+    }
     if (mutation.auditGaps > 0) {
       // The row is intentionally present and explicitly ungradable.  This is
       // a partial-pregame-scope fact, not a failed settlement write.  A truly
