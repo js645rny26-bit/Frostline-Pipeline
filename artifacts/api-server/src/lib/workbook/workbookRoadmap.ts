@@ -1071,7 +1071,7 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     boardRelationship:
       "Controls evidence about model reliability; does not rewrite a prior board.",
     readNote:
-      "Separate total accuracy from allocation and direction before tuning.",
+      "Separate total accuracy from allocation and direction before tuning. Bias_Alert is only |mean signed error| > 0.20 for that window; it has no sample floor or uncertainty test and is not a model-condition verdict.",
   },
   {
     sheet: "MONOTONICITY",

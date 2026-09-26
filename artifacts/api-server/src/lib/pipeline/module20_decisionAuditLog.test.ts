@@ -7,6 +7,7 @@ import {
   DECISION_AUDIT_HEADER,
   DECISION_AUDIT_INDEX as C,
   DECISION_AUDIT_REQUIRED_FROM_DATE,
+  chooseAllocationWinner,
   classifyDecisionAuditOutcomeGapMessages,
   classifyMissingDecisionAuditRows,
   markDecisionAuditOutcomeGaps,
@@ -24,6 +25,14 @@ import type { SettlementRow } from "./module14_shadowSettlement.js";
 const TS1 = "2026-08-09T12:00:00.000Z";
 const TS2 = "2026-08-09T13:00:00.000Z";
 const TS3 = "2026-08-10T03:00:00.000Z";
+
+test("Allocation_Winner compares allocation error, not higher-scoring-side identity", () => {
+  assert.equal(chooseAllocationWinner(2, 3, "CORRECT", "CORRECT"), "MODEL");
+  assert.equal(chooseAllocationWinner(4, 1, "CORRECT", "INCORRECT"), "MANUAL");
+  assert.equal(chooseAllocationWinner(2, 2, "CORRECT", "CORRECT"), "TIE");
+  assert.equal(chooseAllocationWinner(1, 5, "INCORRECT", "INCORRECT"), "BOTH_WRONG");
+  assert.equal(chooseAllocationWinner(null, 1, "CORRECT", "CORRECT"), "NOT_COMPARABLE");
+});
 
 function pregame(overrides: Partial<DecisionAuditPregameInput> = {}): DecisionAuditPregameInput {
   return {

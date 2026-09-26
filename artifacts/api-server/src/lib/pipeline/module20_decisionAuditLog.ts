@@ -451,7 +451,13 @@ function winnerResult(
   return projectedWinner === actualWinner ? "CORRECT" : "INCORRECT";
 }
 
-function chooseAllocationWinner(
+/**
+ * Compare model and manual summed absolute team-run allocation error.
+ * This legacy field does not grade which layer called the higher-scoring team;
+ * that separate result lives in Model_Winner_Result / Manual_Winner_Result.
+ * BOTH_WRONG is retained when both market-direction truth grades are incorrect.
+ */
+export function chooseAllocationWinner(
   modelError: number | null,
   manualError: number | null,
   modelTruth: TruthGrade,

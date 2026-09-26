@@ -82,6 +82,16 @@ const MIN_BUCKET_N        = 75;    // minimum n per bucket to include in verdict
 const MONOTONE_PASS_FRAC  = 0.80;  // fraction of adjacent pairs that must be monotone
 const TOP_BOTTOM_SEP_PCT  = 5.0;   // minimum hit-rate % gap between top and bottom tier
 
+/**
+ * Descriptive regression-alert cutoffs. These are not statistical tests and
+ * have no minimum-sample requirement or active projection/decision consumer.
+ */
+export const REGRESSION_ALERT_THRESHOLDS = {
+  mae: 4.2,
+  absolute_bias: 0.20,
+  miss_4plus_pct: 45,
+} as const;
+
 // ─── Fixed edge tiers ─────────────────────────────────────────────────────────
 
 const FIXED_TIERS = [
@@ -199,6 +209,31 @@ type OutcomeObs = {
   abs_error: number;
 };
 
+/**
+ * Return descriptive window alerts from already-computed summary statistics.
+ * Bias is the arithmetic mean of signed error (projection minus actual); the
+ * alert is symmetric and fires only when |bias| is strictly greater than 0.20.
+ * The result is deliberately uninterpreted: it is not a significance test,
+ * drift detector, calibration verdict, or authorization input.
+ */
+export function evaluateRegressionAlerts(
+  mae: number,
+  bias: number,
+  miss4PlusPct: number,
+): string[] {
+  const alerts: string[] = [];
+  if (mae > REGRESSION_ALERT_THRESHOLDS.mae) {
+    alerts.push(`MAE_HIGH(${mae} > ${REGRESSION_ALERT_THRESHOLDS.mae})`);
+  }
+  if (Math.abs(bias) > REGRESSION_ALERT_THRESHOLDS.absolute_bias) {
+    alerts.push(`BIAS_HIGH(${bias.toFixed(3)})`);
+  }
+  if (miss4PlusPct > REGRESSION_ALERT_THRESHOLDS.miss_4plus_pct) {
+    alerts.push(`MISS_4PLUS_HIGH(${miss4PlusPct}%)`);
+  }
+  return alerts;
+}
+
 function computeWindow(
   rows: OutcomeObs[],
   label: string,
@@ -225,10 +260,7 @@ function computeWindow(
   const overPct  = parseFloat((over  / n * 100).toFixed(1));
   const underPct = parseFloat((under / n * 100).toFixed(1));
   const missPct  = parseFloat((miss4 / n * 100).toFixed(1));
-  const alerts: string[] = [];
-  if (mae > 4.2)               alerts.push(`MAE_HIGH(${mae} > 4.2)`);
-  if (Math.abs(bias) > 0.20)   alerts.push(`BIAS_HIGH(${bias.toFixed(3)})`);
-  if (missPct > 45)            alerts.push(`MISS_4PLUS_HIGH(${missPct}%)`);
+  const alerts = evaluateRegressionAlerts(mae, bias, missPct);
   return {
     window: label, n_games: n,
     mae, median_ae: medAE, bias,

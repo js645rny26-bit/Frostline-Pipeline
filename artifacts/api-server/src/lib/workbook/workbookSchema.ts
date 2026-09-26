@@ -8454,7 +8454,8 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         width: 90,
         filledBy: "MODULE_15",
         readOnly: true,
-        description: "YES when |bias| > 0.20",
+        description:
+          "Descriptive ALERT when |mean signed error| > 0.20 runs within this row's window. Strict > boundary; no sample-size floor, uncertainty interval, significance test, drift verdict, or active consumer. Treat as an uninterpreted diagnostic flag.",
         exampleValue: "NO",
       },
       {
@@ -9590,7 +9591,8 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         width: 155,
         filledBy: "MODULE_20",
         readOnly: true,
-        description: "MODEL | MANUAL | TIE | BOTH_WRONG | NOT_COMPARABLE",
+        description:
+          "Legacy name for the lower summed absolute team-run allocation error: MODEL | MANUAL | TIE. BOTH_WRONG is retained when both market-direction truth grades are incorrect; NOT_COMPARABLE means either allocation is unavailable. This is not the higher-scoring-side grade; use Model_Winner_Result and Manual_Winner_Result for that.",
         exampleValue: "MODEL",
       },
       {
