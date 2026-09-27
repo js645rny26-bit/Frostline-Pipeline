@@ -147,16 +147,21 @@ const METRICS_HEADER: string[] = [
 // ─── ODDS_HISTORY helpers ─────────────────────────────────────────────────────
 
 /**
- * Normalise a REPLAY_RESULTS game_id to the ODDS_HISTORY legacy_game_id format.
- *   REPLAY:      "2026-07-24_SDP@ATL"   (YYYY-MM-DD_AWAY@HOME)
- *   ODDS_HISTORY: "20260724_SDP_ATL"    (YYYYMMDD_AWAY_HOME)
+ * Normalise either a canonical or legacy REPLAY_RESULTS game_id to the
+ * ODDS_HISTORY game_id format. Legacy parsing is retained so older exported
+ * fixtures remain joinable without rewriting their persisted values.
  */
 function replayToOddsGameId(replayId: string): string {
+  if (/^\d{8}_[A-Z0-9]+_[A-Z0-9]+(?:__G(?:\d+|PK\d+))?$/.test(replayId)) return replayId;
   const sepIdx = replayId.indexOf("_");
   if (sepIdx === -1) return replayId;
   const datePart = replayId.slice(0, sepIdx).replace(/-/g, "");
   const teamPart = replayId.slice(sepIdx + 1).replace("@", "_");
   return `${datePart}_${teamPart}`;
+}
+
+export function canonicalReplayGameId(date: string, awayAbbr: string, homeAbbr: string): string {
+  return `${date.replace(/-/g, "")}_${awayAbbr}_${homeAbbr}`;
 }
 
 /**
@@ -926,7 +931,7 @@ export async function runHistoricalReplay(
       }
 
       const actualTotal      = awayScore + homeScore;
-      const gameId           = `${date}_${awayAbbr}@${homeAbbr}`;
+      const gameId           = canonicalReplayGameId(date, awayAbbr, homeAbbr);
       const parkFactors      = parkFactorsMap.get(homeAbbr) ?? null;
       const parkSourceStatus = parkFactors !== null
         ? "SEASONAL_FACTOR_USED" as const

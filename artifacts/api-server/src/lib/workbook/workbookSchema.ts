@@ -259,8 +259,14 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      pregame chat evidence, and post-opportunity chat evidence in the same
  *      DECISION_AUDIT_LOG. Optional mechanism-specificity/entity metadata is
  *      preserved for research only; no active consumer is added.
+ *  v79 (2026-09-27): adds prospective human-read independence metadata and a
+ *      settlement-only mechanism grade to DECISION_AUDIT_LOG; extends the
+ *      existing compact postmortem and game-truth replay with explicitly
+ *      separated reference/operator market and season-phase research fields.
+ *      All additions are observational and have no projection or authorization
+ *      consumer.
  */
-export const WORKBOOK_SCHEMA_VERSION = 78;
+export const WORKBOOK_SCHEMA_VERSION = 79;
 
 export interface ColumnDef {
   name: string;
@@ -1027,6 +1033,7 @@ const GAME_TRUTH_REPLAY_V1_COLUMN_NAMES = [
   "Objective_Grade_Derivability_Status",
   "Replay_Status",
   "Settlement_TS",
+  "Season_Phase_Tag",
 ] as const;
 const DISTRIBUTION_WIDTH_REPLAY_V1_COLUMN_NAMES = [
   "Date",
@@ -8956,7 +8963,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
   {
     name: "VEHICLE_POSTMORTEM",
     description:
-      "Per-game postmortem grading. Written by module17 (phase 2) after settlement. Idempotent by (date, game_id). Grades thesis accuracy and ticket result separately.",
+      "Compact one-row-per-game postmortem. Written by module17 after settlement and idempotent by Date + date-qualified Game_ID. Reference-market research and executable/operator grades remain explicit, separate objects.",
     section: "ANALYSIS",
     frozenRows: 1,
     columns: [
@@ -8976,7 +8983,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         width: 160,
         filledBy: "MODULE_17",
         readOnly: true,
-        exampleValue: "2026-07-24_NYY@BOS",
+        exampleValue: "20260724_NYY_BOS",
       },
       {
         name: "Away_Team",
@@ -9140,6 +9147,30 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         exampleValue: "2026-07-25T08:30:00.000Z",
       },
+      ...diagnosticColumns(
+        [
+          "Final_Score",
+          "Reference_Market_Line", "Reference_Market_Source", "Reference_Market_TS",
+          "Reference_Direction_Result",
+          "Executable_Market_Line", "Executable_Market_Source", "Executable_Market_TS",
+          "Executable_Market_Provenance_Status", "Model_Operator_Direction_Result",
+          "Human_Total_P50", "Human_Point_Error", "Human_Operator_Direction_Result",
+          "Human_Allocation_Result", "Human_Mechanism_Grade", "Primary_Miss",
+        ],
+        ["Reference_Market_Line", "Executable_Market_Line", "Human_Total_P50", "Human_Point_Error"],
+        "MODULE_17",
+      ).map((column, offset) => ({
+        ...column,
+        index: 19 + offset,
+        readOnly: true,
+        description: column.name === "Reference_Direction_Result"
+          ? "Standing reference-market research grade; never described as executable operator performance."
+          : column.name === "Model_Operator_Direction_Result" || column.name === "Human_Operator_Direction_Result"
+            ? "Executable/operator grade only. UNGRADABLE when no literal operator line was prospectively persisted; reference lines are never silently substituted."
+            : column.name === "Primary_Miss"
+              ? "One compact deterministic diagnosis. Longer prose is reserved for genuinely new cross-slate findings."
+              : "Compact settlement/postmortem presentation field; observational only.",
+      })),
     ],
   },
 
@@ -9944,6 +9975,36 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         description: "Provenance status for optional entity metadata; posthoc metadata never becomes part of the frozen claim.",
         exampleValue: "POSTHOC_METADATA_ONLY_NOT_PART_OF_FROZEN_MECHANISM",
+      },
+      {
+        name: "Workbook_Exposure_Status",
+        index: 79,
+        type: "string",
+        width: 210,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "Prospective human-read independence marker: WORKBOOK_BLIND or WORKBOOK_EXPOSED. Descriptive only; no confidence or authorization consumer.",
+        exampleValue: "WORKBOOK_BLIND",
+      },
+      {
+        name: "Human_Context_Mode",
+        index: 80,
+        type: "string",
+        width: 190,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "BASEBALL_ONLY for prospective human truth formed without park, weather, roof, umpire, or market inputs. Historical rows remain blank rather than being backfilled.",
+        exampleValue: "BASEBALL_ONLY",
+      },
+      {
+        name: "Human_Mechanism_Grade",
+        index: 81,
+        type: "string",
+        width: 210,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "Settlement-only CONFIRMED | PARTIAL | FAILED | UNGRADABLE grade against the immutable pregame human mechanism. Never a projection or decision input.",
+        exampleValue: "PARTIAL",
       },
     ],
   },

@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   classifyPostmortemOutcomeAvailability,
+  buildHumanModelAgreementSummary,
   groupContiguousVehicleLogUpdates,
   gradePostmortemTicket,
+  gradeOperatorDirection,
   gradeTicket,
   isFinalizedVehiclePublication,
+  isProspectiveHumanTruthEvidence,
   postmortemRowToValues,
   selectVerifiedDecisionPacketFallbackRows,
   selectNewImmutableVehicleRows,
@@ -88,8 +91,12 @@ test("postponed games are terminal skips while ordinary missing outcomes remain 
 
 const canonicalMarket = (overrides: Partial<Parameters<typeof gradePostmortemTicket>[2]> = {}) => ({
   actual_total: 8,
+  reference_market_line: 8,
+  reference_market_source: "MLB_STARTING_NINE_CARD",
+  reference_market_ts: "2026-09-26T20:00:00.000Z",
   executable_market_line: 8.5,
   executable_market_source: "HARD_ROCK_FLORIDA",
+  executable_market_ts: "2026-09-26T20:05:00.000Z",
   primary_market_line: 8.5,
   primary_market_source: "LITERAL_EXECUTABLE_HARD_ROCK",
   primary_market_status: "LITERAL_EXECUTABLE",
@@ -223,13 +230,13 @@ test("only finalized board-lock states can become immutable vehicle publications
   assert.equal(isFinalizedVehiclePublication(entry("LOCKED_OUT")), true);
 });
 
-test("postmortem rows match the current 19-column workbook schema", () => {
+test("postmortem rows match the compact 35-column workbook schema", () => {
   const row: PostmortemRow = {
     date: "2026-08-07",
     game_id: "20260807_OAK_BOS",
     away_team: "OAK",
     home_team: "BOS",
-    active_vehicle_label: "OAK@BOS FG Over 8.5",
+    active_vehicle_label: "20260807_OAK_BOS | OAK@BOS FG Over 8.5",
     vehicle_type: "FULL_GAME_OVER",
     market_line: 8.5,
     decision: "PASS",
@@ -244,13 +251,62 @@ test("postmortem rows match the current 19-column workbook schema", () => {
     failure_modes: "PROJECTION_MISS_4PLUS",
     exact_blocker: "INSUFFICIENT_PROJECTION_SEPARATION",
     graded_ts: "2026-08-09T00:00:00.000Z",
+    final_score: "6-8",
+    reference_market_line: 8,
+    reference_market_source: "MLB_STARTING_NINE_CARD",
+    reference_market_ts: "2026-08-07T15:00:00.000Z",
+    reference_direction_result: "CORRECT",
+    executable_market_line: null,
+    executable_market_source: "",
+    executable_market_ts: "",
+    executable_market_provenance_status: "EXECUTABLE_OPERATOR_LINE_NOT_PERSISTED",
+    model_operator_direction_result: "UNGRADABLE",
+    human_total_p50: 9.0,
+    human_point_error: -5.0,
+    human_operator_direction_result: "UNGRADABLE",
+    human_allocation_result: "LEADER_CORRECT",
+    human_mechanism_grade: "PARTIAL",
+    primary_miss: "POINT_MISS_LOW_4.80",
   };
 
   const values = postmortemRowToValues(row);
-  assert.equal(values.length, 19);
+  assert.equal(values.length, 35);
   assert.equal(values[4], row.active_vehicle_label);
   assert.equal(values[8], row.packet_projected_total);
   assert.equal(values[18], row.graded_ts);
+  assert.equal(values[19], row.final_score);
+  assert.equal(values[34], row.primary_miss);
+});
+
+test("operator grading never substitutes the reference market", () => {
+  assert.equal(gradeOperatorDirection(9.1, null, 10), "UNGRADABLE");
+  assert.equal(gradeOperatorDirection(9.1, 8.5, 10), "CORRECT");
+  assert.equal(gradeOperatorDirection(8.5, 8.5, 10), "NO_CALL");
+});
+
+test("compact human comparison admits only demonstrably prospective evidence", () => {
+  assert.equal(isProspectiveHumanTruthEvidence("CANONICAL_RESEARCH_FREEZE"), true);
+  assert.equal(isProspectiveHumanTruthEvidence("CHAT_RECORDED_PREGAME_UNHASHED"), true);
+  assert.equal(isProspectiveHumanTruthEvidence("CHAT_RECORDED_HUMAN_TRUTH"), false);
+  assert.equal(isProspectiveHumanTruthEvidence("", "2026-09-25T18:00:00Z", "2026-09-25T19:00:00Z"), true);
+  assert.equal(isProspectiveHumanTruthEvidence("", "2026-09-25T20:00:00Z", "2026-09-25T19:00:00Z"), false);
+  assert.equal(isProspectiveHumanTruthEvidence(""), false);
+});
+
+test("agreement research is descriptive and keeps consecutive matchup dates distinct upstream", () => {
+  const summary = buildHumanModelAgreementSummary([
+    { model_p50: 9, human_p50: 9.2, actual_total: 10, reference_line: 8.5 },
+    { model_p50: 7, human_p50: 9, actual_total: 6, reference_line: 8 },
+  ]);
+  assert.equal(summary.status, "RESEARCH_ONLY_NO_AUTHORIZATION_WEIGHT");
+  assert.equal(summary.agreement.n, 1);
+  assert.equal(summary.disagreement.n, 1);
+
+  const consecutive = selectCanonicalVehicleRows([
+    ["2026-09-25", "20260925_TBR_PHI", "TBR", "PHI"],
+    ["2026-09-26", "20260926_TBR_PHI", "TBR", "PHI"],
+  ]);
+  assert.deepEqual(consecutive.rows.map((row) => row[1]), ["20260925_TBR_PHI", "20260926_TBR_PHI"]);
 });
 
 function rowFromHeaders(headers: readonly string[], fields: Record<string, unknown>): unknown[] {

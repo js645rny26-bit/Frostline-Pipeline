@@ -317,7 +317,24 @@ export const GAME_TRUTH_REPLAY_HEADERS = [
   "Objective_Grade_Derivability_Status",
   "Replay_Status",
   "Settlement_TS",
+  "Season_Phase_Tag",
 ] as const;
+
+export type SeasonPhaseTag = "NORMAL_REGULAR_SEASON" | "SEPTEMBER_EXPANDED_ROSTER" | "POSTSEASON";
+
+/** Research-only stratification; it has no projection or authorization consumer. */
+export function deriveSeasonPhaseTag(date: string, officialGameType = "R"): SeasonPhaseTag {
+  const gameType = text(officialGameType).toUpperCase();
+  if (["F", "D", "L", "W", "C", "P"].includes(gameType)) return "POSTSEASON";
+  return /^\d{4}-09-/.test(date) ? "SEPTEMBER_EXPANDED_ROSTER" : "NORMAL_REGULAR_SEASON";
+}
+
+export const SEPT26_GAME_TRUTH_REGRESSION_CASES = {
+  "20260926_NYM_WSN": "CLOSE_TOTAL_WRONG_PHASE_SHAPE",
+  "20260926_TEX_MIN": "ACCURATE_P50_MECHANISM_NOT_AUTOCONFIRMED",
+  "20260926_ARI_SDP": "STARTER_IDENTITY_WORKLOAD_BULLPEN_STATE",
+  "20260926_STL_MIL": "BULLPEN_CONTINUATION_NOT_GUARANTEED",
+} as const;
 
 const LADDER = Object.fromEntries(
   FULL_LADDER_AUDIT_HEADERS.map((name, index) => [name, index]),
@@ -1932,6 +1949,7 @@ export function buildGameTruthReplay(
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
     "FROZEN_PACKET_AND_FINAL_VERIFIED",
     outcome.settlement_ts,
+    deriveSeasonPhaseTag(packet.date),
   ];
 }
 

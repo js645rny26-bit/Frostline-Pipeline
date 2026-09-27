@@ -90,13 +90,17 @@ Mechanism grades are deterministic:
 
 - Runner import: none.
 - Publisher import: none.
-- Settlement import: none.
-- Workbook schema import: none.
+- Settlement import: deterministic hash/grade helpers only through the existing
+  `DECISION_AUDIT_LOG`; this remains observational and cannot originate truth.
+- Workbook schema: the existing ledger carries canonical/noncanonical evidence,
+  prospective workbook exposure, baseball-only context, and settlement-only
+  mechanism grade. No second truth table exists.
 - Active projection import: none.
 - Decision/authorization import: none.
 - Market logic import: none.
 
-The test component is callable only from its dedicated tests. Production behavior is therefore invariant.
+No field has an active projection, confidence, decision, authorization, or
+market consumer. Production behavior is therefore invariant.
 
 ## Commissioning result
 

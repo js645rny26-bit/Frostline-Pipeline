@@ -37,6 +37,10 @@ import {
   PREGAME_PACKET_HISTORY_HEADERS,
   PREGAME_PACKET_HISTORY_SHEET,
 } from "./module20a_pregamePacket.js";
+import {
+  DECISION_AUDIT_HEADER,
+  DECISION_AUDIT_INDEX,
+} from "./module20_decisionAuditLog.js";
 
 const VEHICLE_LOG_SHEET  = "VEHICLE_LOG";
 const POSTMORTEM_SHEET   = "VEHICLE_POSTMORTEM";
@@ -44,7 +48,7 @@ const OUTCOMES_SHEET     = "SHADOW_OUTCOMES";
 const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
 export const VEHICLE_LOG_COLS = 17;
 const LOG_COLS           = VEHICLE_LOG_COLS;
-const POSTMORTEM_COLS    = 19;
+const POSTMORTEM_COLS    = 35;
 
 export interface ContiguousVehicleLogUpdate {
   start_data_row_index: number;
@@ -67,6 +71,13 @@ export const POSTMORTEM_HEADER: string[] = [
   "Packet_Projected_Total", "Actual_Total", "Signed_Error", "Abs_Error",
   "Game_Truth_Grade", "Vehicle_Capture_Grade", "Ticket_Result", "Blocker_Grade",
   "Failure_Modes", "Exact_Blocker", "Graded_TS",
+  "Final_Score",
+  "Reference_Market_Line", "Reference_Market_Source", "Reference_Market_TS",
+  "Reference_Direction_Result",
+  "Executable_Market_Line", "Executable_Market_Source", "Executable_Market_TS",
+  "Executable_Market_Provenance_Status", "Model_Operator_Direction_Result",
+  "Human_Total_P50", "Human_Point_Error", "Human_Operator_Direction_Result",
+  "Human_Allocation_Result", "Human_Mechanism_Grade", "Primary_Miss",
 ];
 
 // ─── VEHICLE_LOG column indices (0-based) ──────────────────────────────────────
@@ -91,8 +102,12 @@ export const L_RECORD_INTEGRITY_STATUS = 16;
 // ─── SHADOW_OUTCOMES column indices (0-based) ─────────────────────────────────
 const O_GAME_ID  = 1;
 const O_ACTUAL   = 5;
+const O_REFERENCE_MARKET_LINE = 33;
+const O_REFERENCE_MARKET_SOURCE = 34;
+const O_REFERENCE_MARKET_TS = 35;
 const O_EXECUTABLE_MARKET_LINE = 36;
 const O_EXECUTABLE_MARKET_SOURCE = 37;
+const O_EXECUTABLE_MARKET_TS = 38;
 const O_PRIMARY_MARKET_LINE = 39;
 const O_PRIMARY_MARKET_SOURCE = 40;
 const O_PRIMARY_MARKET_STATUS = 41;
@@ -144,6 +159,39 @@ export interface PostmortemRow {
   failure_modes: string;
   exact_blocker: string;
   graded_ts: string;
+  final_score: string;
+  reference_market_line: number | null;
+  reference_market_source: string;
+  reference_market_ts: string;
+  reference_direction_result: string;
+  executable_market_line: number | null;
+  executable_market_source: string;
+  executable_market_ts: string;
+  executable_market_provenance_status: string;
+  model_operator_direction_result: string;
+  human_total_p50: number | null;
+  human_point_error: number | null;
+  human_operator_direction_result: string;
+  human_allocation_result: string;
+  human_mechanism_grade: string;
+  primary_miss: string;
+}
+
+export interface AgreementCohortMetrics {
+  n: number;
+  model_directional_accuracy_pct: number | null;
+  human_directional_accuracy_pct: number | null;
+  model_mae: number | null;
+  human_mae: number | null;
+  model_bias: number | null;
+  human_bias: number | null;
+}
+
+export interface HumanModelAgreementSummary {
+  status: "RESEARCH_ONLY_NO_AUTHORIZATION_WEIGHT";
+  market_basis: "REFERENCE_MARKET_RESEARCH_ONLY";
+  agreement: AgreementCohortMetrics;
+  disagreement: AgreementCohortMetrics;
 }
 
 export interface PostmortemResult {
@@ -159,6 +207,7 @@ export interface PostmortemResult {
   core_push: number;
   /** % of GAME_TOTAL vehicles where projection direction matched outcome, across all decisions */
   thesis_correct_pct: number | null;
+  human_model_agreement_summary: HumanModelAgreementSummary;
   rows: PostmortemRow[];
   errors: string[];
 }
@@ -192,9 +241,9 @@ export function gradeTicket(
   };
 }
 
-function activeVehicleLabel(away: string, home: string, direction: string, line: number | null): string {
+function activeVehicleLabel(gameId: string, away: string, home: string, direction: string, line: number | null): string {
   if (direction === "NONE" || line === null) return "—";
-  return `${away}@${home} FG ${direction === "OVER" ? "Over" : "Under"} ${line}`;
+  return `${gameId} | ${away}@${home} FG ${direction === "OVER" ? "Over" : "Under"} ${line}`;
 }
 
 function modernVehicleType(direction: string): string {
@@ -210,6 +259,13 @@ export function postmortemRowToValues(row: PostmortemRow): unknown[] {
     row.packet_projected_total, row.actual_total, row.signed_error, row.abs_error,
     row.game_truth_grade, row.vehicle_capture_grade, row.ticket_result, row.blocker_grade,
     row.failure_modes, row.exact_blocker, row.graded_ts,
+    row.final_score,
+    row.reference_market_line ?? "", row.reference_market_source, row.reference_market_ts,
+    row.reference_direction_result,
+    row.executable_market_line ?? "", row.executable_market_source, row.executable_market_ts,
+    row.executable_market_provenance_status, row.model_operator_direction_result,
+    row.human_total_p50 ?? "", row.human_point_error ?? "", row.human_operator_direction_result,
+    row.human_allocation_result, row.human_mechanism_grade, row.primary_miss,
   ];
 }
 
@@ -225,8 +281,12 @@ function gameIdDateMatchesDate(gameId: string, date: string): boolean {
 
 export interface CanonicalOutcomeMarketGrade {
   actual_total: number;
+  reference_market_line: number | null;
+  reference_market_source: string;
+  reference_market_ts: string;
   executable_market_line: number | null;
   executable_market_source: string;
+  executable_market_ts: string;
   primary_market_line: number | null;
   primary_market_source: string;
   primary_market_status: string;
@@ -295,6 +355,94 @@ export function gradePostmortemTicket(
     market_line: referenceLine,
     market_status: "REFERENCE_MARKET_STANDING_BENCHMARK",
     ...gradeTicket(direction, referenceLine, outcome.actual_total),
+  };
+}
+
+export function gradeOperatorDirection(
+  pointForecast: number | null,
+  executableLine: number | null,
+  actualTotal: number,
+): "CORRECT" | "INCORRECT" | "PUSH" | "NO_CALL" | "UNGRADABLE" {
+  if (pointForecast === null || executableLine === null) return "UNGRADABLE";
+  if (pointForecast === executableLine) return "NO_CALL";
+  if (actualTotal === executableLine) return "PUSH";
+  const direction = pointForecast > executableLine ? "OVER" : "UNDER";
+  return direction === "OVER"
+    ? actualTotal > executableLine ? "CORRECT" : "INCORRECT"
+    : actualTotal < executableLine ? "CORRECT" : "INCORRECT";
+}
+
+export function isProspectiveHumanTruthEvidence(
+  evidenceStatus: string,
+  freezeTs = "",
+  scheduledFirstPitch = "",
+): boolean {
+  const status = evidenceStatus.trim().toUpperCase();
+  if (status === "CANONICAL_RESEARCH_FREEZE" || status === "CHAT_RECORDED_PREGAME_UNHASHED") {
+    return true;
+  }
+  if (status === "CHAT_RECORDED_HUMAN_TRUTH") return false;
+
+  // Legacy compatibility: admit an older human overlay only when its persisted
+  // freeze timestamp proves it preceded first pitch. Never infer prospectiveness
+  // from a populated total alone.
+  if (!status && freezeTs && scheduledFirstPitch) {
+    const frozenAt = Date.parse(freezeTs);
+    const firstPitch = Date.parse(scheduledFirstPitch);
+    return Number.isFinite(frozenAt) && Number.isFinite(firstPitch) && frozenAt < firstPitch;
+  }
+  return false;
+}
+
+export interface AgreementObservation {
+  model_p50: number;
+  human_p50: number;
+  actual_total: number;
+  reference_line: number;
+}
+
+function agreementMetrics(rows: AgreementObservation[]): AgreementCohortMetrics {
+  const metric = (selector: (row: AgreementObservation) => number): { mae: number | null; bias: number | null } => {
+    if (!rows.length) return { mae: null, bias: null };
+    const errors = rows.map((row) => selector(row) - row.actual_total);
+    return {
+      mae: Number((errors.reduce((sum, value) => sum + Math.abs(value), 0) / errors.length).toFixed(3)),
+      bias: Number((errors.reduce((sum, value) => sum + value, 0) / errors.length).toFixed(3)),
+    };
+  };
+  const directionAccuracy = (selector: (row: AgreementObservation) => number): number | null => {
+    const gradable = rows.filter((row) => selector(row) !== row.reference_line && row.actual_total !== row.reference_line);
+    if (!gradable.length) return null;
+    const correct = gradable.filter((row) =>
+      (selector(row) > row.reference_line) === (row.actual_total > row.reference_line)).length;
+    return Number((100 * correct / gradable.length).toFixed(1));
+  };
+  const model = metric((row) => row.model_p50);
+  const human = metric((row) => row.human_p50);
+  return {
+    n: rows.length,
+    model_directional_accuracy_pct: directionAccuracy((row) => row.model_p50),
+    human_directional_accuracy_pct: directionAccuracy((row) => row.human_p50),
+    model_mae: model.mae,
+    human_mae: human.mae,
+    model_bias: model.bias,
+    human_bias: human.bias,
+  };
+}
+
+export function buildHumanModelAgreementSummary(
+  observations: AgreementObservation[],
+): HumanModelAgreementSummary {
+  const sameDirection = (row: AgreementObservation): boolean => {
+    const model = Math.sign(row.model_p50 - row.reference_line);
+    const human = Math.sign(row.human_p50 - row.reference_line);
+    return model !== 0 && human !== 0 && model === human;
+  };
+  return {
+    status: "RESEARCH_ONLY_NO_AUTHORIZATION_WEIGHT",
+    market_basis: "REFERENCE_MARKET_RESEARCH_ONLY",
+    agreement: agreementMetrics(observations.filter(sameDirection)),
+    disagreement: agreementMetrics(observations.filter((row) => !sameDirection(row))),
   };
 }
 
@@ -722,12 +870,13 @@ export async function runPostmortem(
   const write = options.writeSheets ?? false;
   const terminalNoOutcomeGameIds = new Set(options.terminalNoOutcomeGameIds ?? []);
   const errors: string[] = [];
+  const emptyAgreement = buildHumanModelAgreementSummary([]);
 
   const empty = (status: PostmortemResult["status"]): PostmortemResult => ({
     status, graded_date: date, graded_ts: ts,
     games_graded: 0, games_no_outcome: 0,
     core_bets: 0, core_covered: 0, core_missed: 0, core_push: 0,
-    thesis_correct_pct: null, rows: [], errors,
+    thesis_correct_pct: null, human_model_agreement_summary: emptyAgreement, rows: [], errors,
   });
 
   logger.info({ date }, "MODULE_17: Vehicle postmortem starting");
@@ -760,18 +909,20 @@ export async function runPostmortem(
   // audit and canonical packet preserve matching, prospective model state.
   // Recover only that verified pair for postmortem publication; never write it
   // into VEHICLE_LOG and never inspect postgame audit fields.
+  let decisionAuditRows: unknown[][] = [];
   try {
     const [auditResponse, packetResponse] = await Promise.all([
-      readRange(wbId, `${DECISION_AUDIT_SHEET}!A1:BL5000`),
+      readRange(wbId, `${DECISION_AUDIT_SHEET}!A1:CD5000`),
       readRange(wbId, `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(5000)}`),
     ]);
+    decisionAuditRows = (auditResponse.values ?? []) as unknown[][];
     const normalizedPackets = normalizePregamePacketHistoryRows(
       (packetResponse.values ?? []) as unknown[][],
     );
     const fallback = selectVerifiedDecisionPacketFallbackRows(
       date,
       vehicleRows,
-      (auditResponse.values ?? []) as unknown[][],
+      decisionAuditRows,
       [Array.from(PREGAME_PACKET_HISTORY_HEADERS), ...normalizedPackets.rows],
     );
     if (fallback.rows.length > 0) {
@@ -804,10 +955,16 @@ export async function runPostmortem(
       if (!gid) continue;
       outcomesMap.set(gid, {
         actual_total: parseFloat(r[O_ACTUAL]  ?? "0") || 0,
+        reference_market_line: r[O_REFERENCE_MARKET_LINE]
+          ? parseFloat(r[O_REFERENCE_MARKET_LINE]!)
+          : null,
+        reference_market_source: r[O_REFERENCE_MARKET_SOURCE] ?? "",
+        reference_market_ts: r[O_REFERENCE_MARKET_TS] ?? "",
         executable_market_line: r[O_EXECUTABLE_MARKET_LINE]
           ? parseFloat(r[O_EXECUTABLE_MARKET_LINE]!)
           : null,
         executable_market_source: r[O_EXECUTABLE_MARKET_SOURCE] ?? "",
+        executable_market_ts: r[O_EXECUTABLE_MARKET_TS] ?? "",
         primary_market_line: r[O_PRIMARY_MARKET_LINE]
           ? parseFloat(r[O_PRIMARY_MARKET_LINE]!)
           : null,
@@ -824,11 +981,21 @@ export async function runPostmortem(
     return { ...empty("failure"), errors };
   }
 
+  const auditByGame = new Map<string, unknown[]>();
+  const auditHeader = tableHeaderIndex(decisionAuditRows.length
+    ? decisionAuditRows
+    : [Array.from(DECISION_AUDIT_HEADER)]);
+  for (const auditRow of decisionAuditRows.slice(1)) {
+    if (tableValue(auditRow, auditHeader, "Date") !== date) continue;
+    const gameId = tableValue(auditRow, auditHeader, "Game_ID");
+    if (gameId) auditByGame.set(gameId, auditRow);
+  }
+
   // ── Read existing VEHICLE_POSTMORTEM to avoid duplicates ──
   const existingPmIndex = new Map<string, number>();
   let existingPmRows: unknown[][] = [];
   try {
-    const resp = await readRange(wbId, `${POSTMORTEM_SHEET}!A1:S5000`);
+      const resp = await readRange(wbId, `${POSTMORTEM_SHEET}!A1:AI5000`);
     const all  = (resp.values ?? []) as unknown[][];
     existingPmRows = all.slice(1);
     existingPmRows.forEach((r, index) => {
@@ -897,13 +1064,47 @@ export async function runPostmortem(
       Math.abs(signedError) >= 4 ? "PROJECTION_MISS_4PLUS" : "",
       thesis_correct === false ? "DIRECTION_MISS" : "",
     ].filter(Boolean).join("; ") || "NO_MATERIAL_DEFECT";
+    const auditRow = auditByGame.get(gameId);
+    const actualAway = auditRow ? finiteNumber(tableValue(auditRow, auditHeader, "Actual_Away_Runs")) : null;
+    const actualHome = auditRow ? finiteNumber(tableValue(auditRow, auditHeader, "Actual_Home_Runs")) : null;
+    const humanProspective = auditRow
+      ? isProspectiveHumanTruthEvidence(
+          tableValue(auditRow, auditHeader, "Human_Truth_Evidence_Status"),
+          tableValue(auditRow, auditHeader, "Freeze_TS"),
+          tableValue(auditRow, auditHeader, "Scheduled_First_Pitch"),
+        )
+      : false;
+    const humanTotal = auditRow && humanProspective ? finiteNumber(tableValue(auditRow, auditHeader, "Manual_Total_View")) : null;
+    const humanAway = auditRow && humanProspective ? finiteNumber(tableValue(auditRow, auditHeader, "Manual_Away_Run_View")) : null;
+    const humanHome = auditRow && humanProspective ? finiteNumber(tableValue(auditRow, auditHeader, "Manual_Home_Run_View")) : null;
+    const humanAllocationResult = humanAway === null || humanHome === null || actualAway === null || actualHome === null
+      ? "UNGRADABLE"
+      : (Math.sign(humanAway - humanHome) === Math.sign(actualAway - actualHome)
+          ? "LEADER_CORRECT"
+          : "ALLOCATION_SIGN_REVERSAL");
+    const operatorProvenanceStatus = outcome.executable_market_line === null
+      ? "EXECUTABLE_OPERATOR_LINE_NOT_PERSISTED"
+      : "EXECUTABLE_OPERATOR_LINE_PERSISTED";
+    const modelOperatorGrade = gradeOperatorDirection(projected, outcome.executable_market_line, outcome.actual_total);
+    const humanOperatorGrade = gradeOperatorDirection(humanTotal, outcome.executable_market_line, outcome.actual_total);
+    const referenceDirectionResult = gradeOperatorDirection(projected, outcome.reference_market_line, outcome.actual_total);
+    const mechanismGrade = auditRow && humanProspective
+      ? tableValue(auditRow, auditHeader, "Human_Mechanism_Grade") || "UNGRADABLE"
+      : "UNGRADABLE";
+    const primaryMiss = Math.abs(signedError) >= 4
+      ? `POINT_MISS_${signedError > 0 ? "HIGH" : "LOW"}_${Math.abs(signedError).toFixed(2)}`
+      : humanAllocationResult === "ALLOCATION_SIGN_REVERSAL"
+        ? "ALLOCATION_SIGN_REVERSAL"
+        : mechanismGrade === "FAILED"
+          ? "FROZEN_HUMAN_MECHANISM_FAILED"
+          : "NO_NEW_STRUCTURAL_FINDING";
 
     graded.push({
       date,
       game_id:          gameId,
       away_team:        r[L_AWAY] ?? "",
       home_team:        r[L_HOME] ?? "",
-      active_vehicle_label: activeVehicleLabel(r[L_AWAY] ?? "", r[L_HOME] ?? "", direction, marketLine),
+      active_vehicle_label: activeVehicleLabel(gameId, r[L_AWAY] ?? "", r[L_HOME] ?? "", direction, marketLine),
       vehicle_type:     modernVehicleType(direction),
       market_line:      marketLine,
       decision,
@@ -924,6 +1125,22 @@ export async function runPostmortem(
       failure_modes: failureModes,
       exact_blocker: r[L_CORE_BLOCKER] ?? "",
       graded_ts: ts,
+      final_score: actualAway === null || actualHome === null ? "" : `${actualAway}-${actualHome}`,
+      reference_market_line: outcome.reference_market_line,
+      reference_market_source: outcome.reference_market_source,
+      reference_market_ts: outcome.reference_market_ts,
+      reference_direction_result: referenceDirectionResult,
+      executable_market_line: outcome.executable_market_line,
+      executable_market_source: outcome.executable_market_source,
+      executable_market_ts: outcome.executable_market_ts,
+      executable_market_provenance_status: operatorProvenanceStatus,
+      model_operator_direction_result: modelOperatorGrade,
+      human_total_p50: humanTotal,
+      human_point_error: humanTotal === null ? null : Number((humanTotal - outcome.actual_total).toFixed(2)),
+      human_operator_direction_result: humanOperatorGrade,
+      human_allocation_result: humanAllocationResult,
+      human_mechanism_grade: mechanismGrade,
+      primary_miss: primaryMiss,
     });
   }
 
@@ -941,6 +1158,16 @@ export async function runPostmortem(
         (thesisObs.filter((r) => r.game_truth_grade === "TRUTH_CONFIRMED").length / thesisObs.length * 100).toFixed(1),
       )
     : null;
+  const agreementSummary = buildHumanModelAgreementSummary(graded.flatMap((row) =>
+    row.human_total_p50 === null || row.reference_market_line === null
+      ? []
+      : [{
+          model_p50: row.packet_projected_total,
+          human_p50: row.human_total_p50,
+          actual_total: row.actual_total,
+          reference_line: row.reference_market_line,
+        }],
+  ));
 
   // ── Write VEHICLE_POSTMORTEM (append) ──
   if (write && graded.length > 0) {
@@ -958,7 +1185,7 @@ export async function runPostmortem(
         }
       }
       const sheetRows = [POSTMORTEM_HEADER, ...existingPmRows];
-      await writeRange(wbId, `${POSTMORTEM_SHEET}!A1`, sheetRows);
+      await writeRange(wbId, `${POSTMORTEM_SHEET}!A1:AI${sheetRows.length}`, sheetRows);
       logger.info({ written: sheetRows.length }, "MODULE_17: Vehicle postmortem written");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -989,6 +1216,7 @@ export async function runPostmortem(
     core_missed:        coreMissed,
     core_push:          corePush,
     thesis_correct_pct: thesisCorrectPct,
+    human_model_agreement_summary: agreementSummary,
     rows:               graded,
     errors,
   };

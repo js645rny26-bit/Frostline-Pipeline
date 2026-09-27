@@ -16,6 +16,8 @@ export const ALLOCATION_TOLERANCE = 1e-9;
 export type PrimaryCarrier = "AWAY" | "HOME" | "BALANCED";
 export type PrimaryPhase = "STARTER" | "BULLPEN" | "MIXED" | "SUPPRESSION";
 export type MarketExposureStatus = "PRICE_BLIND" | "MARKET_EXPOSED";
+export type WorkbookExposureStatus = "WORKBOOK_BLIND" | "WORKBOOK_EXPOSED";
+export type HumanContextMode = "BASEBALL_ONLY";
 export type MarketState = "PREGAME" | "LIVE";
 export type TruthDirection = "OVER" | "UNDER" | "NO_CALL";
 export type MechanismGrade = "CONFIRMED" | "PARTIAL" | "FAILED" | "UNGRADABLE";
@@ -66,6 +68,18 @@ export interface CanonicalHumanInput {
   secondary_mechanism_code: HumanTruthMechanismCode | "";
   primary_mechanism_text: string;
   market_exposure_status: MarketExposureStatus;
+}
+
+/**
+ * Prospective independence metadata introduced after the Sept. 26 review.
+ * It is deliberately stored beside, rather than inserted into, the V1 hashed
+ * payload so previously published Sept. 25 record hashes remain immutable.
+ */
+export interface ProspectiveHumanIndependenceEvidence {
+  workbook_exposure_status: WorkbookExposureStatus;
+  human_context_mode: HumanContextMode;
+  environment_inputs_consumed: boolean;
+  market_inputs_consumed: boolean;
 }
 
 export interface CanonicalTruthRecord extends CanonicalHumanInput {
@@ -295,6 +309,22 @@ export function validateCanonicalHumanInput(input: CanonicalHumanInput): string[
   if (mechanismWords === 0) errors.push("PRIMARY_MECHANISM_TEXT_MISSING");
   if (mechanismWords > MAX_MECHANISM_WORDS) errors.push("PRIMARY_MECHANISM_TEXT_OVER_40_WORDS");
   if (!input.market_exposure_status) errors.push("MARKET_EXPOSURE_STATUS_MISSING");
+  return errors;
+}
+
+export function validateProspectiveHumanIndependence(
+  evidence: ProspectiveHumanIndependenceEvidence,
+): string[] {
+  const errors: string[] = [];
+  if (evidence.workbook_exposure_status !== "WORKBOOK_BLIND"
+    && evidence.workbook_exposure_status !== "WORKBOOK_EXPOSED") {
+    errors.push("WORKBOOK_EXPOSURE_STATUS_INVALID");
+  }
+  if (evidence.human_context_mode !== "BASEBALL_ONLY") {
+    errors.push("HUMAN_CONTEXT_MODE_NOT_BASEBALL_ONLY");
+  }
+  if (evidence.environment_inputs_consumed) errors.push("HUMAN_ENVIRONMENT_INPUT_CONSUMED");
+  if (evidence.market_inputs_consumed) errors.push("HUMAN_MARKET_INPUT_CONSUMED");
   return errors;
 }
 

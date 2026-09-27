@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   GAME_TRUTH_REPLAY_HEADERS,
+  SEPT26_GAME_TRUTH_REGRESSION_CASES,
+  deriveSeasonPhaseTag,
   STARTER_OUTCOME_HEADERS,
   buildAllocationDiagnostic,
   buildConversionDiagnostic,
@@ -367,7 +369,19 @@ test("Module 24 headers stay exactly aligned with the generated workbook schema"
     );
   assert.deepEqual(expected("STARTER_OUTCOME_DIAGNOSTICS"), STARTER_OUTCOME_HEADERS);
   assert.equal(expected("CONVERSION_SETTLEMENT_DIAGNOSTICS")?.[0], "Date");
-  assert.equal(expected("GAME_TRUTH_REPLAY_V1")?.at(-1), "Settlement_TS");
+  assert.equal(expected("GAME_TRUTH_REPLAY_V1")?.at(-1), "Season_Phase_Tag");
+});
+
+test("season phase is shadow-only and Sept. 26 structural cases stay date-qualified", () => {
+  assert.equal(deriveSeasonPhaseTag("2026-06-15"), "NORMAL_REGULAR_SEASON");
+  assert.equal(deriveSeasonPhaseTag("2026-09-26"), "SEPTEMBER_EXPANDED_ROSTER");
+  assert.equal(deriveSeasonPhaseTag("2026-10-03", "D"), "POSTSEASON");
+  assert.deepEqual(Object.keys(SEPT26_GAME_TRUTH_REGRESSION_CASES), [
+    "20260926_NYM_WSN",
+    "20260926_TEX_MIN",
+    "20260926_ARI_SDP",
+    "20260926_STL_MIL",
+  ]);
 });
 
 test("legacy game-truth provenance is filled only after an exact frozen-packet and settled-final match", () => {

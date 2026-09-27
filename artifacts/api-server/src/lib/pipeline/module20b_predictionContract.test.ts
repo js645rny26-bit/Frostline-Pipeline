@@ -14,6 +14,7 @@ import {
   recoverLegacyHumanP50,
   settleCanonicalTruth,
   validateCanonicalHumanInput,
+  validateProspectiveHumanIndependence,
   type CanonicalHumanInput,
   type TruthReadyEvidence,
 } from "./module20b_predictionContract.js";
@@ -68,6 +69,21 @@ test("canonical input rejects rounding drift and a 41-word mechanism", () => {
   assert.ok(errors.includes("TOTAL_P50_MORE_THAN_ONE_DECIMAL"));
   assert.ok(errors.includes("ALLOCATION_IDENTITY_FAILURE"));
   assert.ok(errors.includes("PRIMARY_MECHANISM_TEXT_OVER_40_WORDS"));
+});
+
+test("prospective human truth is baseball-only and preserves separate workbook/market exposure", () => {
+  assert.deepEqual(validateProspectiveHumanIndependence({
+    workbook_exposure_status: "WORKBOOK_BLIND",
+    human_context_mode: "BASEBALL_ONLY",
+    environment_inputs_consumed: false,
+    market_inputs_consumed: false,
+  }), []);
+  assert.deepEqual(validateProspectiveHumanIndependence({
+    workbook_exposure_status: "WORKBOOK_EXPOSED",
+    human_context_mode: "BASEBALL_ONLY",
+    environment_inputs_consumed: true,
+    market_inputs_consumed: true,
+  }), ["HUMAN_ENVIRONMENT_INPUT_CONSUMED", "HUMAN_MARKET_INPUT_CONSUMED"]);
 });
 
 test("truth-ready gate fails closed on projected lineups or unresolved chain", () => {

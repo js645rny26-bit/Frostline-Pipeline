@@ -2026,7 +2026,14 @@ export async function runDailySettlement(
       status: "failure", graded_date: date, graded_ts: new Date().toISOString(),
       games_graded: 0, games_no_outcome: 0,
       core_bets: 0, core_covered: 0, core_missed: 0, core_push: 0,
-      thesis_correct_pct: null, rows: [], errors: [msg],
+      thesis_correct_pct: null,
+      human_model_agreement_summary: {
+        status: "RESEARCH_ONLY_NO_AUTHORIZATION_WEIGHT",
+        market_basis: "REFERENCE_MARKET_RESEARCH_ONLY",
+        agreement: { n: 0, model_directional_accuracy_pct: null, human_directional_accuracy_pct: null, model_mae: null, human_mae: null, model_bias: null, human_bias: null },
+        disagreement: { n: 0, model_directional_accuracy_pct: null, human_directional_accuracy_pct: null, model_mae: null, human_mae: null, model_bias: null, human_bias: null },
+      },
+      rows: [], errors: [msg],
     };
   });
 

@@ -99,9 +99,9 @@ function outcome(overrides: Partial<SettlementRow> = {}): SettlementRow {
   };
 }
 
-test("decision audit schema has the exact 79-column settlement and three-class human-evidence contract", () => {
+test("decision audit schema has the exact 82-column settlement and three-class human-evidence contract", () => {
   assert.equal(DECISION_AUDIT_HEADER.length, DECISION_AUDIT_COLS);
-  assert.equal(DECISION_AUDIT_COLS, 79);
+  assert.equal(DECISION_AUDIT_COLS, 82);
   assert.equal(DECISION_AUDIT_HEADER[0], "Date");
   assert.equal(DECISION_AUDIT_HEADER[49], "Graded_TS");
   assert.equal(DECISION_AUDIT_HEADER[50], "Model_Total_Error");
@@ -110,6 +110,9 @@ test("decision audit schema has the exact 79-column settlement and three-class h
   assert.equal(DECISION_AUDIT_HEADER[62], "Settlement_Status");
   assert.equal(DECISION_AUDIT_HEADER[63], "Settlement_Gap_Reason");
   assert.equal(DECISION_AUDIT_HEADER[64], "Human_Truth_Version");
+  assert.equal(DECISION_AUDIT_HEADER[79], "Workbook_Exposure_Status");
+  assert.equal(DECISION_AUDIT_HEADER[80], "Human_Context_Mode");
+  assert.equal(DECISION_AUDIT_HEADER[81], "Human_Mechanism_Grade");
   assert.equal(DECISION_AUDIT_HEADER[73], "Human_Record_Hash");
   assert.equal(DECISION_AUDIT_HEADER[74], "Distribution_Total_Mean_At_Human_Read");
   assert.equal(DECISION_AUDIT_HEADER[75], "Human_Truth_Evidence_Status");

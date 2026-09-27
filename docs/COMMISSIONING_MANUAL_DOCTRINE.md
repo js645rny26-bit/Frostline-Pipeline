@@ -19,6 +19,14 @@ Treat every model total, team allocation, direction, confidence, and vehicle as 
 
 Do not begin by trying to preserve a Frostline Over, Under, side, confidence, or preferred vehicle. Disagreement does not require extraordinary evidence, and skepticism must not be represented as an automatic numerical discount.
 
+For prospective Prediction Contract reads, the canonical human P50 is
+`BASEBALL_ONLY`: confirmed lineup, offensive shape, starter state/workload,
+bullpen state/deployment, and script interaction may move it; park, weather,
+roof, umpire, workbook output, and market price may not. Freeze and hash the
+human object before workbook and market reveal. Record workbook and market
+exposure independently. Agreement with Frostline is descriptive only and does
+not create a confidence bonus.
+
 ## Vehicle and polarity audit
 
 A veto of the original vehicle starts a price-blind reroute audit. Review the opposite game total, moneyline, run line, each team total, opponent team total, and appropriate derivatives. This search is mandatory; selecting an alternative is not. Return NO CORE when no alternative captures the dominant scripts better.

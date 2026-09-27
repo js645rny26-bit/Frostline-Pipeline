@@ -9,6 +9,12 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
 - Published pregame vehicle and decision rows are immutable. Settlement reads them and appends outcomes and grades without running mutable pregame stages.
 - `VEHICLE_LOG` remains the primary Module 17 settlement source. When the last legitimate run occurred before lock and no later publish created a vehicle row, Module 17 may fill only the postmortem publication gap from matching, timestamp-valid `DECISION_AUDIT_LOG` and `PREGAME_PACKET_HISTORY` pregame state. It never creates or rewrites a historical `VEHICLE_LOG` row.
 - Projection generation, final decision, freeze, publication, and settlement timestamps describe distinct real events.
+- Settlement, replay, regression, postmortem, and human-audit presentation must
+  show the date-qualified `Game_ID` (`YYYYMMDD_AWAY_HOME`). A bare matchup is
+  never the sole identifier across slates.
+- The compact `VEHICLE_POSTMORTEM` row keeps reference-market research and
+  executable/operator grading separate. Missing executable evidence makes the
+  operator grade `UNGRADABLE`; it never triggers a silent reference fallback.
 
 **Schema v65 - updated 2026-09-15 - board authorization finalizes 30 minutes before first pitch; the independent pregame packet stays refreshable through legitimate pre-first-pitch runs and freezes only at first pitch. Settlement-only slate-size and operator postmortem audits are research-only and have no production consumer. Exact fields live in SCHEMA_REFERENCE.**
 
@@ -45,6 +51,16 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
   explicitly reported.
 
 ## What auto-runs vs. what you do
+
+### Prospective human baseball-only truth
+
+Freeze the independent human P50, allocation, carrier, phase, and mechanism
+before revealing the workbook and market. Record workbook exposure separately
+from market exposure. `Human_Context_Mode=BASEBALL_ONLY` prohibits park,
+weather, roof, umpire, and market inputs from numerically moving the human P50.
+New pregame baseball evidence requires a new preserved version; never backfill
+a canonical read after first pitch. Human/model agreement is descriptive and
+has no confidence or authorization bonus.
 
 - **Auto, every publish** (dashboard **Run Pipeline** button, or `POST /api/pipeline/publish`): schedule, pitcher workloads and roles, weather, bullpen usage + quality tiers, posted lineups, starter previous outings, umpires, team run rates, odds snapshot → ODDS_HISTORY, pitcher season stats, all sheet writes, boards, RUN_LOG.
 - **You:** trigger the three publishes above; own SLATE_INPUT O–W.

@@ -42,7 +42,7 @@ import {
 } from "./module20b_predictionContract.js";
 
 export const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
-export const DECISION_AUDIT_COLS = 79;
+export const DECISION_AUDIT_COLS = 82;
 /** August 10 is the first live slate whose pregame publish includes Module 20. */
 export const DECISION_AUDIT_REQUIRED_FROM_DATE = "2026-08-10";
 
@@ -80,6 +80,7 @@ export const DECISION_AUDIT_HEADER = [
   "Distribution_Total_Mean_At_Human_Read",
   "Human_Truth_Evidence_Status", "Mechanism_Specificity_Flag",
   "Mechanism_Entity_Reference", "Entity_Reference_Status",
+  "Workbook_Exposure_Status", "Human_Context_Mode", "Human_Mechanism_Grade",
 ] as const;
 
 export type DecisionAuditStatus = "OPEN" | "FROZEN" | "SETTLED" | "AUDIT_GAP";
@@ -209,6 +210,9 @@ export const DECISION_AUDIT_INDEX = {
   MECHANISM_SPECIFICITY_FLAG: 76,
   MECHANISM_ENTITY_REFERENCE: 77,
   ENTITY_REFERENCE_STATUS: 78,
+  WORKBOOK_EXPOSURE_STATUS: 79,
+  HUMAN_CONTEXT_MODE: 80,
+  HUMAN_MECHANISM_GRADE: 81,
 } as const;
 
 export interface DecisionAuditPregameInput {
@@ -563,6 +567,9 @@ function humanEvidenceSnapshot(row: unknown[]): Record<string, unknown> {
     Mechanism_Specificity_Flag: row[DECISION_AUDIT_INDEX.MECHANISM_SPECIFICITY_FLAG] ?? "",
     Mechanism_Entity_Reference: row[DECISION_AUDIT_INDEX.MECHANISM_ENTITY_REFERENCE] ?? "",
     Entity_Reference_Status: row[DECISION_AUDIT_INDEX.ENTITY_REFERENCE_STATUS] ?? "",
+    Workbook_Exposure_Status: row[DECISION_AUDIT_INDEX.WORKBOOK_EXPOSURE_STATUS] ?? "",
+    Human_Context_Mode: row[DECISION_AUDIT_INDEX.HUMAN_CONTEXT_MODE] ?? "",
+    Human_Mechanism_Grade: row[DECISION_AUDIT_INDEX.HUMAN_MECHANISM_GRADE] ?? "",
   };
 }
 
@@ -917,6 +924,9 @@ export function materializeCanonicalHumanTruthRows(
       DECISION_AUDIT_INDEX.MECHANISM_SPECIFICITY_FLAG,
       DECISION_AUDIT_INDEX.MECHANISM_ENTITY_REFERENCE,
       DECISION_AUDIT_INDEX.ENTITY_REFERENCE_STATUS,
+      DECISION_AUDIT_INDEX.WORKBOOK_EXPOSURE_STATUS,
+      DECISION_AUDIT_INDEX.HUMAN_CONTEXT_MODE,
+      DECISION_AUDIT_INDEX.HUMAN_MECHANISM_GRADE,
     ];
     if (forbidden.some((column) => String(row[column] ?? "").trim() !== "")) {
       errors.push(`NO_HUMAN_TRUTH_ROW_POPULATED:${gameId}`);
@@ -1697,7 +1707,7 @@ async function ensureDecisionAuditSheet(workbookId: string): Promise<void> {
 }
 
 async function readAuditRows(workbookId: string): Promise<unknown[][]> {
-  const response = await readRange(workbookId, `${DECISION_AUDIT_SHEET}!A1:CA5000`);
+  const response = await readRange(workbookId, `${DECISION_AUDIT_SHEET}!A1:CD5000`);
   return ((response.values ?? []) as unknown[][]).slice(1);
 }
 
