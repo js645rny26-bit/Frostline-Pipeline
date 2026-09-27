@@ -15,6 +15,7 @@ import {
   createSpreadsheet,
   batchUpdate,
   clearRange,
+  expandSheetColumns,
   getSpreadsheetSheetProperties,
   writeRange,
   WORKBOOK_ID,
@@ -293,6 +294,33 @@ export interface RepairSchemaResult {
 }
 
 /**
+ * Settlement-owned research surfaces whose schema must still materialize
+ * during an ordinary pregame publish.  Updating these header rows is
+ * metadata-only: it neither clears nor rewrites any historical data row.
+ */
+export const PREGAME_SCHEMA_MATERIALIZATION_SHEETS = [
+  "VEHICLE_POSTMORTEM",
+  "GAME_TRUTH_REPLAY_V1",
+] as const;
+
+export function buildPregameSchemaMaterializationHeaders(): Array<{
+  sheet: string;
+  headers: string[];
+}> {
+  const schemaByName = new Map(
+    WORKBOOK_SCHEMA.map((sheet) => [sheet.name, sheet]),
+  );
+  return PREGAME_SCHEMA_MATERIALIZATION_SHEETS.map((sheet) => {
+    const schema = schemaByName.get(sheet);
+    if (!schema) throw new Error(`No workbook schema found for sheet ${sheet}`);
+    return {
+      sheet,
+      headers: schema.columns.map((column) => column.name),
+    };
+  });
+}
+
+/**
  * Rewrites SCHEMA_REFERENCE and README in the live workbook so they reflect
  * the current WORKBOOK_SCHEMA definitions and WORKBOOK_SCHEMA_VERSION.
  *
@@ -309,6 +337,30 @@ export async function repairWorkbookSchemaReference(
   );
 
   const errors: Array<{ step: string; error: string }> = [];
+
+  // ── Step 0: Materialize settlement-research schema during normal publish ─
+  // These tabs are normally written only by settlement modules.  Without this
+  // bounded header sync, a code-side schema upgrade can remain absent from the
+  // authoritative workbook until the next settlement.  Expand and rewrite
+  // only row 1; historical rows and every active projection/decision surface
+  // remain untouched.
+  try {
+    for (const { sheet, headers } of buildPregameSchemaMaterializationHeaders()) {
+      await expandSheetColumns(workbookId, sheet, headers.length);
+      await writeRange(workbookId, `${sheet}!A1`, [headers]);
+    }
+    logger.info(
+      { sheets: PREGAME_SCHEMA_MATERIALIZATION_SHEETS },
+      "WORKBOOK_REPAIR: Settlement research headers materialized",
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(
+      { err: msg },
+      "WORKBOOK_REPAIR: Settlement research header materialization failed",
+    );
+    errors.push({ step: "research_schema_materialization", error: msg });
+  }
 
   // ── Step 1: Rewrite SCHEMA_REFERENCE ─────────────────────────────────────
   let schemaRows = 0;
