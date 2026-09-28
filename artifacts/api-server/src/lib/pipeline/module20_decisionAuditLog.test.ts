@@ -583,7 +583,7 @@ test("an explicit pregame audit gap is warning-only while a missing official out
   assert.match(missingMessages.errors[0] ?? "", /MISSING_OFFICIAL_OUTCOME/);
 });
 
-test("source-confirmed postponements are terminal non-gradable warnings without rewriting frozen evidence", () => {
+test("source-confirmed terminal no-outcome games are non-gradable warnings without rewriting frozen evidence", () => {
   const requestedDate = upsertDecisionAuditPregameRows([], [pregame({
     date: "2026-09-22",
     game_id: "20260922_TOR_BAL",
@@ -608,11 +608,11 @@ test("source-confirmed postponements are terminal non-gradable warnings without 
   assert.match(messages.warnings[0] ?? "", /DECISION_AUDIT_TERMINAL_NO_OUTCOME/);
   assert.deepEqual(
     marked.rows.map((row) => row[C.SETTLEMENT_STATUS]),
-    ["NOT_GRADABLE_POSTPONED", "NOT_GRADABLE_POSTPONED"],
+    ["NOT_GRADABLE_TERMINAL_NO_OUTCOME", "NOT_GRADABLE_TERMINAL_NO_OUTCOME"],
   );
   assert.deepEqual(
     marked.rows.map((row) => row[C.SETTLEMENT_GAP_REASON]),
-    ["OFFICIAL_GAME_POSTPONED_OR_RESCHEDULED", "OFFICIAL_GAME_POSTPONED_OR_RESCHEDULED"],
+    ["OFFICIAL_GAME_TERMINAL_NO_OUTCOME", "OFFICIAL_GAME_TERMINAL_NO_OUTCOME"],
   );
   assert.deepEqual(marked.rows.map((row) => row[C.FROZEN_TOTAL]), frozenTotals);
 });

@@ -1570,8 +1570,8 @@ export function markDecisionAuditOutcomeGaps(
     if (outcomeKeys.has(key)) continue;
     const gameId = String(row[DECISION_AUDIT_INDEX.GAME_ID] ?? "");
     if (terminalNoOutcomeGameIds.has(gameId)) {
-      const status = "NOT_GRADABLE_POSTPONED";
-      const reason = "OFFICIAL_GAME_POSTPONED_OR_RESCHEDULED";
+      const status = "NOT_GRADABLE_TERMINAL_NO_OUTCOME";
+      const reason = "OFFICIAL_GAME_TERMINAL_NO_OUTCOME";
       row[DECISION_AUDIT_INDEX.SETTLEMENT_STATUS] = status;
       row[DECISION_AUDIT_INDEX.SETTLEMENT_GAP_REASON] = reason;
       outcomeGaps++;

@@ -763,15 +763,19 @@ export function indexFinalGamesByCanonicalGameId(
 function isSourceConfirmedTerminalNoOutcome(game: MlbGame): boolean {
   const detailedState = String(game.status?.detailedState ?? "").trim().toUpperCase();
   const statusCode = String(game.status?.statusCode ?? "").trim().toUpperCase();
-  return detailedState === "POSTPONED" || statusCode === "DR";
+  return detailedState === "POSTPONED"
+    || detailedState === "CANCELLED"
+    || statusCode === "DR"
+    || statusCode === "CR";
 }
 
 /**
  * Index both the requested-date identity and MLB's official-date identity for
- * a source-confirmed postponement/reschedule. The requested-date alias matches
- * the frozen record that existed before postponement; the official-date alias
- * catches stale rows created by the old cross-date schedule bug. Neither alias
- * is an outcome and neither is reconstructed from a final score.
+ * a source-confirmed terminal game without an outcome (postponed/rescheduled or
+ * cancelled). The requested-date alias matches the frozen record that existed
+ * before the terminal status; the official-date alias catches stale rows
+ * created by the old cross-date schedule bug. Neither alias is an outcome and
+ * neither is reconstructed from a final score.
  */
 export function indexTerminalNoOutcomeGameIds(
   requestedDate: string,
@@ -1886,7 +1890,7 @@ export async function runShadowSettlement(
     if (!final) {
       if (settlementSchedule.terminalNoOutcomeGameIds.has(gameId)) {
         skipped++;
-        warnings.push(`OFFICIAL_GAME_POSTPONED_OR_RESCHEDULED: ${gameId} preserved without outcome grading`);
+        warnings.push(`OFFICIAL_GAME_TERMINAL_NO_OUTCOME: ${gameId} preserved without outcome grading`);
         continue;
       }
       noActual++;

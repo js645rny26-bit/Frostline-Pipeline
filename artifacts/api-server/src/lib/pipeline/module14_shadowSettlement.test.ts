@@ -120,6 +120,25 @@ test("source-confirmed postponed games expose requested-date and official-date t
   assert.deepEqual([...ids].sort(), ["20260922_TOR_BAL", "20260923_TOR_BAL"]);
 });
 
+test("source-confirmed cancellations remain terminal without manufacturing an outcome", () => {
+  const ids = indexTerminalNoOutcomeGameIds("2026-09-27", [{
+    gamePk: 823490,
+    officialDate: "2026-09-27",
+    status: {
+      abstractGameState: "Final",
+      codedGameState: "C",
+      detailedState: "Cancelled",
+      statusCode: "CR",
+    },
+    teams: {
+      away: { team: { name: "Baltimore Orioles" } },
+      home: { team: { name: "New York Yankees" } },
+    },
+  }]);
+
+  assert.deepEqual([...ids], ["20260927_BAL_NYY"]);
+});
+
 test("an ordinary non-final game is not silently classified as a terminal skip", () => {
   const ids = indexTerminalNoOutcomeGameIds("2026-09-22", [{
     gamePk: 999999,
