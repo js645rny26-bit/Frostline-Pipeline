@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DECISION_AUDIT_POSTMORTEM_READ_RANGE,
   classifyPostmortemOutcomeAvailability,
   buildHumanModelAgreementSummary,
   buildReferenceDirectionSeparationSummary,
@@ -19,6 +20,10 @@ import {
 } from "./module17_vehiclePostmortem.js";
 import type { SlateBoardEntry } from "./module11_outputExtraction.js";
 import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
+
+test("vehicle postmortem reads the complete 86-column human comparison-line ledger", () => {
+  assert.equal(DECISION_AUDIT_POSTMORTEM_READ_RANGE, "DECISION_AUDIT_LOG!A1:CH5000");
+});
 
 test("vehicle postmortem preserves Over and Under pushes", () => {
   assert.deepEqual(gradeTicket("OVER", 9, 9), {

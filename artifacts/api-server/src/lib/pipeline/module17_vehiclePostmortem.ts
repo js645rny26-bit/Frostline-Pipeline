@@ -46,6 +46,7 @@ const VEHICLE_LOG_SHEET  = "VEHICLE_LOG";
 const POSTMORTEM_SHEET   = "VEHICLE_POSTMORTEM";
 const OUTCOMES_SHEET     = "SHADOW_OUTCOMES";
 const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
+export const DECISION_AUDIT_POSTMORTEM_READ_RANGE = `${DECISION_AUDIT_SHEET}!A1:CH5000`;
 export const VEHICLE_LOG_COLS = 17;
 const LOG_COLS           = VEHICLE_LOG_COLS;
 const POSTMORTEM_COLS    = 48;
@@ -975,7 +976,7 @@ export async function runPostmortem(
   let decisionAuditRows: unknown[][] = [];
   try {
     const [auditResponse, packetResponse] = await Promise.all([
-      readRange(wbId, `${DECISION_AUDIT_SHEET}!A1:CD5000`),
+      readRange(wbId, DECISION_AUDIT_POSTMORTEM_READ_RANGE),
       readRange(wbId, `${PREGAME_PACKET_HISTORY_SHEET}!${pregamePacketHistoryRange(5000)}`),
     ]);
     decisionAuditRows = (auditResponse.values ?? []) as unknown[][];
