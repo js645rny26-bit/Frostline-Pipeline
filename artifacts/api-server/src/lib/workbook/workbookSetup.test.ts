@@ -28,7 +28,7 @@ test("decision-score columns use numeric rather than percentage formats", () => 
   }
 });
 
-test("normal publish materializes the v79 settlement-research headers", () => {
+test("normal publish materializes the v80 settlement-research headers", () => {
   assert.deepEqual(PREGAME_SCHEMA_MATERIALIZATION_SHEETS, [
     "VEHICLE_POSTMORTEM",
     "GAME_TRUTH_REPLAY_V1",
@@ -43,10 +43,10 @@ test("normal publish materializes the v79 settlement-research headers", () => {
   );
   assert.equal(
     materialized.find(({ sheet }) => sheet === "VEHICLE_POSTMORTEM")?.headers.length,
-    35,
+    48,
   );
   assert.equal(
     materialized.find(({ sheet }) => sheet === "GAME_TRUTH_REPLAY_V1")?.headers.at(-1),
-    "Season_Phase_Tag",
+    "Regulation_Score_Status",
   );
 });

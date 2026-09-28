@@ -265,8 +265,13 @@ import { MODEL_INPUT_CATALOG_HEADER } from "./modelInputCatalog.js";
  *      separated reference/operator market and season-phase research fields.
  *      All additions are observational and have no projection or authorization
  *      consumer.
+ *  v80 (2026-09-28): separates regulation game truth from official ticket
+ *      settlement, preserves human-specific comparison-line provenance, and
+ *      admits official postseason appearances to workload/rest continuity.
+ *      POSTSEASON tagging remains research-only and no forecast, confidence,
+ *      vehicle, CORE, or authorization consumer is added.
  */
-export const WORKBOOK_SCHEMA_VERSION = 79;
+export const WORKBOOK_SCHEMA_VERSION = 80;
 
 export interface ColumnDef {
   name: string;
@@ -1034,6 +1039,13 @@ const GAME_TRUTH_REPLAY_V1_COLUMN_NAMES = [
   "Replay_Status",
   "Settlement_TS",
   "Season_Phase_Tag",
+  "Official_Game_Type",
+  "Regulation_Away_Runs",
+  "Regulation_Home_Runs",
+  "Regulation_Total",
+  "Frozen_Projection_Regulation_Error",
+  "Frozen_Projection_Official_Error",
+  "Regulation_Score_Status",
 ] as const;
 const DISTRIBUTION_WIDTH_REPLAY_V1_COLUMN_NAMES = [
   "Date",
@@ -1910,7 +1922,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         type: "string",
         width: 110,
         filledBy: "MODULE_08",
-        description: "Most recent cutoff-safe regular-season pitching appearance, including a bulk/follower outing.",
+        description: "Most recent cutoff-safe MLB pitching appearance relevant to the current competition state, including regular-season/postseason starter, bulk, follower, or relief work.",
         exampleValue: "2026-07-18",
       },
       {
@@ -1956,7 +1968,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         type: "string",
         width: 110,
         filledBy: "MODULE_08",
-        description: "Most recent cutoff-safe regular-season pitching appearance, including a bulk/follower outing.",
+        description: "Most recent cutoff-safe MLB pitching appearance relevant to the current competition state, including regular-season/postseason starter, bulk, follower, or relief work.",
         exampleValue: "2026-07-17",
       },
       {
@@ -8957,6 +8969,23 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         description: "CANONICAL_PACKET_SNAPSHOT for new valid rows; legacy rows stay blank and are never silently selected when conflicting.",
         exampleValue: "CANONICAL_PACKET_SNAPSHOT",
       },
+      ...diagnosticColumns(
+        [
+          "Official_Game_Type", "Regulation_Away_Runs", "Regulation_Home_Runs",
+          "Regulation_Total", "Regulation_Score_Status", "Went_Extra_Innings",
+        ],
+        ["Regulation_Away_Runs", "Regulation_Home_Runs", "Regulation_Total"],
+        "MODULE_14",
+      ).map((column, offset) => ({
+        ...column,
+        index: 49 + offset,
+        readOnly: true,
+        description: column.name === "Official_Game_Type"
+          ? "Official MLB game type used for research-only season-phase tagging."
+          : column.name === "Regulation_Total"
+            ? "Nine-inning game-truth total. Official Actual_Total remains the ticket-settlement total."
+            : "Additive official settlement evidence; never rewrites the frozen pregame prediction.",
+      })),
     ],
   },
 
@@ -9156,8 +9185,18 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
           "Executable_Market_Provenance_Status", "Model_Operator_Direction_Result",
           "Human_Total_P50", "Human_Point_Error", "Human_Operator_Direction_Result",
           "Human_Allocation_Result", "Human_Mechanism_Grade", "Primary_Miss",
+          "Regulation_Total", "Official_Total", "Model_Regulation_Error",
+          "Model_Official_Error", "Human_Regulation_Error", "Human_Official_Error",
+          "Human_Comparison_Line", "Human_Comparison_Line_Source",
+          "Human_Comparison_Line_TS", "Human_Comparison_Line_Provenance_Status",
+          "Human_Direction_Result", "Reference_Absolute_Separation",
+          "Reference_Separation_Cohort",
         ],
-        ["Reference_Market_Line", "Executable_Market_Line", "Human_Total_P50", "Human_Point_Error"],
+        [
+          "Reference_Market_Line", "Executable_Market_Line", "Human_Total_P50", "Human_Point_Error",
+          "Regulation_Total", "Official_Total", "Model_Regulation_Error", "Model_Official_Error",
+          "Human_Regulation_Error", "Human_Official_Error", "Human_Comparison_Line", "Reference_Absolute_Separation",
+        ],
         "MODULE_17",
       ).map((column, offset) => ({
         ...column,
@@ -10005,6 +10044,47 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         description: "Settlement-only CONFIRMED | PARTIAL | FAILED | UNGRADABLE grade against the immutable pregame human mechanism. Never a projection or decision input.",
         exampleValue: "PARTIAL",
+      },
+      {
+        name: "Human_Comparison_Line",
+        index: 82,
+        type: "number",
+        width: 190,
+        format: "0.0",
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "Exact legitimate pregame line used for the human directional read. Never substituted from the model reference line.",
+        exampleValue: "7.5",
+      },
+      {
+        name: "Human_Comparison_Line_Source",
+        index: 83,
+        type: "string",
+        width: 240,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "Source of the exact line used for the human read.",
+        exampleValue: "OPERATOR_CHAT_PROSPECTIVE",
+      },
+      {
+        name: "Human_Comparison_Line_TS",
+        index: 84,
+        type: "string",
+        width: 220,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "Prospective line timestamp when preserved; blank rather than invented when unavailable.",
+        exampleValue: "2026-09-27T17:30:00.000Z",
+      },
+      {
+        name: "Human_Comparison_Line_Provenance_Status",
+        index: 85,
+        type: "string",
+        width: 330,
+        filledBy: "MODULE_20",
+        readOnly: true,
+        description: "Explicit provenance/completeness status for the human comparison line.",
+        exampleValue: "EXACT_PREGAME_LINE_TS_NOT_PRESERVED",
       },
     ],
   },

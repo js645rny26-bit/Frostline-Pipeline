@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   classifyPostmortemOutcomeAvailability,
   buildHumanModelAgreementSummary,
+  buildReferenceDirectionSeparationSummary,
   groupContiguousVehicleLogUpdates,
   gradePostmortemTicket,
   gradeOperatorDirection,
@@ -71,6 +72,24 @@ test("published vehicle rows remain byte-for-byte immutable on later refresh", (
   assert.deepEqual(published, snapshot);
   assert.equal(result.protectedRows, 1);
   assert.deepEqual(result.newRows, []);
+});
+
+test("directional presentation splits sub-quarter-run edges and keeps Wilson intervals descriptive", () => {
+  const base = {
+    reference_direction_result: "CORRECT",
+    reference_absolute_separation: 0.1,
+  } as PostmortemRow;
+  const rows = [
+    ...Array.from({ length: 4 }, () => ({ ...base })),
+    ...Array.from({ length: 6 }, () => ({ ...base, reference_absolute_separation: 0.5 })),
+    ...Array.from({ length: 4 }, () => ({ ...base, reference_absolute_separation: 0.5, reference_direction_result: "INCORRECT" })),
+  ];
+  const summary = buildReferenceDirectionSeparationSummary(rows);
+  assert.deepEqual([summary.all.correct, summary.all.incorrect], [10, 4]);
+  assert.deepEqual([summary.meaningful.correct, summary.meaningful.incorrect], [6, 4]);
+  assert.deepEqual([summary.all.wilson_low_pct, summary.all.wilson_high_pct], [45.4, 88.3]);
+  assert.deepEqual([summary.meaningful.wilson_low_pct, summary.meaningful.wilson_high_pct], [31.3, 83.2]);
+  assert.equal(summary.status, "DESCRIPTIVE_ONLY_NO_AUTHORIZATION_WEIGHT");
 });
 
 test("postponed games are terminal skips while ordinary missing outcomes remain integrity gaps", () => {
@@ -221,6 +240,25 @@ test("multiple explicitly keyed snapshots select the latest packet deterministic
   assert.deepEqual(parsed.rows, [late]);
 });
 
+test("Sept. 27 HOU-OAK preserves the legitimate pregame direction flip across snapshots", () => {
+  const early = [
+    "2026-09-27", "20260927_HOU_OAK", "HOU", "OAK", "GAME_TOTAL", 8.5,
+    "UNDER", 8.38, -0.12, "NO_CORE", "", "LEAN", 0.5, "2026-09-27T15:53:00.000Z",
+    "2026-09-27T15:53:00.000Z", vehicleSnapshotKey("2026-09-27", "20260927_HOU_OAK", "2026-09-27T15:53:00.000Z"), "CANONICAL_PACKET_SNAPSHOT",
+  ];
+  const frozen = [...early];
+  frozen[6] = "OVER";
+  frozen[7] = 8.62;
+  frozen[8] = 0.12;
+  frozen[13] = "2026-09-27T18:00:00.000Z";
+  frozen[14] = "2026-09-27T18:00:00.000Z";
+  frozen[15] = vehicleSnapshotKey("2026-09-27", "20260927_HOU_OAK", "2026-09-27T18:00:00.000Z");
+  const parsed = selectCanonicalVehicleRows([early, frozen]);
+  assert.equal(early[6], "UNDER");
+  assert.equal(frozen[6], "OVER");
+  assert.deepEqual(parsed.rows, [frozen]);
+});
+
 test("only finalized board-lock states can become immutable vehicle publications", () => {
   const entry = (lock_status: SlateBoardEntry["lock_status"]) => ({ lock_status }) as SlateBoardEntry;
   assert.equal(isFinalizedVehiclePublication(entry("PRE_LOCK")), false);
@@ -230,7 +268,7 @@ test("only finalized board-lock states can become immutable vehicle publications
   assert.equal(isFinalizedVehiclePublication(entry("LOCKED_OUT")), true);
 });
 
-test("postmortem rows match the compact 35-column workbook schema", () => {
+test("postmortem rows match the compact 48-column workbook schema", () => {
   const row: PostmortemRow = {
     date: "2026-08-07",
     game_id: "20260807_OAK_BOS",
@@ -270,7 +308,7 @@ test("postmortem rows match the compact 35-column workbook schema", () => {
   };
 
   const values = postmortemRowToValues(row);
-  assert.equal(values.length, 35);
+  assert.equal(values.length, 48);
   assert.equal(values[4], row.active_vehicle_label);
   assert.equal(values[8], row.packet_projected_total);
   assert.equal(values[18], row.graded_ts);

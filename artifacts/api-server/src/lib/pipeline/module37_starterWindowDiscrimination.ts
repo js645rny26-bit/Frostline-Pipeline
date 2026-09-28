@@ -469,7 +469,12 @@ export function applyObjectivePostmortemGrades(
   const output=gd.map(raw=>{
     const row=Array.from(GAME_TRUTH_REPLAY_HEADERS,header=>val(raw,gi,header)??"");
     const game=text(row[canonicalIndex.get("Game_ID")!]); const packet=packets.get(game); const exact=coverage.get(game);
-    const actualTotal=num(row[canonicalIndex.get("Actual_Total")!]); const totalAbsError=num(row[canonicalIndex.get("Total_Abs_Error")!]);
+    const actualTotal=num(row[canonicalIndex.get("Actual_Total")!]);
+    const regulationErrorPosition=canonicalIndex.get("Frozen_Projection_Regulation_Error");
+    const regulationError=regulationErrorPosition===undefined?null:num(row[regulationErrorPosition]);
+    const totalAbsError=regulationError===null
+      ? num(row[canonicalIndex.get("Total_Abs_Error")!])
+      : Math.abs(regulationError);
     const allocationReversal=text(row[canonicalIndex.get("Allocation_Sign_Reversal")!]);
     if(!packet){set(row,"Objective_Game_Truth_Grade","GAME_TRUTH_PROXY_UNGRADABLE");set(row,"Objective_Phase_Mechanism_Proxy_Grade","PHASE_PROXY_UNGRADABLE");set(row,"Objective_Vehicle_Capture_Grade","UNGRADABLE_NO_FROZEN_PACKET");set(row,"Objective_Authorization_Blocker_Grade","AUTHORIZATION_STATE_UNAVAILABLE");set(row,"Pregame_Causal_Detail_Status","NOT_FROZEN_CAUSAL_DETAIL_UNAVAILABLE");set(row,"Objective_Grade_Derivability_Status","FROZEN_PACKET_UNAVAILABLE");return row;}
     const starterAttack=num(val(packet,pi,"Starter_Attack_Runs"));

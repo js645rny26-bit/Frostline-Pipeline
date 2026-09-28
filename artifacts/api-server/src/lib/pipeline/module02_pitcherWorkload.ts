@@ -9,6 +9,18 @@ import { logger } from "../../lib/logger.js";
 
 const MLB_API = "https://statsapi.mlb.com/api/v1";
 
+/** Official MLB competition game types admitted to cutoff-safe workload history. */
+export const MLB_COMPETITION_GAME_TYPES = ["R", "F", "D", "L", "W", "C", "P"] as const;
+const MLB_COMPETITION_GAME_TYPE_SET = new Set<string>(MLB_COMPETITION_GAME_TYPES);
+
+export function isCompetitionPitchingAppearance(gameType: unknown): boolean {
+  return MLB_COMPETITION_GAME_TYPE_SET.has(String(gameType ?? ""));
+}
+
+export function pitchingGameLogUrl(pitcherId: number, season: string): string {
+  return `${MLB_API}/people/${pitcherId}/stats?stats=gameLog&group=pitching&season=${season}&gameType=${MLB_COMPETITION_GAME_TYPES.join(",")}`;
+}
+
 export interface PitcherRollingStats {
   appearances: number;
   total_pitch_count: number;
@@ -52,8 +64,9 @@ export interface WorkloadResult {
   status: string;
 }
 
-interface GameLogSplit {
+export interface GameLogSplit {
   date: string;
+  gameType?: string;
   game?: { gamePk?: number };
   stat: {
     inningsPitched?: string | number;
@@ -73,8 +86,12 @@ function parseInnings(ip: string | number | undefined): number {
   return full + thirds / 3;
 }
 
-function rollingStats(splits: GameLogSplit[], afterDate: string, beforeOrOnDate: string): PitcherRollingStats {
-  const filtered = splits.filter((s) => s.date > afterDate && s.date <= beforeOrOnDate);
+export function rollingStats(splits: GameLogSplit[], afterDate: string, beforeOrOnDate: string): PitcherRollingStats {
+  const filtered = splits.filter((s) =>
+    isCompetitionPitchingAppearance(s.gameType)
+    && s.date > afterDate
+    && s.date <= beforeOrOnDate,
+  );
   if (filtered.length === 0) {
     return { appearances: 0, total_pitch_count: 0, total_innings: 0, avg_pitches_per_appearance: 0 };
   }
@@ -89,12 +106,12 @@ function rollingStats(splits: GameLogSplit[], afterDate: string, beforeOrOnDate:
   };
 }
 
-function recentAppearances(
+export function recentAppearances(
   splits: GameLogSplit[],
   throughDate: string,
 ): PitcherGameLogAppearance[] {
   return splits
-    .filter((split) => split.date <= throughDate)
+    .filter((split) => isCompetitionPitchingAppearance(split.gameType) && split.date <= throughDate)
     .sort((left, right) => right.date.localeCompare(left.date))
     .map((split) => ({
       date: split.date,
@@ -108,7 +125,7 @@ function recentAppearances(
 
 async function fetchSinglePitcher(pitcherId: number, endDate: string): Promise<PitcherWorkloadData> {
   const season = endDate.slice(0, 4);
-  const url = `${MLB_API}/people/${pitcherId}/stats?stats=gameLog&group=pitching&season=${season}`;
+  const url = pitchingGameLogUrl(pitcherId, season);
 
   try {
     const controller = new AbortController();

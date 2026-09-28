@@ -23,6 +23,12 @@ import {
 } from "./module24_postgameDiagnostics.js";
 import { WORKBOOK_SCHEMA } from "../workbook/workbookSchema.js";
 
+test("official postseason game type drives a research-only POSTSEASON tag without calendar inference", () => {
+  assert.equal(deriveSeasonPhaseTag("2026-10-02", "D"), "POSTSEASON");
+  assert.equal(deriveSeasonPhaseTag("2026-10-02", "R"), "NORMAL_REGULAR_SEASON");
+  assert.equal(deriveSeasonPhaseTag("2026-09-27", "R"), "SEPTEMBER_EXPANDED_ROSTER");
+});
+
 const packet: FrozenPacketDiagnosticInput = {
   date: "2026-08-25",
   game_id: "20260825_AAA_BBB",
@@ -369,7 +375,7 @@ test("Module 24 headers stay exactly aligned with the generated workbook schema"
     );
   assert.deepEqual(expected("STARTER_OUTCOME_DIAGNOSTICS"), STARTER_OUTCOME_HEADERS);
   assert.equal(expected("CONVERSION_SETTLEMENT_DIAGNOSTICS")?.[0], "Date");
-  assert.equal(expected("GAME_TRUTH_REPLAY_V1")?.at(-1), "Season_Phase_Tag");
+  assert.equal(expected("GAME_TRUTH_REPLAY_V1")?.at(-1), "Regulation_Score_Status");
 });
 
 test("season phase is shadow-only and Sept. 26 structural cases stay date-qualified", () => {
@@ -491,4 +497,23 @@ test("game truth replay joins frozen allocation with starter and bullpen timing 
     String(at("Away_Starter_Path")),
     /WORKLOAD=SHORT_OF_EXPECTED_IP/,
   );
+});
+
+test("game truth replay grades extra-inning game shape against regulation while retaining official error", () => {
+  const row = buildGameTruthReplay({ ...packet, projected_total: 8.67 }, {
+    actual_away_runs: 5,
+    actual_home_runs: 1,
+    actual_total: 6,
+    regulation_away_runs: 1,
+    regulation_home_runs: 1,
+    regulation_total: 2,
+    regulation_score_status: "REGULATION_RECONSTRUCTED_FROM_LINESCORE",
+    official_game_type: "R",
+    settlement_ts: "2026-09-28T04:00:00.000Z",
+  }, deGromDetail);
+  const at = (name: (typeof GAME_TRUTH_REPLAY_HEADERS)[number]) => row[GAME_TRUTH_REPLAY_HEADERS.indexOf(name)];
+  assert.equal(at("Regulation_Total"), 2);
+  assert.equal(at("Frozen_Projection_Regulation_Error"), 6.67);
+  assert.equal(at("Frozen_Projection_Official_Error"), 2.67);
+  assert.equal(at("Actual_Total"), 6);
 });

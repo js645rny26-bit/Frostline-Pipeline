@@ -4,6 +4,7 @@ import {
   FROZEN_VEHICLE_REQUIRED_FROM_DATE,
   COLLISION_CALIBRATION_REPORT_HEADER,
   OUTCOMES_HEADER,
+  deriveRegulationScore,
   classifyFrozenVehicleGap,
   collisionCalibrationValues,
   excludeSupersededUnsuffixedDoubleheaderSnapshots,
@@ -32,6 +33,41 @@ import { parseGamePitcherProvenance } from "./module14_pitcherProvenance.js";
 import { PREGAME_PACKET_HISTORY_HEADERS } from "./module20a_pregamePacket.js";
 
 const vehicle = { market_line: 8.5, direction: "OVER", projected_total: 9.11 };
+
+test("LAD-SFG extra innings preserves regulation 2 separately from official 6", () => {
+  const score = deriveRegulationScore({
+    currentInning: 10,
+    innings: [
+      ...Array.from({ length: 9 }, (_, index) => ({
+        num: index + 1,
+        away: { runs: index === 0 ? 1 : 0 },
+        home: { runs: index === 4 ? 1 : 0 },
+      })),
+      { num: 10, away: { runs: 4 }, home: { runs: 0 } },
+    ],
+  }, 5, 1);
+  assert.deepEqual(score, {
+    away: 1,
+    home: 1,
+    total: 2,
+    status: "REGULATION_RECONSTRUCTED_FROM_LINESCORE",
+    went_extra_innings: true,
+  });
+  assert.equal(Number((8.67 - score.total!).toFixed(2)), 6.67);
+  assert.equal(Number((8.9 - score.total!).toFixed(2)), 6.9);
+});
+
+test("MIA-CHC extra-inning proof case does not let the official total overwrite regulation truth", () => {
+  const innings = Array.from({ length: 12 }, (_, index) => ({
+    num: index + 1,
+    away: { runs: index === 1 ? 2 : index === 11 ? 6 : 0 },
+    home: { runs: index === 3 ? 2 : 0 },
+  }));
+  const score = deriveRegulationScore({ currentInning: 12, innings }, 8, 2);
+  assert.equal(score.total, 4);
+  assert.equal(score.went_extra_innings, true);
+  assert.equal(8 + 2, 10);
+});
 
 test("settlement excludes a superseded unsuffixed snapshot when canonical G1 and G2 history exists", () => {
   const base = ["2026-09-23", "20260923_TOR_BAL", "TOR", "BAL"];

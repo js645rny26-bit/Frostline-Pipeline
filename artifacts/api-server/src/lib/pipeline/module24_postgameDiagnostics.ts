@@ -318,6 +318,13 @@ export const GAME_TRUTH_REPLAY_HEADERS = [
   "Replay_Status",
   "Settlement_TS",
   "Season_Phase_Tag",
+  "Official_Game_Type",
+  "Regulation_Away_Runs",
+  "Regulation_Home_Runs",
+  "Regulation_Total",
+  "Frozen_Projection_Regulation_Error",
+  "Frozen_Projection_Official_Error",
+  "Regulation_Score_Status",
 ] as const;
 
 export type SeasonPhaseTag = "NORMAL_REGULAR_SEASON" | "SEPTEMBER_EXPANDED_ROSTER" | "POSTSEASON";
@@ -729,6 +736,8 @@ export function buildAllocationDiagnostic(
   outcome: Pick<
     SettlementRow,
     "actual_away_runs" | "actual_home_runs" | "actual_total" | "settlement_ts"
+    | "official_game_type" | "regulation_away_runs" | "regulation_home_runs"
+    | "regulation_total" | "regulation_score_status"
   >,
 ): unknown[] {
   const projectedMargin = round2(
@@ -1830,6 +1839,8 @@ export function buildGameTruthReplay(
   outcome: Pick<
     SettlementRow,
     "actual_away_runs" | "actual_home_runs" | "actual_total" | "settlement_ts"
+    | "official_game_type" | "regulation_away_runs" | "regulation_home_runs"
+    | "regulation_total" | "regulation_score_status"
   >,
   detail: PostgameGameDetail,
 ): unknown[] {
@@ -1895,6 +1906,10 @@ export function buildGameTruthReplay(
       : allocationReversal === "NOT_COMPARABLE"
         ? "ALLOCATION_NOT_COMPARABLE"
         : `NO_ALLOCATION_REVERSAL__${totals.primary}`;
+  const regulationError = outcome.regulation_total === null || outcome.regulation_total === undefined
+    ? null
+    : round2(packet.projected_total - outcome.regulation_total);
+  const officialError = round2(packet.projected_total - outcome.actual_total);
   return [
     packet.date,
     packet.game_id,
@@ -1949,7 +1964,14 @@ export function buildGameTruthReplay(
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
     "FROZEN_PACKET_AND_FINAL_VERIFIED",
     outcome.settlement_ts,
-    deriveSeasonPhaseTag(packet.date),
+    deriveSeasonPhaseTag(packet.date, outcome.official_game_type),
+    outcome.official_game_type ?? "",
+    outcome.regulation_away_runs ?? "",
+    outcome.regulation_home_runs ?? "",
+    outcome.regulation_total ?? "",
+    regulationError ?? "",
+    officialError,
+    outcome.regulation_score_status ?? "",
   ];
 }
 
@@ -2392,7 +2414,7 @@ export async function runPostgameDiagnostics(
       { range: `${CONVERSION_SHEET}!A1:AZ10000`, dataRowsOnly: true },
       { range: `${GAME_TRUTH_REPLAY_SHEET}!A1:AZ10000`, dataRowsOnly: true },
       { range: `${LADDER_SETTLEMENT_SHEET}!A1:T10000`, dataRowsOnly: true },
-      { range: `${OUTCOMES_SHEET}!A1:AW10000`, dataRowsOnly: true },
+      { range: `${OUTCOMES_SHEET}!A1:BC10000`, dataRowsOnly: true },
     ]);
     const [
       existingAllocation,

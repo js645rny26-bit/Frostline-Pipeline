@@ -2033,6 +2033,12 @@ export async function runDailySettlement(
         agreement: { n: 0, model_directional_accuracy_pct: null, human_directional_accuracy_pct: null, model_mae: null, human_mae: null, model_bias: null, human_bias: null },
         disagreement: { n: 0, model_directional_accuracy_pct: null, human_directional_accuracy_pct: null, model_mae: null, human_mae: null, model_bias: null, human_bias: null },
       },
+      reference_direction_separation_summary: {
+        status: "DESCRIPTIVE_ONLY_NO_AUTHORIZATION_WEIGHT",
+        threshold: 0.25,
+        all: { correct: 0, incorrect: 0, n: 0, wilson_low_pct: null, wilson_high_pct: null },
+        meaningful: { correct: 0, incorrect: 0, n: 0, wilson_low_pct: null, wilson_high_pct: null },
+      },
       rows: [], errors: [msg],
     };
   });

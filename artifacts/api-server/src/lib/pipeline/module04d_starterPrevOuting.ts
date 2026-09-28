@@ -1,7 +1,8 @@
 /**
  * Module 04d: Starter Previous Outing
  * For each probable starting pitcher on today's slate:
- *   1. Fetch their MLB Stats API game log → find the most recent regular-season appearance
+ *   1. Fetch their MLB Stats API game log → find the most recent cutoff-safe MLB
+ *      competition appearance (regular season or postseason)
  *      (gamePk, date, IP, pitch count)
  *   2. Fetch Baseball Savant /gf?game_pk=X → extract pitch array → compute innings
  *      pitched per inning and derive a stress flag
@@ -11,8 +12,8 @@
 
 import { logger } from "../../lib/logger.js";
 import type { GameScheduleResult } from "./module01_mlbStatsApi.js";
+import { isCompetitionPitchingAppearance, pitchingGameLogUrl } from "./module02_pitcherWorkload.js";
 
-const MLB_API    = "https://statsapi.mlb.com/api/v1";
 const SAVANT_GF  = "https://baseballsavant.mlb.com/gf";
 const CONCURRENCY = 5;
 
@@ -70,7 +71,7 @@ function makeSummary(outing: Omit<StarterOuting, "summary">): string {
   return `${outing.ip_display} IP | ${outing.pitch_count}P | ${outing.days_rest}d rest | ${outing.stress_flag}`;
 }
 
-// ─── Step 1: MLB Stats API game log → find last regular-season start ──────────
+// ─── Step 1: MLB Stats API game log → find last competition appearance ───────
 
 export interface GameLogEntry {
   date:     string;
@@ -98,7 +99,7 @@ export function selectLatestPreviousPitchingAppearance(
 ): GameLogEntry | null {
   const last = splits
     .filter((split) =>
-      split.gameType === "R"
+      isCompetitionPitchingAppearance(split.gameType)
       && split.date !== undefined
       && split.date < beforeDate
       && split.game?.gamePk !== undefined,
@@ -118,7 +119,7 @@ export function selectLatestPreviousPitchingAppearance(
 
 async function fetchLastAppearance(pitcherId: number, beforeDate: string): Promise<GameLogEntry | null> {
   const season = beforeDate.slice(0, 4);
-  const url    = `${MLB_API}/people/${pitcherId}/stats?stats=gameLog&group=pitching&season=${season}`;
+  const url    = pitchingGameLogUrl(pitcherId, season);
 
   try {
     const ctrl  = new AbortController();

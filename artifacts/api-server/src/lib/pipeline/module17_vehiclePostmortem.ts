@@ -48,7 +48,7 @@ const OUTCOMES_SHEET     = "SHADOW_OUTCOMES";
 const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
 export const VEHICLE_LOG_COLS = 17;
 const LOG_COLS           = VEHICLE_LOG_COLS;
-const POSTMORTEM_COLS    = 35;
+const POSTMORTEM_COLS    = 48;
 
 export interface ContiguousVehicleLogUpdate {
   start_data_row_index: number;
@@ -78,6 +78,12 @@ export const POSTMORTEM_HEADER: string[] = [
   "Executable_Market_Provenance_Status", "Model_Operator_Direction_Result",
   "Human_Total_P50", "Human_Point_Error", "Human_Operator_Direction_Result",
   "Human_Allocation_Result", "Human_Mechanism_Grade", "Primary_Miss",
+  "Regulation_Total", "Official_Total", "Model_Regulation_Error",
+  "Model_Official_Error", "Human_Regulation_Error", "Human_Official_Error",
+  "Human_Comparison_Line", "Human_Comparison_Line_Source",
+  "Human_Comparison_Line_TS", "Human_Comparison_Line_Provenance_Status",
+  "Human_Direction_Result", "Reference_Absolute_Separation",
+  "Reference_Separation_Cohort",
 ];
 
 // ─── VEHICLE_LOG column indices (0-based) ──────────────────────────────────────
@@ -113,6 +119,7 @@ const O_PRIMARY_MARKET_SOURCE = 40;
 const O_PRIMARY_MARKET_STATUS = 41;
 const O_PRIMARY_DIRECTIONAL_RESULT = 42;
 const O_PRIMARY_MARKET_PROVENANCE = 47;
+const O_REGULATION_TOTAL = 52;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -175,6 +182,26 @@ export interface PostmortemRow {
   human_allocation_result: string;
   human_mechanism_grade: string;
   primary_miss: string;
+  regulation_total?: number | null;
+  official_total?: number;
+  model_regulation_error?: number | null;
+  model_official_error?: number;
+  human_regulation_error?: number | null;
+  human_official_error?: number | null;
+  human_comparison_line?: number | null;
+  human_comparison_line_source?: string;
+  human_comparison_line_ts?: string;
+  human_comparison_line_provenance_status?: string;
+  human_direction_result?: string;
+  reference_absolute_separation?: number | null;
+  reference_separation_cohort?: string;
+}
+
+export interface ReferenceDirectionSeparationSummary {
+  status: "DESCRIPTIVE_ONLY_NO_AUTHORIZATION_WEIGHT";
+  threshold: 0.25;
+  all: { correct: number; incorrect: number; n: number; wilson_low_pct: number | null; wilson_high_pct: number | null };
+  meaningful: { correct: number; incorrect: number; n: number; wilson_low_pct: number | null; wilson_high_pct: number | null };
 }
 
 export interface AgreementCohortMetrics {
@@ -208,6 +235,7 @@ export interface PostmortemResult {
   /** % of GAME_TOTAL vehicles where projection direction matched outcome, across all decisions */
   thesis_correct_pct: number | null;
   human_model_agreement_summary: HumanModelAgreementSummary;
+  reference_direction_separation_summary: ReferenceDirectionSeparationSummary;
   rows: PostmortemRow[];
   errors: string[];
 }
@@ -266,7 +294,39 @@ export function postmortemRowToValues(row: PostmortemRow): unknown[] {
     row.executable_market_provenance_status, row.model_operator_direction_result,
     row.human_total_p50 ?? "", row.human_point_error ?? "", row.human_operator_direction_result,
     row.human_allocation_result, row.human_mechanism_grade, row.primary_miss,
+    row.regulation_total ?? "", row.official_total ?? row.actual_total,
+    row.model_regulation_error ?? "", row.model_official_error ?? row.signed_error,
+    row.human_regulation_error ?? "", row.human_official_error ?? "",
+    row.human_comparison_line ?? "", row.human_comparison_line_source ?? "",
+    row.human_comparison_line_ts ?? "", row.human_comparison_line_provenance_status ?? "",
+    row.human_direction_result ?? row.human_operator_direction_result, row.reference_absolute_separation ?? "",
+    row.reference_separation_cohort ?? "",
   ];
+}
+
+function wilson95(correct: number, total: number): [number | null, number | null] {
+  if (total <= 0) return [null, null];
+  const z = 1.959963984540054;
+  const p = correct / total;
+  const denominator = 1 + (z * z) / total;
+  const center = (p + (z * z) / (2 * total)) / denominator;
+  const margin = z * Math.sqrt((p * (1 - p) + (z * z) / (4 * total)) / total) / denominator;
+  return [Number((100 * (center - margin)).toFixed(1)), Number((100 * (center + margin)).toFixed(1))];
+}
+
+export function buildReferenceDirectionSeparationSummary(rows: readonly PostmortemRow[]): ReferenceDirectionSeparationSummary {
+  const summarize = (selected: readonly PostmortemRow[]) => {
+    const gradable = selected.filter((row) => ["CORRECT", "INCORRECT"].includes(row.reference_direction_result));
+    const correct = gradable.filter((row) => row.reference_direction_result === "CORRECT").length;
+    const [wilson_low_pct, wilson_high_pct] = wilson95(correct, gradable.length);
+    return { correct, incorrect: gradable.length - correct, n: gradable.length, wilson_low_pct, wilson_high_pct };
+  };
+  return {
+    status: "DESCRIPTIVE_ONLY_NO_AUTHORIZATION_WEIGHT",
+    threshold: 0.25,
+    all: summarize(rows),
+    meaningful: summarize(rows.filter((row) => (row.reference_absolute_separation ?? -1) >= 0.25)),
+  };
 }
 
 /**
@@ -281,6 +341,7 @@ function gameIdDateMatchesDate(gameId: string, date: string): boolean {
 
 export interface CanonicalOutcomeMarketGrade {
   actual_total: number;
+  regulation_total?: number | null;
   reference_market_line: number | null;
   reference_market_source: string;
   reference_market_ts: string;
@@ -871,12 +932,14 @@ export async function runPostmortem(
   const terminalNoOutcomeGameIds = new Set(options.terminalNoOutcomeGameIds ?? []);
   const errors: string[] = [];
   const emptyAgreement = buildHumanModelAgreementSummary([]);
+  const emptySeparation = buildReferenceDirectionSeparationSummary([]);
 
   const empty = (status: PostmortemResult["status"]): PostmortemResult => ({
     status, graded_date: date, graded_ts: ts,
     games_graded: 0, games_no_outcome: 0,
     core_bets: 0, core_covered: 0, core_missed: 0, core_push: 0,
-    thesis_correct_pct: null, human_model_agreement_summary: emptyAgreement, rows: [], errors,
+    thesis_correct_pct: null, human_model_agreement_summary: emptyAgreement,
+    reference_direction_separation_summary: emptySeparation, rows: [], errors,
   });
 
   logger.info({ date }, "MODULE_17: Vehicle postmortem starting");
@@ -948,13 +1011,14 @@ export async function runPostmortem(
   type OutcomeData = CanonicalOutcomeMarketGrade;
   const outcomesMap = new Map<string, OutcomeData>();
   try {
-    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:AW5000`);
+    const resp = await readRange(wbId, `${OUTCOMES_SHEET}!A1:BC5000`);
     const all  = (resp.values ?? []) as string[][];
     for (const r of all.slice(1)) {
       const gid = r[O_GAME_ID] ?? "";
       if (!gid) continue;
       outcomesMap.set(gid, {
         actual_total: parseFloat(r[O_ACTUAL]  ?? "0") || 0,
+        regulation_total: finiteNumber(r[O_REGULATION_TOTAL]),
         reference_market_line: r[O_REFERENCE_MARKET_LINE]
           ? parseFloat(r[O_REFERENCE_MARKET_LINE]!)
           : null,
@@ -995,7 +1059,7 @@ export async function runPostmortem(
   const existingPmIndex = new Map<string, number>();
   let existingPmRows: unknown[][] = [];
   try {
-      const resp = await readRange(wbId, `${POSTMORTEM_SHEET}!A1:AI5000`);
+      const resp = await readRange(wbId, `${POSTMORTEM_SHEET}!A1:AV5000`);
     const all  = (resp.values ?? []) as unknown[][];
     existingPmRows = all.slice(1);
     existingPmRows.forEach((r, index) => {
@@ -1053,7 +1117,9 @@ export async function runPostmortem(
     const { market_line: marketLine, market_status: marketStatus, thesis_correct, ticket_result } = canonicalGrade;
 
     const projected = parseFloat(r[L_PROJ_TOTAL] ?? "0") || 0;
-    const signedError = parseFloat((projected - outcome.actual_total).toFixed(2));
+    const gameTruthTotal = outcome.regulation_total ?? outcome.actual_total;
+    const signedError = parseFloat((projected - gameTruthTotal).toFixed(2));
+    const officialError = parseFloat((projected - outcome.actual_total).toFixed(2));
     const decision: PostmortemRow["decision"] = finalDecision === "CORE" ? "BET" : "PASS";
     const truthGrade = thesis_correct === null
       ? "TRUTH_NOT_EVALUABLE"
@@ -1086,8 +1152,15 @@ export async function runPostmortem(
       ? "EXECUTABLE_OPERATOR_LINE_NOT_PERSISTED"
       : "EXECUTABLE_OPERATOR_LINE_PERSISTED";
     const modelOperatorGrade = gradeOperatorDirection(projected, outcome.executable_market_line, outcome.actual_total);
-    const humanOperatorGrade = gradeOperatorDirection(humanTotal, outcome.executable_market_line, outcome.actual_total);
+    const humanComparisonLine = auditRow ? finiteNumber(tableValue(auditRow, auditHeader, "Human_Comparison_Line")) : null;
+    const humanComparisonLineSource = auditRow ? tableValue(auditRow, auditHeader, "Human_Comparison_Line_Source") : "";
+    const humanComparisonLineTs = auditRow ? tableValue(auditRow, auditHeader, "Human_Comparison_Line_TS") : "";
+    const humanComparisonLineProvenance = auditRow ? tableValue(auditRow, auditHeader, "Human_Comparison_Line_Provenance_Status") : "";
+    const humanOperatorGrade = gradeOperatorDirection(humanTotal, humanComparisonLine, outcome.actual_total);
     const referenceDirectionResult = gradeOperatorDirection(projected, outcome.reference_market_line, outcome.actual_total);
+    const referenceAbsoluteSeparation = outcome.reference_market_line === null
+      ? null
+      : Number(Math.abs(projected - outcome.reference_market_line).toFixed(3));
     const mechanismGrade = auditRow && humanProspective
       ? tableValue(auditRow, auditHeader, "Human_Mechanism_Grade") || "UNGRADABLE"
       : "UNGRADABLE";
@@ -1136,11 +1209,28 @@ export async function runPostmortem(
       executable_market_provenance_status: operatorProvenanceStatus,
       model_operator_direction_result: modelOperatorGrade,
       human_total_p50: humanTotal,
-      human_point_error: humanTotal === null ? null : Number((humanTotal - outcome.actual_total).toFixed(2)),
+      human_point_error: humanTotal === null ? null : Number((humanTotal - gameTruthTotal).toFixed(2)),
       human_operator_direction_result: humanOperatorGrade,
       human_allocation_result: humanAllocationResult,
       human_mechanism_grade: mechanismGrade,
       primary_miss: primaryMiss,
+      regulation_total: outcome.regulation_total ?? null,
+      official_total: outcome.actual_total,
+      model_regulation_error: outcome.regulation_total === null || outcome.regulation_total === undefined ? null : signedError,
+      model_official_error: officialError,
+      human_regulation_error: humanTotal === null || outcome.regulation_total === null || outcome.regulation_total === undefined
+        ? null
+        : Number((humanTotal - outcome.regulation_total).toFixed(2)),
+      human_official_error: humanTotal === null ? null : Number((humanTotal - outcome.actual_total).toFixed(2)),
+      human_comparison_line: humanComparisonLine,
+      human_comparison_line_source: humanComparisonLineSource,
+      human_comparison_line_ts: humanComparisonLineTs,
+      human_comparison_line_provenance_status: humanComparisonLineProvenance,
+      human_direction_result: humanOperatorGrade,
+      reference_absolute_separation: referenceAbsoluteSeparation,
+      reference_separation_cohort: referenceAbsoluteSeparation === null
+        ? "UNGRADABLE"
+        : referenceAbsoluteSeparation < 0.25 ? "LT_0_25" : "GE_0_25",
     });
   }
 
@@ -1168,6 +1258,7 @@ export async function runPostmortem(
           reference_line: row.reference_market_line,
         }],
   ));
+  const separationSummary = buildReferenceDirectionSeparationSummary(graded);
 
   // ── Write VEHICLE_POSTMORTEM (append) ──
   if (write && graded.length > 0) {
@@ -1185,7 +1276,7 @@ export async function runPostmortem(
         }
       }
       const sheetRows = [POSTMORTEM_HEADER, ...existingPmRows];
-      await writeRange(wbId, `${POSTMORTEM_SHEET}!A1:AI${sheetRows.length}`, sheetRows);
+      await writeRange(wbId, `${POSTMORTEM_SHEET}!A1:AV${sheetRows.length}`, sheetRows);
       logger.info({ written: sheetRows.length }, "MODULE_17: Vehicle postmortem written");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1217,6 +1308,7 @@ export async function runPostmortem(
     core_push:          corePush,
     thesis_correct_pct: thesisCorrectPct,
     human_model_agreement_summary: agreementSummary,
+    reference_direction_separation_summary: separationSummary,
     rows:               graded,
     errors,
   };

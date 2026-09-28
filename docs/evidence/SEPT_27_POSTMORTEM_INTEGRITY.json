@@ -1,0 +1,59 @@
+{
+  "date": "2026-09-27",
+  "status": "IMMUTABLE_USER_SUPPLIED_POSTMORTEM_EVIDENCE",
+  "directional_reference_summary": {
+    "all_eligible": { "correct": 10, "incorrect": 4, "wilson_95_pct": [45.4, 88.3] },
+    "separation_ge_0_25": { "correct": 6, "incorrect": 4, "wilson_95_pct": [31.3, 83.2] },
+    "interpretation": "DESCRIPTIVE_ONLY_NO_AUTHORIZATION_WEIGHT"
+  },
+  "human_exact_line_records": [
+    {
+      "game_id": "20260927_TBR_PHI",
+      "human_p50": 6.5,
+      "comparison_line": 6.5,
+      "comparison_line_source": "OPERATOR_CHAT_PROSPECTIVE",
+      "comparison_line_ts": null,
+      "provenance_status": "EXACT_PREGAME_LINE_TS_NOT_PRESERVED",
+      "direction_result": "NO_CALL"
+    },
+    {
+      "game_id": "20260927_CHC_BOS",
+      "human_p50": 7.5,
+      "comparison_line": 7.5,
+      "comparison_line_source": "OPERATOR_CHAT_PROSPECTIVE",
+      "comparison_line_ts": null,
+      "provenance_status": "EXACT_PREGAME_LINE_TS_NOT_PRESERVED",
+      "direction_result": "NO_CALL"
+    }
+  ],
+  "snapshot_direction_flip": {
+    "game_id": "20260927_HOU_OAK",
+    "early_snapshot": { "board_time": "11:53", "p50": 8.38, "line": 8.5, "direction": "UNDER" },
+    "frozen_final": { "p50": 8.62, "line": 8.5, "direction": "OVER" },
+    "status": "LEGITIMATE_PREGAME_DIRECTION_FLIP_PRESERVE_BOTH_SNAPSHOTS"
+  },
+  "extra_innings": {
+    "game_id": "20260927_LAD_SFG",
+    "regulation_score": "1-1",
+    "regulation_total": 2,
+    "official_score": "5-1",
+    "official_total": 6,
+    "frozen_model_p50": 8.67,
+    "human_p50": 8.9,
+    "model_regulation_error": 6.67,
+    "human_regulation_error": 6.9,
+    "human_mechanism_grade": "FAILED"
+  },
+  "single_slate_rank_correlation": {
+    "spearman_rho": -0.235,
+    "n": 14,
+    "status": "DESCRIPTIVE_OBSERVATION_NOT_STATISTICALLY_DISTINGUISHABLE_FROM_ZERO"
+  },
+  "carrier_gap_note": {
+    "top_four_correct": 3,
+    "top_four_n": 4,
+    "other_correct": 2,
+    "other_n": 5,
+    "status": "OFFSEASON_RESEARCH_HINT_ONLY_NO_ACTIVE_CONSUMER"
+  }
+}

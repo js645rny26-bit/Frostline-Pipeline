@@ -41,7 +41,7 @@ const STARTER_SURVIVAL_HISTORY_SHEET = "STARTER_SURVIVAL_CALIBRATION_HISTORY";
 const STARTER_SURVIVAL_REPORT_SHEET = "STARTER_SURVIVAL_CALIBRATION_REPORT";
 const STARTER_SURVIVAL_V2_HISTORY_SHEET = "STARTER_SURVIVAL_V2_CALIBRATION_HISTORY";
 const STARTER_SURVIVAL_V2_REPORT_SHEET = "STARTER_SURVIVAL_V2_CALIBRATION_REPORT";
-const OUTCOMES_COLS = 49; // A-AW
+const OUTCOMES_COLS = 55; // A-BC
 
 export const LOW_CENTER_CALIBRATION_REPORT_HEADER = [
   "Date", "Game_ID", "Away_Team", "Home_Team", "Scheduled_First_Pitch",
@@ -208,6 +208,10 @@ export const OUTCOMES_HEADER = [
   // silently erased by reference fallback grading.
   "Reference_Market_Convention", "Reference_Market_Representation_Status",
   "Synthetic_Normalized_Reference_Line", "Primary_Market_Provenance", "Market_Grade_Notes",
+  // v80 preserves official ticket settlement while giving game-truth diagnosis
+  // a separate nine-inning target for games decided in extras.
+  "Official_Game_Type", "Regulation_Away_Runs", "Regulation_Home_Runs",
+  "Regulation_Total", "Regulation_Score_Status", "Went_Extra_Innings",
 ];
 
 export const PROJECTION_REPLAY_HEADER = [
@@ -509,6 +513,12 @@ export interface SettlementRow {
   /** Official final home score. Used by DECISION_AUDIT_LOG allocation grading. */
   actual_home_runs: number;
   actual_total: number;
+  official_game_type?: string;
+  regulation_away_runs?: number | null;
+  regulation_home_runs?: number | null;
+  regulation_total?: number | null;
+  regulation_score_status?: string;
+  went_extra_innings?: boolean;
   error: number;
   abs_error: number;
   park_source_status: string;
@@ -587,6 +597,15 @@ export interface MlbGame {
   gamePk?: number;
   officialDate?: string;
   gameNumber?: number;
+  gameType?: string;
+  linescore?: {
+    currentInning?: number;
+    innings?: Array<{
+      num?: number;
+      away?: { runs?: number };
+      home?: { runs?: number };
+    }>;
+  };
   status?: {
     abstractGameState?: string;
     codedGameState?: string;
@@ -604,7 +623,52 @@ interface FinalGame {
   actual_away_runs: number;
   actual_home_runs: number;
   actual_total: number;
+  official_game_type?: string;
+  regulation_away_runs?: number | null;
+  regulation_home_runs?: number | null;
+  regulation_total?: number | null;
+  regulation_score_status?: string;
+  went_extra_innings?: boolean;
   provenance: GamePitcherProvenance;
+}
+
+export interface RegulationScore {
+  away: number | null;
+  home: number | null;
+  total: number | null;
+  status: "REGULATION_EQUALS_OFFICIAL" | "REGULATION_RECONSTRUCTED_FROM_LINESCORE" | "REGULATION_SCORE_UNAVAILABLE";
+  went_extra_innings: boolean;
+}
+
+export function deriveRegulationScore(
+  linescore: MlbGame["linescore"],
+  officialAway: number,
+  officialHome: number,
+): RegulationScore {
+  const innings = linescore?.innings ?? [];
+  const wentExtra = innings.some((inning) => (inning.num ?? 0) > 9) || (linescore?.currentInning ?? 0) > 9;
+  if (!wentExtra) {
+    return {
+      away: officialAway,
+      home: officialHome,
+      total: officialAway + officialHome,
+      status: "REGULATION_EQUALS_OFFICIAL",
+      went_extra_innings: false,
+    };
+  }
+  const regulation = innings.filter((inning) => (inning.num ?? 0) >= 1 && (inning.num ?? 0) <= 9);
+  if (regulation.length === 0) {
+    return { away: null, home: null, total: null, status: "REGULATION_SCORE_UNAVAILABLE", went_extra_innings: true };
+  }
+  const away = regulation.reduce((sum, inning) => sum + (inning.away?.runs ?? 0), 0);
+  const home = regulation.reduce((sum, inning) => sum + (inning.home?.runs ?? 0), 0);
+  return {
+    away,
+    home,
+    total: away + home,
+    status: "REGULATION_RECONSTRUCTED_FROM_LINESCORE",
+    went_extra_innings: true,
+  };
 }
 
 interface SettlementSchedule {
@@ -683,6 +747,12 @@ export function indexFinalGamesByCanonicalGameId(
       actual_away_runs: game.actual_away_runs,
       actual_home_runs: game.actual_home_runs,
       actual_total: game.actual_total,
+      official_game_type: game.official_game_type ?? "",
+      regulation_away_runs: game.regulation_away_runs ?? null,
+      regulation_home_runs: game.regulation_home_runs ?? null,
+      regulation_total: game.regulation_total ?? null,
+      regulation_score_status: game.regulation_score_status ?? "",
+      went_extra_innings: game.went_extra_innings ?? false,
       provenance: game.provenance,
     });
   }
@@ -738,7 +808,7 @@ export function indexTerminalNoOutcomeGameIds(
 
 async function fetchSettlementSchedule(date: string, warnings: string[]): Promise<SettlementSchedule> {
   const schedule = await fetchJson(
-    `${MLB_API}/schedule?sportId=1&date=${date}&gameType=R&hydrate=linescore`,
+    `${MLB_API}/schedule?sportId=1&date=${date}&hydrate=linescore`,
   ) as { dates?: Array<{ games?: MlbGame[] }> };
 
   const scheduleGames = (schedule.dates ?? []).flatMap((day) => day.games ?? []);
@@ -753,6 +823,7 @@ async function fetchSettlementSchedule(date: string, warnings: string[]): Promis
       const home = teamNameToAbbr(game.teams?.home?.team?.name ?? "");
       if (awayScore === undefined || homeScore === undefined || !away || !home || !game.gamePk) continue;
       const officialDate = game.officialDate ?? date;
+      const regulation = deriveRegulationScore(game.linescore, awayScore, homeScore);
       finals.push({
         legacy_game_id: `${officialDate.replace(/-/g, "")}_${away}_${home}`,
         game_pk: game.gamePk,
@@ -760,6 +831,12 @@ async function fetchSettlementSchedule(date: string, warnings: string[]): Promis
         actual_away_runs: awayScore,
         actual_home_runs: homeScore,
         actual_total: awayScore + homeScore,
+        official_game_type: String(game.gameType ?? ""),
+        regulation_away_runs: regulation.away,
+        regulation_home_runs: regulation.home,
+        regulation_total: regulation.total,
+        regulation_score_status: regulation.status,
+        went_extra_innings: regulation.went_extra_innings,
       });
   }
 
@@ -804,6 +881,12 @@ export function settlementRowToValues(row: SettlementRow): unknown[] {
     row.synthetic_normalized_reference_line ?? "",
     row.primary_market_provenance ?? "",
     row.market_grade_notes ?? "",
+    row.official_game_type ?? "",
+    row.regulation_away_runs ?? "",
+    row.regulation_home_runs ?? "",
+    row.regulation_total ?? "",
+    row.regulation_score_status ?? "",
+    row.went_extra_innings === undefined ? "" : row.went_extra_innings,
   ];
 }
 
@@ -1770,7 +1853,7 @@ export async function runShadowSettlement(
   const existingByGame = new Map<string, Existing>();
   let existingRows: unknown[][] = [];
   try {
-    const response = await readRange(wbId, `${OUTCOMES_SHEET}!A1:AR5000`);
+    const response = await readRange(wbId, `${OUTCOMES_SHEET}!A1:BC5000`);
     const all = (response.values ?? []) as unknown[][];
     existingRows = all.slice(1).map((row) => normalizeOutcomeValues(row, vehiclesByGame.get(String(row[1] ?? ""))));
     existingRows.forEach((row, index) => {
@@ -1879,6 +1962,12 @@ export async function runShadowSettlement(
       actual_away_runs: final.actual_away_runs,
       actual_home_runs: final.actual_home_runs,
       actual_total: final.actual_total,
+      official_game_type: final.official_game_type,
+      regulation_away_runs: final.regulation_away_runs,
+      regulation_home_runs: final.regulation_home_runs,
+      regulation_total: final.regulation_total,
+      regulation_score_status: final.regulation_score_status,
+      went_extra_innings: final.went_extra_innings,
       error,
       abs_error: Number.parseFloat(Math.abs(error).toFixed(2)),
       park_source_status: String(existing?.values[8] || history[H_PARK_SRC] || ""),

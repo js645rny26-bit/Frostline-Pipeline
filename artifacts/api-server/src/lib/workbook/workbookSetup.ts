@@ -464,6 +464,7 @@ export async function repairWorkbookSchemaReference(
         "v77 (2026-09-26): DECISION_AUDIT_LOG gains minimal canonical human-truth provenance and hash fields for the eight Sept. 25 Prediction Contract records. Settlement grades that manual layer only after the canonical freeze, allocation, and SHA-256 checks pass; active projections and decisions remain unchanged. " +
         "v78 (2026-09-26): DECISION_AUDIT_LOG distinguishes canonical research freezes from un-hashed pregame and post-opportunity chat evidence, and preserves optional mechanism-specificity/entity metadata. Noncanonical evidence remains research-only and no active consumer is added.",
         "v79 (2026-09-27): compact postmortem presentation separates reference and executable market grades; DECISION_AUDIT_LOG preserves prospective workbook exposure and BASEBALL_ONLY human context; GAME_TRUTH_REPLAY_V1 adds a shadow-only season-phase tag. No projection or authorization consumer is added.",
+        "v80 (2026-09-28): postseason continuity admits official competition appearances after Game 1; regulation game truth is preserved separately from official settlement; human directional grades require their own exact comparison line. All additions are audit/research-only.",
     ],
     [
       "Workbook_Purpose",

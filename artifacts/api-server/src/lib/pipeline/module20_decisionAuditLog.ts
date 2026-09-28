@@ -42,7 +42,7 @@ import {
 } from "./module20b_predictionContract.js";
 
 export const DECISION_AUDIT_SHEET = "DECISION_AUDIT_LOG";
-export const DECISION_AUDIT_COLS = 82;
+export const DECISION_AUDIT_COLS = 86;
 /** August 10 is the first live slate whose pregame publish includes Module 20. */
 export const DECISION_AUDIT_REQUIRED_FROM_DATE = "2026-08-10";
 
@@ -81,6 +81,8 @@ export const DECISION_AUDIT_HEADER = [
   "Human_Truth_Evidence_Status", "Mechanism_Specificity_Flag",
   "Mechanism_Entity_Reference", "Entity_Reference_Status",
   "Workbook_Exposure_Status", "Human_Context_Mode", "Human_Mechanism_Grade",
+  "Human_Comparison_Line", "Human_Comparison_Line_Source",
+  "Human_Comparison_Line_TS", "Human_Comparison_Line_Provenance_Status",
 ] as const;
 
 export type DecisionAuditStatus = "OPEN" | "FROZEN" | "SETTLED" | "AUDIT_GAP";
@@ -213,7 +215,44 @@ export const DECISION_AUDIT_INDEX = {
   WORKBOOK_EXPOSURE_STATUS: 79,
   HUMAN_CONTEXT_MODE: 80,
   HUMAN_MECHANISM_GRADE: 81,
+  HUMAN_COMPARISON_LINE: 82,
+  HUMAN_COMPARISON_LINE_SOURCE: 83,
+  HUMAN_COMPARISON_LINE_TS: 84,
+  HUMAN_COMPARISON_LINE_PROVENANCE_STATUS: 85,
 } as const;
+
+const SEPT27_POSTMORTEM_EVIDENCE = {
+  "20260927_TBR_PHI": {
+    line: 6.5,
+    source: "OPERATOR_CHAT_PROSPECTIVE",
+    provenance: "EXACT_PREGAME_LINE_TS_NOT_PRESERVED",
+  },
+  "20260927_CHC_BOS": {
+    line: 7.5,
+    source: "OPERATOR_CHAT_PROSPECTIVE",
+    provenance: "EXACT_PREGAME_LINE_TS_NOT_PRESERVED",
+  },
+} as const;
+
+/** Add only supplied Sept. 27 postmortem metadata; never invent timestamps. */
+export function applySept27PostmortemEvidence(rows: unknown[][]): unknown[][] {
+  return rows.map((raw) => {
+    const row = padRow(raw);
+    if (String(row[DECISION_AUDIT_INDEX.DATE] ?? "") !== "2026-09-27") return row;
+    const gameId = String(row[DECISION_AUDIT_INDEX.GAME_ID] ?? "");
+    const evidence = SEPT27_POSTMORTEM_EVIDENCE[gameId as keyof typeof SEPT27_POSTMORTEM_EVIDENCE];
+    if (evidence) {
+      row[DECISION_AUDIT_INDEX.HUMAN_COMPARISON_LINE] = evidence.line;
+      row[DECISION_AUDIT_INDEX.HUMAN_COMPARISON_LINE_SOURCE] = evidence.source;
+      row[DECISION_AUDIT_INDEX.HUMAN_COMPARISON_LINE_TS] = "";
+      row[DECISION_AUDIT_INDEX.HUMAN_COMPARISON_LINE_PROVENANCE_STATUS] = evidence.provenance;
+    }
+    if (gameId === "20260927_LAD_SFG") {
+      row[DECISION_AUDIT_INDEX.HUMAN_MECHANISM_GRADE] = "FAILED";
+    }
+    return row;
+  });
+}
 
 export interface DecisionAuditPregameInput {
   date: string;
@@ -1043,6 +1082,17 @@ function gradeAuditMarketTruth(
   return grade.outcome === "WIN" ? "CORRECT" : "INCORRECT";
 }
 
+export function gradeHumanTruthAgainstComparisonLine(
+  humanP50: number | null,
+  comparisonLine: number | null,
+  actualTotal: number,
+): TruthGrade {
+  if (humanP50 === null || comparisonLine === null) return "NOT_GRADABLE";
+  const delta = Number((humanP50 - comparisonLine).toFixed(3));
+  if (Math.abs(delta) < 0.0005) return "PUSH";
+  return gradeAuditTruth(delta > 0 ? "OVER" : "UNDER", comparisonLine, actualTotal);
+}
+
 function ticketResult(
   row: unknown[],
   actualTotal: number,
@@ -1322,14 +1372,13 @@ export function settleDecisionAuditRows(
     const canonicalClaimed = canonicalManualGate.status !== "NOT_CANONICAL";
     const canonicalManualEligible = canonicalManualGate.status === "PASS";
     const manualEligible = !canonicalClaimed || canonicalManualEligible;
-    const manualGradeDirection = canonicalManualEligible
-      ? canonicalManualGate.direction
-      : manualDirection(current[DECISION_AUDIT_INDEX.MANUAL_TRUTH]);
-    const manualTruth = isAuditGap || !manualEligible ? "NOT_GRADABLE" : gradeAuditMarketTruth(
-      manualGradeDirection,
-      marketContext,
-      outcome.actual_total,
-    );
+    const manualTruth = isAuditGap || !manualEligible
+      ? "NOT_GRADABLE"
+      : gradeHumanTruthAgainstComparisonLine(
+          numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_TOTAL]),
+          numberOrNull(current[DECISION_AUDIT_INDEX.HUMAN_COMPARISON_LINE]),
+          outcome.actual_total,
+        );
     const modelAllocationError = isAuditGap ? null : allocationError(
       numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_AWAY]),
       numberOrNull(current[DECISION_AUDIT_INDEX.FROZEN_HOME]),
@@ -1790,7 +1839,9 @@ export async function settleDecisionAuditLog(
   try {
     await ensureDecisionAuditSheet(workbookId);
     const existingBeforeMaterialization = await readAuditRows(workbookId);
-    let existing = existingBeforeMaterialization;
+    let existing = date === "2026-09-27"
+      ? applySept27PostmortemEvidence(existingBeforeMaterialization)
+      : existingBeforeMaterialization;
     let humanTruthMaterialization: CanonicalHumanTruthMaterializationSummary | undefined;
     let forceCanonicalManualRegradeGameIds: ReadonlySet<string> = new Set();
     if (date === SEPT25_HUMAN_TRUTH_DATE) {

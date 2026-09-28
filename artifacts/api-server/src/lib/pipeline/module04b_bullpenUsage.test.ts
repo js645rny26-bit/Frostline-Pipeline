@@ -62,3 +62,19 @@ test("Starting Nine parser maps the Athletics report identity to the canonical O
   const rows = parseMlbStartingNineBullpenHtml(athleticsFixture, "2026-08-27", "2026-08-27T12:00:00.000Z");
   assert.equal(rows[0]?.team_abbr, "OAK");
 });
+
+test("postseason Game 1 reliever workload is visible in the Game 2 pregame availability state", () => {
+  const game2Fixture = REPORT_FIXTURE.replace(
+    "<td>-</td><td>18</td><td>15</td><td>-</td><td>20</td>",
+    "<td>31</td><td>-</td><td>-</td><td>-</td><td>-</td>",
+  );
+  const rows = parseMlbStartingNineBullpenHtml(
+    game2Fixture,
+    "2026-10-02",
+    "2026-10-02T14:00:00.000Z",
+  );
+  assert.equal(rows[0]?.pitches_yesterday, 31);
+  assert.equal(rows[0]?.last_outing_date, "2026-10-01");
+  assert.equal(rows[0]?.days_rest, 1);
+  assert.match(rows[0]?.notes ?? "", /Availability: AVAILABLE; L5 pitches: 31/);
+});

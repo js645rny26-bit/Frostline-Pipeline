@@ -11,8 +11,10 @@ import {
   classifyDecisionAuditOutcomeGapMessages,
   classifyMissingDecisionAuditRows,
   markDecisionAuditOutcomeGaps,
+  applySept27PostmortemEvidence,
   evaluateCanonicalManualTruthGate,
   gradeAuditTruth,
+  gradeHumanTruthAgainstComparisonLine,
   materializeCanonicalHumanTruthRows,
   settleDecisionAuditRows,
   upsertDecisionAuditPregameRows,
@@ -32,6 +34,26 @@ test("Allocation_Winner compares allocation error, not higher-scoring-side ident
   assert.equal(chooseAllocationWinner(2, 2, "CORRECT", "CORRECT"), "TIE");
   assert.equal(chooseAllocationWinner(1, 5, "INCORRECT", "INCORRECT"), "BOTH_WRONG");
   assert.equal(chooseAllocationWinner(null, 1, "CORRECT", "CORRECT"), "NOT_COMPARABLE");
+});
+
+test("human exact-line ties are NO_CALL/PUSH and missing comparison lines are ungradable", () => {
+  assert.equal(gradeHumanTruthAgainstComparisonLine(6.5, 6.5, 9), "PUSH");
+  assert.equal(gradeHumanTruthAgainstComparisonLine(7.5, 7.5, 4), "PUSH");
+  assert.equal(gradeHumanTruthAgainstComparisonLine(8.1, null, 6), "NOT_GRADABLE");
+});
+
+test("Sept. 27 supplied human-line evidence never fabricates timestamps and marks LAD-SFG mechanism failed", () => {
+  const rows = ["20260927_TBR_PHI", "20260927_CHC_BOS", "20260927_LAD_SFG"].map((gameId) => {
+    const row = Array(DECISION_AUDIT_COLS).fill("");
+    row[C.DATE] = "2026-09-27";
+    row[C.GAME_ID] = gameId;
+    return row;
+  });
+  const repaired = applySept27PostmortemEvidence(rows);
+  assert.equal(repaired[0]?.[C.HUMAN_COMPARISON_LINE], 6.5);
+  assert.equal(repaired[1]?.[C.HUMAN_COMPARISON_LINE], 7.5);
+  assert.equal(repaired[0]?.[C.HUMAN_COMPARISON_LINE_TS], "");
+  assert.equal(repaired[2]?.[C.HUMAN_MECHANISM_GRADE], "FAILED");
 });
 
 function pregame(overrides: Partial<DecisionAuditPregameInput> = {}): DecisionAuditPregameInput {
@@ -99,9 +121,9 @@ function outcome(overrides: Partial<SettlementRow> = {}): SettlementRow {
   };
 }
 
-test("decision audit schema has the exact 82-column settlement and three-class human-evidence contract", () => {
+test("decision audit schema has the exact 86-column settlement and human comparison-line contract", () => {
   assert.equal(DECISION_AUDIT_HEADER.length, DECISION_AUDIT_COLS);
-  assert.equal(DECISION_AUDIT_COLS, 82);
+  assert.equal(DECISION_AUDIT_COLS, 86);
   assert.equal(DECISION_AUDIT_HEADER[0], "Date");
   assert.equal(DECISION_AUDIT_HEADER[49], "Graded_TS");
   assert.equal(DECISION_AUDIT_HEADER[50], "Model_Total_Error");
@@ -113,6 +135,8 @@ test("decision audit schema has the exact 82-column settlement and three-class h
   assert.equal(DECISION_AUDIT_HEADER[79], "Workbook_Exposure_Status");
   assert.equal(DECISION_AUDIT_HEADER[80], "Human_Context_Mode");
   assert.equal(DECISION_AUDIT_HEADER[81], "Human_Mechanism_Grade");
+  assert.equal(DECISION_AUDIT_HEADER[82], "Human_Comparison_Line");
+  assert.equal(DECISION_AUDIT_HEADER[85], "Human_Comparison_Line_Provenance_Status");
   assert.equal(DECISION_AUDIT_HEADER[73], "Human_Record_Hash");
   assert.equal(DECISION_AUDIT_HEADER[74], "Distribution_Total_Mean_At_Human_Read");
   assert.equal(DECISION_AUDIT_HEADER[75], "Human_Truth_Evidence_Status");
@@ -610,6 +634,8 @@ test("a winning passed vehicle does not become QUESTIONABLE_PASS", () => {
     model_blocker: "UNRESOLVED_STARTER",
   })], TS1);
   pre.rows[0]![C.MANUAL_TRUTH] = "UNDER";
+  pre.rows[0]![C.MANUAL_TOTAL] = 8.0;
+  pre.rows[0]![C.HUMAN_COMPARISON_LINE] = 8.5;
   pre.rows[0]![C.FINAL_REASONING_SOURCE] = "MODEL_WITH_MANUAL_DOWNGRADE";
   pre.rows[0]![C.FINAL_DECISION] = "NO CORE";
   pre.rows[0]![C.FINAL_BLOCKER] = "UNRESOLVED_STARTER";
@@ -663,6 +689,8 @@ test("August 11 CHW-CIN keeps the loss while recording bullpen and extra-inning 
 test("manual override grades the authorized manual direction without rewriting model truth", () => {
   const pre = upsertDecisionAuditPregameRows([], [pregame({ lock_status: "LOCKED_IN" })], TS1);
   pre.rows[0]![C.MANUAL_TRUTH] = "UNDER suppression";
+  pre.rows[0]![C.MANUAL_TOTAL] = 8.0;
+  pre.rows[0]![C.HUMAN_COMPARISON_LINE] = 8.5;
   pre.rows[0]![C.FINAL_REASONING_SOURCE] = "MANUAL_OVERRIDE";
   pre.rows[0]![C.FINAL_DECISION] = "CORE";
   pre.rows[0]![C.FINAL_BLOCKER] = "";

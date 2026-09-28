@@ -16,7 +16,7 @@ The workbook reading map is [WORKBOOK_ROADMAP.md](./WORKBOOK_ROADMAP.md). The in
   executable/operator grading separate. Missing executable evidence makes the
   operator grade `UNGRADABLE`; it never triggers a silent reference fallback.
 
-**Schema v65 - updated 2026-09-15 - board authorization finalizes 30 minutes before first pitch; the independent pregame packet stays refreshable through legitimate pre-first-pitch runs and freezes only at first pitch. Settlement-only slate-size and operator postmortem audits are research-only and have no production consumer. Exact fields live in SCHEMA_REFERENCE.**
+**Schema v80 - updated 2026-09-28 - board authorization finalizes 30 minutes before first pitch; the independent pregame packet stays refreshable through legitimate pre-first-pitch runs and freezes only at first pitch. Settlement-only postseason, regulation/official, slate-size, and operator postmortem audits are research-only and have no production consumer. Exact fields live in SCHEMA_REFERENCE.**
 
 ## Daily sequence (all times ET)
 
@@ -94,7 +94,15 @@ has no confidence or authorization bonus.
 
 ## Warning triage
 
-- **Benign, ignore:** validation FAIL "Game count below minimum" on small slates (fewer than 13 games); umpires blank before noon; platoon blank before lineups post.
+- **Benign, descriptive only:** `[ATYPICAL_SLATE_SIZE]` warning on 1–4 game postseason slates; zero CORE is valid and the pipeline never manufactures a wager because the slate is small. Umpires may be blank before noon and platoon detail may be blank before lineups post.
+
+### Postseason operator continuity checklist
+
+- Did late-season clinch/rest behavior materially distort recent team form relative to today's confirmed lineup? Record the answer as human context only; do not alter active recent-form math.
+- Is today's expected pitching deployment materially different from the pitcher's recent workload history? Check explicit evidence for a shorter leash, opener, piggyback/bulk follower, multi-inning relief, aggressive leverage concentration, or rest-driven availability change. Never apply a generic postseason-leash assumption.
+- For Game 2 and later, verify Game 1 starter/reliever work appears in `Away/Home_Last_Outing_Date`, recent workload history, and bullpen pitch availability before trusting the read.
+- Confirm the official MLB game type supports `Season_Phase_Tag=POSTSEASON`; the tag is research-only and cannot change projection, confidence, vehicle, CORE/NO CORE, or authorization.
+- Keep literal executable Hard Rock evidence separate from the standing reference-market research line. Missing executable evidence makes the operator grade `UNGRADABLE`; it does not block projection research.
 - **Investigate:** RUN_LOG Pipeline_Status of `failure` or `partial_success` (a sheet write went wrong — check the run logs); any module logging status `failure`; weather fallback on an outdoor slate; umpires still blank after ~2 PM ET; platoon still blank near first pitch; ODDS_HISTORY not growing (odds quota exhausted).
 - **Rule:** blanks always mean "feed unavailable" — the pipeline never fabricates a value.
 
