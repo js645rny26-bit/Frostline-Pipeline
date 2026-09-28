@@ -223,16 +223,30 @@ export const DECISION_AUDIT_INDEX = {
 
 const SEPT27_POSTMORTEM_EVIDENCE = {
   "20260927_TBR_PHI": {
+    humanP50: 6.5,
     line: 6.5,
     source: "OPERATOR_CHAT_PROSPECTIVE",
     provenance: "EXACT_PREGAME_LINE_TS_NOT_PRESERVED",
   },
   "20260927_CHC_BOS": {
+    humanP50: 7.5,
     line: 7.5,
     source: "OPERATOR_CHAT_PROSPECTIVE",
     provenance: "EXACT_PREGAME_LINE_TS_NOT_PRESERVED",
   },
 } as const;
+const SEPT27_HUMAN_P50_GAME_IDS = new Set([
+  "20260927_TBR_PHI",
+  "20260927_CHC_BOS",
+  "20260927_LAD_SFG",
+]);
+
+function isSept27ProspectiveChatEvidence(row: unknown[]): boolean {
+  return String(row[DECISION_AUDIT_INDEX.DATE] ?? "") === "2026-09-27"
+    && SEPT27_HUMAN_P50_GAME_IDS.has(String(row[DECISION_AUDIT_INDEX.GAME_ID] ?? ""))
+    && String(row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS] ?? "") === "CHAT_RECORDED_PREGAME_UNHASHED"
+    && String(row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] ?? "") === "NO_CANONICAL_PREGAME_FREEZE";
+}
 
 /** Add only supplied Sept. 27 postmortem metadata; never invent timestamps. */
 export function applySept27PostmortemEvidence(rows: unknown[][]): unknown[][] {
@@ -242,12 +256,19 @@ export function applySept27PostmortemEvidence(rows: unknown[][]): unknown[][] {
     const gameId = String(row[DECISION_AUDIT_INDEX.GAME_ID] ?? "");
     const evidence = SEPT27_POSTMORTEM_EVIDENCE[gameId as keyof typeof SEPT27_POSTMORTEM_EVIDENCE];
     if (evidence) {
+      row[DECISION_AUDIT_INDEX.MANUAL_TOTAL] = evidence.humanP50;
+      row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] = "NO_CANONICAL_PREGAME_FREEZE";
+      row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS] = "CHAT_RECORDED_PREGAME_UNHASHED";
+      row[DECISION_AUDIT_INDEX.MARKET_EXPOSURE_STATUS] = "MARKET_EXPOSED";
       row[DECISION_AUDIT_INDEX.HUMAN_COMPARISON_LINE] = evidence.line;
       row[DECISION_AUDIT_INDEX.HUMAN_COMPARISON_LINE_SOURCE] = evidence.source;
       row[DECISION_AUDIT_INDEX.HUMAN_COMPARISON_LINE_TS] = "";
       row[DECISION_AUDIT_INDEX.HUMAN_COMPARISON_LINE_PROVENANCE_STATUS] = evidence.provenance;
     }
     if (gameId === "20260927_LAD_SFG") {
+      row[DECISION_AUDIT_INDEX.MANUAL_TOTAL] = 8.9;
+      row[DECISION_AUDIT_INDEX.HUMAN_FREEZE_STATUS] = "NO_CANONICAL_PREGAME_FREEZE";
+      row[DECISION_AUDIT_INDEX.HUMAN_TRUTH_EVIDENCE_STATUS] = "CHAT_RECORDED_PREGAME_UNHASHED";
       row[DECISION_AUDIT_INDEX.HUMAN_MECHANISM_GRADE] = "FAILED";
     }
     return row;
@@ -1333,7 +1354,10 @@ export function settleDecisionAuditRows(
   existingRows: unknown[][],
   outcomes: SettlementRow[],
   ts: string,
-  options: { forceCanonicalManualRegradeGameIds?: ReadonlySet<string> } = {},
+  options: {
+    forceCanonicalManualRegradeGameIds?: ReadonlySet<string>;
+    forceManualEvidenceRegradeGameIds?: ReadonlySet<string>;
+  } = {},
 ): RowMutationResult {
   const deduped = dedupeRows(existingRows);
   const rows = deduped.rows;
@@ -1349,7 +1373,51 @@ export function settleDecisionAuditRows(
     if (position === undefined) continue;
     const current = padRow(rows[position]!);
     const forceCanonicalManualRegrade = options.forceCanonicalManualRegradeGameIds?.has(outcome.game_id) ?? false;
-    if (String(current[DECISION_AUDIT_INDEX.GRADED_TS] ?? "").trim() && !forceCanonicalManualRegrade) {
+    const forceManualEvidenceRegrade = options.forceManualEvidenceRegradeGameIds?.has(outcome.game_id) ?? false;
+    if (String(current[DECISION_AUDIT_INDEX.GRADED_TS] ?? "").trim()
+      && !forceCanonicalManualRegrade
+      && !forceManualEvidenceRegrade) {
+      rowsSettled++;
+      continue;
+    }
+
+    if (String(current[DECISION_AUDIT_INDEX.GRADED_TS] ?? "").trim() && forceManualEvidenceRegrade) {
+      const canonicalManualGate = evaluateCanonicalManualTruthGate(current);
+      const manualEligible = canonicalManualGate.status === "NOT_CANONICAL"
+        || canonicalManualGate.status === "PASS"
+        || isSept27ProspectiveChatEvidence(current);
+      const manualTruth = manualEligible
+        ? gradeHumanTruthAgainstComparisonLine(
+            numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_TOTAL]),
+            numberOrNull(current[DECISION_AUDIT_INDEX.HUMAN_COMPARISON_LINE]),
+            outcome.actual_total,
+          )
+        : "NOT_GRADABLE";
+      const manualAway = manualEligible ? numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_AWAY]) : null;
+      const manualHome = manualEligible ? numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_HOME]) : null;
+      const manualTotal = manualEligible ? numberOrNull(current[DECISION_AUDIT_INDEX.MANUAL_TOTAL]) : null;
+      const manualAllocationError = allocationError(
+        manualAway, manualHome, outcome.actual_away_runs, outcome.actual_home_runs,
+      );
+      const modelTruth = String(current[DECISION_AUDIT_INDEX.MODEL_TRUTH_GRADE] ?? "NOT_GRADABLE") as TruthGrade;
+      const modelAllocationError = numberOrNull(current[DECISION_AUDIT_INDEX.MODEL_ALLOCATION_ERROR]);
+      const ticket = String(current[DECISION_AUDIT_INDEX.TICKET_RESULT] ?? "NO_WAGER") as AuditTicketResult;
+      current[DECISION_AUDIT_INDEX.MANUAL_TRUTH_GRADE] = manualTruth;
+      current[DECISION_AUDIT_INDEX.MANUAL_ALLOCATION_ERROR] = manualAllocationError ?? "";
+      current[DECISION_AUDIT_INDEX.ALLOCATION_WINNER] = chooseAllocationWinner(
+        modelAllocationError, manualAllocationError, modelTruth, manualTruth,
+      );
+      current[DECISION_AUDIT_INDEX.OUTCOME_TAG] = outcomeTag(modelTruth, manualTruth, ticket);
+      current[DECISION_AUDIT_INDEX.MANUAL_TOTAL_ERROR] = signedError(manualTotal, outcome.actual_total) ?? "";
+      current[DECISION_AUDIT_INDEX.MANUAL_AWAY_ERROR] = signedError(manualAway, outcome.actual_away_runs) ?? "";
+      current[DECISION_AUDIT_INDEX.MANUAL_HOME_ERROR] = signedError(manualHome, outcome.actual_home_runs) ?? "";
+      current[DECISION_AUDIT_INDEX.MANUAL_MARGIN_ERROR] = manualAway === null || manualHome === null
+        ? "" : round2((manualAway - manualHome) - (outcome.actual_away_runs - outcome.actual_home_runs));
+      current[DECISION_AUDIT_INDEX.MANUAL_WINNER_RESULT] = winnerResult(
+        manualAway, manualHome, outcome.actual_away_runs, outcome.actual_home_runs,
+      );
+      rows[position] = current;
+      rowsUpdated++;
       rowsSettled++;
       continue;
     }
@@ -1371,7 +1439,9 @@ export function settleDecisionAuditRows(
     const canonicalManualGate = evaluateCanonicalManualTruthGate(current);
     const canonicalClaimed = canonicalManualGate.status !== "NOT_CANONICAL";
     const canonicalManualEligible = canonicalManualGate.status === "PASS";
-    const manualEligible = !canonicalClaimed || canonicalManualEligible;
+    const manualEligible = !canonicalClaimed
+      || canonicalManualEligible
+      || isSept27ProspectiveChatEvidence(current);
     const manualTruth = isAuditGap || !manualEligible
       ? "NOT_GRADABLE"
       : gradeHumanTruthAgainstComparisonLine(
@@ -1844,6 +1914,9 @@ export async function settleDecisionAuditLog(
       : existingBeforeMaterialization;
     let humanTruthMaterialization: CanonicalHumanTruthMaterializationSummary | undefined;
     let forceCanonicalManualRegradeGameIds: ReadonlySet<string> = new Set();
+    const forceManualEvidenceRegradeGameIds: ReadonlySet<string> = date === "2026-09-27"
+      ? new Set(["20260927_TBR_PHI", "20260927_CHC_BOS", "20260927_LAD_SFG"])
+      : new Set();
     if (date === SEPT25_HUMAN_TRUTH_DATE) {
       let sourcePath = options.canonicalHumanTruthEvidencePath
         ?? resolve(process.cwd(), SEPT25_HUMAN_TRUTH_EVIDENCE_PATH);
@@ -1934,6 +2007,7 @@ export async function settleDecisionAuditLog(
     }
     const mutation = settleDecisionAuditRows(existing, outcomes, new Date().toISOString(), {
       forceCanonicalManualRegradeGameIds,
+      forceManualEvidenceRegradeGameIds,
     });
     const expectedKeys = new Set(outcomes.map((outcome) => rowKey(outcome.date, outcome.game_id)));
     const existingKeys = new Set(existing.map((row) => rowKey(

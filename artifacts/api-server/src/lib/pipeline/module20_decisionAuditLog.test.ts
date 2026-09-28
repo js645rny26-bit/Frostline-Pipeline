@@ -42,7 +42,7 @@ test("human exact-line ties are NO_CALL/PUSH and missing comparison lines are un
   assert.equal(gradeHumanTruthAgainstComparisonLine(8.1, null, 6), "NOT_GRADABLE");
 });
 
-test("Sept. 27 supplied human-line evidence never fabricates timestamps and marks LAD-SFG mechanism failed", () => {
+test("Sept. 27 supplied human evidence preserves exact-line NO_CALLs and LAD-SFG regulation truth without fabricating timestamps", () => {
   const rows = ["20260927_TBR_PHI", "20260927_CHC_BOS", "20260927_LAD_SFG"].map((gameId) => {
     const row = Array(DECISION_AUDIT_COLS).fill("");
     row[C.DATE] = "2026-09-27";
@@ -50,10 +50,48 @@ test("Sept. 27 supplied human-line evidence never fabricates timestamps and mark
     return row;
   });
   const repaired = applySept27PostmortemEvidence(rows);
+  assert.equal(repaired[0]?.[C.MANUAL_TOTAL], 6.5);
+  assert.equal(repaired[1]?.[C.MANUAL_TOTAL], 7.5);
+  assert.equal(repaired[2]?.[C.MANUAL_TOTAL], 8.9);
   assert.equal(repaired[0]?.[C.HUMAN_COMPARISON_LINE], 6.5);
   assert.equal(repaired[1]?.[C.HUMAN_COMPARISON_LINE], 7.5);
   assert.equal(repaired[0]?.[C.HUMAN_COMPARISON_LINE_TS], "");
+  assert.equal(repaired[0]?.[C.HUMAN_FREEZE_STATUS], "NO_CANONICAL_PREGAME_FREEZE");
+  assert.equal(repaired[0]?.[C.HUMAN_TRUTH_EVIDENCE_STATUS], "CHAT_RECORDED_PREGAME_UNHASHED");
+  assert.equal(repaired[0]?.[C.MARKET_EXPOSURE_STATUS], "MARKET_EXPOSED");
+  assert.equal(repaired[2]?.[C.HUMAN_FREEZE_STATUS], "NO_CANONICAL_PREGAME_FREEZE");
   assert.equal(repaired[2]?.[C.HUMAN_MECHANISM_GRADE], "FAILED");
+});
+
+test("Sept. 27 supplied human evidence can regrade only manual fields on an already-settled row", () => {
+  const base = upsertDecisionAuditPregameRows([], [pregame({
+    date: "2026-09-27",
+    game_id: "20260927_TBR_PHI",
+    lock_status: "LOCKED_IN",
+  })], TS1);
+  const first = settleDecisionAuditRows(base.rows, [outcome({
+    date: "2026-09-27",
+    game_id: "20260927_TBR_PHI",
+    actual_total: 10,
+  })], TS3);
+  const before = first.rows[0]!.slice();
+  const repaired = applySept27PostmortemEvidence(first.rows);
+  const second = settleDecisionAuditRows(repaired, [outcome({
+    date: "2026-09-27",
+    game_id: "20260927_TBR_PHI",
+    actual_total: 10,
+  })], "2026-09-28T15:00:00.000Z", {
+    forceManualEvidenceRegradeGameIds: new Set(["20260927_TBR_PHI"]),
+  });
+  const after = second.rows[0]!;
+
+  assert.equal(after[C.MANUAL_TOTAL], 6.5);
+  assert.equal(after[C.MANUAL_TRUTH_GRADE], "PUSH");
+  assert.equal(after[C.MANUAL_TOTAL_ERROR], -3.5);
+  assert.equal(after[C.GRADED_TS], before[C.GRADED_TS], "manual-only repair must preserve original grading time");
+  assert.deepEqual(after.slice(0, 17), before.slice(0, 17), "manual-only repair must not touch frozen model evidence");
+  assert.equal(after[C.ACTUAL_TOTAL], before[C.ACTUAL_TOTAL]);
+  assert.equal(after[C.MODEL_TOTAL_ERROR], before[C.MODEL_TOTAL_ERROR]);
 });
 
 function pregame(overrides: Partial<DecisionAuditPregameInput> = {}): DecisionAuditPregameInput {
