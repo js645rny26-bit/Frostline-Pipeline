@@ -147,6 +147,33 @@ function isBlank(v: unknown): boolean {
   return v === null || v === undefined || v === "";
 }
 
+export interface PregameLineLockState {
+  locked: boolean;
+  value: unknown;
+  stale_pregame_lock_cleared: boolean;
+}
+
+/**
+ * Pregame_Line_Locked_TS is written only when a game reaches LIVE/FINAL.
+ * A nonblank legacy value on a still-mutable PREGAME row is therefore stale
+ * state, not executable-market provenance. Clear it so the rolling pregame
+ * snapshot can refresh; protected/started rows are restored by the scoped
+ * publication merge and remain immutable.
+ */
+export function reconcilePregameLineLock(
+  phase: "PREGAME" | "LIVE" | "FINAL",
+  value: unknown,
+): PregameLineLockState {
+  if (phase === "PREGAME" && !isBlank(value)) {
+    return { locked: false, value: null, stale_pregame_lock_cleared: true };
+  }
+  return {
+    locked: !isBlank(value),
+    value,
+    stale_pregame_lock_cleared: false,
+  };
+}
+
 /**
  * Market representation sanitation for an OPEN full-game total only. Once a
  * game is LIVE/FINAL its stored line is historical pregame evidence and must
@@ -233,7 +260,16 @@ export async function seedSlateInput(
         // EXISTING: refresh model fields, preserve operator fields
         const row = existingByGameId.get(gameId)!;
         const phase = deriveMarketPhase(game.game_status.abstractGameState);
-        const alreadyFrozen = !isBlank(row[COL_LINE_LOCKED_TS]);
+        const priorLineLockedTs = row[COL_LINE_LOCKED_TS];
+        const lockState = reconcilePregameLineLock(phase, priorLineLockedTs);
+        row[COL_LINE_LOCKED_TS] = lockState.value;
+        const alreadyFrozen = lockState.locked;
+        if (lockState.stale_pregame_lock_cleared) {
+          logger.warn(
+            { gameId, staleLockedTs: priorLineLockedTs },
+            "MODULE_10: Cleared stale pregame line-lock timestamp from mutable game",
+          );
+        }
 
         // Refresh model fields (indices 5–13)
         modelValues.forEach((v, i) => { row[5 + i] = v; });
