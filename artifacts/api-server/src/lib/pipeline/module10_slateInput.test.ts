@@ -6,7 +6,7 @@ import { reconcilePregameLineLock } from "./module10_slateInput.js";
 test("mutable pregame rows clear stale historical line-lock timestamps", () => {
   assert.deepEqual(
     reconcilePregameLineLock("PREGAME", "2026-08-04T04:58:30.861Z"),
-    { locked: false, value: null, stale_pregame_lock_cleared: true },
+    { locked: false, value: "", stale_pregame_lock_cleared: true },
   );
 });
 

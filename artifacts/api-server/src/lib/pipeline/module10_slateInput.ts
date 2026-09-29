@@ -165,7 +165,9 @@ export function reconcilePregameLineLock(
   value: unknown,
 ): PregameLineLockState {
   if (phase === "PREGAME" && !isBlank(value)) {
-    return { locked: false, value: null, stale_pregame_lock_cleared: true };
+    // Sheets values.update skips JSON nulls and would leave the old cell in
+    // place. An explicit empty string clears the existing value.
+    return { locked: false, value: "", stale_pregame_lock_cleared: true };
   }
   return {
     locked: !isBlank(value),
