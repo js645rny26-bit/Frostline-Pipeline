@@ -50,3 +50,27 @@ test("normal publish materializes the v80 settlement-research headers", () => {
     "Regulation_Score_Status",
   );
 });
+
+test("v80 regulation evidence is owned by SHADOW_OUTCOMES, not VEHICLE_LOG", () => {
+  const regulationFields = [
+    "Official_Game_Type",
+    "Regulation_Away_Runs",
+    "Regulation_Home_Runs",
+    "Regulation_Total",
+    "Regulation_Score_Status",
+    "Went_Extra_Innings",
+  ];
+  const shadowOutcomes = WORKBOOK_SCHEMA.find(({ name }) => name === "SHADOW_OUTCOMES");
+  const vehicleLog = WORKBOOK_SCHEMA.find(({ name }) => name === "VEHICLE_LOG");
+
+  assert.ok(shadowOutcomes);
+  assert.ok(vehicleLog);
+  assert.deepEqual(
+    shadowOutcomes.columns.filter(({ name }) => regulationFields.includes(name)).map(({ name }) => name),
+    regulationFields,
+  );
+  assert.equal(
+    vehicleLog.columns.some(({ name }) => regulationFields.includes(name)),
+    false,
+  );
+});

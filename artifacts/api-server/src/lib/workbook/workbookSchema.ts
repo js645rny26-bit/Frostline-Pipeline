@@ -7774,6 +7774,23 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         readOnly: true,
         description: "Result of the preserved frozen model direction against the literal reference line, including PUSH on whole numbers.",
       },
+      ...diagnosticColumns(
+        [
+          "Official_Game_Type", "Regulation_Away_Runs", "Regulation_Home_Runs",
+          "Regulation_Total", "Regulation_Score_Status", "Went_Extra_Innings",
+        ],
+        ["Regulation_Away_Runs", "Regulation_Home_Runs", "Regulation_Total"],
+        "MODULE_14",
+      ).map((column, offset) => ({
+        ...column,
+        index: 49 + offset,
+        readOnly: true,
+        description: column.name === "Official_Game_Type"
+          ? "Official MLB game type used for research-only season-phase tagging."
+          : column.name === "Regulation_Total"
+            ? "Nine-inning game-truth total. Official Actual_Total remains the ticket-settlement total."
+            : "Additive official settlement evidence; never rewrites the frozen pregame prediction.",
+      })),
     ],
   },
 
@@ -8969,23 +8986,6 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         description: "CANONICAL_PACKET_SNAPSHOT for new valid rows; legacy rows stay blank and are never silently selected when conflicting.",
         exampleValue: "CANONICAL_PACKET_SNAPSHOT",
       },
-      ...diagnosticColumns(
-        [
-          "Official_Game_Type", "Regulation_Away_Runs", "Regulation_Home_Runs",
-          "Regulation_Total", "Regulation_Score_Status", "Went_Extra_Innings",
-        ],
-        ["Regulation_Away_Runs", "Regulation_Home_Runs", "Regulation_Total"],
-        "MODULE_14",
-      ).map((column, offset) => ({
-        ...column,
-        index: 49 + offset,
-        readOnly: true,
-        description: column.name === "Official_Game_Type"
-          ? "Official MLB game type used for research-only season-phase tagging."
-          : column.name === "Regulation_Total"
-            ? "Nine-inning game-truth total. Official Actual_Total remains the ticket-settlement total."
-            : "Additive official settlement evidence; never rewrites the frozen pregame prediction.",
-      })),
     ],
   },
 
