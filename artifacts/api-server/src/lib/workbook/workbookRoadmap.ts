@@ -71,7 +71,7 @@ export const WORKBOOK_ROADMAP: WorkbookRoadmapEntry[] = [
     boardRelationship:
       "Feeds Module 09 bullpen innings and continuation components.",
     readNote:
-      "Start with explicit AVAILABLE/TIRED/UNAVAILABLE status and the five-day pitch map. Inside The Pen is innings-history fallback only; Notes are not durable.",
+      "Start with the daily status and five-day pitch map. Official D-1 MLB usage reconciles stale pitch/rest evidence and makes an unreconciled availability UNKNOWN; Inside The Pen is innings-history fallback only.",
   },
   {
     sheet: "RUN_ENVIRONMENT",

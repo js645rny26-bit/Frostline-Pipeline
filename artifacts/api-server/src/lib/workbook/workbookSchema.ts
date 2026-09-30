@@ -2472,7 +2472,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         type: "string",
         width: 120,
         filledBy: "MODULE_08",
-        description: "Explicit daily report status: AVAILABLE, TIRED, UNAVAILABLE, or UNKNOWN fallback",
+        description: "Daily AVAILABLE/TIRED/UNAVAILABLE status; UNKNOWN when official D-1 MLB usage is newer than the daily report and current availability cannot be inferred safely.",
         exampleValue: "AVAILABLE",
       },
       {
@@ -2492,6 +2492,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         width: 115,
         format: "0",
         filledBy: "MODULE_08",
+        description: "Previous-day pitch count reconciled to the official MLB boxscore when the daily report is stale.",
         exampleValue: "18",
       },
       {

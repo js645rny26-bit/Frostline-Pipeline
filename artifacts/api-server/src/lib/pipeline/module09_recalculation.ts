@@ -681,7 +681,8 @@ export function computeTeamBullpenQuality(
     // today. Preserve that richer state instead of replacing it with a
     // generic days-rest / workload heuristic. Legacy fallback rows retain
     // the prior logic because they have no explicit availability status.
-    if (r.workload_source === "MLBSTARTINGNINE_BULLPEN_REPORT") {
+    if (r.workload_source === "MLBSTARTINGNINE_BULLPEN_REPORT"
+      || r.workload_source === "MLBSTARTINGNINE_PLUS_MLB_OFFICIAL_D1") {
       return r.availability_status === "AVAILABLE";
     }
     return r.days_rest >= 1 && r.role !== "HIGH_WORKLOAD";

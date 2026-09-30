@@ -18,7 +18,17 @@ const INSIDE_THE_PEN_URL = "https://insidethepen.com/bullpen-usage.html";
 export type BullpenAvailability = "AVAILABLE" | "TIRED" | "UNAVAILABLE" | "UNKNOWN";
 export type BullpenWorkloadSource =
   | "MLBSTARTINGNINE_BULLPEN_REPORT"
+  | "MLBSTARTINGNINE_PLUS_MLB_OFFICIAL_D1"
   | "INSIDETHEPEN_FALLBACK";
+
+export interface OfficialPreviousDayPitchingUsage {
+  player_id: number;
+  team_abbr: string;
+  appearance_date: string;
+  innings: number;
+  pitches: number;
+  games_started: number;
+}
 
 // ─── Canonical abbr mapping (insidethepen → our SOURCE_MAPPINGS keys) ─────────
 const SITE_ABBR_MAP: Record<string, string> = {
@@ -114,6 +124,12 @@ function isoDateDaysBefore(date: string, days: number): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const parsed = new Date(`${date}T12:00:00Z`);
   parsed.setUTCDate(parsed.getUTCDate() - days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function previousIsoDate(date: string): string {
+  const parsed = new Date(`${date}T12:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate() - 1);
   return parsed.toISOString().slice(0, 10);
 }
 
@@ -483,6 +499,116 @@ function mergeBullpenSources(primary: BullpenResult, fallback: BullpenResult): B
 }
 
 /**
+ * Reconcile the daily report with official D-1 MLB pitching usage.
+ *
+ * A daily report that still omits an official prior-day appearance cannot keep
+ * claiming a current AVAILABLE state.  The appearance and pitch count are
+ * authoritative, while today's managerial availability remains UNKNOWN until
+ * a current daily source actually incorporates that workload.
+ */
+export function applyOfficialPreviousDayUsage(
+  relievers: RelieverStat[],
+  usage: OfficialPreviousDayPitchingUsage[],
+): RelieverStat[] {
+  const usageByPlayer = new Map(
+    usage.map((appearance) => [`${appearance.team_abbr}:${appearance.player_id}`, appearance]),
+  );
+  return relievers.map((reliever) => {
+    if (reliever.player_id === null) return reliever;
+    const appearance = usageByPlayer.get(`${reliever.team_abbr}:${reliever.player_id}`);
+    if (!appearance) return reliever;
+
+    const dailySourceAlreadyCurrent = reliever.pitches_yesterday === appearance.pitches
+      && reliever.last_outing_date === appearance.appearance_date;
+    const inningsLast7 = dailySourceAlreadyCurrent
+      ? Math.max(reliever.innings_last_7, appearance.innings)
+      : reliever.innings_last_7 + appearance.innings;
+    const gamesLast7 = dailySourceAlreadyCurrent
+      ? Math.max(reliever.games_last_7, 1)
+      : reliever.games_last_7 + 1;
+    const appearancesLast5 = reliever.appearances_last_5 === null
+      ? 1
+      : dailySourceAlreadyCurrent
+        ? Math.max(reliever.appearances_last_5, 1)
+        : reliever.appearances_last_5 + 1;
+    const appearanceRole = appearance.games_started > 0 ? "STARTER" : "RELIEF";
+    const reconciliation = dailySourceAlreadyCurrent
+      ? "DAILY_STATUS_RECONCILED"
+      : "DAILY_STATUS_STALE_AVAILABILITY_UNKNOWN";
+
+    return {
+      ...reliever,
+      innings_last_7: Math.round(inningsLast7 * 1000) / 1000,
+      games_last_7: gamesLast7,
+      days_rest: 1,
+      last_outing_date: appearance.appearance_date,
+      role: deriveRole(inningsLast7 / Math.max(1, gamesLast7), gamesLast7),
+      notes: `${reliever.notes}; MLB official D-1 ${appearanceRole} ${appearance.innings.toFixed(3)} IP/${appearance.pitches}P; ${reconciliation}`,
+      availability_status: dailySourceAlreadyCurrent ? reliever.availability_status : "UNKNOWN",
+      appearances_last_5: appearancesLast5,
+      pitches_yesterday: appearance.pitches,
+      workload_source: "MLBSTARTINGNINE_PLUS_MLB_OFFICIAL_D1",
+    };
+  });
+}
+
+async function fetchOfficialPreviousDayPitchingUsage(date: string): Promise<OfficialPreviousDayPitchingUsage[]> {
+  const appearanceDate = previousIsoDate(date);
+  const scheduleResponse = await fetch(
+    `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${appearanceDate}`,
+    { headers: { "User-Agent": "FrostlinePipeline/1.0" } },
+  );
+  if (!scheduleResponse.ok) throw new Error(`MLB schedule HTTP ${scheduleResponse.status}`);
+  const schedule = await scheduleResponse.json() as {
+    dates?: Array<{ games?: Array<{ gamePk?: number; status?: { abstractGameState?: string } }> }>;
+  };
+  const games = (schedule.dates ?? []).flatMap((entry) => entry.games ?? [])
+    .filter((game) => game.gamePk && game.status?.abstractGameState === "Final");
+  const usage: OfficialPreviousDayPitchingUsage[] = [];
+
+  for (const game of games) {
+    const response = await fetch(
+      `https://statsapi.mlb.com/api/v1/game/${game.gamePk}/boxscore`,
+      { headers: { "User-Agent": "FrostlinePipeline/1.0" } },
+    );
+    if (!response.ok) throw new Error(`MLB boxscore ${game.gamePk} HTTP ${response.status}`);
+    const boxscore = await response.json() as {
+      teams?: Record<"away" | "home", {
+        team?: { abbreviation?: string };
+        pitchers?: number[];
+        players?: Record<string, {
+          stats?: { pitching?: {
+            inningsPitched?: string;
+            numberOfPitches?: number;
+            gamesStarted?: number;
+          } };
+        }>;
+      }>;
+    };
+    for (const side of ["away", "home"] as const) {
+      const team = boxscore.teams?.[side];
+      const rawAbbr = team?.team?.abbreviation ?? "";
+      const teamAbbr = SITE_ABBR_MAP[rawAbbr] ?? rawAbbr;
+      for (const playerId of team?.pitchers ?? []) {
+        const pitching = team?.players?.[`ID${playerId}`]?.stats?.pitching;
+        const innings = parseIP(String(pitching?.inningsPitched ?? "0.0"));
+        const pitches = Number(pitching?.numberOfPitches ?? 0);
+        if (!teamAbbr || !Number.isFinite(pitches)) continue;
+        usage.push({
+          player_id: playerId,
+          team_abbr: teamAbbr,
+          appearance_date: appearanceDate,
+          innings,
+          pitches,
+          games_started: Number(pitching?.gamesStarted ?? 0),
+        });
+      }
+    }
+  }
+  return usage;
+}
+
+/**
  * Primary daily workload feed: MLB Starting Nine's availability and five-day
  * pitch-count report. Seven-day innings history is enriched from the former
  * Inside The Pen source when available; it never replaces a primary status.
@@ -496,17 +622,33 @@ export async function fetchBullpenUsage(
     fetchInsideThePenUsage(date, teamIds),
   ]);
   const merged = mergeBullpenSources(primary, fallback);
+  let reconciled = merged;
+  try {
+    const officialPreviousDayUsage = await fetchOfficialPreviousDayPitchingUsage(date);
+    reconciled = {
+      ...merged,
+      relievers: applyOfficialPreviousDayUsage(merged.relievers, officialPreviousDayUsage),
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn({ date, err: message }, "MODULE_04b: official D-1 pitching continuity unavailable");
+    reconciled = {
+      ...merged,
+      status: "partial",
+      errors: [...merged.errors, `MLB official D-1 pitching continuity: ${message}`],
+    };
+  }
   logger.info(
     {
-      relievers: merged.relievers.length,
-      teams: merged.teams_fetched,
+      relievers: reconciled.relievers.length,
+      teams: reconciled.teams_fetched,
       primary_status: primary.status,
       fallback_status: fallback.status,
-      status: merged.status,
+      status: reconciled.status,
     },
     "MODULE_04b: Bullpen availability and innings history resolved",
   );
-  return merged;
+  return reconciled;
 }
 
 /** Build a Map<game_id, RelieverStat[]> keyed by team_abbr for quick lookups */

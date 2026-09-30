@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseMlbStartingNineBullpenHtml } from "./module04b_bullpenUsage.js";
+import {
+  applyOfficialPreviousDayUsage,
+  parseMlbStartingNineBullpenHtml,
+} from "./module04b_bullpenUsage.js";
 
 const REPORT_FIXTURE = `
   <tbody class="team-group">
@@ -151,4 +154,59 @@ test("Sept. 29 Wild Card Game 1 pitch counts remain visible for every Game 2 clu
     assert.equal(row.last_outing_date, "2026-09-29");
     assert.equal(row.days_rest, 1);
   }
+
+  const staleRows = parsed.map((row) => ({
+    ...row,
+    last_outing_date: "2026-09-27",
+    days_rest: 3,
+    pitches_yesterday: null,
+    availability_status: "AVAILABLE" as const,
+  }));
+  const reconciled = applyOfficialPreviousDayUsage(
+    staleRows,
+    game1Usage.map(([, team, id, , pitches]) => ({
+      player_id: id,
+      team_abbr: team,
+      appearance_date: "2026-09-29",
+      innings: 1,
+      pitches,
+      games_started: 0,
+    })),
+  );
+  for (const [, team, id, name, pitches] of game1Usage) {
+    const row = reconciled.find((candidate) => candidate.player_id === id);
+    assert.ok(row, `${team} ${name} must survive official Game 1 reconciliation`);
+    assert.equal(row.pitches_yesterday, pitches);
+    assert.equal(row.last_outing_date, "2026-09-29");
+    assert.equal(row.availability_status, "UNKNOWN");
+  }
+});
+
+test("official Game 1 usage invalidates a stale daily availability claim without guessing Game 2 availability", () => {
+  const [stale, current] = parseMlbStartingNineBullpenHtml(
+    REPORT_FIXTURE,
+    "2026-09-30",
+    "2026-09-30T12:00:00.000Z",
+  );
+  assert.ok(stale && current);
+  const reconciled = applyOfficialPreviousDayUsage([stale, {
+    ...current,
+    pitches_yesterday: 24,
+    last_outing_date: "2026-09-29",
+    days_rest: 1,
+  }], [
+    { player_id: 547973, team_abbr: "BOS", appearance_date: "2026-09-29", innings: 2, pitches: 27, games_started: 0 },
+    { player_id: 123456, team_abbr: "BOS", appearance_date: "2026-09-29", innings: 1, pitches: 24, games_started: 0 },
+  ]);
+
+  assert.equal(reconciled[0]?.pitches_yesterday, 27);
+  assert.equal(reconciled[0]?.last_outing_date, "2026-09-29");
+  assert.equal(reconciled[0]?.days_rest, 1);
+  assert.equal(reconciled[0]?.availability_status, "UNKNOWN");
+  assert.equal(reconciled[0]?.workload_source, "MLBSTARTINGNINE_PLUS_MLB_OFFICIAL_D1");
+  assert.match(reconciled[0]?.notes ?? "", /DAILY_STATUS_STALE_AVAILABILITY_UNKNOWN/);
+
+  assert.equal(reconciled[1]?.availability_status, "TIRED");
+  assert.equal(reconciled[1]?.pitches_yesterday, 24);
+  assert.match(reconciled[1]?.notes ?? "", /DAILY_STATUS_RECONCILED/);
 });

@@ -129,3 +129,22 @@ test("unqualified expected relievers remain an explicit unavailable-quality gap"
   );
   assert.equal(result, null);
 });
+
+test("official D-1 reconciliation excludes an unresolved stale availability claim", () => {
+  const stale = {
+    ...reliever(30),
+    availability_status: "UNKNOWN" as const,
+    workload_source: "MLBSTARTINGNINE_PLUS_MLB_OFFICIAL_D1" as const,
+    pitches_yesterday: 54,
+  };
+  const result = computeTeamBullpenQuality(
+    "AAA",
+    [stale, reliever(31), reliever(32)],
+    new Map([
+      [30, seasonStats(30, { era: 1.0 })],
+      [31, seasonStats(31, { era: 6.0 })],
+      [32, seasonStats(32, { era: 6.0 })],
+    ]),
+  );
+  assert.deepEqual(result, { factor: 1.4286, source: "SEASON_ERA" });
+});
