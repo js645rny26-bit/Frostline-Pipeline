@@ -434,6 +434,29 @@ export function gradeOperatorDirection(
     : actualTotal < executableLine ? "CORRECT" : "INCORRECT";
 }
 
+/**
+ * Grade the immutable pregame direction against a later reference threshold.
+ *
+ * The threshold may differ from the line that originally produced the frozen
+ * direction.  Re-deriving direction from the point forecast and the later line
+ * would rewrite pregame intent (for example, frozen OVER 7.5 with a 7.54 point
+ * forecast must remain OVER when displayed against a reference 8).
+ */
+export function gradeFrozenDirection(
+  frozenDirection: string,
+  comparisonLine: number | null,
+  actualTotal: number,
+): "CORRECT" | "INCORRECT" | "PUSH" | "UNGRADABLE" {
+  const direction = frozenDirection.trim().toUpperCase();
+  if ((direction !== "OVER" && direction !== "UNDER") || comparisonLine === null) {
+    return "UNGRADABLE";
+  }
+  if (actualTotal === comparisonLine) return "PUSH";
+  return direction === "OVER"
+    ? actualTotal > comparisonLine ? "CORRECT" : "INCORRECT"
+    : actualTotal < comparisonLine ? "CORRECT" : "INCORRECT";
+}
+
 export function isProspectiveHumanTruthEvidence(
   evidenceStatus: string,
   freezeTs = "",
@@ -1158,7 +1181,7 @@ export async function runPostmortem(
     const humanComparisonLineTs = auditRow ? tableValue(auditRow, auditHeader, "Human_Comparison_Line_TS") : "";
     const humanComparisonLineProvenance = auditRow ? tableValue(auditRow, auditHeader, "Human_Comparison_Line_Provenance_Status") : "";
     const humanOperatorGrade = gradeOperatorDirection(humanTotal, humanComparisonLine, outcome.actual_total);
-    const referenceDirectionResult = gradeOperatorDirection(projected, outcome.reference_market_line, outcome.actual_total);
+    const referenceDirectionResult = gradeFrozenDirection(direction, outcome.reference_market_line, outcome.actual_total);
     const referenceAbsoluteSeparation = outcome.reference_market_line === null
       ? null
       : Number(Math.abs(projected - outcome.reference_market_line).toFixed(3));

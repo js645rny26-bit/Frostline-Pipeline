@@ -78,3 +78,77 @@ test("postseason Game 1 reliever workload is visible in the Game 2 pregame avail
   assert.equal(rows[0]?.days_rest, 1);
   assert.match(rows[0]?.notes ?? "", /Availability: AVAILABLE; L5 pitches: 31/);
 });
+
+test("Sept. 29 Wild Card Game 1 pitch counts remain visible for every Game 2 club", () => {
+  const game1Usage = [
+    ["philadelphia-phillies", "PHI", 666200, "Jesús Luzardo", 77],
+    ["philadelphia-phillies", "PHI", 686934, "Alex McFarlane", 16],
+    ["philadelphia-phillies", "PHI", 661395, "Jhoan Duran", 27],
+    ["atlanta-braves", "ATL", 519242, "Chris Sale", 95],
+    ["atlanta-braves", "ATL", 800311, "Didier Fuentes", 12],
+    ["atlanta-braves", "ATL", 669276, "Dylan Lee", 16],
+    ["atlanta-braves", "ATL", 628452, "Raisel Iglesias", 7],
+    ["chicago-white-sox", "CHW", 696146, "Hagen Smith", 38],
+    ["chicago-white-sox", "CHW", 663855, "Jordan Hicks", 17],
+    ["chicago-white-sox", "CHW", 656794, "Sean Newcomb", 19],
+    ["chicago-white-sox", "CHW", 689818, "David Sandlin", 22],
+    ["chicago-white-sox", "CHW", 691799, "Grant Taylor", 54],
+    ["houston-astros", "HOU", 805123, "AJ Blubaugh", 27],
+    ["houston-astros", "HOU", 687911, "Bryan King", 22],
+    ["houston-astros", "HOU", 699044, "Miguel Ullola", 31],
+    ["houston-astros", "HOU", 681973, "Josh Hendrickson", 37],
+    ["houston-astros", "HOU", 701121, "Logan VanWey", 3],
+    ["houston-astros", "HOU", 656986, "Bennett Sousa", 13],
+    ["houston-astros", "HOU", 650556, "Bryan Abreu", 11],
+    ["houston-astros", "HOU", 623352, "Josh Hader", 11],
+    ["boston-red-sox", "BOS", 801139, "Payton Tolle", 83],
+    ["boston-red-sox", "BOS", 669062, "Erik Miller", 9],
+    ["boston-red-sox", "BOS", 669711, "Greg Weissert", 15],
+    ["boston-red-sox", "BOS", 687941, "Alec Gamboa", 15],
+    ["boston-red-sox", "BOS", 681544, "Wyatt Olds", 18],
+    ["boston-red-sox", "BOS", 678394, "Brayan Bello", 21],
+    ["new-york-yankees", "NYY", 693645, "Cam Schlittler", 117],
+    ["new-york-yankees", "NYY", 621112, "Paul Blackburn", 18],
+    ["new-york-yankees", "NYY", 670167, "John Schreiber", 11],
+    ["chicago-cubs", "CHC", 571510, "Matthew Boyd", 58],
+    ["chicago-cubs", "CHC", 665871, "Javier Assad", 18],
+    ["chicago-cubs", "CHC", 669020, "Ryan Rolison", 16],
+    ["chicago-cubs", "CHC", 650644, "Aaron Civale", 24],
+    ["chicago-cubs", "CHC", 657097, "Jacob Webb", 16],
+    ["san-diego-padres", "SDP", 650633, "Michael King", 97],
+    ["san-diego-padres", "SDP", 673513, "Yuki Matsui", 11],
+    ["san-diego-padres", "SDP", 605397, "Joe Musgrove", 22],
+  ] as const;
+
+  const bySlug = new Map<string, typeof game1Usage[number][]>();
+  for (const appearance of game1Usage) {
+    const rows = bySlug.get(appearance[0]) ?? [];
+    rows.push(appearance);
+    bySlug.set(appearance[0], rows);
+  }
+  const html = [...bySlug.entries()].map(([slug, appearances]) => `
+    <tbody class="team-group">
+      <tr class="accordion-toggle" data-bs-target="#collapse-${slug}"><td>${slug}</td></tr>
+      <tr id="collapse-${slug}" class="collapse collapse-row"><td>
+        <h6>5-Day Pitch Count Heat Map</h6><table><tbody>
+        ${appearances.map(([, , id, name, pitches]) => `
+          <tr class="bg-white">
+            <td><img src="https://img.mlbstatic.com/mlb-photos/image/upload/v1/people/${id}/headshot"><a>${name}</a></td>
+            <td>0.00</td><td>0.00</td><td><span>UNKNOWN</span></td><td>1</td>
+            <td>${pitches}</td><td>-</td><td>-</td><td>-</td><td>-</td>
+          </tr>`).join("")}
+      </tbody></table></td></tr>
+    </tbody>`).join("");
+
+  const parsed = parseMlbStartingNineBullpenHtml(html, "2026-09-30", "2026-09-30T12:00:00.000Z");
+  assert.equal(parsed.length, game1Usage.length);
+  assert.deepEqual(new Set(parsed.map((row) => row.team_abbr)), new Set(["PHI", "ATL", "CHW", "HOU", "BOS", "NYY", "CHC", "SDP"]));
+  for (const [, team, id, name, pitches] of game1Usage) {
+    const row = parsed.find((candidate) => candidate.player_id === id);
+    assert.ok(row, `${team} ${name} must remain visible in Game 2 workload state`);
+    assert.equal(row.team_abbr, team);
+    assert.equal(row.pitches_yesterday, pitches);
+    assert.equal(row.last_outing_date, "2026-09-29");
+    assert.equal(row.days_rest, 1);
+  }
+});

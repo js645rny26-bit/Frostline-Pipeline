@@ -7,6 +7,7 @@ import {
   buildReferenceDirectionSeparationSummary,
   groupContiguousVehicleLogUpdates,
   gradePostmortemTicket,
+  gradeFrozenDirection,
   gradeOperatorDirection,
   gradeTicket,
   isFinalizedVehiclePublication,
@@ -325,6 +326,20 @@ test("operator grading never substitutes the reference market", () => {
   assert.equal(gradeOperatorDirection(9.1, null, 10), "UNGRADABLE");
   assert.equal(gradeOperatorDirection(9.1, 8.5, 10), "CORRECT");
   assert.equal(gradeOperatorDirection(8.5, 8.5, 10), "NO_CALL");
+});
+
+test("reference postmortem grading preserves the frozen direction across whole and half-number lines", () => {
+  // Sept. 29 CHW-HOU: the frozen direction was OVER from 7.54 vs 7.5.
+  // A later reference threshold of 8 must not re-origin the direction as UNDER.
+  assert.equal(gradeFrozenDirection("OVER", 8, 9), "CORRECT");
+  assert.equal(gradeFrozenDirection("OVER", 8, 8), "PUSH");
+  assert.equal(gradeFrozenDirection("UNDER", 8, 7), "CORRECT");
+  assert.equal(gradeFrozenDirection("UNDER", 8, 9), "INCORRECT");
+
+  assert.equal(gradeFrozenDirection("OVER", 7.5, 8), "CORRECT");
+  assert.equal(gradeFrozenDirection("UNDER", 7.5, 8), "INCORRECT");
+  assert.equal(gradeFrozenDirection("NONE", 7.5, 8), "UNGRADABLE");
+  assert.equal(gradeFrozenDirection("OVER", null, 8), "UNGRADABLE");
 });
 
 test("compact human comparison admits only demonstrably prospective evidence", () => {

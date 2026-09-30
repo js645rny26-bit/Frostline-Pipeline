@@ -47,3 +47,17 @@ test("postseason Game 1 starter work is the latest cutoff-safe outing for Game 2
   assert.equal(rollingStats(splits, "2026-09-20", "2026-10-01").total_pitch_count, 179);
   assert.match(pitchingGameLogUrl(123, "2026"), /gameType=R,F,D,L,W,C,P/);
 });
+
+test("Wild Card Game 1 starter-used-as-reliever work supersedes the regular-season snapshot", () => {
+  const brayanBello = [
+    { date: "2026-09-25", gameType: "R", game: { gamePk: 849700 }, stat: { inningsPitched: "6.0", numberOfPitches: 91, gamesStarted: 1 } },
+    { date: "2026-09-29", gameType: "F", game: { gamePk: 849851 }, stat: { inningsPitched: "0.2", numberOfPitches: 21, gamesStarted: 0 } },
+  ];
+  assert.deepEqual(selectLatestPreviousPitchingAppearance(brayanBello, "2026-09-30"), {
+    date: "2026-09-29", gamePk: 849851, ip: "0.2", pitches: 21,
+  });
+  assert.deepEqual(recentAppearances(brayanBello, "2026-09-29")[0], {
+    date: "2026-09-29", game_pk: 849851, games_started: 0,
+    innings: 0.667, pitch_count: 21, batters_faced: null,
+  });
+});

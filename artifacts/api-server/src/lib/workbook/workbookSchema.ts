@@ -7786,7 +7786,7 @@ export const WORKBOOK_SCHEMA: SheetDef[] = [
         index: 49 + offset,
         readOnly: true,
         description: column.name === "Official_Game_Type"
-          ? "Official MLB game type used for research-only season-phase tagging."
+          ? "Official MLB game-type code used for research-only season-phase tagging (R regular season; F Wild Card; D Division Series; L League Championship; W World Series)."
           : column.name === "Regulation_Total"
             ? "Nine-inning game-truth total. Official Actual_Total remains the ticket-settlement total."
             : "Additive official settlement evidence; never rewrites the frozen pregame prediction.",

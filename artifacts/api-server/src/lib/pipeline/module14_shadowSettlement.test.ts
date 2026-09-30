@@ -504,6 +504,32 @@ test("OPEN decision audit row is a valid prospective fallback only before first 
   assert.match(parsed.warnings[0] ?? "", /non-prospective timestamp/);
 });
 
+test("Sept. 29 prospective decision fallback preserves the pregame point forecast without settlement recomputation", () => {
+  const row = Array(86).fill("");
+  row[0] = "2026-09-29";
+  row[1] = "20260929_PHI_ATL";
+  row[4] = "2026-09-29T18:00:00.000Z";
+  row[7] = "FROZEN";
+  row[10] = 5.81;
+  row[11] = 6.5;
+  row[12] = "UNDER";
+  row[16] = "2026-09-29T16:08:41.000Z";
+  // Later settlement evidence may coexist in the ledger, but it cannot become
+  // an input to the preserved point forecast selected above.
+  row[22] = 3;
+  row[23] = 5;
+  row[24] = 8;
+
+  const parsed = parseProspectiveDecisionAuditSnapshots([row], "2026-09-29");
+  assert.deepEqual(parsed.snapshots.get("20260929_PHI_ATL"), {
+    market_line: 6.5,
+    direction: "UNDER",
+    projected_total: 5.81,
+    source: "PROSPECTIVE_DECISION_AUDIT",
+  });
+  assert.equal(parsed.warnings.length, 0);
+});
+
 test("frozen packet starter provenance repairs an unresolved legacy outcome without overwriting valid evidence", () => {
   const valid = Array(95).fill("");
   const index = Object.fromEntries(

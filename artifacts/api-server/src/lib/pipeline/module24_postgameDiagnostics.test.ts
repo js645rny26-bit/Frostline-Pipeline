@@ -24,6 +24,7 @@ import {
 import { WORKBOOK_SCHEMA } from "../workbook/workbookSchema.js";
 
 test("official postseason game type drives a research-only POSTSEASON tag without calendar inference", () => {
+  assert.equal(deriveSeasonPhaseTag("2026-09-29", "F"), "POSTSEASON");
   assert.equal(deriveSeasonPhaseTag("2026-10-02", "D"), "POSTSEASON");
   assert.equal(deriveSeasonPhaseTag("2026-10-02", "R"), "NORMAL_REGULAR_SEASON");
   assert.equal(deriveSeasonPhaseTag("2026-09-27", "R"), "SEPTEMBER_EXPANDED_ROSTER");
