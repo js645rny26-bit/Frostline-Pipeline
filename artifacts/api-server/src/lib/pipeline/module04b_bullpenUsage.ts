@@ -23,6 +23,7 @@ export type BullpenWorkloadSource =
 
 export interface OfficialPreviousDayPitchingUsage {
   player_id: number;
+  player_name: string;
   team_abbr: string;
   appearance_date: string;
   innings: number;
@@ -513,10 +514,13 @@ export function applyOfficialPreviousDayUsage(
   const usageByPlayer = new Map(
     usage.map((appearance) => [`${appearance.team_abbr}:${appearance.player_id}`, appearance]),
   );
-  return relievers.map((reliever) => {
+  const matchedKeys = new Set<string>();
+  const reconciled: RelieverStat[] = relievers.map((reliever): RelieverStat => {
     if (reliever.player_id === null) return reliever;
-    const appearance = usageByPlayer.get(`${reliever.team_abbr}:${reliever.player_id}`);
+    const key = `${reliever.team_abbr}:${reliever.player_id}`;
+    const appearance = usageByPlayer.get(key);
     if (!appearance) return reliever;
+    matchedKeys.add(key);
 
     const dailySourceAlreadyCurrent = reliever.pitches_yesterday === appearance.pitches
       && reliever.last_outing_date === appearance.appearance_date;
@@ -550,6 +554,39 @@ export function applyOfficialPreviousDayUsage(
       workload_source: "MLBSTARTINGNINE_PLUS_MLB_OFFICIAL_D1",
     };
   });
+
+  // A stale daily report can omit an arm entirely. Preserve official Game 1
+  // usage as an UNKNOWN observability row rather than silently losing the
+  // appearance or guessing that the pitcher is available for Game 2.
+  const teamsInDailyReport = new Set(relievers.map((reliever) => reliever.team_abbr));
+  for (const appearance of usage) {
+    const key = `${appearance.team_abbr}:${appearance.player_id}`;
+    if (matchedKeys.has(key) || !teamsInDailyReport.has(appearance.team_abbr)) continue;
+    const appearanceRole = appearance.games_started > 0 ? "STARTER" : "RELIEF";
+    reconciled.push({
+      player_id: appearance.player_id,
+      full_name: appearance.player_name,
+      team_abbr: appearance.team_abbr,
+      innings_last_7: Math.round(appearance.innings * 1000) / 1000,
+      games_last_7: 1,
+      days_rest: 1,
+      last_outing_date: appearance.appearance_date,
+      role: appearance.games_started > 0
+        ? "STARTER_USED_PREVIOUS_DAY"
+        : deriveRole(appearance.innings, 1),
+      notes: `MLB official D-1 only ${appearanceRole} ${appearance.innings.toFixed(3)} IP/${appearance.pitches}P; DAILY_REPORT_PLAYER_MISSING_AVAILABILITY_UNKNOWN`,
+      availability_status: "UNKNOWN",
+      appearances_last_5: 1,
+      pitches_yesterday: appearance.pitches,
+      pitches_2_days_ago: null,
+      pitches_3_days_ago: null,
+      pitches_4_days_ago: null,
+      pitches_5_days_ago: null,
+      workload_source: "MLBSTARTINGNINE_PLUS_MLB_OFFICIAL_D1",
+      source_snapshot_utc: relievers[0]?.source_snapshot_utc ?? null,
+    });
+  }
+  return reconciled;
 }
 
 async function fetchOfficialPreviousDayPitchingUsage(date: string): Promise<OfficialPreviousDayPitchingUsage[]> {
@@ -577,6 +614,7 @@ async function fetchOfficialPreviousDayPitchingUsage(date: string): Promise<Offi
         team?: { abbreviation?: string };
         pitchers?: number[];
         players?: Record<string, {
+          person?: { fullName?: string };
           stats?: { pitching?: {
             inningsPitched?: string;
             numberOfPitches?: number;
@@ -596,6 +634,7 @@ async function fetchOfficialPreviousDayPitchingUsage(date: string): Promise<Offi
         if (!teamAbbr || !Number.isFinite(pitches)) continue;
         usage.push({
           player_id: playerId,
+          player_name: team?.players?.[`ID${playerId}`]?.person?.fullName ?? `MLB_ID_${playerId}`,
           team_abbr: teamAbbr,
           appearance_date: appearanceDate,
           innings,

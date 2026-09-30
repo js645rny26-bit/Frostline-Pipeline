@@ -166,6 +166,7 @@ test("Sept. 29 Wild Card Game 1 pitch counts remain visible for every Game 2 clu
     staleRows,
     game1Usage.map(([, team, id, , pitches]) => ({
       player_id: id,
+      player_name: `Pitcher ${id}`,
       team_abbr: team,
       appearance_date: "2026-09-29",
       innings: 1,
@@ -195,8 +196,9 @@ test("official Game 1 usage invalidates a stale daily availability claim without
     last_outing_date: "2026-09-29",
     days_rest: 1,
   }], [
-    { player_id: 547973, team_abbr: "BOS", appearance_date: "2026-09-29", innings: 2, pitches: 27, games_started: 0 },
-    { player_id: 123456, team_abbr: "BOS", appearance_date: "2026-09-29", innings: 1, pitches: 24, games_started: 0 },
+    { player_id: 547973, player_name: "Current One", team_abbr: "BOS", appearance_date: "2026-09-29", innings: 2, pitches: 27, games_started: 0 },
+    { player_id: 123456, player_name: "Current Two", team_abbr: "BOS", appearance_date: "2026-09-29", innings: 1, pitches: 24, games_started: 0 },
+    { player_id: 888888, player_name: "Missing Starter", team_abbr: "BOS", appearance_date: "2026-09-29", innings: 5, pitches: 77, games_started: 1 },
   ]);
 
   assert.equal(reconciled[0]?.pitches_yesterday, 27);
@@ -209,4 +211,10 @@ test("official Game 1 usage invalidates a stale daily availability claim without
   assert.equal(reconciled[1]?.availability_status, "TIRED");
   assert.equal(reconciled[1]?.pitches_yesterday, 24);
   assert.match(reconciled[1]?.notes ?? "", /DAILY_STATUS_RECONCILED/);
+
+  assert.equal(reconciled[2]?.full_name, "Missing Starter");
+  assert.equal(reconciled[2]?.role, "STARTER_USED_PREVIOUS_DAY");
+  assert.equal(reconciled[2]?.availability_status, "UNKNOWN");
+  assert.equal(reconciled[2]?.pitches_yesterday, 77);
+  assert.match(reconciled[2]?.notes ?? "", /DAILY_REPORT_PLAYER_MISSING_AVAILABILITY_UNKNOWN/);
 });
