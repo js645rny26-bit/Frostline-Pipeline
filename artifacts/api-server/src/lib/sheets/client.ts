@@ -380,6 +380,21 @@ export async function expandSheetColumns(workbookId: string, sheetTitle: string,
   await batchUpdate(workbookId, [{ updateSheetProperties: { properties: { sheetId: sheet.properties.sheetId, gridProperties: { columnCount: targetCols } }, fields: "gridProperties.columnCount" } }]);
 }
 
+export async function expandSheetRows(workbookId: string, sheetTitle: string, targetRows: number): Promise<void> {
+  const meta = await sheetsRequest(`/v4/spreadsheets/${workbookId}?fields=sheets.properties`) as {
+    sheets: Array<{ properties: { sheetId: number; title: string; gridProperties: { rowCount: number } } }>;
+  };
+  const sheet = meta.sheets.find((candidate) => candidate.properties.title === sheetTitle);
+  if (!sheet) throw new Error(`Sheet "${sheetTitle}" not found in workbook`);
+  if ((sheet.properties.gridProperties.rowCount ?? 0) >= targetRows) return;
+  await batchUpdate(workbookId, [{
+    updateSheetProperties: {
+      properties: { sheetId: sheet.properties.sheetId, gridProperties: { rowCount: targetRows } },
+      fields: "gridProperties.rowCount",
+    },
+  }]);
+}
+
 export interface DriveFile { id: string; name: string; }
 
 export async function createDriveFolder(name: string, parentId: string): Promise<DriveFile> {

@@ -12,6 +12,7 @@ import {
   addSheet,
   clearRange,
   expandSheetColumns,
+  expandSheetRows,
   getSpreadsheetSheetProperties,
   readRange,
   writeRange,
@@ -563,12 +564,14 @@ export async function writeActivePitchingInventory(
     const appended = selectInventoryRowsForAppend(existing, rows, options.protection?.protected_game_ids);
     if (appended.length > 0) {
       const start = existing.length + 2;
+      await expandSheetRows(workbookId, ACTIVE_PITCHING_INVENTORY_SHEET, start + appended.length - 1);
       await writeRange(workbookId, `${ACTIVE_PITCHING_INVENTORY_SHEET}!A${start}:BA${start + appended.length - 1}`, appended.map(rowValues));
     }
     const summaries = summaryRows(appended);
     const existingSummary = (await readRange(workbookId, `${ACTIVE_PITCHING_INVENTORY_SUMMARY_SHEET}!A2:R3000`).catch(() => ({ values: [] }))).values ?? [];
     if (summaries.length > 0) {
       const start = existingSummary.length + 2;
+      await expandSheetRows(workbookId, ACTIVE_PITCHING_INVENTORY_SUMMARY_SHEET, start + summaries.length - 1);
       await writeRange(workbookId, `${ACTIVE_PITCHING_INVENTORY_SUMMARY_SHEET}!A${start}:R${start + summaries.length - 1}`, summaries);
     }
     const preserved = rows.length - appended.length;
