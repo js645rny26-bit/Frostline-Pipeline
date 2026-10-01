@@ -31,6 +31,11 @@ import {
   type SWEGameState,
 } from "./module02i_starterWorkloadEstimator.js";
 import type { PublicationProtection } from "./module00_scopedPublication.js";
+import {
+  sourceDeclaredPitchingPlanForSide,
+  sourceDeclaredPitchingPlansForDate,
+  type SourceDeclaredPitchingPlan,
+} from "./sourceDeclaredPitchingPlans.js";
 
 export const ACTIVE_PITCHING_INVENTORY_SHEET = "ACTIVE_PITCHING_INVENTORY_V1";
 export const ACTIVE_PITCHING_INVENTORY_SUMMARY_SHEET = "ACTIVE_PITCHING_INVENTORY_SUMMARY_V1";
@@ -332,12 +337,15 @@ function resolveSide(
   dataThroughDate: string,
   snapshotTs: string,
   activePitchersByTeamId: ReadonlyMap<number, readonly ActiveRosterPitcher[]>,
+  declaredPlans: readonly SourceDeclaredPitchingPlan[],
 ): ActivePitchingInventoryRow {
   const pitcher = side === "AWAY" ? game.away_pitcher : game.home_pitcher;
   const team = side === "AWAY" ? game.away_team.team_abbr ?? "" : game.home_team.team_abbr ?? "";
   const offense = side === "AWAY" ? game.home_team.team_abbr ?? "" : game.away_team.team_abbr ?? "";
   const sideSwe = side === "AWAY" ? swe?.away : swe?.home;
   const productionIp = pitcher.expected_innings;
+  const declaredPlan = sourceDeclaredPitchingPlanForSide(declaredPlans, game.legacy_game_id, side);
+  const declaredPlanMatches = declaredPlan?.opener_pitcher_id === pitcher.player_id;
   const bullpenSourceAvailable = bullpen !== null && bullpen.status !== "failure";
   const bullpenHistoryOptions = bullpenSourceAvailable && hasChainNeed(pitcher.role, productionIp)
     ? bullpenRosterHistoryOptions(team, pitcher.player_id, bullpen!.relievers, appearances, game.date)
@@ -353,19 +361,19 @@ function resolveSide(
     : [];
   // Neither the daily bullpen availability report nor historical multi-inning
   // use designates the manager's intended follower. They may surface roster
-  // plausibility, but only a future explicit pregame follower source may
-  // populate Expected_Bulk_Pitcher and unlock an API shadow delta.
-  const bulkIp: number | null = null;
+  // plausibility, but only exact source-declared pregame evidence may populate
+  // Expected_Bulk_Pitcher. The API projection effect remains uncommissioned.
+  const bulkIp: number | null = declaredPlanMatches ? declaredPlan.bulk_expected_ip : null;
   const starterIp = productionIp;
-  const bullpenIp = starterIp === null ? null : round(Math.max(0, 9 - starterIp));
+  const bullpenIp = starterIp === null ? null : round(Math.max(0, 9 - starterIp - (bulkIp ?? 0)));
   const historyOptionCount = new Set([
     ...bullpenHistoryOptions.map((candidate) => candidate.reliever.player_id),
     ...rosterOptions.map((option) => option.pitcher.player_id),
   ]).size;
-  const plan = planType(pitcher.role, starterIp, false, historyOptionCount);
+  const plan = planType(pitcher.role, starterIp, declaredPlanMatches, historyOptionCount);
   const observability: APIObservability = !bullpenSourceAvailable
     ? "MISSING_DUE_TO_SOURCE_FAILURE"
-    : "NOT_OBSERVABLE_PREGAME";
+    : declaredPlanMatches ? "KNOWN_PREGAME" : "NOT_OBSERVABLE_PREGAME";
   const bullpenQuality = bullpenSourceAvailable
     ? computeTeamBullpenQuality(team, bullpen!.relievers, pitcherStats, statcastPitcherStats)
     : null;
@@ -383,7 +391,7 @@ function resolveSide(
     : [];
   const missing = [
     !bullpenSourceAvailable ? "BULLPEN_SOURCE_UNAVAILABLE" : "",
-    hasChainNeed(pitcher.role, productionIp) ? "EXPECTED_BULK_IDENTITY_NOT_OBSERVABLE" : "",
+    hasChainNeed(pitcher.role, productionIp) && !declaredPlanMatches ? "EXPECTED_BULK_IDENTITY_NOT_OBSERVABLE" : "",
     historyOptionCount > 0 ? "ROSTER_MULTI_INNING_OPTIONS_UNCONFIRMED" : "",
     !summary ? "ACTIVE_SUMMARY_UNAVAILABLE" : "",
     projectionEligible ? "" : "API_PROJECTION_EFFECT_NOT_ESTIMABLE",
@@ -400,6 +408,7 @@ function resolveSide(
   ];
   const sequence = [
     pitcher.name || "UNRESOLVED_STARTER",
+    declaredPlanMatches ? `${declaredPlan.bulk_pitcher} [SOURCE_SUPPORTED_BULK]` : "",
     "REMAINING_AVAILABLE_RELIEF_POOL",
   ].filter(Boolean).join(" > ");
   const base: Omit<ActivePitchingInventoryRow, "deterministic_hash"> = {
@@ -410,10 +419,10 @@ function resolveSide(
     named_starter_role: pitcher.role, starter_expected_ip: pitcher.expected_innings,
     starter_expected_pitches: pitcher.expected_pitches, starter_role_confidence: pitcher.role_confidence,
     production_expected_ip: productionIp, swe_expected_ip: sideSwe?.expected_ip ?? null,
-    swe_status: sideSwe?.status ?? "UNAVAILABLE", expected_bulk_pitcher_id: null,
-    expected_bulk_pitcher: "", expected_bulk_ip: bulkIp,
-    expected_bulk_pitches: null, bulk_role_confidence: "NONE",
-    bulk_observability: observability, bulk_swe_status: "NOT_EVALUATED",
+    swe_status: sideSwe?.status ?? "UNAVAILABLE", expected_bulk_pitcher_id: declaredPlanMatches ? declaredPlan.bulk_pitcher_id : null,
+    expected_bulk_pitcher: declaredPlanMatches ? declaredPlan.bulk_pitcher : "", expected_bulk_ip: bulkIp,
+    expected_bulk_pitches: null, bulk_role_confidence: declaredPlanMatches ? "HIGH" : "NONE",
+    bulk_observability: observability, bulk_swe_status: declaredPlanMatches ? "SOURCE_DECLARED_MINIMUM" : "NOT_EVALUATED",
     secondary_bulk_or_swing: "", secondary_bulk_expected_ip: null,
     secondary_bulk_confidence: "NONE",
     expected_leverage_bridge: "", long_relief_options: longRelief.join(" | "),
@@ -423,7 +432,9 @@ function resolveSide(
     true_bullpen_exposure_ip: bullpenIp, pitching_plan_type: plan,
     pitcher_chain_confidence: plan === "CONVENTIONAL_STARTER" ? "HIGH" : projectionEligible ? "MEDIUM" : "LOW",
     pitcher_chain_status: chainStatus,
-    source_provenance: "MLB_STATS_PROBABLE_STARTER|MLB_ACTIVE_ROSTER|MLBSTARTINGNINE_BULLPEN_REPORT|SAVANT_D1_SWE_APPEARANCE_HISTORY|MLB_SEASON_PITCHING",
+    source_provenance: declaredPlanMatches
+      ? `MLB_STATS_PROBABLE_STARTER|MLB_ACTIVE_ROSTER|MLB_DECLARED_PITCHING_PLAN:${declaredPlan.source_url}|SAVANT_D1_SWE_APPEARANCE_HISTORY|MLB_SEASON_PITCHING`
+      : "MLB_STATS_PROBABLE_STARTER|MLB_ACTIVE_ROSTER|MLBSTARTINGNINE_BULLPEN_REPORT|SAVANT_D1_SWE_APPEARANCE_HISTORY|MLB_SEASON_PITCHING",
     freshness: dataThroughDate === new Date(new Date(`${game.date}T12:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10) ? "CURRENT_D1" : "STALE_OR_UNVERIFIED",
     missing_data_flags: missing.join(" | "), baseline_opposing_offense_runs: baselineOffenseRuns,
     api_shadow_opposing_offense_runs: projected, api_shadow_run_delta: delta,
@@ -446,11 +457,12 @@ export function buildActivePitchingInventory(
   dataThroughDate: string,
   snapshotTs = new Date().toISOString(),
   activePitchersByTeamId: ReadonlyMap<number, readonly ActiveRosterPitcher[]> = new Map(),
+  declaredPlans: readonly SourceDeclaredPitchingPlan[] = sourceDeclaredPitchingPlansForDate(games[0]?.date ?? ""),
 ): ActivePitchingInventoryRow[] {
   const summaryByGame = new Map(summaries.map((summary) => [summary.game_id, summary]));
   return games.flatMap((game) => [
-    resolveSide(game, "AWAY", summaryByGame.get(game.legacy_game_id), bullpen, appearances, sweStates.get(game.legacy_game_id), pitcherStats, statcastPitcherStats, dataThroughDate, snapshotTs, activePitchersByTeamId),
-    resolveSide(game, "HOME", summaryByGame.get(game.legacy_game_id), bullpen, appearances, sweStates.get(game.legacy_game_id), pitcherStats, statcastPitcherStats, dataThroughDate, snapshotTs, activePitchersByTeamId),
+    resolveSide(game, "AWAY", summaryByGame.get(game.legacy_game_id), bullpen, appearances, sweStates.get(game.legacy_game_id), pitcherStats, statcastPitcherStats, dataThroughDate, snapshotTs, activePitchersByTeamId, declaredPlans),
+    resolveSide(game, "HOME", summaryByGame.get(game.legacy_game_id), bullpen, appearances, sweStates.get(game.legacy_game_id), pitcherStats, statcastPitcherStats, dataThroughDate, snapshotTs, activePitchersByTeamId, declaredPlans),
   ]);
 }
 

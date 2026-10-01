@@ -19,6 +19,7 @@ import type { BullpenResult, RelieverStat } from "./module04b_bullpenUsage.js";
 import type { GameSummaryRow } from "./module09_recalculation.js";
 import type { SWEAppearance, SWEGameState } from "./module02i_starterWorkloadEstimator.js";
 import type { ActiveRosterPitcher } from "./module02c_batterSeasonStats.js";
+import { sourceDeclaredPitchingPlansForDate } from "./sourceDeclaredPitchingPlans.js";
 
 const pitcher = (id: number, name: string, role: string, ip: number) => ({
   player_id: id, name, hand: "R", role, role_confidence: "high" as const,
@@ -158,6 +159,37 @@ test("missing pregame bullpen source fails closed instead of inventing a followe
   assert.equal(home.expected_bulk_pitcher, "");
   assert.equal(home.api_shadow_opposing_offense_runs, null);
   assert.match(home.missing_data_flags, /BULLPEN_SOURCE_UNAVAILABLE/);
+});
+
+test("exact MLB-declared opener and follower populate the shadow chain without becoming an active consumer", () => {
+  const declaredGame: NormalizedGame = {
+    ...game,
+    legacy_game_id: "20261001_PHI_ATL",
+    date: "2026-10-01",
+    home_team: { team_id: 144, team_abbr: "ATL", team_name: "Atlanta Braves" },
+    home_pitcher: pitcher(678061, "Ray Kerr", "OPENER", 1.2),
+  };
+  const declaredSummary = {
+    ...summary, game_id: declaredGame.legacy_game_id, date: declaredGame.date,
+    away_team: "PHI", home_team: "ATL",
+  } as GameSummaryRow;
+  const rows = buildActivePitchingInventory(
+    [declaredGame], [declaredSummary], bullpen, [], new Map(), new Map(), new Map(),
+    "2026-09-30", "2026-10-01T22:56:04.932Z", new Map(),
+    sourceDeclaredPitchingPlansForDate("2026-10-01"),
+  );
+  const home = rows.find((row) => row.team_side === "HOME")!;
+  assert.equal(home.named_starter_role, "OPENER");
+  assert.equal(home.expected_bulk_pitcher_id, 656550);
+  assert.equal(home.expected_bulk_pitcher, "Grant Holmes");
+  assert.equal(home.expected_bulk_phase_ip, 4);
+  assert.equal(home.bulk_observability, "KNOWN_PREGAME");
+  assert.equal(home.pitching_plan_type, "OPENER_PLUS_CREDIBLE_BULK");
+  assert.equal(home.true_bullpen_exposure_ip, 3.8);
+  assert.match(home.expected_pitching_sequence, /Ray Kerr > Grant Holmes \[SOURCE_SUPPORTED_BULK\]/);
+  assert.equal(home.api_shadow_run_delta, null);
+  assert.equal(home.projection_effect_status, "NOT_ESTIMABLE");
+  assert.doesNotMatch(home.missing_data_flags, /EXPECTED_BULK_IDENTITY_NOT_OBSERVABLE/);
 });
 
 test("active-roster multi-inning options are surfaced without fabricating an expected follower", () => {

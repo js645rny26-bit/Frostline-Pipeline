@@ -8,6 +8,7 @@ import { baseGameId, fetchMlbSchedule } from "./module01_mlbStatsApi.js";
 import { fetchPitcherWorkload, type WorkloadResult } from "./module02_pitcherWorkload.js";
 import { buildWorkloadGameStates } from "./module02g_workloadState.js";
 import { classifyPitcherRoles } from "./module03_pitcherClassification.js";
+import { sourceDeclaredPitchingPlansForDate } from "./sourceDeclaredPitchingPlans.js";
 import { fetchWeatherForecasts } from "./module04_openMeteo.js";
 import { fetchTeamSplitsWithFallback } from "./module05_fangraphs.js";
 import { fetchBullpenUsage } from "./module04b_bullpenUsage.js";
@@ -301,7 +302,8 @@ export async function runPipeline(dateStr?: string): Promise<PipelineSlateResult
   });
 
   // Module 03: Pitcher classification
-  const roles = classifyPitcherRoles(resolvedManifest, workload);
+  const declaredPitchingPlans = sourceDeclaredPitchingPlansForDate(date);
+  const roles = classifyPitcherRoles(resolvedManifest, workload, declaredPitchingPlans);
   const resolvedCount = roles.games.flatMap((g) => [g.away_pitcher, g.home_pitcher]).filter((p) => p.role !== "UNRESOLVED").length;
   const totalPitchers = roles.games.length * 2;
   moduleStatuses.push({

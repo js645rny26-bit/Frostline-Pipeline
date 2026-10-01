@@ -4,6 +4,7 @@ import type { GameScheduleResult } from "./module01_mlbStatsApi.js";
 import type { PitcherWorkloadData, WorkloadResult } from "./module02_pitcherWorkload.js";
 import { buildWorkloadState } from "./module02g_workloadState.js";
 import { classifyPitcherRoles } from "./module03_pitcherClassification.js";
+import { sourceDeclaredPitchingPlansForDate } from "./sourceDeclaredPitchingPlans.js";
 
 function pitcher(playerId: number, status: string, innings: number[], pitches: number[]): PitcherWorkloadData {
   return {
@@ -119,4 +120,33 @@ test("Module 02g freezes the commissioned workload lineage without estimating it
   );
   assert.equal(lineage.projected_ip_shadow, active.expected_innings);
   assert.equal(lineage.projected_pitches_shadow, active.expected_pitches);
+});
+
+test("Module 03 applies an exact source-declared opener plan without leaking to other games", () => {
+  const game = structuredClone(manifest);
+  game.date = "2026-10-01";
+  game.games[0]!.officialDate = "2026-10-01";
+  game.games[0]!.legacy_game_id = "20261001_PHI_ATL";
+  game.games[0]!.homeProbablePitcher = {
+    id: 678061,
+    fullName: "Ray Kerr",
+    hand: "L",
+    source: "MLB_STATS_API",
+  };
+  const workload: WorkloadResult = {
+    retrieval_timestamp_utc: "2026-10-01T22:55:00.000Z",
+    retrieval_source: "mlb_stats_api",
+    data_through_date: "2026-09-30",
+    status: "success",
+    pitchers: [pitcher(10, "active", [5], [75]), pitcher(678061, "active", [3, 3, 2], [45, 44, 31])],
+  };
+  const plans = sourceDeclaredPitchingPlansForDate("2026-10-01");
+  const result = classifyPitcherRoles(game, workload, plans).games[0]!.home_pitcher;
+  assert.equal(result.role, "OPENER");
+  assert.equal(result.role_confidence, "high");
+  assert.ok((result.expected_innings ?? 9) <= 1.2);
+  assert.match(result.reasoning, /Grant Holmes \(BULK\)/);
+
+  const noLeak = classifyPitcherRoles({ ...game, date: "2026-10-02" }, workload).games[0]!.home_pitcher;
+  assert.equal(noLeak.role, "CONVENTIONAL_STARTER");
 });

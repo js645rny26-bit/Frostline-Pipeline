@@ -7,6 +7,11 @@ import { logger } from "../../lib/logger.js";
 import type { GameScheduleResult } from "./module01_mlbStatsApi.js";
 import type { PitcherWorkloadData, WorkloadResult } from "./module02_pitcherWorkload.js";
 import { estimatePitcherSpecificWorkload } from "./module03_numericWorkload.js";
+import {
+  sourceDeclaredPitchingPlanForSide,
+  sourceDeclaredPitchingPlansForDate,
+  type SourceDeclaredPitchingPlan,
+} from "./sourceDeclaredPitchingPlans.js";
 
 export interface PitcherClassificationData {
   player_id: number | null;
@@ -46,6 +51,7 @@ function classifySinglePitcher(
   identitySourceUrl: string | null | undefined,
   gameDate: string,
   dataThroughDate: string,
+  declaredPlan?: SourceDeclaredPitchingPlan,
 ): PitcherClassificationData {
   if (!pitcherId || !pitcherName) {
     return {
@@ -64,6 +70,8 @@ function classifySinglePitcher(
     };
   }
 
+  const planMatchesPitcher = declaredPlan?.opener_pitcher_id === pitcherId;
+
   if (!workloadData || workloadData.status === "fetch_error" || workloadData.status === "no_games_in_window") {
     // A pitcher listed as probable IS going to start regardless of workload data availability.
     // Apply a seasonal-baseline classification rather than leaving them UNRESOLVED.
@@ -74,12 +82,14 @@ function classifySinglePitcher(
       player_id: pitcherId,
       name: pitcherName,
       hand,
-      role: "CONVENTIONAL_STARTER",
-      role_confidence: "medium",
+      role: planMatchesPitcher ? declaredPlan.opener_role : "CONVENTIONAL_STARTER",
+      role_confidence: planMatchesPitcher ? "high" : "medium",
       workload_flags: [flag],
-      expected_pitches: 85,
-      expected_innings: 5.5,
-      reasoning: "No Statcast workload data; probable starter classified using seasonal baseline",
+      expected_pitches: planMatchesPitcher ? Math.round(declaredPlan.opener_expected_ip_cap * 18) : 85,
+      expected_innings: planMatchesPitcher ? declaredPlan.opener_expected_ip_cap : 5.5,
+      reasoning: planMatchesPitcher
+        ? `Authoritative pregame source declares ${declaredPlan.opener_pitcher} as OPENER before ${declaredPlan.bulk_pitcher} (BULK); source role retained despite unavailable workload history.`
+        : "No Statcast workload data; probable starter classified using seasonal baseline",
       identity_source: identitySource ?? "MLB_STATS_API",
       identity_source_observed_ts: identitySourceObservedTs ?? null,
       identity_source_url: identitySourceUrl ?? null,
@@ -91,8 +101,10 @@ function classifySinglePitcher(
   const recentGames = workloadData.recent_games_count ?? 0;
 
   const flags: string[] = [];
-  const role = "CONVENTIONAL_STARTER";
-  const confidence = identitySource === "MLB_STARTING_NINE_TEAM_PAGE" ? "medium" : "high";
+  const role = planMatchesPitcher ? declaredPlan.opener_role : "CONVENTIONAL_STARTER";
+  const confidence = planMatchesPitcher
+    ? "high"
+    : identitySource === "MLB_STARTING_NINE_TEAM_PAGE" ? "medium" : "high";
 
   // Workload flags
   if (recentGames < 3 && appearances > 0) {
@@ -109,12 +121,18 @@ function classifySinglePitcher(
   // and pitches from prior starts without changing the assignment label.
   const workloadEstimate = estimatePitcherSpecificWorkload(
     role,
-    workloadData.status === "active_wide_window" ? 85 : 92,
-    workloadData.status === "active_wide_window" ? 5.5 : 6,
+    role === "OPENER" ? 25 : workloadData.status === "active_wide_window" ? 85 : 92,
+    role === "OPENER" ? 1.2 : workloadData.status === "active_wide_window" ? 5.5 : 6,
     gameDate,
     dataThroughDate,
     workloadData,
   );
+  const expectedInnings = planMatchesPitcher
+    ? Math.min(workloadEstimate.expected_innings, declaredPlan.opener_expected_ip_cap)
+    : workloadEstimate.expected_innings;
+  const expectedPitches = planMatchesPitcher && expectedInnings < workloadEstimate.expected_innings
+    ? Math.min(workloadEstimate.expected_pitches, Math.round(expectedInnings * 18))
+    : workloadEstimate.expected_pitches;
 
   return {
     player_id: pitcherId,
@@ -123,11 +141,13 @@ function classifySinglePitcher(
     role,
     role_confidence: confidence,
     workload_flags: flags,
-    expected_pitches: workloadEstimate.expected_pitches,
-    expected_innings: workloadEstimate.expected_innings,
-    reasoning:
-      `Listed probable starter; role is not inferred from pitch-count magnitude. `
-      + `Independent workload: ${workloadEstimate.notes}`,
+    expected_pitches: expectedPitches,
+    expected_innings: expectedInnings,
+    reasoning: planMatchesPitcher
+      ? `Authoritative pregame source declares ${declaredPlan.opener_pitcher} as OPENER before ${declaredPlan.bulk_pitcher} (BULK); `
+        + `source observed ${declaredPlan.source_observed_ts}. Independent workload: ${workloadEstimate.notes}`
+      : `Listed probable starter; role is not inferred from pitch-count magnitude. `
+        + `Independent workload: ${workloadEstimate.notes}`,
     identity_source: identitySource ?? "MLB_STATS_API",
     identity_source_observed_ts: identitySourceObservedTs ?? null,
     identity_source_url: identitySourceUrl ?? null,
@@ -137,6 +157,7 @@ function classifySinglePitcher(
 export function classifyPitcherRoles(
   manifest: GameScheduleResult,
   workload: WorkloadResult,
+  declaredPlans: readonly SourceDeclaredPitchingPlan[] = sourceDeclaredPitchingPlansForDate(manifest.date),
 ): ClassificationResult {
   logger.info({ games: manifest.total_games }, "MODULE_03: Classifying pitcher roles");
 
@@ -156,6 +177,7 @@ export function classifyPitcherRoles(
       game.awayProbablePitcher.sourceUrl,
       game.officialDate ?? manifest.date,
       workload.data_through_date,
+      sourceDeclaredPitchingPlanForSide(declaredPlans, game.legacy_game_id, "AWAY"),
     );
     const homePitcher = classifySinglePitcher(
       game.homeProbablePitcher.id,
@@ -167,6 +189,7 @@ export function classifyPitcherRoles(
       game.homeProbablePitcher.sourceUrl,
       game.officialDate ?? manifest.date,
       workload.data_through_date,
+      sourceDeclaredPitchingPlanForSide(declaredPlans, game.legacy_game_id, "HOME"),
     );
 
     if (awayPitcher.role === "UNRESOLVED") unresolved++;
